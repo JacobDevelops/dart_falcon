@@ -1,0 +1,172 @@
+---
+source: crates/jdlint_dart_parser/tests/parser_tests.rs
+expression: "prog.declarations[0]"
+---
+Function(
+    FunctionDecl {
+        annotations: [],
+        is_external: false,
+        is_async: false,
+        is_generator: false,
+        return_type: Some(
+            Named(
+                NamedType {
+                    segments: [
+                        Identifier {
+                            name: "int",
+                            span: Span {
+                                start: 0,
+                                end: 3,
+                            },
+                        },
+                    ],
+                    type_args: [],
+                    is_nullable: false,
+                    span: Span {
+                        start: 0,
+                        end: 4,
+                    },
+                },
+            ),
+        ),
+        name: Identifier {
+            name: "add",
+            span: Span {
+                start: 4,
+                end: 7,
+            },
+        },
+        type_params: [],
+        params: FormalParamList {
+            positional: [
+                FormalParam {
+                    annotations: [],
+                    is_required: true,
+                    is_covariant: false,
+                    is_final: false,
+                    is_field: false,
+                    is_super: false,
+                    param_type: Some(
+                        Named(
+                            NamedType {
+                                segments: [
+                                    Identifier {
+                                        name: "int",
+                                        span: Span {
+                                            start: 8,
+                                            end: 11,
+                                        },
+                                    },
+                                ],
+                                type_args: [],
+                                is_nullable: false,
+                                span: Span {
+                                    start: 8,
+                                    end: 12,
+                                },
+                            },
+                        ),
+                    ),
+                    name: Identifier {
+                        name: "a",
+                        span: Span {
+                            start: 12,
+                            end: 13,
+                        },
+                    },
+                    default_value: None,
+                    function_params: None,
+                    span: Span {
+                        start: 8,
+                        end: 13,
+                    },
+                },
+                FormalParam {
+                    annotations: [],
+                    is_required: true,
+                    is_covariant: false,
+                    is_final: false,
+                    is_field: false,
+                    is_super: false,
+                    param_type: Some(
+                        Named(
+                            NamedType {
+                                segments: [
+                                    Identifier {
+                                        name: "int",
+                                        span: Span {
+                                            start: 15,
+                                            end: 18,
+                                        },
+                                    },
+                                ],
+                                type_args: [],
+                                is_nullable: false,
+                                span: Span {
+                                    start: 15,
+                                    end: 19,
+                                },
+                            },
+                        ),
+                    ),
+                    name: Identifier {
+                        name: "b",
+                        span: Span {
+                            start: 19,
+                            end: 20,
+                        },
+                    },
+                    default_value: None,
+                    function_params: None,
+                    span: Span {
+                        start: 15,
+                        end: 20,
+                    },
+                },
+            ],
+            optional_positional: [],
+            named: [],
+            span: Span {
+                start: 7,
+                end: 22,
+            },
+        },
+        body: Some(
+            Arrow(
+                Binary {
+                    op: Add,
+                    left: Ident(
+                        Identifier {
+                            name: "a",
+                            span: Span {
+                                start: 25,
+                                end: 26,
+                            },
+                        },
+                    ),
+                    right: Ident(
+                        Identifier {
+                            name: "b",
+                            span: Span {
+                                start: 29,
+                                end: 30,
+                            },
+                        },
+                    ),
+                    span: Span {
+                        start: 25,
+                        end: 30,
+                    },
+                },
+                Span {
+                    start: 22,
+                    end: 31,
+                },
+            ),
+        ),
+        span: Span {
+            start: 0,
+            end: 31,
+        },
+    },
+)

@@ -3,3 +3,7 @@ name = "jdlint_syntax"
 version.workspace = true
 edition.workspace = true
 description = "Dart AST node types and syntax tree definitions for jdlint"
+
+[dev-dependencies]
+insta = { workspace = true }
+jdlint_dart_parser = { path = "../jdlint_dart_parser" }

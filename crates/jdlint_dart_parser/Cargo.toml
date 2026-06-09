@@ -3,3 +3,9 @@ name = "jdlint_dart_parser"
 version.workspace = true
 edition.workspace = true
 description = "Hand-rolled Dart 3.x recursive-descent parser for jdlint"
+
+[dependencies]
+jdlint_syntax = { path = "../jdlint_syntax" }
+
+[dev-dependencies]
+insta = { workspace = true }

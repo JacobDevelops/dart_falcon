@@ -1,9 +1,10 @@
-//! Dart AST node types and syntax tree definitions.
-//!
-//! Defines the immutable AST produced by `jdlint_dart_parser` and
-//! consumed by `jdlint_analyze`. Format is locked after M1.5.
-
 pub mod ast;
 pub mod token;
+pub mod visitor;
 
 pub use ast::Program;
+pub use token::{Token, TokenKind};
+
+/// Locked AST format version for Phase 1.
+/// Any breaking change to AST enum shapes requires bumping MAJOR.
+pub const JDLINT_AST_FORMAT_VERSION: &str = "1.0";
