@@ -8,3 +8,21 @@
 
 pub mod dart_code_linter;
 pub mod pyramid_lint;
+
+use jdlint_analyze::Rule;
+
+/// Return all implemented lint rules.
+pub fn all_rules() -> Vec<Box<dyn Rule>> {
+    vec![
+        Box::new(dart_code_linter::avoid_dynamic::AvoidDynamic),
+        Box::new(dart_code_linter::avoid_throw_in_catch_block::AvoidThrowInCatchBlock),
+        Box::new(dart_code_linter::avoid_nested_conditional_expressions::AvoidNestedConditionalExpressions),
+        Box::new(dart_code_linter::avoid_non_null_assertion::AvoidNonNullAssertion),
+        Box::new(dart_code_linter::avoid_redundant_async::AvoidRedundantAsync),
+        Box::new(dart_code_linter::avoid_unused_parameters::AvoidUnusedParameters),
+        Box::new(dart_code_linter::avoid_passing_async_when_sync_expected::AvoidPassingAsyncWhenSyncExpected),
+        Box::new(dart_code_linter::avoid_unnecessary_type_assertions::AvoidUnnecessaryTypeAssertions),
+        Box::new(dart_code_linter::avoid_unnecessary_type_casts::AvoidUnnecessaryTypeCasts),
+        Box::new(dart_code_linter::avoid_unrelated_type_assertions::AvoidUnrelatedTypeAssertions),
+    ]
+}

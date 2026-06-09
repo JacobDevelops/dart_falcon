@@ -10,7 +10,7 @@ pub mod rule;
 pub mod visitor;
 
 pub use context::AnalyzeContext;
-pub use parallel::analyze_parallel;
+pub use parallel::{analyze_parallel, analyze_sequential};
 pub use registry::RuleRegistry;
 pub use rule::Rule;
 pub use visitor::RuleVisitor;

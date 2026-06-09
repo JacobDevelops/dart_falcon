@@ -555,7 +555,7 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
             v.visit_dart_type(dart_type);
             walk_arg_list(v, args);
         }
-        Expr::Await { expr, .. } | Expr::Throw { expr, .. } => v.visit_expr(expr),
+        Expr::Await { expr, .. } | Expr::Throw { expr, .. } | Expr::NullAssert { operand: expr, .. } => v.visit_expr(expr),
         Expr::Switch { subject, arms, .. } => {
             v.visit_expr(subject);
             for arm in arms {

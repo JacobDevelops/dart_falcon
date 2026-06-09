@@ -767,32 +767,62 @@ This phase is the largest, with 60 rules to port. Parallelization is critical. M
    - Rule name, category (error prevention, code style, maintainability, Flutter-specific)
    - Enabled by default in jfit analysis_options.yaml? (Yes/No)
    - Configuration options (e.g., no-magic-number: excluded_values, max-value)
-   - Correct behavior on 5-10 code examples (reverse-engineered from dart_code_linter/pyramid_lint)
+   - Correct behavior on 5-10 code examples (sourced directly from upstream linter test fixtures — see M4.0.1)
    - Edge cases and exceptions
 2. Golden test corpus: `jdlint_rules/tests/corpus/{rule_name}/`
-   - For each rule: 5-10 .dart files with expected diagnostics
-   - Format: /* expect: rule_name, line 5, col 3 */ annotations in test files
-   - All examples extracted from jfit or public Dart projects
+   - **Primary source: upstream test fixtures copied verbatim from dart_code_linter and pyramid_lint** (see M4.0.1)
+   - For each rule: the full set of `.dart` test files used by the original linter, placed under `corpus/{rule_name}/`
+   - Supplemented by jfit-extracted examples where upstream coverage is thin (<3 cases)
+   - Annotation format: mirror the upstream fixture annotation style exactly (see M4.0.1 for format audit)
 
-**Activities:**
+#### M4.0.1: Upstream Test Fixture Audit & Copy (NEW — prerequisite to M4.0 corpus build)
+
+**What gets built:**
+1. Locate and clone test fixture directories from both upstream repos:
+   - **dart_code_linter**: `https://github.com/dart-code-checker/dart_code_linter` — test fixtures live under `test/rules/` (one subdirectory per rule, containing `example.dart` or similar fixtures with `// expect` comment annotations)
+   - **pyramid_lint**: `https://github.com/charlescyt/pyramid_lint` — test fixtures live under `test/` or `lib/src/lints/{rule_name}/` (fixture `.dart` files with analyzer expectation annotations)
+2. For each of the 60 rules, locate the upstream fixture files and document:
+   - Exact file paths in the upstream repo
+   - Annotation format used (e.g., `// expect_lint: rule_name`, `// [rule_name]`, `/* expect: ... */`)
+   - Number of positive (should-trigger) and negative (should-not-trigger) test cases
+3. Copy upstream fixture files verbatim into `crates/jdlint_rules/tests/corpus/{rule_name}/`:
+   - Preserve original file names (`example.dart`, `good_example.dart`, `bad_example.dart`, etc.)
+   - Keep upstream annotations intact as documentation; add a `// jdlint-expect:` companion annotation in the jdlint format (`/* expect: rule_name, line X, col Y */`) derived from the upstream annotations
+   - Commit all copied fixtures to the repo as baseline
+4. Document the annotation format mapping in `crates/jdlint_rules/tests/corpus/FIXTURE_FORMAT.md`:
+   - How upstream `// expect_lint:` maps to jdlint `/* expect: rule_name, line X, col Y */`
+   - Any upstream fixtures that require manual annotation translation (e.g., upstream uses column-free format)
+   - Rules with no upstream fixtures → flag for supplementation from jfit corpus
+
+**Acceptance:**
+- All 60 rules have at least 3 fixture files copied from upstream (or from jfit if upstream is sparse)
+- `FIXTURE_FORMAT.md` documents the upstream-to-jdlint annotation mapping
+- Fixture files are committed under `crates/jdlint_rules/tests/corpus/`
+- Any rule with <3 upstream fixtures is flagged and supplemented before M4.2 begins
+
+**Estimated effort:** 8-12 hours (1 agent; mostly file copying + annotation translation)
+
+**Activities (main M4.0):**
 - Audit dart_code_linter source for each rule (1-2 hours per rule, 60 hours total)
 - Audit pyramid_lint source (1 hour per rule, 26 hours total)
-- Extract test cases from real jfit code and open-source examples
+- Extract test cases from real jfit code and open-source examples where upstream coverage is thin
 - Document rule behavior in specs
 - Define "Rule Acceptance Criteria Policy": Same rule fires on same code (column-accurate), same message text (within 10% fuzzy match), same severity. Different suggestions/fixes acceptable in Phase 1.
 
 **Tests written:**
 - Specs: one per rule in rule_specs.md with acceptance criteria
-- Golden corpus: 300-600 .dart test files (5-10 per rule)
+- Golden corpus: 300-600 .dart test files sourced primarily from upstream linter test suites
 
 **Exit criteria:**
 - All 60 rules documented in rule_specs.md with behavior examples
-- Golden corpus complete with expected annotations (/* expect: rule_name, line X, col Y */ format)
+- M4.0.1 upstream fixture copy complete: all 60 rules have fixtures in `corpus/{rule_name}/`
+- `FIXTURE_FORMAT.md` committed with annotation mapping documented
+- Golden corpus has jdlint-format annotations (`/* expect: rule_name, line X, col Y */`) derived from upstream
 - Rule Acceptance Criteria Policy documented and approved
 - Specs reviewed by team for accuracy and completeness
 - Complexity tiers assigned (from M0.5 RULE_ANALYSIS_MATRIX) for resource allocation
 
-**Estimated effort:** 80-100 hours (3-4 agents in parallel, 48-60 hours per agent)
+**Estimated effort:** 88-112 hours (adding M4.0.1: +8-12h; 3-4 agents in parallel)
 
 ---
 
@@ -904,7 +934,7 @@ This phase is the largest, with 60 rules to port. Parallelization is critical. M
 
 **Tests written (per rule):**
 - Unit: 5-10 cases covering violations and valid code
-- Golden: 5-10 jfit code examples; compare against expected annotations
+- Golden: upstream fixture `.dart` files (copied in M4.0.1) plus jfit supplements; compare against `/* expect: */` annotations derived from upstream
 - Integration: rule runs in full jdlint pipeline; diagnostics collected correctly
 - Snapshot: diagnostic output for each test case
 
@@ -1889,9 +1919,9 @@ For each rule (e.g., `avoid_dynamic`):
 
 **Step M4.X.4: Golden corpus tests**
 - File: `crates/jdlint_rules/tests/corpus/avoid_dynamic/`
-- Files: 5-10 .dart files with `/* expect: ... */` annotations
-- Activity: run rule on corpus files; compare against expected
-- Acceptance: no mismatches; diagnostics match expected
+- Files: upstream fixture `.dart` files copied verbatim from dart_code_linter/pyramid_lint test suites (via M4.0.1), with `/* expect: rule_name, line X, col Y */` jdlint annotations added alongside original upstream annotations
+- Activity: run rule on corpus files; compare diagnostic output against `/* expect: */` annotations
+- Acceptance: no mismatches; all upstream fixture cases pass; diagnostics match expected positions/messages
 
 ---
 

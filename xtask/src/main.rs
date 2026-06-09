@@ -1,9 +1,25 @@
+use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
 fn main() {
-    let task = std::env::args().nth(1);
-    match task.as_deref() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(|s| s.as_str()) {
         Some("codegen") => codegen(),
+        Some("validate-rules") => validate_rules(&args[1..]),
         _ => {
-            eprintln!("Available tasks: codegen");
+            eprintln!("Usage: cargo xtask <task>");
+            eprintln!("Available tasks:");
+            eprintln!("  codegen         Generate rule visitor stubs");
+            eprintln!("  validate-rules  Validate rule implementations against golden corpus");
+            eprintln!();
+            eprintln!("validate-rules flags:");
+            eprintln!("  --corpus <path>      Path to corpus directory (default: crates/jdlint_rules/tests/corpus)");
+            eprintln!("  --threshold <float>  Fuzzy message match threshold 0.0-1.0 (default: 0.85)");
+            eprintln!("  --rule <name>        Filter to a single rule");
+            eprintln!("  --jdlint-bin <path>  Path to jdlint binary (default: target/debug/jdlint)");
+            eprintln!("  --json               Output results as JSON");
             std::process::exit(1);
         }
     }
@@ -11,4 +27,358 @@ fn main() {
 
 fn codegen() {
     println!("codegen: rule visitor stubs — not yet implemented");
+}
+
+// ── Validation harness ──────────────────────────────────────────────────────
+
+fn workspace_root() -> PathBuf {
+    // When run via `cargo xtask`, CWD is the workspace root.
+    std::env::current_dir().unwrap()
+}
+
+/// Convert a byte offset in `source` to a 1-indexed line number.
+fn byte_offset_to_line(source: &str, offset: usize) -> usize {
+    let clamped = offset.min(source.len());
+    source[..clamped].chars().filter(|&c| c == '\n').count() + 1
+}
+
+#[derive(Debug, Clone)]
+struct Expectation {
+    rule: String,
+    line: usize,
+    expected_msg: Option<String>,
+}
+
+/// Parse `/* expect: rule-name */` or `/* expect: rule-name, msg: "text" */` annotations.
+/// The annotation appears on the same line as the expected violation.
+fn parse_expectations(source: &str) -> Vec<Expectation> {
+    let mut exps = Vec::new();
+    for (line_idx, line) in source.lines().enumerate() {
+        let line_num = line_idx + 1;
+        let mut search = line;
+        while let Some(start) = search.find("/* expect:") {
+            let after = &search[start + 10..];
+            if let Some(end) = after.find("*/") {
+                let annotation = after[..end].trim();
+                // annotation: "rule-name" or "rule-name, msg: \"text\""
+                let mut parts = annotation.splitn(2, ',');
+                let rule = parts.next().unwrap_or("").trim().to_string();
+                let msg_part = parts.next().map(|s| s.trim());
+                let expected_msg = msg_part.and_then(|s| {
+                    if let Some(rest) = s.strip_prefix("msg:") {
+                        let trimmed = rest.trim().trim_matches('"');
+                        Some(trimmed.to_string())
+                    } else {
+                        None
+                    }
+                });
+                if !rule.is_empty() {
+                    exps.push(Expectation { rule, line: line_num, expected_msg });
+                }
+                search = &after[end + 2..];
+            } else {
+                break;
+            }
+        }
+    }
+    exps
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DiagnosticJson {
+    rule: String,
+    message: String,
+    span: SpanJson,
+    #[allow(dead_code)]
+    severity: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    file_path: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SpanJson {
+    start: usize,
+    #[allow(dead_code)]
+    end: usize,
+}
+
+fn run_jdlint(jdlint_bin: &str, file: &Path) -> Result<Vec<DiagnosticJson>, String> {
+    let output = Command::new(jdlint_bin)
+        .args(["check", "--format", "json", file.to_str().unwrap_or("")])
+        .output()
+        .map_err(|e| format!("Failed to run jdlint binary '{}': {}", jdlint_bin, e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() || trimmed == "[]" {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str::<Vec<DiagnosticJson>>(trimmed)
+        .map_err(|e| format!("JSON parse error: {}\nOutput was: {}", e, &trimmed[..trimmed.len().min(200)]))
+}
+
+#[derive(Debug)]
+struct MissedExpectation {
+    rule: String,
+    line: usize,
+}
+
+#[derive(Debug)]
+struct UnexpectedDiagnostic {
+    rule: String,
+    line: usize,
+    message: String,
+}
+
+#[derive(Debug)]
+struct FileResult {
+    #[allow(dead_code)]
+    file: PathBuf,
+    expected: usize,
+    matched: usize,
+    missed: Vec<MissedExpectation>,
+    false_positives: Vec<UnexpectedDiagnostic>,
+}
+
+fn fuzzy_match(a: &str, b: &str) -> f64 {
+    strsim::jaro_winkler(a, b)
+}
+
+fn validate_file(
+    file: &Path,
+    source: &str,
+    jdlint_bin: &str,
+    threshold: f64,
+    rule_filter: Option<&str>,
+) -> FileResult {
+    let all_exps = parse_expectations(source);
+    let exps: Vec<Expectation> = all_exps
+        .into_iter()
+        .filter(|e| rule_filter.map(|r| e.rule == r).unwrap_or(true))
+        .collect();
+
+    let raw_diags = run_jdlint(jdlint_bin, file).unwrap_or_default();
+    let diags: Vec<(usize, &DiagnosticJson)> = raw_diags
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| rule_filter.map(|r| d.rule == r).unwrap_or(true))
+        .map(|(i, d)| (i, d))
+        .collect();
+
+    let mut matched_diag_indices: HashSet<usize> = HashSet::new();
+    let mut missed: Vec<MissedExpectation> = Vec::new();
+    let mut matched = 0usize;
+
+    'exp_loop: for exp in &exps {
+        for &(idx, diag) in &diags {
+            if matched_diag_indices.contains(&idx) {
+                continue;
+            }
+            let diag_line = byte_offset_to_line(source, diag.span.start);
+            if diag.rule != exp.rule || diag_line != exp.line {
+                continue;
+            }
+            // Rule + line match. If expected_msg set, do fuzzy check.
+            let msg_ok = exp.expected_msg.as_ref()
+                .map(|em| fuzzy_match(em, &diag.message) >= threshold)
+                .unwrap_or(true);
+            if msg_ok {
+                matched += 1;
+                matched_diag_indices.insert(idx);
+                continue 'exp_loop;
+            }
+        }
+        missed.push(MissedExpectation { rule: exp.rule.clone(), line: exp.line });
+    }
+
+    let false_positives: Vec<UnexpectedDiagnostic> = raw_diags
+        .iter()
+        .enumerate()
+        .filter(|(i, d)| {
+            !matched_diag_indices.contains(i)
+                && rule_filter.map(|r| d.rule == r).unwrap_or(true)
+        })
+        .map(|(_, d)| {
+            let line = byte_offset_to_line(source, d.span.start);
+            UnexpectedDiagnostic {
+                rule: d.rule.clone(),
+                line,
+                message: d.message.clone(),
+            }
+        })
+        .collect();
+
+    FileResult {
+        file: file.to_path_buf(),
+        expected: exps.len(),
+        matched,
+        missed,
+        false_positives,
+    }
+}
+
+fn validate_rules(args: &[String]) {
+    let workspace = workspace_root();
+    let default_corpus = workspace.join("crates/jdlint_rules/tests/corpus");
+    let default_bin = workspace.join("target/debug/jdlint");
+
+    let mut corpus_path = default_corpus;
+    let mut threshold: f64 = 0.85;
+    let mut rule_filter: Option<String> = None;
+    let mut jdlint_bin = default_bin.to_string_lossy().to_string();
+    let mut json_output = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--corpus" => {
+                i += 1;
+                if i < args.len() {
+                    corpus_path = PathBuf::from(&args[i]);
+                }
+            }
+            "--threshold" => {
+                i += 1;
+                if i < args.len() {
+                    threshold = args[i].parse().unwrap_or(0.85);
+                }
+            }
+            "--rule" => {
+                i += 1;
+                if i < args.len() {
+                    rule_filter = Some(args[i].clone());
+                }
+            }
+            "--jdlint-bin" => {
+                i += 1;
+                if i < args.len() {
+                    jdlint_bin = args[i].clone();
+                }
+            }
+            "--json" => {
+                json_output = true;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    if !corpus_path.exists() {
+        eprintln!("error: corpus path does not exist: {}", corpus_path.display());
+        std::process::exit(1);
+    }
+
+    // Walk corpus/{rule_name}/*.dart
+    let mut rule_dirs: Vec<PathBuf> = fs::read_dir(&corpus_path)
+        .expect("Failed to read corpus directory")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .filter(|p| {
+            rule_filter
+                .as_ref()
+                .map(|r| p.file_name().and_then(|n| n.to_str()) == Some(r.as_str()))
+                .unwrap_or(true)
+        })
+        .collect();
+    rule_dirs.sort();
+
+    let mut total_files: usize = 0;
+    let mut total_expected: usize = 0;
+    let mut total_matched: usize = 0;
+    let mut all_failures: Vec<String> = Vec::new();
+
+    for rule_dir in &rule_dirs {
+        let rule_name = rule_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let mut dart_files: Vec<PathBuf> = fs::read_dir(rule_dir)
+            .unwrap_or_else(|_| panic!("Cannot read {}", rule_dir.display()))
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("dart"))
+            .collect();
+        dart_files.sort();
+
+        for dart_file in &dart_files {
+            let source = match fs::read_to_string(dart_file) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("warning: cannot read {}: {}", dart_file.display(), e);
+                    continue;
+                }
+            };
+
+            let result = validate_file(
+                dart_file,
+                &source,
+                &jdlint_bin,
+                threshold,
+                Some(&rule_name),
+            );
+            total_files += 1;
+            total_expected += result.expected;
+            total_matched += result.matched;
+
+            for m in &result.missed {
+                let msg = format!(
+                    "MISS  {}:{} — rule `{}` expected but not emitted",
+                    dart_file.display(),
+                    m.line,
+                    m.rule
+                );
+                all_failures.push(msg.clone());
+                if !json_output {
+                    eprintln!("{msg}");
+                }
+            }
+            for fp in &result.false_positives {
+                let msg = format!(
+                    "EXTRA {}:{} — rule `{}` fired unexpectedly: {}",
+                    dart_file.display(),
+                    fp.line,
+                    fp.rule,
+                    fp.message
+                );
+                all_failures.push(msg.clone());
+                if !json_output {
+                    eprintln!("{msg}");
+                }
+            }
+        }
+    }
+
+    if json_output {
+        let report = serde_json::json!({
+            "rules_checked": rule_dirs.len(),
+            "files_checked": total_files,
+            "expectations": total_expected,
+            "matched": total_matched,
+            "failures": all_failures,
+            "pass": all_failures.is_empty(),
+        });
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    } else {
+        println!();
+        println!("── validate-rules ──────────────────────────────────────");
+        println!("  Rules checked:  {}", rule_dirs.len());
+        println!("  Files checked:  {total_files}");
+        println!("  Expectations:   {total_expected}");
+        println!("  Matched:        {total_matched}");
+        println!("  Failures:       {}", all_failures.len());
+        if all_failures.is_empty() {
+            println!("  Status:         PASS");
+        } else {
+            println!("  Status:         FAIL");
+        }
+        println!("────────────────────────────────────────────────────────");
+    }
+
+    if !all_failures.is_empty() {
+        std::process::exit(1);
+    }
 }

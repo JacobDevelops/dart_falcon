@@ -696,6 +696,7 @@ pub struct ReturnStmt {
 #[derive(Debug, Clone)]
 pub struct ThrowStmt {
     pub value: Expr,
+    pub is_rethrow: bool,
     pub span: Span,
 }
 
@@ -798,7 +799,7 @@ pub enum Expr {
     Record { fields: Vec<RecordField>, span: Span },
 
     // Function expressions
-    FuncExpr { type_params: Vec<TypeParam>, params: FormalParamList, body: Box<FunctionBody>, span: Span },
+    FuncExpr { type_params: Vec<TypeParam>, params: FormalParamList, is_async: bool, is_generator: bool, body: Box<FunctionBody>, span: Span },
 
     // Instantiation / new
     New { is_const: bool, dart_type: DartType, constructor_name: Option<Identifier>, args: ArgList, span: Span },
@@ -810,6 +811,9 @@ pub enum Expr {
 
     // Switch expression (Dart 3.x)
     Switch { subject: Box<Expr>, arms: Vec<SwitchExprArm>, span: Span },
+
+    // Postfix null-assertion  expr!
+    NullAssert { operand: Box<Expr>, span: Span },
 
     Error { span: Span },
 }
@@ -845,7 +849,8 @@ impl Expr {
             | Expr::New { span, .. }
             | Expr::Await { span, .. }
             | Expr::Throw { span, .. }
-            | Expr::Switch { span, .. } => span,
+            | Expr::Switch { span, .. }
+            | Expr::NullAssert { span, .. } => span,
         }
     }
 }

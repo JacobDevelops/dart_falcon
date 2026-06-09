@@ -1,0 +1,26 @@
+// Test cases for avoid-ignoring-return-values rule
+// Lines with violations have /* expect: avoid-ignoring-return-values */
+
+String transform(String input) => input.toUpperCase();
+
+int compute(int x, int y) => x + y;
+
+List<int> buildList() => [1, 2, 3];
+
+void badUsage() {
+  transform('hello'); /* expect: avoid-ignoring-return-values */
+  compute(2, 3); /* expect: avoid-ignoring-return-values */
+  buildList(); /* expect: avoid-ignoring-return-values */
+  'hello'.toUpperCase(); /* expect: avoid-ignoring-return-values */
+  [1, 2, 3].map((x) => x * 2); /* expect: avoid-ignoring-return-values */
+}
+
+class Counter {
+  int value = 0;
+
+  int increment() => ++value;
+
+  void badMethodCall() {
+    increment(); /* expect: avoid-ignoring-return-values */
+  }
+}

@@ -288,12 +288,10 @@ impl<'src> Parser<'src> {
                     self.advance();
                     expr = Expr::PostfixIncDec { op: PostfixIncDec::Decrement, operand: Box::new(expr), span: self.span_from(start) };
                 }
-                // Null-assertion  !
+                // Null-assertion  expr!
                 TokenKind::Bang => {
-                    // Could be postfix null-assertion in Dart (expr!)
-                    // Distinguish from unary ! by checking it follows a complete expression
                     self.advance();
-                    expr = Expr::Unary { op: UnaryOp::Bang, operand: Box::new(expr), span: self.span_from(start) };
+                    expr = Expr::NullAssert { operand: Box::new(expr), span: self.span_from(start) };
                 }
                 // Member access  .field  ?.field  .new (constructor tear-off)
                 TokenKind::Dot | TokenKind::QmarkDot => {
@@ -629,12 +627,12 @@ impl<'src> Parser<'src> {
 
     fn parse_function_expr(&mut self, start: usize) -> Expr {
         let params = self.parse_formal_param_list();
-        let (_is_async, _is_generator) = self.parse_async_marker();
+        let (is_async, is_generator) = self.parse_async_marker();
         let body = self.parse_function_body().unwrap_or_else(|| {
             self.error("expected function body after parameter list".to_string());
             FunctionBody::Block(Block { stmts: Vec::new(), span: self.span_from(start) })
         });
-        Expr::FuncExpr { type_params: Vec::new(), params, body: Box::new(body), span: self.span_from(start) }
+        Expr::FuncExpr { type_params: Vec::new(), params, is_async, is_generator, body: Box::new(body), span: self.span_from(start) }
     }
 
     fn parse_switch_expr_primary(&mut self, start: usize) -> Expr {

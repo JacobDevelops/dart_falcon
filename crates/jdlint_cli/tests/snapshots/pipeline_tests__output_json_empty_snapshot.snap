@@ -1,0 +1,6 @@
+---
+source: crates/jdlint_cli/tests/pipeline_tests.rs
+assertion_line: 122
+expression: result
+---
+[]

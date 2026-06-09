@@ -49,7 +49,7 @@ impl<'src> Parser<'src> {
                 self.advance();
                 let value = self.parse_expr();
                 self.eat(TokenKind::Semicolon);
-                Stmt::Throw(ThrowStmt { value, span: self.span_from(start) })
+                Stmt::Throw(ThrowStmt { value, is_rethrow: false, span: self.span_from(start) })
             }
             TokenKind::Break => {
                 self.advance();
@@ -70,6 +70,7 @@ impl<'src> Parser<'src> {
                 self.eat(TokenKind::Semicolon);
                 Stmt::Throw(ThrowStmt {
                     value: Expr::Error { span: self.span_from(start) },
+                    is_rethrow: true,
                     span: self.span_from(start),
                 })
             }

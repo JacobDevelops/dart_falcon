@@ -10,13 +10,13 @@ pub fn init(verbose: bool, log_format: LogFormat) {
         LogFormat::Json => {
             tracing_subscriber::registry()
                 .with(filter)
-                .with(fmt::layer().json())
+                .with(fmt::layer().json().with_writer(std::io::stderr))
                 .init();
         }
         LogFormat::Text => {
             tracing_subscriber::registry()
                 .with(filter)
-                .with(fmt::layer().with_target(false))
+                .with(fmt::layer().with_target(false).with_writer(std::io::stderr))
                 .init();
         }
     }

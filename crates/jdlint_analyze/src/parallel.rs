@@ -9,10 +9,22 @@ use jdlint_diagnostics::Diagnostic;
 
 use crate::{AnalyzeContext, RuleRegistry};
 
-/// Analyze multiple Dart files in parallel using Rayon.
-///
-/// Each file is a separate work unit: parsed independently, analyzed against
-/// all rules, and diagnostics are collected. No shared mutable state.
+fn analyze_file(
+    registry: &RuleRegistry,
+    path: &PathBuf,
+    source: &str,
+    config: &JdlintConfig,
+) -> Vec<Diagnostic> {
+    let span = info_span!("analyze_file", file = %path.display());
+    let _enter = span.enter();
+    let (program, _parse_errors) = parse(source);
+    let ctx = AnalyzeContext { file_path: path, source, config };
+    let diagnostics = registry.run_all(&program, &ctx);
+    info!(file = %path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
+    diagnostics
+}
+
+/// Analyze multiple Dart files in parallel using Rayon work-stealing.
 pub fn analyze_parallel(
     registry: &RuleRegistry,
     files: &[(PathBuf, String)],
@@ -20,23 +32,18 @@ pub fn analyze_parallel(
 ) -> Vec<Diagnostic> {
     files
         .par_iter()
-        .flat_map(|(path, source)| {
-            let span = info_span!("analyze_file", file = %path.display());
-            let _enter = span.enter();
+        .flat_map(|(path, source)| analyze_file(registry, path, source, config))
+        .collect()
+}
 
-            let (program, _parse_errors) = parse(source);
-            let ctx = AnalyzeContext {
-                file_path: path,
-                source,
-                config,
-            };
-            let diagnostics = registry.run_all(&program, &ctx);
-            info!(
-                file = %path.display(),
-                diagnostic_count = diagnostics.len(),
-                "file analysis complete"
-            );
-            diagnostics
-        })
+/// Analyze multiple Dart files sequentially (deterministic, useful for debugging).
+pub fn analyze_sequential(
+    registry: &RuleRegistry,
+    files: &[(PathBuf, String)],
+    config: &JdlintConfig,
+) -> Vec<Diagnostic> {
+    files
+        .iter()
+        .flat_map(|(path, source)| analyze_file(registry, path, source, config))
         .collect()
 }

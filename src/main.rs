@@ -1,3 +1,3 @@
 fn main() {
-    println!("jdlint v{}", env!("CARGO_PKG_VERSION"));
+    std::process::exit(jdlint_cli::run_cli());
 }
