@@ -1,0 +1,8 @@
+[package]
+name = "jdlint_diagnostics"
+version.workspace = true
+edition.workspace = true
+description = "Diagnostic types, severity levels, and reporting for jdlint"
+
+[dependencies]
+serde.workspace = true

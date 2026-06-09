@@ -1,0 +1,12 @@
+[package]
+name = "jdlint_cli"
+version.workspace = true
+edition.workspace = true
+description = "CLI argument parsing and command dispatch for jdlint"
+
+[dependencies]
+jdlint_analyze = { path = "../jdlint_analyze" }
+jdlint_diagnostics = { path = "../jdlint_diagnostics" }
+jdlint_config = { path = "../jdlint_config" }
+clap.workspace = true
+serde_json.workspace = true

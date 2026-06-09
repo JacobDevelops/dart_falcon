@@ -1,0 +1,13 @@
+[package]
+name = "jdlint_lsp"
+version.workspace = true
+edition.workspace = true
+description = "LSP server implementation (JSON-RPC 2.0 / LSP 3.17) for jdlint"
+
+[dependencies]
+jdlint_analyze = { path = "../jdlint_analyze" }
+jdlint_diagnostics = { path = "../jdlint_diagnostics" }
+jdlint_config = { path = "../jdlint_config" }
+lsp-server.workspace = true
+lsp-types.workspace = true
+serde_json.workspace = true

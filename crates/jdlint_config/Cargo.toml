@@ -1,0 +1,9 @@
+[package]
+name = "jdlint_config"
+version.workspace = true
+edition.workspace = true
+description = "jdlint.json configuration schema and loader"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
