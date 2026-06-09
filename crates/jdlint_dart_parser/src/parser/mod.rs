@@ -8,6 +8,7 @@ mod types;
 
 use jdlint_syntax::ast::*;
 use jdlint_syntax::token::{Token, TokenKind};
+use tracing::debug;
 
 use crate::lexer::{filter_trivia, Lexer};
 
@@ -19,10 +20,13 @@ use crate::lexer::{filter_trivia, Lexer};
 /// always produces an AST (possibly with [`TopLevelDecl::Error`] nodes) and
 /// never panics.
 pub fn parse(source: &str) -> (Program, Vec<ParseError>) {
+    debug!("parsing file");
     let raw_tokens = Lexer::new(source).tokenize();
     let tokens = filter_trivia(raw_tokens);
     let mut p = Parser::new(tokens, source);
     let program = p.parse_program();
+    let error_count = p.errors.len();
+    debug!(errors = error_count, "parse complete");
     (program, p.errors)
 }
 

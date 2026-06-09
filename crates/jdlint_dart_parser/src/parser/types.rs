@@ -185,10 +185,9 @@ impl<'src> Parser<'src> {
             } else {
                 positional.push(self.parse_type());
                 // Skip optional name
-                if self.is_ident_like() && !self.at(TokenKind::Comma)
-                    && self.peek(1).kind == TokenKind::Comma || self.peek(1).kind == TokenKind::RParen {
-                    if self.is_ident_like() { self.advance(); }
-                }
+                if (self.is_ident_like() && !self.at(TokenKind::Comma)
+                    && self.peek(1).kind == TokenKind::Comma || self.peek(1).kind == TokenKind::RParen)
+                    && self.is_ident_like() { self.advance(); }
             }
             if self.eat(TokenKind::Comma).is_none() { break; }
         }

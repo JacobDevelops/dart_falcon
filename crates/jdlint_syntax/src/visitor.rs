@@ -416,7 +416,7 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
                     match kind {
                         SwitchCaseKind::Pattern(p, guard) => {
                             v.visit_pattern(p);
-                            if let Some(g) = guard {
+                            if let Some(g) = &**guard {
                                 v.visit_expr(g);
                             }
                         }

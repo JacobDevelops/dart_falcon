@@ -602,8 +602,7 @@ impl<'src> Parser<'src> {
         // Scan for matching `)` then inspect the following token.
         let mut depth = 0usize;
         let mut i = self.pos;
-        loop {
-            let Some(tok) = self.tokens.get(i) else { break };
+        while let Some(tok) = self.tokens.get(i) {
             match tok.kind {
                 TokenKind::LParen => depth += 1,
                 TokenKind::RParen => {
@@ -726,7 +725,7 @@ impl<'src> Parser<'src> {
                     let e = self.parse_expr();
                     self.advance(); // case
                     let p = self.parse_pattern();
-                    IfCondition::Case(e, p)
+                    IfCondition::Case(e, Box::new(p))
                 } else {
                     IfCondition::Expr(self.parse_expr())
                 };

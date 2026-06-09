@@ -608,7 +608,7 @@ pub struct IfStmt {
 #[derive(Debug, Clone)]
 pub enum IfCondition {
     Expr(Expr),
-    Case(Expr, Pattern),
+    Case(Expr, Box<Pattern>),
 }
 
 #[derive(Debug, Clone)]
@@ -628,7 +628,7 @@ pub enum ForInit {
         is_final: bool,
         var_type: Option<DartType>,
         name: Identifier,
-        iterable: Expr,
+        iterable: Box<Expr>,
     },
     Exprs(Vec<Expr>),
 }
@@ -665,7 +665,7 @@ pub struct SwitchCase {
 #[derive(Debug, Clone)]
 pub enum SwitchCaseKind {
     /// `case <pattern> [when <guard>]:`
-    Pattern(Pattern, Option<Expr>),
+    Pattern(Box<Pattern>, Box<Option<Expr>>),
     /// `default:`
     Default,
 }

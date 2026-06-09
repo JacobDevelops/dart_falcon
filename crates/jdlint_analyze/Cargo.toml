@@ -8,4 +8,6 @@ description = "Rule visitor infrastructure and analysis engine for jdlint"
 jdlint_syntax = { path = "../jdlint_syntax" }
 jdlint_diagnostics = { path = "../jdlint_diagnostics" }
 jdlint_config = { path = "../jdlint_config" }
+jdlint_dart_parser = { path = "../jdlint_dart_parser" }
 rayon.workspace = true
+tracing.workspace = true

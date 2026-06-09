@@ -6,6 +6,7 @@ description = "Hand-rolled Dart 3.x recursive-descent parser for jdlint"
 
 [dependencies]
 jdlint_syntax = { path = "../jdlint_syntax" }
+tracing.workspace = true
 
 [dev-dependencies]
 insta = { workspace = true }

@@ -332,6 +332,7 @@ impl<'src> Parser<'src> {
         ConstructorDecl { annotations, is_const: false, is_factory: true, is_external, name, constructor_name, params, initializers: Vec::new(), body, span: self.span_from(start) }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn parse_field_or_method(
         &mut self, annotations: Vec<Annotation>,
         is_static: bool, is_abstract: bool, is_external: bool,
@@ -447,6 +448,7 @@ impl<'src> Parser<'src> {
         ClassMember::Error(ErrorNode { message: "could not parse class member".into(), span })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn parse_field_tail(
         &mut self, annotations: Vec<Annotation>,
         is_static: bool, is_abstract: bool, is_external: bool,
@@ -739,7 +741,7 @@ impl<'src> Parser<'src> {
 
 // Minimal quote-stripping for string literal values (not full escape handling).
 fn strip_quotes(raw: &str) -> String {
-    let raw = if raw.starts_with('r') { &raw[1..] } else { raw };
+    let raw = raw.strip_prefix('r').unwrap_or(raw);
     let (triple, q) = if raw.starts_with("\"\"\"") || raw.starts_with("'''") {
         (true, &raw[..3])
     } else if raw.starts_with('"') || raw.starts_with('\'') {

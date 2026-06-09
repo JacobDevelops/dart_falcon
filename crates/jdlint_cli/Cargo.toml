@@ -10,3 +10,5 @@ jdlint_diagnostics = { path = "../jdlint_diagnostics" }
 jdlint_config = { path = "../jdlint_config" }
 clap.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

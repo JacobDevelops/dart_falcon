@@ -1,0 +1,10 @@
+{
+  "rules": {},
+  "exclude_patterns": [
+    ".dart_tool/**",
+    "build/**",
+    "**/*.g.dart",
+    "**/*.freezed.dart"
+  ],
+  "max_errors": null
+}

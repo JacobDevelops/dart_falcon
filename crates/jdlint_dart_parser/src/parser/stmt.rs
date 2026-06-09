@@ -91,7 +91,7 @@ impl<'src> Parser<'src> {
         let expr = self.parse_expr();
         let condition = if self.eat(TokenKind::Case).is_some() {
             let pattern = self.parse_pattern();
-            IfCondition::Case(expr, pattern)
+            IfCondition::Case(expr, Box::new(pattern))
         } else {
             IfCondition::Expr(expr)
         };
@@ -150,7 +150,7 @@ impl<'src> Parser<'src> {
             if self.eat(TokenKind::In).is_some() {
                 let iterable = self.parse_expr();
                 self.expect(TokenKind::RParen);
-                return (Some(ForInit::ForIn { is_final, var_type, name, iterable }), None, Vec::new());
+                return (Some(ForInit::ForIn { is_final, var_type, name, iterable: Box::new(iterable) }), None, Vec::new());
             }
             let (decl, cond, update) = self.finish_c_style_for(is_final, var_type, name, saved);
             return (Some(ForInit::VarDecl(decl)), cond, update);
@@ -177,7 +177,7 @@ impl<'src> Parser<'src> {
                     let iterable = self.parse_expr();
                     self.expect(TokenKind::RParen);
                     return (
-                        Some(ForInit::ForIn { is_final: false, var_type: Some(ty), name, iterable }),
+                        Some(ForInit::ForIn { is_final: false, var_type: Some(ty), name, iterable: Box::new(iterable) }),
                         None,
                         Vec::new(),
                     );
@@ -203,7 +203,7 @@ impl<'src> Parser<'src> {
             let iterable = self.parse_expr();
             self.expect(TokenKind::RParen);
             return (
-                Some(ForInit::ForIn { is_final: false, var_type: None, name, iterable }),
+                Some(ForInit::ForIn { is_final: false, var_type: None, name, iterable: Box::new(iterable) }),
                 None,
                 Vec::new(),
             );
@@ -333,7 +333,7 @@ impl<'src> Parser<'src> {
                     let pattern = self.parse_pattern();
                     let guard = if self.eat(TokenKind::When).is_some() { Some(self.parse_expr()) } else { None };
                     self.expect(TokenKind::Colon);
-                    case_kinds.push(SwitchCaseKind::Pattern(pattern, guard));
+                    case_kinds.push(SwitchCaseKind::Pattern(Box::new(pattern), Box::new(guard)));
                 } else if self.at(TokenKind::Default) {
                     self.advance();
                     self.expect(TokenKind::Colon);
