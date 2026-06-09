@@ -11,9 +11,13 @@ impl<'src> Parser<'src> {
         let start = self.cur().offset;
         let annotations = self.parse_annotations();
         self.advance(); // library
-        let mut name = vec![self.expect_ident()];
-        while self.eat(TokenKind::Dot).is_some() {
+        // Dart 3 allows bare `library;` with no name.
+        let mut name = Vec::new();
+        if self.is_ident_like() {
             name.push(self.expect_ident());
+            while self.eat(TokenKind::Dot).is_some() {
+                name.push(self.expect_ident());
+            }
         }
         self.expect(TokenKind::Semicolon);
         Some(LibraryDirective { annotations, name, span: self.span_from(start) })
@@ -628,10 +632,50 @@ impl<'src> Parser<'src> {
         let return_type = if self.is_type_start_at_cur() {
             let saved = self.pos;
             let ty = self.parse_type();
-            if self.is_ident_like() { Some(ty) } else { self.pos = saved; None }
+            // Accept the type only if followed by an ident-like token (the name).
+            // Special case: if followed by `get`/`set` + ident, that is a getter/setter.
+            if self.at(TokenKind::Get) || self.at(TokenKind::Set) || self.is_ident_like() {
+                Some(ty)
+            } else {
+                self.pos = saved;
+                None
+            }
         } else {
             None
         };
+
+        // Top-level getter: `(ReturnType) get name { ... }`
+        if self.at(TokenKind::Get) && self.is_ident_like_at_offset(1) {
+            self.advance(); // get
+            let name = self.expect_ident();
+            let (is_async, is_generator) = self.parse_async_marker();
+            let body = self.parse_function_body();
+            let empty_params = FormalParamList {
+                positional: vec![], optional_positional: vec![], named: vec![],
+                span: Span::default(),
+            };
+            return Some(TopLevelDecl::Function(FunctionDecl {
+                annotations, is_external, is_async, is_generator,
+                is_getter: true, is_setter: false,
+                return_type, name, type_params: vec![], params: empty_params, body,
+                span: self.span_from(start),
+            }));
+        }
+
+        // Top-level setter: `(ReturnType) set name(param) { ... }`
+        if self.at(TokenKind::Set) && self.is_ident_like_at_offset(1) {
+            self.advance(); // set
+            let name = self.expect_ident();
+            let params = self.parse_formal_param_list();
+            let (is_async, is_generator) = self.parse_async_marker();
+            let body = self.parse_function_body();
+            return Some(TopLevelDecl::Function(FunctionDecl {
+                annotations, is_external, is_async, is_generator,
+                is_getter: false, is_setter: true,
+                return_type, name, type_params: vec![], params, body,
+                span: self.span_from(start),
+            }));
+        }
 
         // Name
         if !self.is_ident_like() {
@@ -648,6 +692,7 @@ impl<'src> Parser<'src> {
             let body = self.parse_function_body();
             return Some(TopLevelDecl::Function(FunctionDecl {
                 annotations, is_external, is_async, is_generator,
+                is_getter: false, is_setter: false,
                 return_type, name, type_params, params, body,
                 span: self.span_from(start),
             }));

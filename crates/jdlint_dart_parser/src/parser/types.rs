@@ -54,6 +54,11 @@ impl<'src> Parser<'src> {
             return self.parse_function_type(None, start);
         }
 
+        // Record type: (type, name: type) — must precede is_type_start() since LParen is in it
+        if self.at(TokenKind::LParen) {
+            return self.parse_record_type(start);
+        }
+
         // Named type: Identifier [. Identifier] [< ... >] [?]
         if self.is_type_start() {
             let first = self.expect_ident();
@@ -98,7 +103,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn is_type_start(&self) -> bool {
-        self.is_ident_like() || self.at(TokenKind::Ident)
+        self.is_ident_like() || matches!(self.cur().kind, TokenKind::Void | TokenKind::LParen)
     }
 
     pub(super) fn is_ident_like_at(&self, offset: usize) -> bool {

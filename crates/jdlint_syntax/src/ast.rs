@@ -376,6 +376,10 @@ pub struct FunctionDecl {
     pub is_external: bool,
     pub is_async: bool,
     pub is_generator: bool,
+    /// True when declared with `get` keyword (a top-level getter).
+    pub is_getter: bool,
+    /// True when declared with `set` keyword (a top-level setter).
+    pub is_setter: bool,
     pub return_type: Option<DartType>,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,

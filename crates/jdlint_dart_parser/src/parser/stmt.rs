@@ -486,8 +486,10 @@ impl<'src> Parser<'src> {
             return self.parse_local_var_or_func_after_annotations(start);
         }
 
-        // Try to parse as typed local decl or function
-        if self.is_type_start() {
+        // Try to parse as typed local decl or function.
+        // Skip LParen: `(expr)` at statement level is almost always a paren expression,
+        // not a record-typed var decl, and speculative parse_record_type would add errors.
+        if self.is_type_start() && !self.at(TokenKind::LParen) {
             let saved = self.pos;
             let ty = self.parse_type();
             if self.is_ident_like() {

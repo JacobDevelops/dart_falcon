@@ -1,5 +1,6 @@
 ---
 source: crates/jdlint_dart_parser/tests/parser_tests.rs
+assertion_line: 1222
 expression: "prog.declarations[0]"
 ---
 Function(
@@ -8,6 +9,8 @@ Function(
         is_external: false,
         is_async: false,
         is_generator: false,
+        is_getter: false,
+        is_setter: false,
         return_type: Some(
             Named(
                 NamedType {

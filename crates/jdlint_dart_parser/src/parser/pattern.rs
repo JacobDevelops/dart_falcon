@@ -8,8 +8,8 @@ impl<'src> Parser<'src> {
     ///
     /// Grammar (simplified):
     ///   pattern  ::= logicalOrPattern
-    ///   logicalOrPattern  ::= logicalAndPattern ('|' logicalAndPattern)*
-    ///   logicalAndPattern ::= relationalPattern ('&' relationalPattern)*
+    ///   logicalOrPattern  ::= logicalAndPattern ('||' logicalAndPattern)*
+    ///   logicalAndPattern ::= relationalPattern ('&&' relationalPattern)*
     pub(super) fn parse_pattern(&mut self) -> Pattern {
         self.parse_logical_or_pattern()
     }
@@ -17,7 +17,7 @@ impl<'src> Parser<'src> {
     fn parse_logical_or_pattern(&mut self) -> Pattern {
         let start = self.cur().offset;
         let mut left = self.parse_logical_and_pattern();
-        while self.eat(TokenKind::Pipe).is_some() {
+        while self.eat(TokenKind::PipePipe).is_some() {
             let right = self.parse_logical_and_pattern();
             let span = self.span_from(start);
             left = Pattern::LogicalOr { left: Box::new(left), right: Box::new(right), span };
@@ -28,7 +28,7 @@ impl<'src> Parser<'src> {
     fn parse_logical_and_pattern(&mut self) -> Pattern {
         let start = self.cur().offset;
         let mut left = self.parse_relational_pattern();
-        while self.eat(TokenKind::Amp).is_some() {
+        while self.eat(TokenKind::AmpAmp).is_some() {
             let right = self.parse_relational_pattern();
             let span = self.span_from(start);
             left = Pattern::LogicalAnd { left: Box::new(left), right: Box::new(right), span };
@@ -339,11 +339,23 @@ impl<'src> Parser<'src> {
         let ty = self.parse_type();
 
         if self.at(TokenKind::LParen) {
-            // Object pattern: Type(field: pattern, ...)
+            // Object pattern: Type(field: pattern, ...) or Type(:var field, ...)
             self.advance(); // (
             let mut fields = Vec::new();
             while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
                 let fs = self.cur().offset;
+                // Dart 3 colon-shorthand: `:var x` means `x: var x`, `:final x` means `x: final x`
+                if self.at(TokenKind::Colon) {
+                    self.advance(); // :
+                    let inner = self.parse_pattern();
+                    let field_name = match &inner {
+                        Pattern::Variable { name, .. } => name.clone(),
+                        _ => Identifier::new("<shorthand>", self.cur_span()),
+                    };
+                    fields.push(ObjectPatternField { name: field_name, pattern: Some(inner), span: self.span_from(fs) });
+                    if self.eat(TokenKind::Comma).is_none() { break; }
+                    continue;
+                }
                 let name = if (self.is_ident_like() || self.at(TokenKind::Ident)) && self.peek(1).kind == TokenKind::Colon {
                     let n = self.expect_ident();
                     self.advance(); // :
@@ -352,7 +364,6 @@ impl<'src> Parser<'src> {
                     None
                 };
                 let pattern = if self.at(TokenKind::RParen) || self.at(TokenKind::Comma) {
-                    // shorthand: just the field name, no pattern
                     None
                 } else {
                     Some(self.parse_pattern())

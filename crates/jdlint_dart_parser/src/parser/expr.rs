@@ -295,11 +295,17 @@ impl<'src> Parser<'src> {
                     self.advance();
                     expr = Expr::Unary { op: UnaryOp::Bang, operand: Box::new(expr), span: self.span_from(start) };
                 }
-                // Member access  .field  ?.field
+                // Member access  .field  ?.field  .new (constructor tear-off)
                 TokenKind::Dot | TokenKind::QmarkDot => {
                     let is_null_safe = self.cur().kind == TokenKind::QmarkDot;
                     self.advance();
-                    let field = self.expect_ident();
+                    // `.new` is a valid constructor tear-off in Dart 3
+                    let field = if self.at(TokenKind::New) {
+                        let tok = self.advance();
+                        Identifier::new("new", Self::tok_span(&tok))
+                    } else {
+                        self.expect_ident()
+                    };
                     expr = Expr::Field { object: Box::new(expr), field, is_null_safe, span: self.span_from(start) };
                 }
                 // Index  [i]  ?[i]
@@ -323,10 +329,16 @@ impl<'src> Parser<'src> {
                     let saved_errors = self.errors.len();
                     let type_args = self.parse_type_args();
                     if self.at(TokenKind::LParen) {
+                        // Generic call: expr<T>(args)
                         let args = self.parse_arg_list();
                         expr = Expr::Call { callee: Box::new(expr), type_args, args, span: self.span_from(start) };
+                    } else if self.at(TokenKind::Dot) || self.at(TokenKind::QmarkDot) {
+                        // Type instantiation expression: Name<T>.method(args) — keep type args,
+                        // represent as Call with empty args; next iteration handles the `.`.
+                        let empty_args = ArgList { positional: Vec::new(), named: Vec::new(), span: self.span_from(start) };
+                        expr = Expr::Call { callee: Box::new(expr), type_args, args: empty_args, span: self.span_from(start) };
                     } else {
-                        // Not a call — restore position and any spurious errors
+                        // Not a call or type instantiation — restore position and any spurious errors
                         self.pos = saved;
                         self.errors.truncate(saved_errors);
                         break;
@@ -439,7 +451,19 @@ impl<'src> Parser<'src> {
                 self.advance();
                 Expr::DoubleLit { value: text, span: self.span_from(start) }
             }
-            TokenKind::StringLit => Expr::StringLit(self.parse_string_lit()),
+            TokenKind::StringLit => {
+                // Adjacent string literals are implicitly concatenated in Dart.
+                let mut node = self.parse_string_lit();
+                while self.at(TokenKind::StringLit) {
+                    let next = self.parse_string_lit();
+                    node = StringLitNode {
+                        raw: node.raw + &next.raw,
+                        value: node.value + &next.value,
+                        span: next.span,
+                    };
+                }
+                Expr::StringLit(node)
+            }
             TokenKind::True => {
                 self.advance();
                 Expr::BoolLit { value: true, span: self.span_from(start) }
@@ -460,8 +484,16 @@ impl<'src> Parser<'src> {
                 self.advance();
                 Expr::Super { span: self.span_from(start) }
             }
-            // Parenthesised / record
-            TokenKind::LParen => self.parse_paren_or_record(start),
+            // Switch expression (primary form): `switch (expr) { pattern => expr, ... }`
+            TokenKind::Switch => self.parse_switch_expr_primary(start),
+            // Parenthesised / record / function expression
+            TokenKind::LParen => {
+                if self.looks_like_function_expr() {
+                    self.parse_function_expr(start)
+                } else {
+                    self.parse_paren_or_record(start)
+                }
+            }
             // List literal
             TokenKind::LBracket => self.parse_list_literal(false, None, start),
             // Map/set literal
@@ -497,20 +529,28 @@ impl<'src> Parser<'src> {
         self.advance(); // (
         if self.at(TokenKind::RParen) {
             self.advance();
-            // Empty record
             return Expr::Record { fields: Vec::new(), span: self.span_from(start) };
         }
-        let first = self.parse_expr();
+        // Detect named first field before calling parse_expr, so `:` stays in stream.
+        let (first_name, first_value) = if self.is_ident_like() && self.peek(1).kind == TokenKind::Colon {
+            let name = self.expect_ident();
+            self.advance(); // :
+            let value = self.parse_expr();
+            (Some(name), value)
+        } else {
+            (None, self.parse_expr())
+        };
         if self.eat(TokenKind::RParen).is_some() {
-            // Single-element paren → just the expression (not a record in Dart)
-            return first;
+            if first_name.is_none() {
+                return first_value;
+            }
+            let fields = vec![RecordField { name: first_name, value: first_value, span: self.span_from(start) }];
+            return Expr::Record { fields, span: self.span_from(start) };
         }
-        // Record or tuple
-        let mut fields = vec![RecordField { name: None, value: first, span: self.span_from(start) }];
+        let mut fields = vec![RecordField { name: first_name, value: first_value, span: self.span_from(start) }];
         while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
             let f_start = self.cur().offset;
-            // Named field: name: expr
-            if (self.is_ident_like()) && self.peek(1).kind == TokenKind::Colon {
+            if self.is_ident_like() && self.peek(1).kind == TokenKind::Colon {
                 let name = self.expect_ident();
                 self.advance(); // :
                 let value = self.parse_expr();
@@ -520,8 +560,95 @@ impl<'src> Parser<'src> {
                 fields.push(RecordField { name: None, value, span: self.span_from(f_start) });
             }
         }
+        self.eat(TokenKind::Comma);
         self.expect(TokenKind::RParen);
         Expr::Record { fields, span: self.span_from(start) }
+    }
+
+    /// Returns `true` when the `(` at `self.pos` starts a function expression
+    /// rather than a parenthesised expression or record literal.
+    ///
+    /// Fast path: a modifier keyword (`final`, `var`, `required`, `covariant`)
+    /// immediately inside the parens unambiguously signals a parameter list.
+    ///
+    /// Slow path: scan forward to the matching `)` and check whether it is
+    /// followed by `=>`, `async`, `sync`, or `{`.
+    fn looks_like_function_expr(&self) -> bool {
+        debug_assert_eq!(self.cur().kind, TokenKind::LParen);
+
+        // Fast path — modifier keyword right after `(`
+        if matches!(
+            self.peek(1).kind,
+            TokenKind::Final
+                | TokenKind::Var
+                | TokenKind::Required
+                | TokenKind::Covariant
+        ) {
+            return true;
+        }
+
+        // Scan for matching `)` then inspect the following token.
+        let mut depth = 0usize;
+        let mut i = self.pos;
+        loop {
+            let Some(tok) = self.tokens.get(i) else { break };
+            match tok.kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            self.tokens.get(i + 1).map(|t| &t.kind),
+                            Some(
+                                TokenKind::Arrow
+                                    | TokenKind::Async
+                                    | TokenKind::Sync
+                                    | TokenKind::LBrace
+                            )
+                        );
+                    }
+                }
+                TokenKind::Eof | TokenKind::Semicolon => break,
+                _ => {}
+            }
+            i += 1;
+        }
+        false
+    }
+
+    fn parse_function_expr(&mut self, start: usize) -> Expr {
+        let params = self.parse_formal_param_list();
+        let (_is_async, _is_generator) = self.parse_async_marker();
+        let body = self.parse_function_body().unwrap_or_else(|| {
+            self.error("expected function body after parameter list".to_string());
+            FunctionBody::Block(Block { stmts: Vec::new(), span: self.span_from(start) })
+        });
+        Expr::FuncExpr { type_params: Vec::new(), params, body: Box::new(body), span: self.span_from(start) }
+    }
+
+    fn parse_switch_expr_primary(&mut self, start: usize) -> Expr {
+        self.advance(); // switch
+        self.expect(TokenKind::LParen);
+        let subject = self.parse_expr();
+        self.expect(TokenKind::RParen);
+        self.expect(TokenKind::LBrace);
+        let mut arms = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let arm_start = self.cur().offset;
+            let pattern = self.parse_pattern();
+            let guard = if self.at(TokenKind::When) {
+                self.advance();
+                Some(self.parse_expr())
+            } else {
+                None
+            };
+            self.expect(TokenKind::Arrow);
+            let body = self.parse_expr();
+            arms.push(SwitchExprArm { pattern, guard, body, span: self.span_from(arm_start) });
+            self.eat(TokenKind::Comma);
+        }
+        self.expect(TokenKind::RBrace);
+        Expr::Switch { subject: Box::new(subject), arms, span: self.span_from(start) }
     }
 
     fn parse_list_literal(&mut self, is_const: bool, type_arg: Option<DartType>, start: usize) -> Expr {

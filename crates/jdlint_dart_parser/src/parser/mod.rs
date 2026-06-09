@@ -250,9 +250,15 @@ impl<'src> Parser<'src> {
             }
         }
         // consume > or >> (split)
-        if self.at(TokenKind::GtGt) {
-            // Synthesise a single > by shrinking the token — just advance for now
-            self.advance();
+        // For nested types like Map<String, List<int>>, >> must be split:
+        // the inner close mutates >> → > in place but does NOT advance, so the
+        // enclosing type-args list sees the remaining > and closes on it.
+        if self.at(TokenKind::GtGtGt) {
+            self.tokens[self.pos].kind = TokenKind::GtGt;
+            // Do NOT advance — leave >> for the next two outer closes.
+        } else if self.at(TokenKind::GtGt) {
+            self.tokens[self.pos].kind = TokenKind::Gt;
+            // Do NOT advance — leave > for the outer close.
         } else {
             self.eat(TokenKind::Gt);
         }
