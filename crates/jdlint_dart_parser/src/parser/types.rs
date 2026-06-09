@@ -149,6 +149,7 @@ impl<'src> Parser<'src> {
             && !self.at(TokenKind::Eof)
         {
             let is_required = self.eat(TokenKind::Required).is_some();
+            let _ = self.eat(TokenKind::Final).or_else(|| self.eat(TokenKind::Covariant));
             let param_type = self.parse_type();
             // Optional name
             let name = if self.is_ident_like() { self.parse_ident() } else { None };

@@ -1,0 +1,201 @@
+---
+source: crates/jdlint_dart_parser/tests/parser_tests.rs
+assertion_line: 1288
+expression: "prog.declarations[0]"
+---
+Class(
+    ClassDecl {
+        annotations: [],
+        modifiers: ClassModifiers {
+            is_abstract: false,
+            is_interface: false,
+            is_base: false,
+            is_final: false,
+            is_sealed: false,
+        },
+        name: Identifier {
+            name: "Dog",
+            span: Span {
+                start: 6,
+                end: 9,
+            },
+        },
+        type_params: [],
+        extends: Some(
+            Named(
+                NamedType {
+                    segments: [
+                        Identifier {
+                            name: "Animal",
+                            span: Span {
+                                start: 18,
+                                end: 24,
+                            },
+                        },
+                    ],
+                    type_args: [],
+                    is_nullable: false,
+                    span: Span {
+                        start: 18,
+                        end: 25,
+                    },
+                },
+            ),
+        ),
+        with_clause: [
+            Named(
+                NamedType {
+                    segments: [
+                        Identifier {
+                            name: "Barker",
+                            span: Span {
+                                start: 30,
+                                end: 36,
+                            },
+                        },
+                    ],
+                    type_args: [],
+                    is_nullable: false,
+                    span: Span {
+                        start: 30,
+                        end: 37,
+                    },
+                },
+            ),
+        ],
+        implements: [
+            Named(
+                NamedType {
+                    segments: [
+                        Identifier {
+                            name: "Pet",
+                            span: Span {
+                                start: 48,
+                                end: 51,
+                            },
+                        },
+                    ],
+                    type_args: [],
+                    is_nullable: false,
+                    span: Span {
+                        start: 48,
+                        end: 52,
+                    },
+                },
+            ),
+        ],
+        members: [
+            Field(
+                FieldDecl {
+                    annotations: [],
+                    is_static: false,
+                    is_abstract: false,
+                    is_external: false,
+                    is_covariant: false,
+                    is_late: false,
+                    is_final: true,
+                    is_const: false,
+                    field_type: Some(
+                        Named(
+                            NamedType {
+                                segments: [
+                                    Identifier {
+                                        name: "String",
+                                        span: Span {
+                                            start: 60,
+                                            end: 66,
+                                        },
+                                    },
+                                ],
+                                type_args: [],
+                                is_nullable: false,
+                                span: Span {
+                                    start: 60,
+                                    end: 67,
+                                },
+                            },
+                        ),
+                    ),
+                    declarators: [
+                        VarDeclarator {
+                            name: Identifier {
+                                name: "name",
+                                span: Span {
+                                    start: 67,
+                                    end: 71,
+                                },
+                            },
+                            initializer: None,
+                            span: Span {
+                                start: 54,
+                                end: 71,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 54,
+                        end: 73,
+                    },
+                },
+            ),
+            Constructor(
+                ConstructorDecl {
+                    annotations: [],
+                    is_const: false,
+                    is_factory: false,
+                    is_external: false,
+                    name: Identifier {
+                        name: "Dog",
+                        span: Span {
+                            start: 73,
+                            end: 76,
+                        },
+                    },
+                    constructor_name: None,
+                    params: FormalParamList {
+                        positional: [
+                            FormalParam {
+                                annotations: [],
+                                is_required: true,
+                                is_covariant: false,
+                                is_final: false,
+                                is_field: true,
+                                is_super: false,
+                                param_type: None,
+                                name: Identifier {
+                                    name: "name",
+                                    span: Span {
+                                        start: 82,
+                                        end: 86,
+                                    },
+                                },
+                                default_value: None,
+                                function_params: None,
+                                span: Span {
+                                    start: 77,
+                                    end: 86,
+                                },
+                            },
+                        ],
+                        optional_positional: [],
+                        named: [],
+                        span: Span {
+                            start: 76,
+                            end: 87,
+                        },
+                    },
+                    initializers: [],
+                    body: None,
+                    span: Span {
+                        start: 73,
+                        end: 89,
+                    },
+                },
+            ),
+        ],
+        span: Span {
+            start: 0,
+            end: 90,
+        },
+    },
+)

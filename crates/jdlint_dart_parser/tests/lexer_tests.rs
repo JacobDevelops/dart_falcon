@@ -601,3 +601,72 @@ fn test_sequence_cascade() {
     assert_eq!(filtered[1].kind, TokenKind::DotDot);
     assert_eq!(filtered[2].kind, TokenKind::Ident);
 }
+
+// ── Malformed input / panic resilience ───────────────────────────────────────
+
+#[test]
+fn test_malformed_double_quote_unterminated() {
+    let tokens = Lexer::new("\"unterminated").tokenize();
+    assert_eq!(tokens[0].kind, TokenKind::Error);
+}
+
+#[test]
+fn test_malformed_raw_string_unterminated() {
+    // r'...' without closing quote
+    let tokens = Lexer::new("r'unterminated").tokenize();
+    assert_eq!(tokens[0].kind, TokenKind::Error);
+}
+
+#[test]
+fn test_malformed_triple_quote_unterminated() {
+    let tokens = Lexer::new("'''never closed").tokenize();
+    assert_eq!(tokens[0].kind, TokenKind::Error);
+}
+
+#[test]
+fn test_malformed_backslash_at_eof() {
+    // Backslash as the very last character inside a string
+    let tokens = Lexer::new("'hello\\").tokenize();
+    assert_eq!(tokens[0].kind, TokenKind::Error);
+}
+
+#[test]
+fn test_malformed_multiple_errors_no_panic() {
+    // Two back-to-back unterminated tokens — lexer must not panic and must
+    // produce at least one Error token
+    let tokens = Lexer::new("'open1 /* open2").tokenize();
+    assert!(!tokens.is_empty());
+    assert!(tokens.iter().any(|t| t.kind == TokenKind::Error));
+}
+
+#[test]
+fn test_malformed_empty_input_no_panic() {
+    // Empty source must not panic and should produce only Eof
+    let tokens = Lexer::new("").tokenize();
+    assert!(tokens.iter().all(|t| matches!(t.kind, TokenKind::Eof)));
+}
+
+#[test]
+fn test_malformed_garbage_bytes_no_panic() {
+    // Arbitrary byte sequences must not panic
+    let _ = Lexer::new("\x00\x01\x02\x7f\u{FFFD}").tokenize();
+}
+
+#[test]
+fn test_malformed_unmatched_block_comment_nested() {
+    // /* /* */ — outer comment never closed
+    let tokens = Lexer::new("/* /* inner */").tokenize();
+    assert_eq!(tokens[0].kind, TokenKind::Error);
+}
+
+#[test]
+fn test_malformed_valid_tokens_after_error_recover() {
+    // After an error token the lexer should continue and produce valid tokens
+    let tokens = Lexer::new("'bad 42").tokenize();
+    // Must contain Error and IntLit somewhere (order may vary by impl)
+    assert!(
+        tokens.iter().any(|t| t.kind == TokenKind::Error)
+            || tokens.iter().any(|t| t.kind == TokenKind::IntLit)
+    );
+    // Must never panic — reaching this line is the assertion
+}

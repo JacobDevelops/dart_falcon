@@ -1,0 +1,139 @@
+---
+source: crates/jdlint_dart_parser/tests/parser_tests.rs
+assertion_line: 1352
+expression: "prog.declarations[0]"
+---
+Function(
+    FunctionDecl {
+        annotations: [],
+        is_external: false,
+        is_async: false,
+        is_generator: false,
+        is_getter: false,
+        is_setter: false,
+        return_type: Some(
+            Named(
+                NamedType {
+                    segments: [
+                        Identifier {
+                            name: "List",
+                            span: Span {
+                                start: 0,
+                                end: 4,
+                            },
+                        },
+                    ],
+                    type_args: [
+                        Named(
+                            NamedType {
+                                segments: [
+                                    Identifier {
+                                        name: "String",
+                                        span: Span {
+                                            start: 5,
+                                            end: 11,
+                                        },
+                                    },
+                                ],
+                                type_args: [],
+                                is_nullable: false,
+                                span: Span {
+                                    start: 5,
+                                    end: 11,
+                                },
+                            },
+                        ),
+                    ],
+                    is_nullable: false,
+                    span: Span {
+                        start: 0,
+                        end: 13,
+                    },
+                },
+            ),
+        ),
+        name: Identifier {
+            name: "names",
+            span: Span {
+                start: 13,
+                end: 18,
+            },
+        },
+        type_params: [],
+        params: FormalParamList {
+            positional: [],
+            optional_positional: [],
+            named: [],
+            span: Span {
+                start: 18,
+                end: 21,
+            },
+        },
+        body: Some(
+            Arrow(
+                List {
+                    is_const: false,
+                    type_arg: Some(
+                        Named(
+                            NamedType {
+                                segments: [
+                                    Identifier {
+                                        name: "String",
+                                        span: Span {
+                                            start: 25,
+                                            end: 31,
+                                        },
+                                    },
+                                ],
+                                type_args: [],
+                                is_nullable: false,
+                                span: Span {
+                                    start: 25,
+                                    end: 31,
+                                },
+                            },
+                        ),
+                    ),
+                    elements: [
+                        Expr(
+                            StringLit(
+                                StringLitNode {
+                                    raw: "'Alice'",
+                                    value: "Alice",
+                                    span: Span {
+                                        start: 33,
+                                        end: 40,
+                                    },
+                                },
+                            ),
+                        ),
+                        Expr(
+                            StringLit(
+                                StringLitNode {
+                                    raw: "'Bob'",
+                                    value: "Bob",
+                                    span: Span {
+                                        start: 42,
+                                        end: 47,
+                                    },
+                                },
+                            ),
+                        ),
+                    ],
+                    span: Span {
+                        start: 24,
+                        end: 48,
+                    },
+                },
+                Span {
+                    start: 21,
+                    end: 49,
+                },
+            ),
+        ),
+        span: Span {
+            start: 0,
+            end: 49,
+        },
+    },
+)

@@ -494,6 +494,18 @@ impl<'src> Parser<'src> {
                     self.parse_paren_or_record(start)
                 }
             }
+            // Typed collection literal without const: <T>[...] or <K,V>{...}
+            TokenKind::Lt => {
+                let type_args = self.parse_type_args();
+                match self.cur().kind {
+                    TokenKind::LBracket => self.parse_list_literal(false, type_args.into_iter().next(), start),
+                    TokenKind::LBrace => self.parse_map_or_set_literal(false, type_args, start),
+                    _ => {
+                        self.error("expected '[' or '{' after type arguments in collection literal".to_string());
+                        Expr::Error { span: self.span_from(start) }
+                    }
+                }
+            }
             // List literal
             TokenKind::LBracket => self.parse_list_literal(false, None, start),
             // Map/set literal
@@ -728,7 +740,20 @@ impl<'src> Parser<'src> {
             TokenKind::For => {
                 self.advance(); // for
                 self.expect(TokenKind::LParen);
-                let var_type = None; // simplified
+                // Consume optional var/final/const keyword
+                let _ = self.eat(TokenKind::Var)
+                    .or_else(|| self.eat(TokenKind::Final))
+                    .or_else(|| self.eat(TokenKind::Const));
+                // Try to parse an optional type annotation before the variable name
+                let var_type = {
+                    let saved = self.pos;
+                    if self.is_type_start() && !self.at(TokenKind::LParen) {
+                        let ty = self.parse_type();
+                        if self.is_ident_like() { Some(ty) } else { self.pos = saved; None }
+                    } else {
+                        None
+                    }
+                };
                 let variable = self.expect_ident();
                 self.eat(TokenKind::In);
                 let iterable = self.parse_expr();

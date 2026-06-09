@@ -1270,3 +1270,124 @@ fn snap_extension() {
     assert!(errors.is_empty());
     assert_debug_snapshot!(prog.declarations[0]);
 }
+
+// ── Additional corpus-representative snapshots ────────────────────────────────
+
+#[test]
+fn snap_mixin_declaration() {
+    let (prog, errors) = parse("mixin Serializable on Object { Map<String, dynamic> toJson(); }");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_class_extends_with_implements() {
+    let src = "class Dog extends Animal with Barker implements Pet { final String name; Dog(this.name); }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_named_constructor() {
+    let src = "class Vec2 { final double x; final double y; Vec2(this.x, this.y); Vec2.zero() : x = 0, y = 0; }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_factory_constructor() {
+    let src = "class Singleton { static final Singleton _i = Singleton._(); factory Singleton() => _i; Singleton._(); }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_async_function() {
+    let src = "Future<String> fetchName() async { await Future.delayed(Duration.zero); return 'dart'; }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_generic_function() {
+    let src = "T identity<T>(T value) => value;";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_record_return_type() {
+    let src = "(String, int) pair() => ('hello', 42);";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_annotation_with_args() {
+    let src = "@Deprecated('Use newFn instead')\nvoid oldFn() {}";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_late_final_field() {
+    let src = "class Lazy { late final String value; }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_typed_list_literal() {
+    let src = "List<String> names() => <String>['Alice', 'Bob'];";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_collection_for() {
+    let src = "List<int> doubled(List<int> xs) => [for (final x in xs) x * 2];";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_switch_pattern_guard() {
+    let src = r#"String classify(int n) => switch (n) { < 0 => 'neg', 0 => 'zero', _ => 'pos' };"#;
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_enum_with_members() {
+    let src = "enum Color { red, green, blue; bool get isPrimary => this != Color.green; }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_typedef_function_type() {
+    let src = "typedef Predicate<T> = bool Function(T value);";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
+
+#[test]
+fn snap_const_class_field() {
+    let src = "class Config { static const int maxRetries = 3; static const String baseUrl = 'https://api.example.com'; }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert_debug_snapshot!(prog.declarations[0]);
+}
