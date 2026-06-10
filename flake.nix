@@ -1,5 +1,5 @@
 {
-  description = "jdlint — a fast Dart linter built in Rust";
+  description = "falcon — a fast Dart linter built in Rust";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -25,13 +25,13 @@
       in
       {
         packages = {
-          jdlint = rustPlatform.buildRustPackage {
-            pname = "jdlint";
+          falcon = rustPlatform.buildRustPackage {
+            pname = "falcon";
             version = "0.1.0";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
           };
-          default = self.packages.${system}.jdlint;
+          default = self.packages.${system}.falcon;
         };
 
         devShells.default = pkgs.mkShell {

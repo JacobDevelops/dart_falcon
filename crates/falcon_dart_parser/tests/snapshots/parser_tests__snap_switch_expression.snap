@@ -1,0 +1,177 @@
+---
+source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1257
+expression: "prog.declarations[0]"
+---
+Function(
+    FunctionDecl {
+        annotations: [],
+        is_external: false,
+        is_async: false,
+        is_generator: false,
+        is_getter: false,
+        is_setter: false,
+        return_type: Some(
+            Named(
+                NamedType {
+                    segments: [
+                        Identifier {
+                            name: "String",
+                            span: Span {
+                                start: 0,
+                                end: 6,
+                            },
+                        },
+                    ],
+                    type_args: [],
+                    is_nullable: false,
+                    span: Span {
+                        start: 0,
+                        end: 7,
+                    },
+                },
+            ),
+        ),
+        name: Identifier {
+            name: "f",
+            span: Span {
+                start: 7,
+                end: 8,
+            },
+        },
+        type_params: [],
+        params: FormalParamList {
+            positional: [
+                FormalParam {
+                    annotations: [],
+                    is_required: true,
+                    is_covariant: false,
+                    is_final: false,
+                    is_field: false,
+                    is_super: false,
+                    param_type: Some(
+                        Named(
+                            NamedType {
+                                segments: [
+                                    Identifier {
+                                        name: "int",
+                                        span: Span {
+                                            start: 9,
+                                            end: 12,
+                                        },
+                                    },
+                                ],
+                                type_args: [],
+                                is_nullable: false,
+                                span: Span {
+                                    start: 9,
+                                    end: 13,
+                                },
+                            },
+                        ),
+                    ),
+                    name: Identifier {
+                        name: "x",
+                        span: Span {
+                            start: 13,
+                            end: 14,
+                        },
+                    },
+                    default_value: None,
+                    function_params: None,
+                    span: Span {
+                        start: 9,
+                        end: 14,
+                    },
+                },
+            ],
+            optional_positional: [],
+            named: [],
+            span: Span {
+                start: 8,
+                end: 16,
+            },
+        },
+        body: Some(
+            Arrow(
+                Switch {
+                    subject: Ident(
+                        Identifier {
+                            name: "x",
+                            span: Span {
+                                start: 19,
+                                end: 20,
+                            },
+                        },
+                    ),
+                    arms: [
+                        SwitchExprArm {
+                            pattern: Literal(
+                                LiteralPattern {
+                                    value: Int(
+                                        "1",
+                                    ),
+                                    span: Span {
+                                        start: 30,
+                                        end: 32,
+                                    },
+                                },
+                            ),
+                            guard: None,
+                            body: StringLit(
+                                StringLitNode {
+                                    raw: "'one'",
+                                    value: "one",
+                                    span: Span {
+                                        start: 35,
+                                        end: 40,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                start: 30,
+                                end: 40,
+                            },
+                        },
+                        SwitchExprArm {
+                            pattern: Wildcard {
+                                type_: None,
+                                span: Span {
+                                    start: 42,
+                                    end: 44,
+                                },
+                            },
+                            guard: None,
+                            body: StringLit(
+                                StringLitNode {
+                                    raw: "'other'",
+                                    value: "other",
+                                    span: Span {
+                                        start: 47,
+                                        end: 54,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                start: 42,
+                                end: 55,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 19,
+                        end: 56,
+                    },
+                },
+                Span {
+                    start: 16,
+                    end: 57,
+                },
+            ),
+        ),
+        span: Span {
+            start: 0,
+            end: 57,
+        },
+    },
+)

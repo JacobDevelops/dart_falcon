@@ -1,0 +1,21 @@
+[package]
+name = "falcon_cli"
+version.workspace = true
+edition.workspace = true
+description = "CLI argument parsing and command dispatch for falcon"
+
+[dependencies]
+falcon_analyze = { path = "../falcon_analyze" }
+falcon_diagnostics = { path = "../falcon_diagnostics" }
+falcon_config = { path = "../falcon_config" }
+falcon_rules = { path = "../falcon_rules" }
+clap.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+glob.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+insta.workspace = true

@@ -38,14 +38,14 @@ insta = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [package]
-name = "jdlint"
+name = "dart_falcon"
 version.workspace = true
 edition.workspace = true
 description = "A fast Dart linter built in Rust"
 
 [dependencies]
-jdlint_cli = { path = "crates/jdlint_cli" }
+falcon_cli = { path = "crates/falcon_cli" }
 
 [[bin]]
-name = "jdlint"
+name = "falcon"
 path = "src/main.rs"

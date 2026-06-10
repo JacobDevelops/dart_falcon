@@ -1,0 +1,11 @@
+[package]
+name = "falcon_rules"
+version.workspace = true
+edition.workspace = true
+description = "Ported lint rules from dart_code_linter and pyramid_lint"
+
+[dependencies]
+falcon_syntax = { path = "../falcon_syntax" }
+falcon_analyze = { path = "../falcon_analyze" }
+falcon_diagnostics = { path = "../falcon_diagnostics" }
+falcon_config = { path = "../falcon_config" }

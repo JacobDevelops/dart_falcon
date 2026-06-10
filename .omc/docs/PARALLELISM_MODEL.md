@@ -78,7 +78,7 @@ impl RuleRegistry {
     pub fn analyze_parallel(
         &self,
         files: &[&Path],
-        config: &JdlintConfig,
+        config: &FalconConfig,
     ) -> Vec<Diagnostic> {
         // TODO: M2.2 — implement using rayon::par_iter()
     }
@@ -95,7 +95,7 @@ impl RuleRegistry {
     pub fn analyze_parallel(
         &self,
         files: &[&Path],
-        config: &JdlintConfig,
+        config: &FalconConfig,
     ) -> Vec<Diagnostic> {
         files
             .par_iter()
@@ -110,7 +110,7 @@ impl RuleRegistry {
     fn analyze_file(
         &self,
         file_path: &Path,
-        config: &JdlintConfig,
+        config: &FalconConfig,
     ) -> Vec<Diagnostic> {
         // 1. Read source code
         let source = match std::fs::read_to_string(file_path) {
@@ -119,7 +119,7 @@ impl RuleRegistry {
         };
 
         // 2. Parse AST
-        let program = match jdlint_syntax::parse(&source) {
+        let program = match falcon_syntax::parse(&source) {
             Ok(p) => p,
             Err(_) => return vec![], // TODO: M2.2 — error handling strategy
         };
@@ -149,7 +149,7 @@ impl RuleRegistry {
 - Each Rayon task gets its own `source` (owned `String`)
 - Each task gets its own `program` (owned `Program`)
 - Each task accumulates diagnostics in a local `Vec<Diagnostic>`
-- `AnalyzeContext` contains only shared refs (`&Path`, `&str`, `&JdlintConfig`)
+- `AnalyzeContext` contains only shared refs (`&Path`, `&str`, `&FalconConfig`)
 - Rayon's `flat_map()` collects per-task results without contention
 
 **Rules share immutably**
@@ -188,7 +188,7 @@ pub trait Rule: Send + Sync {
 pub struct AnalyzeContext<'a> {
     pub file_path: &'a std::path::Path,  // Send + Sync
     pub source: &'a str,                  // Send + Sync
-    pub config: &'a JdlintConfig,         // TODO: M2.2 — verify JdlintConfig is Send + Sync
+    pub config: &'a FalconConfig,         // TODO: M2.2 — verify FalconConfig is Send + Sync
 }
 ```
 
@@ -250,11 +250,11 @@ Validate that per-file parallelism meets <1s target. If single-file analysis >10
 
 ### Benchmark Harness
 ```
-crates/jdlint_dart_parser/benches/parse_bench.rs
+crates/falcon_dart_parser/benches/parse_bench.rs
 ```
 
 Measure these operations separately:
-1. **Parse time**: `jdlint_syntax::parse()` only
+1. **Parse time**: `falcon_syntax::parse()` only
 2. **Analyze time**: all rules on parsed AST
 3. **Total time**: read + parse + analyze
 
@@ -324,7 +324,7 @@ impl RuleRegistry {
     pub fn analyze_parallel(
         &self,
         files: &[&Path],
-        config: &JdlintConfig,
+        config: &FalconConfig,
     ) -> Vec<Diagnostic> {
         files
             .par_iter()
@@ -337,10 +337,10 @@ impl RuleRegistry {
     fn analyze_file_per_rule_parallel(
         &self,
         file_path: &Path,
-        config: &JdlintConfig,
+        config: &FalconConfig,
     ) -> Vec<Diagnostic> {
         let source = std::fs::read_to_string(file_path).unwrap_or_default();
-        let program = jdlint_syntax::parse(&source).unwrap_or_else(|_| {
+        let program = falcon_syntax::parse(&source).unwrap_or_else(|_| {
             Program::default() // TODO: M6.2 — error handling
         });
 
@@ -414,12 +414,12 @@ When adding LSP incremental analysis (Phase 2 or later):
 
 ## 7. Implementation Checklist (M2.2)
 
-- [ ] Add `rayon` crate to `crates/jdlint_analyze/Cargo.toml`
+- [ ] Add `rayon` crate to `crates/falcon_analyze/Cargo.toml`
 - [ ] Implement `RuleRegistry::analyze_parallel()` per Section 2 pattern
 - [ ] Implement `RuleRegistry::analyze_file()` helper (sequential)
 - [ ] Verify all `Rule` implementations are `Send + Sync` (compiler check)
 - [ ] Verify `AnalyzeContext` fields are `Send + Sync`
-- [ ] Verify `JdlintConfig` is `Send + Sync` (if not, adjust AnalyzeContext)
+- [ ] Verify `FalconConfig` is `Send + Sync` (if not, adjust AnalyzeContext)
 - [ ] Add error handling for read/parse failures (return empty diagnostics or error diagnostic)
 - [ ] Add integration test: `test_analyze_parallel_matches_sequential()` (verify correctness)
 - [ ] Document: RuleRegistry::analyze_parallel in crate-level docs
@@ -432,16 +432,16 @@ When adding LSP incremental analysis (Phase 2 or later):
 
 From source code:
 
-**AnalyzeContext** (`crates/jdlint_analyze/src/context.rs`):
+**AnalyzeContext** (`crates/falcon_analyze/src/context.rs`):
 ```rust
 pub struct AnalyzeContext<'a> {
     pub file_path: &'a std::path::Path,
     pub source: &'a str,
-    pub config: &'a JdlintConfig,
+    pub config: &'a FalconConfig,
 }
 ```
 
-**Rule trait** (`crates/jdlint_analyze/src/rule.rs`):
+**Rule trait** (`crates/falcon_analyze/src/rule.rs`):
 ```rust
 pub trait Rule: Send + Sync {
     fn name(&self) -> &'static str;
@@ -449,7 +449,7 @@ pub trait Rule: Send + Sync {
 }
 ```
 
-**RuleRegistry** (`crates/jdlint_analyze/src/registry.rs`):
+**RuleRegistry** (`crates/falcon_analyze/src/registry.rs`):
 ```rust
 pub struct RuleRegistry {
     rules: Vec<Box<dyn Rule>>,

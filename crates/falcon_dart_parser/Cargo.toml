@@ -1,0 +1,17 @@
+[package]
+name = "falcon_dart_parser"
+version.workspace = true
+edition.workspace = true
+description = "Hand-rolled Dart 3.x recursive-descent parser for falcon"
+
+[dependencies]
+falcon_syntax = { path = "../falcon_syntax" }
+tracing.workspace = true
+
+[dev-dependencies]
+insta = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "parser_bench"
+harness = false

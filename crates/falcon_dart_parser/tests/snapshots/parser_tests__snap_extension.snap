@@ -1,0 +1,116 @@
+---
+source: crates/falcon_dart_parser/tests/parser_tests.rs
+expression: "prog.declarations[0]"
+---
+Extension(
+    ExtensionDecl {
+        annotations: [],
+        name: Some(
+            Identifier {
+                name: "StringX",
+                span: Span {
+                    start: 10,
+                    end: 17,
+                },
+            },
+        ),
+        type_params: [],
+        on_type: Named(
+            NamedType {
+                segments: [
+                    Identifier {
+                        name: "String",
+                        span: Span {
+                            start: 21,
+                            end: 27,
+                        },
+                    },
+                ],
+                type_args: [],
+                is_nullable: false,
+                span: Span {
+                    start: 21,
+                    end: 28,
+                },
+            },
+        ),
+        members: [
+            Getter(
+                GetterDecl {
+                    annotations: [],
+                    is_static: false,
+                    is_abstract: false,
+                    is_external: false,
+                    is_async: false,
+                    return_type: Some(
+                        Named(
+                            NamedType {
+                                segments: [
+                                    Identifier {
+                                        name: "bool",
+                                        span: Span {
+                                            start: 30,
+                                            end: 34,
+                                        },
+                                    },
+                                ],
+                                type_args: [],
+                                is_nullable: false,
+                                span: Span {
+                                    start: 30,
+                                    end: 35,
+                                },
+                            },
+                        ),
+                    ),
+                    name: Identifier {
+                        name: "isBlank",
+                        span: Span {
+                            start: 39,
+                            end: 46,
+                        },
+                    },
+                    body: Some(
+                        Arrow(
+                            Binary {
+                                op: EqEq,
+                                left: Ident(
+                                    Identifier {
+                                        name: "length",
+                                        span: Span {
+                                            start: 50,
+                                            end: 56,
+                                        },
+                                    },
+                                ),
+                                right: IntLit {
+                                    value: "0",
+                                    span: Span {
+                                        start: 60,
+                                        end: 61,
+                                    },
+                                },
+                                span: Span {
+                                    start: 50,
+                                    end: 61,
+                                },
+                            },
+                            Span {
+                                start: 47,
+                                end: 63,
+                            },
+                        ),
+                    ),
+                    span: Span {
+                        start: 30,
+                        end: 63,
+                    },
+                },
+            ),
+        ],
+        span: Span {
+            start: 0,
+            end: 64,
+        },
+    },
+)

@@ -43,10 +43,10 @@ The parser implements the complete Dart 3.x grammar: class/mixin/enum/extension/
 |---|---|
 | Typed enum-based AST nodes covering all Dart productions | PASS |
 | Visitor trait with 20+ `visit_*` methods and default walk | PASS |
-| `FORMAT.md` committed; `JDLINT_AST_FORMAT_VERSION = "1.0"` constant | PASS |
+| `FORMAT.md` committed; `FALCON_AST_FORMAT_VERSION = "1.0"` constant | PASS |
 | 45 AST unit tests passing | PASS |
 
-The AST is defined in the `jdlint_syntax` crate and is stable for M2. The visitor pattern allows rules to selectively override only the nodes they care about, with default walk propagating through all child nodes.
+The AST is defined in the `falcon_syntax` crate and is stable for M2. The visitor pattern allows rules to selectively override only the nodes they care about, with default walk propagating through all child nodes.
 
 ### M1.4 — Parser Integration Tests (Corpus)
 
@@ -76,7 +76,7 @@ The 22 remaining files with errors involve advanced UI widget trees and complex 
 
 Performance baseline (single-threaded, `--release`):
 
-The `parser_bench` criterion benchmark (`parse_50_files`) targets 50 representative Dart files. The 10 embedded snippets cover all major grammar productions and are representative of the jfit corpus. See `crates/jdlint_dart_parser/benches/parser_bench.rs`.
+The `parser_bench` criterion benchmark (`parse_50_files`) targets 50 representative Dart files. The 10 embedded snippets cover all major grammar productions and are representative of the jfit corpus. See `crates/falcon_dart_parser/benches/parser_bench.rs`.
 
 ---
 

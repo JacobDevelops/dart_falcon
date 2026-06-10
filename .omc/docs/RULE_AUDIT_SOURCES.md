@@ -1,8 +1,8 @@
-# jdlint Rule Audit: Source Locations & Version Pins
+# falcon Rule Audit: Source Locations & Version Pins
 
 **Date:** 2026-06-09  
 **Phase:** Phase 1 — Audit trail for all ~60 ported rules  
-**Purpose:** Traceability matrix linking each jdlint rule to source package, repo, version, and file path
+**Purpose:** Traceability matrix linking each falcon rule to source package, repo, version, and file path
 
 ---
 
@@ -90,7 +90,7 @@ pyramid_lint/
 ## Part 1: dart_code_linter Rules (34 rules)
 
 Each rule documents:
-- **Name:** Rule ID as used in jdlint
+- **Name:** Rule ID as used in falcon
 - **Source file:** Estimated path in dart_code_linter repo
 - **Visitor class:** Main implementation class (if known)
 - **Status:** Audit status (✓ Located, ? TBD, ~ Deferred)
@@ -1076,7 +1076,7 @@ Before M4 rule implementation begins:
 - [ ] All 26 pyramid_lint rules verified to exist at expected paths
 - [ ] Rule overlap matrix cross-checked (3 exact duplicates, 3 overlapping)
 - [ ] Test fixtures reviewed for each rule (positive + negative cases)
-- [ ] jdlint.json schema finalized and shared with team
+- [ ] falcon.json schema finalized and shared with team
 - [ ] Rule naming convention agreed (kebab-case for dart_code_linter, snake_case for pyramid_lint, aliased in registry)
 - [ ] ScopeCollector visitor framework designed (shared by 7 scope-lookup rules)
 - [ ] Phase 1 heuristics documented and validated on sample Dart code

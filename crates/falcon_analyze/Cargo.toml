@@ -1,0 +1,13 @@
+[package]
+name = "falcon_analyze"
+version.workspace = true
+edition.workspace = true
+description = "Rule visitor infrastructure and analysis engine for falcon"
+
+[dependencies]
+falcon_syntax = { path = "../falcon_syntax" }
+falcon_diagnostics = { path = "../falcon_diagnostics" }
+falcon_config = { path = "../falcon_config" }
+falcon_dart_parser = { path = "../falcon_dart_parser" }
+rayon.workspace = true
+tracing.workspace = true

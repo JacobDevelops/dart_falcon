@@ -1,4 +1,4 @@
-# jdlint Phase 1: Dart 3.x Parser Grammar Specification
+# falcon Phase 1: Dart 3.x Parser Grammar Specification
 
 **Date:** 2026-06-09  
 **Status:** LOCKED FOR M1 IMPLEMENTATION  
@@ -9,7 +9,7 @@
 
 ## 1. Dart 3.x Features: SUPPORTED in Phase 1
 
-The jdlint Phase 1 parser MUST handle all Dart 3.x constructs listed below. These are required for Phase 1 lint rules to function correctly. Each production includes grammar notation and notes on which Phase 1 rules depend on it.
+The falcon Phase 1 parser MUST handle all Dart 3.x constructs listed below. These are required for Phase 1 lint rules to function correctly. Each production includes grammar notation and notes on which Phase 1 rules depend on it.
 
 ### 1.1 Compilation Unit & File Structure
 
@@ -78,7 +78,7 @@ export 'src/services/api.dart' show ApiClient;
 
 // top_level_declaration
 void main() => runApp(MyApp());
-const appName = "jlint";
+const appName = "falcon";
 @Deprecated('Use newFunction instead')
 void oldFunction() {}
 ```
@@ -1727,7 +1727,7 @@ These constructs are either Dart 2.x-only (no longer relevant) or explicitly def
 
 ## 3. AST Node Taxonomy
 
-This section maps grammar productions to AST node types that the M1 parser must produce. These nodes align with `jdlint_syntax::ast` type definitions that will be created in M1.3.
+This section maps grammar productions to AST node types that the M1 parser must produce. These nodes align with `falcon_syntax::ast` type definitions that will be created in M1.3.
 
 ### Core AST Nodes (Enum Variants in Rust)
 
@@ -2395,7 +2395,7 @@ These grammar constructs will be added in Phase 2 (if at all). Phase 1 parser mu
 
 ### 8.1 Top-Down Recursive Descent
 
-**Recommended approach for jdlint:**
+**Recommended approach for falcon:**
 - Straightforward implementation
 - Good error recovery properties
 - Suitable for Dart grammar (mostly unambiguous, minimal backtracking)

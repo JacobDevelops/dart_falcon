@@ -1,0 +1,75 @@
+---
+source: crates/falcon_dart_parser/tests/parser_tests.rs
+expression: "prog.declarations[0]"
+---
+Class(
+    ClassDecl {
+        annotations: [],
+        modifiers: ClassModifiers {
+            is_abstract: true,
+            is_interface: false,
+            is_base: false,
+            is_final: false,
+            is_sealed: false,
+        },
+        name: Identifier {
+            name: "Shape",
+            span: Span {
+                start: 15,
+                end: 20,
+            },
+        },
+        type_params: [],
+        extends: None,
+        with_clause: [],
+        implements: [],
+        members: [
+            Getter(
+                GetterDecl {
+                    annotations: [],
+                    is_static: false,
+                    is_abstract: false,
+                    is_external: false,
+                    is_async: false,
+                    return_type: Some(
+                        Named(
+                            NamedType {
+                                segments: [
+                                    Identifier {
+                                        name: "double",
+                                        span: Span {
+                                            start: 23,
+                                            end: 29,
+                                        },
+                                    },
+                                ],
+                                type_args: [],
+                                is_nullable: false,
+                                span: Span {
+                                    start: 23,
+                                    end: 30,
+                                },
+                            },
+                        ),
+                    ),
+                    name: Identifier {
+                        name: "area",
+                        span: Span {
+                            start: 34,
+                            end: 38,
+                        },
+                    },
+                    body: None,
+                    span: Span {
+                        start: 23,
+                        end: 40,
+                    },
+                },
+            ),
+        ],
+        span: Span {
+            start: 0,
+            end: 41,
+        },
+    },
+)

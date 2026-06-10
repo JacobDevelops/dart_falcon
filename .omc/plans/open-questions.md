@@ -2,7 +2,7 @@
 
 Track all outstanding questions that need clarification before or during execution. These items are intentionally unresolved to avoid blocking implementation.
 
-## jdlint Phase 1 (2026-06-09)
+## falcon Phase 1 (2026-06-09)
 
 ### Must Resolve Before M4 (Rule Implementation)
 
@@ -20,7 +20,7 @@ Track all outstanding questions that need clarification before or during executi
 
 - [ ] **Auto-fix scope for Phase 1** — Phase 1 explicitly excludes auto-fix. Should we identify a "safe subset" of rules with mechanical fixes (trailing-comma, format-comment) for Phase 1 quick win? **Why it matters:** Affects LSP server design; deferring to Phase 2 keeps scope tight, but quick wins boost adoption.
 
-- [ ] **VS Code extension publishing** — Should jdlint-vscode extension be published to VS Code Marketplace, or distributed only as part of jfit toolchain? **Why it matters:** Affects M5.3 scope; marketplace publishing adds ~4 hours (license file, icon, description, testing in extension host).
+- [ ] **VS Code extension publishing** — Should falcon-vscode extension be published to VS Code Marketplace, or distributed only as part of jfit toolchain? **Why it matters:** Affects M5.3 scope; marketplace publishing adds ~4 hours (license file, icon, description, testing in extension host).
 
 ### Optional Before M7 (Nix Integration)
 
@@ -30,7 +30,7 @@ Track all outstanding questions that need clarification before or during executi
 
 - [ ] **Formatter integration** — Should Phase 2 formatter reuse AST from Phase 1 parser, or build separate formatter parser (like Prettier/Biome do)? **Why it matters:** Affects Phase 2 architecture; shared parser enables co-location of lint + format, but complicates error recovery.
 
-- [ ] **Semantic analysis depth** — Phase 2 will likely need type inference, control flow analysis, const evaluation for comprehensive lint reimplementation (very_good_analysis rules). Should we sketch that API now (M2, analyze crate) to avoid redesign? **Why it matters:** Affects trait design in jdlint_analyze; forward-looking design reduces Phase 2 refactoring.
+- [ ] **Semantic analysis depth** — Phase 2 will likely need type inference, control flow analysis, const evaluation for comprehensive lint reimplementation (very_good_analysis rules). Should we sketch that API now (M2, analyze crate) to avoid redesign? **Why it matters:** Affects trait design in falcon_analyze; forward-looking design reduces Phase 2 refactoring.
 
 ---
 

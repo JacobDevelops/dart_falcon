@@ -4,7 +4,7 @@
 **Status**: PROVISIONAL — Default threshold pending M4.2 pilot calibration  
 **Last Updated**: 2026-06-10
 
-This document defines the acceptance criteria for rule implementations in jdlint. All rules must meet these criteria before being marked as "ready for production" or integrated into the main rule set.
+This document defines the acceptance criteria for rule implementations in falcon. All rules must meet these criteria before being marked as "ready for production" or integrated into the main rule set.
 
 ## Overview
 
@@ -135,7 +135,7 @@ Select **10 representative rules** across the rule complexity spectrum:
 
 ### Step 1: Implement Rule
 
-Create rule implementation in `crates/jdlint_rules/src/rules/{rule_name}.rs` and corresponding test fixtures in `crates/jdlint_rules/tests/corpus/{rule_name}/`.
+Create rule implementation in `crates/falcon_rules/src/rules/{rule_name}.rs` and corresponding test fixtures in `crates/falcon_rules/tests/corpus/{rule_name}/`.
 
 ### Step 2: Validate Fixtures
 
@@ -172,7 +172,7 @@ Merge rule into main rule set; enable in default configuration.
 The default message threshold of **0.85** is provisional because:
 
 1. **Unknown variance distribution**: Not all rules have been ported/implemented yet; true message variance across the rule set is not yet known
-2. **Upstream divergence**: jdlint may intentionally diverge from upstream linters on message formatting; threshold should reflect acceptable divergence
+2. **Upstream divergence**: falcon may intentionally diverge from upstream linters on message formatting; threshold should reflect acceptable divergence
 3. **Type variance**: SIMPLE rules may have near-identical messages; COMPLEX rules may have inherent variance
 4. **Calibration needed**: M4.2 pilot will measure actual variance and provide data-driven threshold
 
@@ -223,8 +223,8 @@ A: When the message content is important to the rule's value. For simple violati
 
 ## Related Documents
 
-- `crates/jdlint_rules/tests/corpus/FIXTURE_FORMAT.md` — Corpus fixture format and annotation syntax
-- `crates/jdlint_rules/src/rules/` — Individual rule implementations (see rule metadata)
+- `crates/falcon_rules/tests/corpus/FIXTURE_FORMAT.md` — Corpus fixture format and annotation syntax
+- `crates/falcon_rules/src/rules/` — Individual rule implementations (see rule metadata)
 - `CONTRIBUTING.md` — General contribution guidelines (when available)
 
 ## Version History

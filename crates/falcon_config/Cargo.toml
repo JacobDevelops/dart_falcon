@@ -1,0 +1,9 @@
+[package]
+name = "falcon_config"
+version.workspace = true
+edition.workspace = true
+description = "falcon.json configuration schema and loader"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

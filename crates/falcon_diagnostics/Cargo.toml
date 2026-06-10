@@ -1,0 +1,10 @@
+[package]
+name = "falcon_diagnostics"
+version.workspace = true
+edition.workspace = true
+description = "Diagnostic types, severity levels, and reporting for falcon"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+lsp-types.workspace = true

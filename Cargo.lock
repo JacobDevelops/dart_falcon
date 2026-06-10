@@ -270,6 +270,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
+name = "dart_falcon"
+version = "0.1.0"
+dependencies = [
+ "falcon_cli",
+]
+
+[[package]]
 name = "either"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -295,6 +302,93 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys",
+]
+
+[[package]]
+name = "falcon_analyze"
+version = "0.1.0"
+dependencies = [
+ "falcon_config",
+ "falcon_dart_parser",
+ "falcon_diagnostics",
+ "falcon_syntax",
+ "rayon",
+ "tracing",
+]
+
+[[package]]
+name = "falcon_cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "falcon_analyze",
+ "falcon_config",
+ "falcon_diagnostics",
+ "falcon_rules",
+ "glob",
+ "insta",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+ "walkdir",
+]
+
+[[package]]
+name = "falcon_config"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "falcon_dart_parser"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "falcon_syntax",
+ "insta",
+ "tracing",
+]
+
+[[package]]
+name = "falcon_diagnostics"
+version = "0.1.0"
+dependencies = [
+ "lsp-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "falcon_lsp"
+version = "0.1.0"
+dependencies = [
+ "falcon_analyze",
+ "falcon_config",
+ "falcon_diagnostics",
+ "lsp-server",
+ "lsp-types",
+ "serde_json",
+]
+
+[[package]]
+name = "falcon_rules"
+version = "0.1.0"
+dependencies = [
+ "falcon_analyze",
+ "falcon_config",
+ "falcon_diagnostics",
+ "falcon_syntax",
+]
+
+[[package]]
+name = "falcon_syntax"
+version = "0.1.0"
+dependencies = [
+ "falcon_dart_parser",
+ "insta",
 ]
 
 [[package]]
@@ -460,100 +554,6 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
-
-[[package]]
-name = "jdlint"
-version = "0.1.0"
-dependencies = [
- "jdlint_cli",
-]
-
-[[package]]
-name = "jdlint_analyze"
-version = "0.1.0"
-dependencies = [
- "jdlint_config",
- "jdlint_dart_parser",
- "jdlint_diagnostics",
- "jdlint_syntax",
- "rayon",
- "tracing",
-]
-
-[[package]]
-name = "jdlint_cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "glob",
- "insta",
- "jdlint_analyze",
- "jdlint_config",
- "jdlint_diagnostics",
- "jdlint_rules",
- "serde_json",
- "tempfile",
- "tracing",
- "tracing-subscriber",
- "walkdir",
-]
-
-[[package]]
-name = "jdlint_config"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jdlint_dart_parser"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "insta",
- "jdlint_syntax",
- "tracing",
-]
-
-[[package]]
-name = "jdlint_diagnostics"
-version = "0.1.0"
-dependencies = [
- "lsp-types",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jdlint_lsp"
-version = "0.1.0"
-dependencies = [
- "jdlint_analyze",
- "jdlint_config",
- "jdlint_diagnostics",
- "lsp-server",
- "lsp-types",
- "serde_json",
-]
-
-[[package]]
-name = "jdlint_rules"
-version = "0.1.0"
-dependencies = [
- "jdlint_analyze",
- "jdlint_config",
- "jdlint_diagnostics",
- "jdlint_syntax",
-]
-
-[[package]]
-name = "jdlint_syntax"
-version = "0.1.0"
-dependencies = [
- "insta",
- "jdlint_dart_parser",
-]
 
 [[package]]
 name = "js-sys"

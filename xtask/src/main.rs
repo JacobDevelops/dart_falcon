@@ -15,10 +15,10 @@ fn main() {
             eprintln!("  validate-rules  Validate rule implementations against golden corpus");
             eprintln!();
             eprintln!("validate-rules flags:");
-            eprintln!("  --corpus <path>      Path to corpus directory (default: crates/jdlint_rules/tests/corpus)");
+            eprintln!("  --corpus <path>      Path to corpus directory (default: crates/falcon_rules/tests/corpus)");
             eprintln!("  --threshold <float>  Fuzzy message match threshold 0.0-1.0 (default: 0.85)");
             eprintln!("  --rule <name>        Filter to a single rule");
-            eprintln!("  --jdlint-bin <path>  Path to jdlint binary (default: target/debug/jdlint)");
+            eprintln!("  --falcon-bin <path>  Path to falcon binary (default: target/debug/falcon)");
             eprintln!("  --json               Output results as JSON");
             std::process::exit(1);
         }
@@ -103,11 +103,11 @@ struct SpanJson {
     end: usize,
 }
 
-fn run_jdlint(jdlint_bin: &str, file: &Path) -> Result<Vec<DiagnosticJson>, String> {
-    let output = Command::new(jdlint_bin)
+fn run_falcon(falcon_bin: &str, file: &Path) -> Result<Vec<DiagnosticJson>, String> {
+    let output = Command::new(falcon_bin)
         .args(["check", "--format", "json", file.to_str().unwrap_or("")])
         .output()
-        .map_err(|e| format!("Failed to run jdlint binary '{}': {}", jdlint_bin, e))?;
+        .map_err(|e| format!("Failed to run falcon binary '{}': {}", falcon_bin, e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let trimmed = stdout.trim();
@@ -148,7 +148,7 @@ fn fuzzy_match(a: &str, b: &str) -> f64 {
 fn validate_file(
     file: &Path,
     source: &str,
-    jdlint_bin: &str,
+    falcon_bin: &str,
     threshold: f64,
     rule_filter: Option<&str>,
 ) -> FileResult {
@@ -158,7 +158,7 @@ fn validate_file(
         .filter(|e| rule_filter.map(|r| e.rule == r).unwrap_or(true))
         .collect();
 
-    let raw_diags = run_jdlint(jdlint_bin, file).unwrap_or_default();
+    let raw_diags = run_falcon(falcon_bin, file).unwrap_or_default();
     let diags: Vec<(usize, &DiagnosticJson)> = raw_diags
         .iter()
         .enumerate()
@@ -219,13 +219,13 @@ fn validate_file(
 
 fn validate_rules(args: &[String]) {
     let workspace = workspace_root();
-    let default_corpus = workspace.join("crates/jdlint_rules/tests/corpus");
-    let default_bin = workspace.join("target/debug/jdlint");
+    let default_corpus = workspace.join("crates/falcon_rules/tests/corpus");
+    let default_bin = workspace.join("target/debug/falcon");
 
     let mut corpus_path = default_corpus;
     let mut threshold: f64 = 0.85;
     let mut rule_filter: Option<String> = None;
-    let mut jdlint_bin = default_bin.to_string_lossy().to_string();
+    let mut falcon_bin = default_bin.to_string_lossy().to_string();
     let mut json_output = false;
 
     let mut i = 0;
@@ -249,10 +249,10 @@ fn validate_rules(args: &[String]) {
                     rule_filter = Some(args[i].clone());
                 }
             }
-            "--jdlint-bin" => {
+            "--falcon-bin" => {
                 i += 1;
                 if i < args.len() {
-                    jdlint_bin = args[i].clone();
+                    falcon_bin = args[i].clone();
                 }
             }
             "--json" => {
@@ -315,7 +315,7 @@ fn validate_rules(args: &[String]) {
             let result = validate_file(
                 dart_file,
                 &source,
-                &jdlint_bin,
+                &falcon_bin,
                 threshold,
                 Some(&rule_name),
             );

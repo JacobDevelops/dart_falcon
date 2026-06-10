@@ -1,0 +1,296 @@
+---
+source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1296
+expression: "prog.declarations[0]"
+---
+Class(
+    ClassDecl {
+        annotations: [],
+        modifiers: ClassModifiers {
+            is_abstract: false,
+            is_interface: false,
+            is_base: false,
+            is_final: false,
+            is_sealed: false,
+        },
+        name: Identifier {
+            name: "Vec2",
+            span: Span {
+                start: 6,
+                end: 10,
+            },
+        },
+        type_params: [],
+        extends: None,
+        with_clause: [],
+        implements: [],
+        members: [
+            Field(
+                FieldDecl {
+                    annotations: [],
+                    is_static: false,
+                    is_abstract: false,
+                    is_external: false,
+                    is_covariant: false,
+                    is_late: false,
+                    is_final: true,
+                    is_const: false,
+                    field_type: Some(
+                        Named(
+                            NamedType {
+                                segments: [
+                                    Identifier {
+                                        name: "double",
+                                        span: Span {
+                                            start: 19,
+                                            end: 25,
+                                        },
+                                    },
+                                ],
+                                type_args: [],
+                                is_nullable: false,
+                                span: Span {
+                                    start: 19,
+                                    end: 26,
+                                },
+                            },
+                        ),
+                    ),
+                    declarators: [
+                        VarDeclarator {
+                            name: Identifier {
+                                name: "x",
+                                span: Span {
+                                    start: 26,
+                                    end: 27,
+                                },
+                            },
+                            initializer: None,
+                            span: Span {
+                                start: 13,
+                                end: 27,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 13,
+                        end: 29,
+                    },
+                },
+            ),
+            Field(
+                FieldDecl {
+                    annotations: [],
+                    is_static: false,
+                    is_abstract: false,
+                    is_external: false,
+                    is_covariant: false,
+                    is_late: false,
+                    is_final: true,
+                    is_const: false,
+                    field_type: Some(
+                        Named(
+                            NamedType {
+                                segments: [
+                                    Identifier {
+                                        name: "double",
+                                        span: Span {
+                                            start: 35,
+                                            end: 41,
+                                        },
+                                    },
+                                ],
+                                type_args: [],
+                                is_nullable: false,
+                                span: Span {
+                                    start: 35,
+                                    end: 42,
+                                },
+                            },
+                        ),
+                    ),
+                    declarators: [
+                        VarDeclarator {
+                            name: Identifier {
+                                name: "y",
+                                span: Span {
+                                    start: 42,
+                                    end: 43,
+                                },
+                            },
+                            initializer: None,
+                            span: Span {
+                                start: 29,
+                                end: 43,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 29,
+                        end: 45,
+                    },
+                },
+            ),
+            Constructor(
+                ConstructorDecl {
+                    annotations: [],
+                    is_const: false,
+                    is_factory: false,
+                    is_external: false,
+                    name: Identifier {
+                        name: "Vec2",
+                        span: Span {
+                            start: 45,
+                            end: 49,
+                        },
+                    },
+                    constructor_name: None,
+                    params: FormalParamList {
+                        positional: [
+                            FormalParam {
+                                annotations: [],
+                                is_required: true,
+                                is_covariant: false,
+                                is_final: false,
+                                is_field: true,
+                                is_super: false,
+                                param_type: None,
+                                name: Identifier {
+                                    name: "x",
+                                    span: Span {
+                                        start: 55,
+                                        end: 56,
+                                    },
+                                },
+                                default_value: None,
+                                function_params: None,
+                                span: Span {
+                                    start: 50,
+                                    end: 56,
+                                },
+                            },
+                            FormalParam {
+                                annotations: [],
+                                is_required: true,
+                                is_covariant: false,
+                                is_final: false,
+                                is_field: true,
+                                is_super: false,
+                                param_type: None,
+                                name: Identifier {
+                                    name: "y",
+                                    span: Span {
+                                        start: 63,
+                                        end: 64,
+                                    },
+                                },
+                                default_value: None,
+                                function_params: None,
+                                span: Span {
+                                    start: 58,
+                                    end: 64,
+                                },
+                            },
+                        ],
+                        optional_positional: [],
+                        named: [],
+                        span: Span {
+                            start: 49,
+                            end: 65,
+                        },
+                    },
+                    initializers: [],
+                    body: None,
+                    span: Span {
+                        start: 45,
+                        end: 67,
+                    },
+                },
+            ),
+            Constructor(
+                ConstructorDecl {
+                    annotations: [],
+                    is_const: false,
+                    is_factory: false,
+                    is_external: false,
+                    name: Identifier {
+                        name: "Vec2",
+                        span: Span {
+                            start: 67,
+                            end: 71,
+                        },
+                    },
+                    constructor_name: Some(
+                        Identifier {
+                            name: "zero",
+                            span: Span {
+                                start: 72,
+                                end: 76,
+                            },
+                        },
+                    ),
+                    params: FormalParamList {
+                        positional: [],
+                        optional_positional: [],
+                        named: [],
+                        span: Span {
+                            start: 76,
+                            end: 79,
+                        },
+                    },
+                    initializers: [
+                        FieldInit {
+                            field: Identifier {
+                                name: "x",
+                                span: Span {
+                                    start: 81,
+                                    end: 82,
+                                },
+                            },
+                            value: IntLit {
+                                value: "0",
+                                span: Span {
+                                    start: 85,
+                                    end: 86,
+                                },
+                            },
+                            span: Span {
+                                start: 81,
+                                end: 86,
+                            },
+                        },
+                        FieldInit {
+                            field: Identifier {
+                                name: "y",
+                                span: Span {
+                                    start: 88,
+                                    end: 89,
+                                },
+                            },
+                            value: IntLit {
+                                value: "0",
+                                span: Span {
+                                    start: 92,
+                                    end: 93,
+                                },
+                            },
+                            span: Span {
+                                start: 88,
+                                end: 93,
+                            },
+                        },
+                    ],
+                    body: None,
+                    span: Span {
+                        start: 67,
+                        end: 95,
+                    },
+                },
+            ),
+        ],
+        span: Span {
+            start: 0,
+            end: 96,
+        },
+    },
+)

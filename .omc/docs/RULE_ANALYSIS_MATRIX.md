@@ -1,4 +1,4 @@
-# jdlint Rule Analysis Matrix
+# falcon Rule Analysis Matrix
 
 **Date:** 2026-06-09  
 **Phase:** Phase 1 — Port rules from dart_code_linter + pyramid_lint  
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This document provides the detailed implementation guidance for all ~60 lint rules being ported from `dart_code_linter` (^3.2.1) and `pyramid_lint` (^2.4.0) to `jdlint` Phase 1.
+This document provides the detailed implementation guidance for all ~60 lint rules being ported from `dart_code_linter` (^3.2.1) and `pyramid_lint` (^2.4.0) to `falcon` Phase 1.
 
 **Complexity Breakdown:**
 - **SIMPLE (1–2h):** ~40 rules — pure AST pattern matching
@@ -278,7 +278,7 @@ These rules are very similar but with minor differences in strictness or scope.
 
 | Rule | Condition | Handling |
 |------|-----------|----------|
-| `no-magic-number` | Numeric thresholds vary by package | Config-driven; allow per-rule threshold in jdlint.json |
+| `no-magic-number` | Numeric thresholds vary by package | Config-driven; allow per-rule threshold in falcon.json |
 | `prefer-correct-identifier-length` | May exclude loop counters (`i`, `j`, `k`) | Heuristic: allow single-char only in for loops |
 
 ---
@@ -330,7 +330,7 @@ For rules marked `requires-scope-lookup` or `requires-type-inference`, Phase 1 u
 
 **Implementation:**
 1. Traverse all numeric literals in AST.
-2. Maintain allowlist: `[0, 1, 2, -1]` (configurable via jdlint.json).
+2. Maintain allowlist: `[0, 1, 2, -1]` (configurable via falcon.json).
 3. Flag any literal not in allowlist as "magic."
 
 **Limitations:**
@@ -424,7 +424,7 @@ Rules requiring:
 
 ## Part 7: Configuration & Rule Registry
 
-### jdlint.json Schema (Sketch)
+### falcon.json Schema (Sketch)
 
 ```json
 {
@@ -475,7 +475,7 @@ Before rule implementation begins (M4.2), verify:
 - [ ] Rule overlaps identified and deduplication strategy approved
 - [ ] Phase 1 heuristics documented and tested on sample code
 - [ ] Test fixtures created for all rules (2 cases each)
-- [ ] jdlint.json schema finalized and documented
+- [ ] falcon.json schema finalized and documented
 - [ ] RuleVisitor trait designed and prototyped
 - [ ] `xtask` codegen pipeline operational (generates rule stubs)
 - [ ] Parallel batching schedule agreed with team
@@ -489,7 +489,7 @@ Before merging to main (end of M4.6):
 
 - [ ] All 60 rules implemented and passing tests
 - [ ] Zero overlapping diagnostics (deduplicated rules working correctly)
-- [ ] jdlint.json config file working (rules can be enabled/disabled)
+- [ ] falcon.json config file working (rules can be enabled/disabled)
 - [ ] Full jfit mobile project lints in <1s on typical hardware
 - [ ] LSP server reporting all diagnostics correctly
 - [ ] No panics or unwrap() calls in rule visitors

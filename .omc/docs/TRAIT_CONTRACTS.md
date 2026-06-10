@@ -320,9 +320,9 @@ pub struct AnalyzeContext<'a> {
     /// Used for span-based source lookup and error context generation.
     pub source: &'a str,
 
-    /// Loaded jdlint.json configuration.
+    /// Loaded falcon.json configuration.
     /// Use for rule-specific overrides (thresholds, exclude lists, etc.).
-    pub config: &'a JdlintConfig,
+    pub config: &'a FalconConfig,
 }
 ```
 
@@ -340,7 +340,7 @@ Rules **do not store** `AnalyzeContext`; they only use it during `analyze()` cal
 To emit a diagnostic, construct a `Diagnostic` struct:
 
 ```rust
-use jdlint_diagnostics::{Diagnostic, Severity, Span};
+use falcon_diagnostics::{Diagnostic, Severity, Span};
 
 fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
     let mut diagnostics = vec![];
@@ -414,7 +414,7 @@ Rules access rule-specific config via `ctx.config`:
 ```rust
 impl Rule for NoMagicNumber {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        // Get rule config (M3 — will be added to JdlintConfig)
+        // Get rule config (M3 — will be added to FalconConfig)
         // let rule_config = ctx.config.rules.no_magic_number;
         // let threshold = rule_config.threshold;
         
@@ -433,11 +433,11 @@ This example demonstrates a complete, compilable rule implementation using stub 
 ### 4.1 Full Implementation
 
 ```rust
-// File: crates/jdlint_rules/src/avoid_dynamic.rs
+// File: crates/falcon_rules/src/avoid_dynamic.rs
 
-use jdlint_analyze::{Rule, RuleVisitor, AnalyzeContext};
-use jdlint_diagnostics::{Diagnostic, Severity, Span};
-use jdlint_syntax::Program;
+use falcon_analyze::{Rule, RuleVisitor, AnalyzeContext};
+use falcon_diagnostics::{Diagnostic, Severity, Span};
+use falcon_syntax::Program;
 
 /// Rule: avoid_dynamic
 /// Flag any use of `dynamic` as a type annotation.
@@ -581,15 +581,15 @@ impl AvoidDynamic {
     }
 }
 
-// Stub AST types (defined in M1 in jdlint_syntax)
+// Stub AST types (defined in M1 in falcon_syntax)
 // These are placeholders; actual definitions come during parser M1.
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub struct Declaration {
     // TODO
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub enum Declaration {
     Class(ClassDeclaration),
     Function(FunctionDeclaration),
@@ -598,49 +598,49 @@ pub enum Declaration {
     // ... others
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub struct ClassDeclaration {
     pub members: Vec<ClassMember>,
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub enum ClassMember {
     Field(FieldDeclaration),
     Method(MethodDeclaration),
     Constructor(ConstructorDeclaration),
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub struct FieldDeclaration {
     pub type_annotation: TypeAnnotation,
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub struct MethodDeclaration {
     pub return_type: TypeAnnotation,
     pub parameters: Vec<FormalParameter>,
     pub body: Option<BlockStatement>,
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub struct ConstructorDeclaration {
     pub parameters: Vec<FormalParameter>,
     pub body: Option<BlockStatement>,
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub struct FunctionDeclaration {
     pub return_type: TypeAnnotation,
     pub parameters: Vec<FormalParameter>,
     pub body: Option<BlockStatement>,
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub struct FormalParameter {
     pub type_annotation: TypeAnnotation,
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub struct TypeAnnotation {
     // ... fields ...
 }
@@ -659,18 +659,18 @@ impl TypeAnnotation {
     }
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub enum Statement {
     VariableDeclaration(VariableDeclaration),
     // ... others
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub struct VariableDeclaration {
     pub type_annotation: TypeAnnotation,
 }
 
-/// TODO: defined in jdlint_syntax::ast (M1)
+/// TODO: defined in falcon_syntax::ast (M1)
 pub struct BlockStatement {
     pub statements: Vec<Statement>,
 }
@@ -681,10 +681,10 @@ pub struct BlockStatement {
 Rules are registered during application startup:
 
 ```rust
-// File: crates/jdlint/src/main.rs or crates/jdlint_cli/src/run.rs
+// File: crates/falcon/src/main.rs or crates/falcon_cli/src/run.rs
 
-use jdlint_analyze::{Rule, RuleRegistry};
-use jdlint_rules::avoid_dynamic::AvoidDynamic;
+use falcon_analyze::{Rule, RuleRegistry};
+use falcon_rules::avoid_dynamic::AvoidDynamic;
 
 fn main() {
     let mut registry = RuleRegistry::new();
@@ -779,7 +779,7 @@ If finer-grained parallelism is required, the contract could evolve:
 pub struct AnalyzeContext<'a> {
     pub file_path: &'a Path,
     pub source: &'a str,
-    pub config: &'a JdlintConfig,
+    pub config: &'a FalconConfig,
     pub diag_sink: Option<Arc<Mutex<Vec<Diagnostic>>>>, // Shared diagnostic buffer
 }
 
@@ -811,7 +811,7 @@ Use this checklist when implementing a new rule:
 - [ ] **Error handling**: On error, log to stderr and return empty `Vec<Diagnostic>` (conservative)
 - [ ] **File filtering**: If rule skips certain files (test, generated), check `ctx.file_path` before analyzing
 - [ ] **Config access**: If rule has config options, use `ctx.config` (M3+) or struct fields
-- [ ] **Tests**: Write tests in `crates/jdlint_rules/tests/` with golden fixtures
+- [ ] **Tests**: Write tests in `crates/falcon_rules/tests/` with golden fixtures
 - [ ] **Registration**: Add `registry.register(Box::new(MyRule::new(...)))` in main initialization
 - [ ] **Documentation**: Add rule to `RULES.md` or project wiki with example violations and fixes
 
@@ -819,7 +819,7 @@ Use this checklist when implementing a new rule:
 
 ## 8. AST Node Types (M1 Definitions)
 
-The following AST node types will be defined in M1 (`jdlint_syntax::ast`). Rules depend on these:
+The following AST node types will be defined in M1 (`falcon_syntax::ast`). Rules depend on these:
 
 **Placeholder list — actual definitions in M1:**
 
@@ -871,7 +871,7 @@ pub struct FormalParameter {
     pub default_value: Option<Expression>,
 }
 
-// ... and many more (see jdlint_syntax::ast in M1 for full list)
+// ... and many more (see falcon_syntax::ast in M1 for full list)
 ```
 
 ---
@@ -1009,18 +1009,18 @@ impl NoMagicNumber {
 
 ## 11. Testing Rules
 
-Each rule must have tests in `crates/jdlint_rules/tests/`.
+Each rule must have tests in `crates/falcon_rules/tests/`.
 
 ### 11.1 Test Structure
 
 ```rust
-// File: crates/jdlint_rules/tests/avoid_dynamic_tests.rs
+// File: crates/falcon_rules/tests/avoid_dynamic_tests.rs
 
 #[cfg(test)]
 mod tests {
-    use jdlint_rules::avoid_dynamic::AvoidDynamic;
-    use jdlint_analyze::{Rule, AnalyzeContext};
-    use jdlint_syntax::Program;
+    use falcon_rules::avoid_dynamic::AvoidDynamic;
+    use falcon_analyze::{Rule, AnalyzeContext};
+    use falcon_syntax::Program;
     use std::path::Path;
 
     #[test]
@@ -1032,7 +1032,7 @@ mod tests {
             }
         "#;
         let program = parse_dart_source(source); // Helper (M1)
-        let config = JdlintConfig::default();
+        let config = FalconConfig::default();
         let ctx = AnalyzeContext {
             file_path: Path::new("test.dart"),
             source,
@@ -1055,7 +1055,7 @@ mod tests {
             }
         "#;
         let program = parse_dart_source(source);
-        let config = JdlintConfig::default();
+        let config = FalconConfig::default();
         let ctx = AnalyzeContext {
             file_path: Path::new("test.dart"),
             source,
@@ -1074,7 +1074,7 @@ mod tests {
 For complex rules, use golden fixtures:
 
 ```
-crates/jdlint_rules/tests/fixtures/
+crates/falcon_rules/tests/fixtures/
 ├── avoid_dynamic/
 │   ├── violations.dart        (code that should trigger violations)
 │   └── clean.dart             (code that should not trigger violations)
@@ -1115,10 +1115,10 @@ match class_member {
 **A:** Rules are independent. If you need shared logic, extract it to a helper module:
 
 ```rust
-// crates/jdlint_rules/src/helpers/type_checker.rs
+// crates/falcon_rules/src/helpers/type_checker.rs
 pub fn is_dynamic(type_ann: &TypeAnnotation) -> bool { /* ... */ }
 
-// crates/jdlint_rules/src/avoid_dynamic.rs
+// crates/falcon_rules/src/avoid_dynamic.rs
 use crate::helpers::type_checker::is_dynamic;
 ```
 
