@@ -1,5 +1,5 @@
 // Test cases for avoid-ignoring-return-values rule
-// Lines with violations have /* expect: avoid-ignoring-return-values */
+// Lines with violations have an expectation annotation
 
 String transform(String input) => input.toUpperCase();
 

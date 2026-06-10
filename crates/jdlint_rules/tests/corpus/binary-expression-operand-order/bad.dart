@@ -1,5 +1,5 @@
 // Test cases for binary-expression-operand-order rule
-// All lines with violations should have /* expect: binary-expression-operand-order */
+// All lines with violations should have an expectation annotation
 
 void compareWithLiterals() {
   if (5 == x) {} /* expect: binary-expression-operand-order */

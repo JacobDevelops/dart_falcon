@@ -1,5 +1,5 @@
 // Test cases for avoid-top-level-member-access rule
-// All lines with violations should have /* expect: avoid-top-level-member-access */
+// All lines with violations should have an expectation annotation
 
 var globalCounter = 0; /* expect: avoid-top-level-member-access */
 

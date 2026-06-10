@@ -56,5 +56,31 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(dart_code_linter::no_equal_then_else::NoEqualThenElse),
         Box::new(dart_code_linter::prefer_moving_to_variable::PreferMovingToVariable),
         Box::new(dart_code_linter::prefer_trailing_comma::PreferTrailingComma),
+        // M4.6 — dart_code_linter
+        Box::new(dart_code_linter::binary_expression_operand_order::BinaryExpressionOperandOrder),
+        Box::new(dart_code_linter::avoid_ignoring_return_values::AvoidIgnoringReturnValues),
+        Box::new(dart_code_linter::avoid_top_level_member_access::AvoidTopLevelMemberAccess),
+        Box::new(dart_code_linter::prefer_const_border_radius::PreferConstBorderRadius),
+        Box::new(dart_code_linter::prefer_correct_edge_insets_constructor::PreferCorrectEdgeInsetsConstructor),
+        Box::new(dart_code_linter::avoid_returning_widgets::AvoidReturningWidgets),
+        Box::new(dart_code_linter::prefer_extracting_callbacks::PreferExtractingCallbacks),
+        // M4.6 — pyramid_lint
+        Box::new(pyramid_lint::use_spacer_as_expanded_child::UseSpacerAsExpandedChild),
+        Box::new(pyramid_lint::prefer_dedicated_media_query_methods::PreferDedicatedMediaQueryMethods),
+        Box::new(pyramid_lint::prefer_iterable_any::PreferIterableAny),
+        Box::new(pyramid_lint::prefer_iterable_every::PreferIterableEvery),
+        Box::new(pyramid_lint::prefer_underscore_for_unused_callback_parameters::PreferUnderscoreForUnusedCallbackParameters),
+        Box::new(pyramid_lint::no_duplicate_case_values::NoDuplicateCaseValues),
+        Box::new(pyramid_lint::prefer_declaring_const_constructor::PreferDeclaringConstConstructor),
+        Box::new(pyramid_lint::avoid_abbreviations_in_doc_comments::AvoidAbbreviationsInDocComments),
+        Box::new(pyramid_lint::avoid_mutable_global_variables::AvoidMutableGlobalVariables),
+        Box::new(pyramid_lint::unnecessary_flutter_imports::UnnecessaryFlutterImports),
+        Box::new(pyramid_lint::class_members_ordering::ClassMembersOrdering),
+        Box::new(pyramid_lint::unnecessary_nullable_return_type::UnnecessaryNullableReturnType),
+        Box::new(pyramid_lint::use_once_constructors_once_provider::UseOnceConstructorsOnceProvider),
+        // M4.6 — pyramid_lint aliases of shared dart_code_linter implementations
+        Box::new(pyramid_lint::no_empty_block::NoEmptyBlock),
+        Box::new(pyramid_lint::no_magic_number::NoMagicNumber),
+        Box::new(pyramid_lint::avoid_unused_parameters::AvoidUnusedParameters),
     ]
 }
