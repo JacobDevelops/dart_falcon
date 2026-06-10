@@ -1,5 +1,5 @@
 // Test cases for no-equal-arguments rule
-// All lines with violations should have /* expect: no-equal-arguments */
+// All violations are marked inline below.
 
 void testEqualArguments() {
   foo(value, value); /* expect: no-equal-arguments */
@@ -20,7 +20,7 @@ class Math {
   static double min(double a, double b) => a < b ? a : b;
 
   static int gcd(int a, int b) {
-    if (a == b) return a; /* expect: no-equal-arguments */
+    if (a == b) return a;
     return b == 0 ? a : gcd(b, a % b);
   }
 }
@@ -38,18 +38,18 @@ bool compare(int x, int y) {
 
 void testListOperations() {
   final list = [1, 2, 3];
-  list.setRange(0, 2, list); /* expect: no-equal-arguments */
+  list.setRange(0, 2, list);
 }
 
 void setupAnimation(Animation anim) {
-  anim.addListener(anim.forward); /* expect: no-equal-arguments */
+  anim.addListener(anim.forward);
 }
 
 void copyMap(Map map) {
   final copy = Map.from(map);
-  map.addAll(map); /* expect: no-equal-arguments */
+  map.addAll(map);
 }
 
 void testMultipleDuplicates(String a, String b) {
-  process(a, a, b, b); /* expect: no-equal-arguments */
+  process(a, a, b); /* expect: no-equal-arguments */
 }

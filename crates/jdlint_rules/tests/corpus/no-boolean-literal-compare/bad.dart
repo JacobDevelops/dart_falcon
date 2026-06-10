@@ -1,5 +1,5 @@
 // Test cases for no-boolean-literal-compare rule
-// All lines with violations should have /* expect: no-boolean-literal-compare */
+// All violations are marked inline below.
 
 void testBooleanComparisons() {
   if (isValid == true) {} /* expect: no-boolean-literal-compare */

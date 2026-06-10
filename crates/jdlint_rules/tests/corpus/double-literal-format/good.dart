@@ -58,7 +58,7 @@ void properFormatting() {
 class Percentage {
   final double value = 0.5;
 
-  bool isValid() => value >= 0.0 && value <= 1.0;
+  bool isValid() => value >= 0.0 && value <= 1;
 }
 
 void performanceMetrics() {

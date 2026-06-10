@@ -1,5 +1,5 @@
 // Test cases for no-equal-then-else rule
-// All lines with violations should have /* expect: no-equal-then-else */
+// All violations are marked inline below.
 
 void testTernaryWithSameValue() {
   final x = condition ? value : value; /* expect: no-equal-then-else */

@@ -32,5 +32,15 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(dart_code_linter::prefer_first::PreferFirst),
         Box::new(dart_code_linter::prefer_immediate_return::PreferImmediateReturn),
         Box::new(dart_code_linter::prefer_last::PreferLast),
+        Box::new(dart_code_linter::double_literal_format::DoubleLiteralFormat),
+        Box::new(dart_code_linter::format_comment::FormatComment),
+        Box::new(dart_code_linter::member_ordering::MemberOrdering),
+        Box::new(dart_code_linter::newline_before_return::NewlineBeforeReturn),
+        Box::new(dart_code_linter::no_boolean_literal_compare::NoBooleanLiteralCompare),
+        Box::new(dart_code_linter::no_empty_block::NoEmptyBlock),
+        Box::new(dart_code_linter::no_equal_arguments::NoEqualArguments),
+        Box::new(dart_code_linter::no_equal_then_else::NoEqualThenElse),
+        Box::new(dart_code_linter::prefer_moving_to_variable::PreferMovingToVariable),
+        Box::new(dart_code_linter::prefer_trailing_comma::PreferTrailingComma),
     ]
 }

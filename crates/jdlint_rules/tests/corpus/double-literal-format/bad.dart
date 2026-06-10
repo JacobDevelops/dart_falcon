@@ -1,5 +1,5 @@
 // Test cases for double-literal-format rule
-// All lines with violations should have /* expect: double-literal-format */
+// All violations are marked inline below.
 
 void testMissingLeadingZero() {
   final opacity = .5; /* expect: double-literal-format */

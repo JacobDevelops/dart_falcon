@@ -1,5 +1,5 @@
 // Test cases for no-empty-block rule
-// All lines with violations should have /* expect: no-empty-block */
+// All violations are marked inline below.
 
 void testEmptyCatchBlock() {
   try {

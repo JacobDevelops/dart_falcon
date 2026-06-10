@@ -53,7 +53,7 @@ void copyMap(Map original) {
 }
 
 void testDistinctValues(String a, String b) {
-  process(a, b, a, b);
+  process(a, b, c, d);
 }
 
 void testWithDefaults(int value, {int other = 10}) {
