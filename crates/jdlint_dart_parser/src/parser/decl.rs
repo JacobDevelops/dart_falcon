@@ -276,6 +276,11 @@ impl<'src> Parser<'src> {
             return ClassMember::Constructor(self.parse_factory_constructor(annotations, is_external, start));
         }
 
+        // `var` keyword — untyped mutable field
+        if self.eat(TokenKind::Var).is_some() {
+            return ClassMember::Field(self.parse_field_tail(annotations, is_static, is_abstract, is_external, is_covariant, is_late, is_final, is_const, None, start));
+        }
+
         // Try to parse as field or method
         self.parse_field_or_method(annotations, is_static, is_abstract, is_external, is_covariant, is_late, is_final, is_const, is_async, start)
     }

@@ -24,5 +24,13 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(dart_code_linter::avoid_unnecessary_type_assertions::AvoidUnnecessaryTypeAssertions),
         Box::new(dart_code_linter::avoid_unnecessary_type_casts::AvoidUnnecessaryTypeCasts),
         Box::new(dart_code_linter::avoid_unrelated_type_assertions::AvoidUnrelatedTypeAssertions),
+        Box::new(dart_code_linter::avoid_late_keyword::AvoidLateKeyword),
+        Box::new(dart_code_linter::avoid_global_state::AvoidGlobalState),
+        Box::new(dart_code_linter::prefer_async_await::PreferAsyncAwait),
+        Box::new(dart_code_linter::prefer_correct_identifier_length::PreferCorrectIdentifierLength),
+        Box::new(dart_code_linter::prefer_conditional_expressions::PreferConditionalExpressions),
+        Box::new(dart_code_linter::prefer_first::PreferFirst),
+        Box::new(dart_code_linter::prefer_immediate_return::PreferImmediateReturn),
+        Box::new(dart_code_linter::prefer_last::PreferLast),
     ]
 }

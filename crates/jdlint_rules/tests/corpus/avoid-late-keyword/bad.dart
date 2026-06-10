@@ -1,5 +1,5 @@
 // Test cases for avoid-late-keyword rule
-// All lines with violations should have /* expect: avoid-late-keyword */
+// All lines with violations have the expect annotation at end of line.
 
 class TestClass {
   late int counter; /* expect: avoid-late-keyword */
