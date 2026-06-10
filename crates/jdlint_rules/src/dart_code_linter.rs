@@ -29,3 +29,5 @@ pub mod no_equal_arguments;
 pub mod no_equal_then_else;
 pub mod prefer_moving_to_variable;
 pub mod prefer_trailing_comma;
+pub mod no_magic_number;
+pub mod no_object_declaration;

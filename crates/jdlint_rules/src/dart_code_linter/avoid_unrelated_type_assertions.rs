@@ -35,11 +35,7 @@ impl AvoidUnrelatedTypeAssertions {
     fn get_first_segment(dart_type: &DartType) -> Option<String> {
         match dart_type {
             DartType::Named(named) => {
-                if let Some(first) = named.segments.first() {
-                    Some(first.name.clone())
-                } else {
-                    None
-                }
+                named.segments.first().map(|first| first.name.clone())
             }
             _ => None,
         }
@@ -69,17 +65,15 @@ impl AvoidUnrelatedTypeAssertions {
                     ..
                 }) => {
                     for declarator in declarators {
-                        if let Some(init_expr) = &declarator.initializer {
-                            if let Some(inferred) = Self::infer_type_from_expr(init_expr) {
+                        if let Some(init_expr) = &declarator.initializer
+                            && let Some(inferred) = Self::infer_type_from_expr(init_expr) {
                                 var_types.insert(declarator.name.name.clone(), inferred);
                             }
-                        }
 
-                        if let Some(var_t) = var_type {
-                            if let Some(type_name) = Self::get_first_segment(var_t) {
+                        if let Some(var_t) = var_type
+                            && let Some(type_name) = Self::get_first_segment(var_t) {
                                 var_types.insert(declarator.name.name.clone(), type_name);
                             }
-                        }
                     }
                 }
                 Stmt::If(IfStmt {
@@ -92,15 +86,14 @@ impl AvoidUnrelatedTypeAssertions {
                         var_types.extend(nested);
                     }
 
-                    if let Some(else_stmt) = else_branch {
-                        if let Stmt::Block(Block {
+                    if let Some(else_stmt) = else_branch
+                        && let Stmt::Block(Block {
                             stmts: else_stmts, ..
                         }) = else_stmt.as_ref()
                         {
                             let nested = self.collect_local_vars(else_stmts);
                             var_types.extend(nested);
                         }
-                    }
                 }
                 Stmt::Block(Block { stmts, .. }) => {
                     let nested = self.collect_local_vars(stmts);
@@ -114,19 +107,16 @@ impl AvoidUnrelatedTypeAssertions {
     }
 
     fn check_is_expr(&self, expr: &Expr, dart_type: &DartType, var_types: &HashMap<String, String>) -> bool {
-        if let Some(category) = Self::get_literal_category(expr) {
-            if let Some(type_name) = Self::get_first_segment(dart_type) {
+        if let Some(category) = Self::get_literal_category(expr)
+            && let Some(type_name) = Self::get_first_segment(dart_type) {
                 return self.is_incompatible_type(category, &type_name);
             }
-        }
 
-        if let Expr::Ident(Identifier { name, .. }) = expr {
-            if let Some(var_type) = var_types.get(name) {
-                if let Some(assert_type) = Self::get_first_segment(dart_type) {
+        if let Expr::Ident(Identifier { name, .. }) = expr
+            && let Some(var_type) = var_types.get(name)
+                && let Some(assert_type) = Self::get_first_segment(dart_type) {
                     return self.is_incompatible_type(var_type, &assert_type);
                 }
-            }
-        }
 
         false
     }
@@ -369,11 +359,9 @@ impl AvoidUnrelatedTypeAssertions {
                         self.visit_stmts(&finally_block.stmts, f);
                     }
                 }
-                Stmt::Return(ReturnStmt { value, .. }) => {
-                    if let Some(v) = value {
-                        let mut expr_visitor = |_: &Expr| {};
-                        self.visit_exprs(v, &mut expr_visitor);
-                    }
+                Stmt::Return(ReturnStmt { value: Some(v), .. }) => {
+                    let mut expr_visitor = |_: &Expr| {};
+                    self.visit_exprs(v, &mut expr_visitor);
                 }
                 Stmt::Throw(ThrowStmt { value, .. }) => {
                     let mut expr_visitor = |_: &Expr| {};
@@ -426,8 +414,7 @@ impl Rule for AvoidUnrelatedTypeAssertions {
                                         negated: false,
                                         span,
                                     } = e
-                                    {
-                                        if self.check_is_expr(expr, dart_type, &var_types) {
+                                        && self.check_is_expr(expr, dart_type, &var_types) {
                                             diagnostics.push(Diagnostic::new(
                                                 "avoid-unrelated-type-assertions",
                                                 Severity::Warning,
@@ -439,7 +426,6 @@ impl Rule for AvoidUnrelatedTypeAssertions {
                                                 },
                                             ));
                                         }
-                                    }
                                 });
                             }
                         });
@@ -475,8 +461,7 @@ impl Rule for AvoidUnrelatedTypeAssertions {
                                                     negated: false,
                                                     span,
                                                 } = e
-                                                {
-                                                    if self.check_is_expr(expr, dart_type, &var_types) {
+                                                    && self.check_is_expr(expr, dart_type, &var_types) {
                                                         diagnostics.push(Diagnostic::new(
                                                             "avoid-unrelated-type-assertions",
                                                             Severity::Warning,
@@ -488,7 +473,6 @@ impl Rule for AvoidUnrelatedTypeAssertions {
                                                             },
                                                         ));
                                                     }
-                                                }
                                             });
                                         }
                                     });
@@ -521,8 +505,7 @@ impl Rule for AvoidUnrelatedTypeAssertions {
                                                     negated: false,
                                                     span,
                                                 } = e
-                                                {
-                                                    if self.check_is_expr(expr, dart_type, &var_types) {
+                                                    && self.check_is_expr(expr, dart_type, &var_types) {
                                                         diagnostics.push(Diagnostic::new(
                                                             "avoid-unrelated-type-assertions",
                                                             Severity::Warning,
@@ -534,7 +517,6 @@ impl Rule for AvoidUnrelatedTypeAssertions {
                                                             },
                                                         ));
                                                     }
-                                                }
                                             });
                                         }
                                     });

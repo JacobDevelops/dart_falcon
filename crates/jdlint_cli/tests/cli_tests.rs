@@ -75,11 +75,13 @@ fn test_check_quiet_parses() {
     }
 }
 
-/// Test 6: Integration test - run_check on temp dir with one .dart file, no rules → exit 0
+/// Test 6: Integration test - run_check on a violation-free .dart file → exit 0
 #[test]
-fn test_run_check_integration_no_rules_exit_zero() {
+fn test_run_check_integration_clean_file_exit_zero() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("test.dart"), "void main() {}").unwrap();
+    // A non-empty body avoids avoid_empty_blocks and the program uses no magic
+    // numbers, so a fully clean program makes the pipeline exit 0.
+    fs::write(dir.path().join("test.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
     let code = run_check(CheckOptions {
         paths: vec![dir.path().to_path_buf()],
         quiet: true,

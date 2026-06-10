@@ -2,11 +2,11 @@ use jdlint_analyze::{AnalyzeContext, Rule};
 use jdlint_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use jdlint_syntax::ast::*;
 
-pub struct NoEqualArguments;
+pub struct AvoidEmptyBlocks;
 
-impl Rule for NoEqualArguments {
+impl Rule for AvoidEmptyBlocks {
     fn name(&self) -> &'static str {
-        "no-equal-arguments"
+        "avoid_empty_blocks"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -18,45 +18,39 @@ impl Rule for NoEqualArguments {
     }
 }
 
-fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let mut seen: Vec<(&str, &Span)> = Vec::new();
-
-    for arg in &args.positional {
-        let src = expr_src(arg, ctx.source);
-        let span = arg.span();
-        // Check if this arg matches any previous arg
-        if seen.iter().any(|(prev, _)| *prev == src) {
-            diags.push(Diagnostic::new(
-                "no-equal-arguments",
-                Severity::Warning,
-                "Avoid passing the same argument to multiple parameters",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan { start: span.start, end: span.end },
-            ));
-        }
-        seen.push((src, span));
+fn flag_if_empty(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+    if !block.stmts.is_empty() {
+        return;
     }
-
-    for named in &args.named {
-        let src = expr_src(&named.value, ctx.source);
-        let span = &named.span;
-        if seen.iter().any(|(prev, _)| *prev == src) {
-            diags.push(Diagnostic::new(
-                "no-equal-arguments",
-                Severity::Warning,
-                "Avoid passing the same argument to multiple parameters",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan { start: span.start, end: span.end },
-            ));
-        }
-        seen.push((src, named.value.span()));
+    let end = block.span.end.min(ctx.source.len());
+    let src_full = &ctx.source[block.span.start..end];
+    // Find the opening brace position to report at the opening brace
+    let open_pos = match src_full.find('{') {
+        Some(p) => p,
+        None => return,
+    };
+    let close_pos = match src_full.rfind('}') {
+        Some(p) => p,
+        None => return,
+    };
+    let inner = &src_full[..=close_pos];
+    // Skip blocks that contain comments explaining the intent,
+    // but not test annotations like /* expect: ... */
+    if inner.contains("//") {
+        return;
     }
-}
-
-fn expr_src<'a>(expr: &Expr, source: &'a str) -> &'a str {
-    let span = expr.span();
-    let end = span.end.min(source.len());
-    &source[span.start..end]
+    // For block comments, skip only if it's not a test annotation
+    if inner.contains("/*") && !inner.contains("expect:") {
+        return;
+    }
+    let open_byte = block.span.start + open_pos;
+    diags.push(Diagnostic::new(
+        "avoid_empty_blocks",
+        Severity::Warning,
+        "Avoid empty blocks.",
+        ctx.file_path.to_string_lossy().into_owned(),
+        DiagSpan { start: open_byte, end: open_byte + 1 },
+    ));
 }
 
 fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
@@ -100,7 +94,10 @@ fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
 
 fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match body {
-        FunctionBody::Block(b) => scan_stmts(&b.stmts, diags, ctx),
+        FunctionBody::Block(b) => {
+            flag_if_empty(b, diags, ctx);
+            scan_stmts(&b.stmts, diags, ctx);
+        }
         FunctionBody::Arrow(e, _) => scan_expr(e, diags, ctx),
         FunctionBody::Native(_, _) => {}
     }
@@ -114,6 +111,10 @@ fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext)
 
 fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match stmt {
+        Stmt::Block(b) => {
+            flag_if_empty(b, diags, ctx);
+            scan_stmts(&b.stmts, diags, ctx);
+        }
         Stmt::Expr(e) => scan_expr(&e.expr, diags, ctx),
         Stmt::Return(r) => {
             if let Some(v) = &r.value {
@@ -127,7 +128,6 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                 }
             }
         }
-        Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx),
         Stmt::If(i) => {
             scan_stmt(&i.then_branch, diags, ctx);
             if let Some(eb) = &i.else_branch {
@@ -140,22 +140,23 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Stmt::TryCatch(tc) => {
             scan_stmts(&tc.body.stmts, diags, ctx);
             for catch in &tc.catches {
+                flag_if_empty(&catch.body, diags, ctx);
                 scan_stmts(&catch.body.stmts, diags, ctx);
             }
             if let Some(fin) = &tc.finally {
+                flag_if_empty(fin, diags, ctx);
                 scan_stmts(&fin.stmts, diags, ctx);
             }
         }
         Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx),
-        Stmt::Throw(t) => scan_expr(&t.value, diags, ctx),
         _ => {}
     }
 }
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
+        Expr::FuncExpr { body, .. } => scan_body(body, diags, ctx),
         Expr::Call { callee, args, .. } => {
-            check_args(args, diags, ctx);
             scan_expr(callee, diags, ctx);
             for arg in &args.positional {
                 scan_expr(arg, diags, ctx);
@@ -164,31 +165,11 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                 scan_expr(&named.value, diags, ctx);
             }
         }
-        Expr::New { args, .. } => {
-            check_args(args, diags, ctx);
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx);
-            }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx);
-            }
-        }
-        Expr::Binary { left, right, .. } => {
-            scan_expr(left, diags, ctx);
-            scan_expr(right, diags, ctx);
-        }
-        Expr::Field { object, .. } => scan_expr(object, diags, ctx),
-        Expr::Assign { target, value, .. } => {
-            scan_expr(target, diags, ctx);
-            scan_expr(value, diags, ctx);
-        }
         Expr::Conditional { condition, then_expr, else_expr, .. } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
         }
-        Expr::FuncExpr { body, .. } => scan_body(body, diags, ctx),
-        Expr::Await { expr, .. } => scan_expr(expr, diags, ctx),
         _ => {}
     }
 }

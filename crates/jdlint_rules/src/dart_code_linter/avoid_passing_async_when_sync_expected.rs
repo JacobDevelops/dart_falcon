@@ -16,7 +16,7 @@ impl AvoidPassingAsyncWhenSyncExpected {
                 }
             }
             DartType::Named(named) => {
-                named.segments.last().map_or(false, |seg| seg.name == "Function")
+                named.segments.last().is_some_and(|seg| seg.name == "Function")
             }
             _ => false,
         }
@@ -25,7 +25,7 @@ impl AvoidPassingAsyncWhenSyncExpected {
     fn is_future_type(dart_type: &DartType) -> bool {
         match dart_type {
             DartType::Named(named) => {
-                named.segments.last().map_or(false, |seg| seg.name == "Future")
+                named.segments.last().is_some_and(|seg| seg.name == "Future")
             }
             _ => false,
         }
@@ -270,26 +270,21 @@ impl AvoidPassingAsyncWhenSyncExpected {
     ) -> Vec<Span> {
         let mut violations = Vec::new();
 
-        if let Some(callee_name) = Self::get_callee_name(callee_expr) {
-            if let Some(param_types) = param_map.get(&callee_name) {
+        if let Some(callee_name) = Self::get_callee_name(callee_expr)
+            && let Some(param_types) = param_map.get(&callee_name) {
                 for (idx, arg) in args.positional.iter().enumerate() {
                     if let Expr::FuncExpr {
                         is_async: true,
                         span: func_span,
                         ..
                     } = arg
-                    {
-                        if idx < param_types.len() {
-                            if let Some(Some(param_type)) = param_types.get(idx) {
-                                if Self::is_non_future_function_type(param_type) {
+                        && idx < param_types.len()
+                            && let Some(Some(param_type)) = param_types.get(idx)
+                                && Self::is_non_future_function_type(param_type) {
                                     violations.push(func_span.clone());
                                 }
-                            }
-                        }
-                    }
                 }
             }
-        }
 
         violations
     }
@@ -335,8 +330,8 @@ impl Rule for AvoidPassingAsyncWhenSyncExpected {
                 }
                 TopLevelDecl::Class(class) => {
                     for member in &class.members {
-                        if let ClassMember::Method(method) = member {
-                            if let Some(FunctionBody::Block(block)) = &method.body {
+                        if let ClassMember::Method(method) = member
+                            && let Some(FunctionBody::Block(block)) = &method.body {
                                 Self::visit_stmts(&block.stmts, &mut |stmt| {
                                     if let Stmt::Expr(expr_stmt) = stmt {
                                         Self::visit_exprs(&expr_stmt.expr, &mut |expr| {
@@ -360,7 +355,6 @@ impl Rule for AvoidPassingAsyncWhenSyncExpected {
                                     }
                                 });
                             }
-                        }
                     }
                 }
                 _ => {}

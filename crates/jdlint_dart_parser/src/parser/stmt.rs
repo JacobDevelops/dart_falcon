@@ -488,10 +488,13 @@ impl<'src> Parser<'src> {
         }
 
         // Try to parse as typed local decl or function.
-        // Skip LParen: `(expr)` at statement level is almost always a paren expression,
-        // not a record-typed var decl, and speculative parse_record_type would add errors.
-        if self.is_type_start() && !self.at(TokenKind::LParen) {
+        // A leading `(` may begin a record-typed var decl (`(int, String) x = ...`)
+        // or a plain parenthesized/record expression. Speculatively parse a type and
+        // only commit when it is followed by `name =`/`;`/`,` (or a function body);
+        // otherwise restore both position and any errors the speculation emitted.
+        if self.is_type_start() {
             let saved = self.pos;
+            let saved_errs = self.errors.len();
             let ty = self.parse_type();
             if self.is_ident_like() {
                 let name = self.expect_ident();
@@ -514,6 +517,7 @@ impl<'src> Parser<'src> {
                     }
                     // No body — fall through as error
                     self.pos = saved;
+                    self.errors.truncate(saved_errs);
                 } else if self.at_any(&[TokenKind::Eq, TokenKind::Semicolon, TokenKind::Comma]) {
                     // Typed var decl
                     let ds = name.span.start;
@@ -536,9 +540,11 @@ impl<'src> Parser<'src> {
                     });
                 } else {
                     self.pos = saved;
+                    self.errors.truncate(saved_errs);
                 }
             } else {
                 self.pos = saved;
+                self.errors.truncate(saved_errs);
             }
         }
 

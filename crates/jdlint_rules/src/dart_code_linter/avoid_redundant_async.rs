@@ -21,14 +21,10 @@ impl Rule for AvoidRedundantAsync {
                 }
                 TopLevelDecl::Class(class_decl) => {
                     for member in &class_decl.members {
-                        match member {
-                            ClassMember::Method(method_decl) => {
-                                if let Some(diag) = check_method_async(method_decl, ctx) {
-                                    diags.push(diag);
-                                }
+                        if let ClassMember::Method(method_decl) = member
+                            && let Some(diag) = check_method_async(method_decl, ctx) {
+                                diags.push(diag);
                             }
-                            _ => {}
-                        }
                     }
                 }
                 _ => {}

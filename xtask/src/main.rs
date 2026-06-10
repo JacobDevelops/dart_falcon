@@ -163,7 +163,6 @@ fn validate_file(
         .iter()
         .enumerate()
         .filter(|(_, d)| rule_filter.map(|r| d.rule == r).unwrap_or(true))
-        .map(|(i, d)| (i, d))
         .collect();
 
     let mut matched_diag_indices: HashSet<usize> = HashSet::new();

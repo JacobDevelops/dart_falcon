@@ -207,8 +207,8 @@ fn visit_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
 }
 
 fn visit_expr(expr: &Expr, inside_nested: bool, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if !inside_nested && is_nested_conditional(expr) {
-        if let Expr::Conditional {
+    if !inside_nested && is_nested_conditional(expr)
+        && let Expr::Conditional {
             span,
             condition,
             then_expr,
@@ -230,7 +230,6 @@ fn visit_expr(expr: &Expr, inside_nested: bool, diagnostics: &mut Vec<Diagnostic
             visit_expr(else_expr, true, diagnostics, ctx);
             return;
         }
-    }
 
     match expr {
         Expr::Unary { operand, .. } => {
@@ -438,7 +437,7 @@ fn contains_conditional(expr: &Expr) -> bool {
                         if contains_conditional(idx) { return true; }
                     }
                     CascadeOp::Call(_, _, args) => {
-                        if args.positional.iter().any(|a| contains_conditional(a)) { return true; }
+                        if args.positional.iter().any(contains_conditional) { return true; }
                         if args.named.iter().any(|na| contains_conditional(&na.value)) { return true; }
                     }
                     CascadeOp::Assign(tgt, _, val) => {
@@ -501,11 +500,10 @@ fn contains_conditional(expr: &Expr) -> bool {
                 return true;
             }
             for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    if contains_conditional(guard) {
+                if let Some(guard) = &arm.guard
+                    && contains_conditional(guard) {
                         return true;
                     }
-                }
                 if contains_conditional(&arm.body) {
                     return true;
                 }
@@ -527,19 +525,17 @@ fn contains_conditional_in_elem(elem: &CollectionElement) -> bool {
             else_elem,
             ..
         } => {
-            if let IfCondition::Expr(cond) = condition {
-                if contains_conditional(cond) {
+            if let IfCondition::Expr(cond) = condition
+                && contains_conditional(cond) {
                     return true;
                 }
-            }
             if contains_conditional_in_elem(then_elem) {
                 return true;
             }
-            if let Some(ee) = else_elem {
-                if contains_conditional_in_elem(ee) {
+            if let Some(ee) = else_elem
+                && contains_conditional_in_elem(ee) {
                     return true;
                 }
-            }
             false
         }
         CollectionElement::For { iterable, element, .. } => {

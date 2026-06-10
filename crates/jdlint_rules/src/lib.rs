@@ -14,6 +14,20 @@ use jdlint_analyze::Rule;
 /// Return all implemented lint rules.
 pub fn all_rules() -> Vec<Box<dyn Rule>> {
     vec![
+        // M4.5 — pyramid_lint
+        Box::new(pyramid_lint::avoid_empty_blocks::AvoidEmptyBlocks),
+        Box::new(pyramid_lint::avoid_inverted_boolean_expressions::AvoidInvertedBooleanExpressions),
+        Box::new(pyramid_lint::avoid_nested_if::AvoidNestedIf),
+        Box::new(pyramid_lint::avoid_positional_fields_in_records::AvoidPositionalFieldsInRecords),
+        Box::new(pyramid_lint::boolean_prefixes::BooleanPrefixes),
+        Box::new(pyramid_lint::correct_order_for_super_dispose::CorrectOrderForSuperDispose),
+        Box::new(pyramid_lint::max_lines_for_file::MaxLinesForFile),
+        Box::new(pyramid_lint::max_lines_for_function::MaxLinesForFunction),
+        Box::new(pyramid_lint::max_parameters_for_function::MaxParametersForFunction),
+        Box::new(pyramid_lint::max_switch_cases::MaxSwitchCases),
+        // M4.5 — dart_code_linter
+        Box::new(dart_code_linter::no_magic_number::NoMagicNumber),
+        Box::new(dart_code_linter::no_object_declaration::NoObjectDeclaration),
         Box::new(dart_code_linter::avoid_dynamic::AvoidDynamic),
         Box::new(dart_code_linter::avoid_throw_in_catch_block::AvoidThrowInCatchBlock),
         Box::new(dart_code_linter::avoid_nested_conditional_expressions::AvoidNestedConditionalExpressions),

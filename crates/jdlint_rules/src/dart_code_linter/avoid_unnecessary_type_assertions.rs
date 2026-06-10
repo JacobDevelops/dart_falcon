@@ -54,17 +54,14 @@ impl Rule for AvoidUnnecessaryTypeAssertions {
 fn collect_class_fields(class_decl: &ClassDecl) -> HashMap<String, DartType> {
     let mut map = HashMap::new();
     for member in &class_decl.members {
-        if let ClassMember::Field(field) = member {
-            if let Some(field_type) = &field.field_type {
-                if let DartType::Named(named) = field_type {
-                    if !named.is_nullable {
+        if let ClassMember::Field(field) = member
+            && let Some(field_type) = &field.field_type
+                && let DartType::Named(named) = field_type
+                    && !named.is_nullable {
                         for declarator in &field.declarators {
                             map.insert(declarator.name.name.clone(), field_type.clone());
                         }
                     }
-                }
-            }
-        }
     }
     map
 }
@@ -129,15 +126,13 @@ fn analyze_statement(
 ) {
     match stmt {
         Stmt::LocalVar(local_var) => {
-            if let Some(var_type) = &local_var.var_type {
-                if let DartType::Named(named) = var_type {
-                    if !named.is_nullable {
+            if let Some(var_type) = &local_var.var_type
+                && let DartType::Named(named) = var_type
+                    && !named.is_nullable {
                         for declarator in &local_var.declarators {
                             scope_map.insert(declarator.name.name.clone(), var_type.clone());
                         }
                     }
-                }
-            }
             for declarator in &local_var.declarators {
                 if let Some(init) = &declarator.initializer {
                     analyze_expression(init, scope_map, diags, ctx);
@@ -235,11 +230,11 @@ fn analyze_expression(
             negated: false,
             span,
         } => {
-            if let Expr::Ident(ident) = &**operand {
-                if let DartType::Named(cast_named) = dart_type {
-                    if let Some(declared) = scope_map.get(&ident.name) {
-                        if let DartType::Named(declared_named) = declared {
-                            if !declared_named.is_nullable {
+            if let Expr::Ident(ident) = &**operand
+                && let DartType::Named(cast_named) = dart_type
+                    && let Some(declared) = scope_map.get(&ident.name)
+                        && let DartType::Named(declared_named) = declared
+                            && !declared_named.is_nullable {
                                 let decl_name = declared_named.segments.first().map(|s| s.name.as_str());
                                 let cast_name = cast_named.segments.first().map(|s| s.name.as_str());
                                 if decl_name == cast_name && type_args_match(&declared_named.type_args, &cast_named.type_args) {
@@ -255,10 +250,6 @@ fn analyze_expression(
                                     ));
                                 }
                             }
-                        }
-                    }
-                }
-            }
 
             analyze_expression(operand, scope_map, diags, ctx);
         }

@@ -32,7 +32,7 @@ const SKIP_DIRS: &[&str] = &[
 ];
 
 fn is_skip_dir(name: &str) -> bool {
-    SKIP_DIRS.iter().any(|s| name == *s)
+    SKIP_DIRS.contains(&name)
         || name.starts_with("result")  // nix result, result-1, result-11, …
 }
 

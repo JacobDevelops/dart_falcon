@@ -21,7 +21,7 @@ impl Rule for NewlineBeforeReturn {
 fn has_blank_line_before(source: &str, pos: usize) -> bool {
     // Scan backwards from pos looking for two consecutive newlines (blank line).
     // Skips spaces and tabs between newlines.
-    let bytes = source[..pos.min(source.len())].as_bytes();
+    let bytes = &source.as_bytes()[..pos.min(source.len())];
     let mut i = bytes.len();
     let mut newlines = 0usize;
     while i > 0 {
@@ -41,9 +41,9 @@ fn has_blank_line_before(source: &str, pos: usize) -> bool {
 }
 
 fn check_stmts_for_return(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for i in 1..stmts.len() {
-        if let Stmt::Return(ret) = &stmts[i] {
-            if !has_blank_line_before(ctx.source, ret.span.start) {
+    for stmt in stmts.iter().skip(1) {
+        if let Stmt::Return(ret) = stmt
+            && !has_blank_line_before(ctx.source, ret.span.start) {
                 diags.push(Diagnostic::new(
                     "newline-before-return",
                     Severity::Warning,
@@ -52,7 +52,6 @@ fn check_stmts_for_return(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &Ana
                     DiagSpan { start: ret.span.start, end: ret.span.end },
                 ));
             }
-        }
     }
 }
 

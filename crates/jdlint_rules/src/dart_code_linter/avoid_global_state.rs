@@ -32,11 +32,10 @@ fn is_mutable(is_const: bool, is_final: bool, is_late: bool) -> bool {
 
 fn check_static_fields(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     for member in members {
-        if let ClassMember::Field(field) = member {
-            if field.is_static && is_mutable(field.is_const, field.is_final, field.is_late) {
+        if let ClassMember::Field(field) = member
+            && field.is_static && is_mutable(field.is_const, field.is_final, field.is_late) {
                 diags.push(make_diag(ctx, &field.span));
             }
-        }
     }
 }
 

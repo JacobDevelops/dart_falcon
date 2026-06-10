@@ -16,15 +16,13 @@ impl AvoidUnnecessaryTypeCasts {
                     declarators,
                     ..
                 }) => {
-                    if let Some(var_t) = var_type {
-                        if let DartType::Named(named) = var_t {
-                            if !named.is_nullable {
+                    if let Some(var_t) = var_type
+                        && let DartType::Named(named) = var_t
+                            && !named.is_nullable {
                                 for declarator in declarators {
                                     var_types.insert(declarator.name.name.clone(), var_t.clone());
                                 }
                             }
-                        }
-                    }
                 }
                 Stmt::If(IfStmt {
                     then_branch,
@@ -36,15 +34,14 @@ impl AvoidUnnecessaryTypeCasts {
                         var_types.extend(nested);
                     }
 
-                    if let Some(else_stmt) = else_branch {
-                        if let Stmt::Block(Block {
+                    if let Some(else_stmt) = else_branch
+                        && let Stmt::Block(Block {
                             stmts: else_stmts, ..
                         }) = else_stmt.as_ref()
                         {
                             let nested = self.collect_local_vars(else_stmts);
                             var_types.extend(nested);
                         }
-                    }
                 }
                 Stmt::Block(Block { stmts, .. }) => {
                     let nested = self.collect_local_vars(stmts);
@@ -60,17 +57,14 @@ impl AvoidUnnecessaryTypeCasts {
     fn collect_class_fields(class: &ClassDecl) -> HashMap<String, DartType> {
         let mut map = HashMap::new();
         for member in &class.members {
-            if let ClassMember::Field(field) = member {
-                if let Some(field_type) = &field.field_type {
-                    if let DartType::Named(named) = field_type {
-                        if !named.is_nullable {
+            if let ClassMember::Field(field) = member
+                && let Some(field_type) = &field.field_type
+                    && let DartType::Named(named) = field_type
+                        && !named.is_nullable {
                             for declarator in &field.declarators {
                                 map.insert(declarator.name.name.clone(), field_type.clone());
                             }
                         }
-                    }
-                }
-            }
         }
         map
     }
@@ -96,11 +90,10 @@ impl AvoidUnnecessaryTypeCasts {
     }
 
     fn check_as_expr(&self, expr: &Expr, dart_type: &DartType, var_types: &HashMap<String, DartType>) -> bool {
-        if let Expr::Ident(Identifier { name, .. }) = expr {
-            if let Some(declared) = var_types.get(name) {
+        if let Expr::Ident(Identifier { name, .. }) = expr
+            && let Some(declared) = var_types.get(name) {
                 return Self::types_match(declared, dart_type);
             }
-        }
         false
     }
 
@@ -342,11 +335,9 @@ impl AvoidUnnecessaryTypeCasts {
                         self.visit_stmts(&finally_block.stmts, f);
                     }
                 }
-                Stmt::Return(ReturnStmt { value, .. }) => {
-                    if let Some(v) = value {
-                        let mut expr_visitor = |_: &Expr| {};
-                        self.visit_exprs(v, &mut expr_visitor);
-                    }
+                Stmt::Return(ReturnStmt { value: Some(v), .. }) => {
+                    let mut expr_visitor = |_: &Expr| {};
+                    self.visit_exprs(v, &mut expr_visitor);
                 }
                 Stmt::Throw(ThrowStmt { value, .. }) => {
                     let mut expr_visitor = |_: &Expr| {};
@@ -385,8 +376,8 @@ impl Rule for AvoidUnnecessaryTypeCasts {
                             };
                             for expr in root_exprs {
                                 self.visit_exprs(expr, &mut |e| {
-                                    if let Expr::As { expr, dart_type, span } = e {
-                                        if self.check_as_expr(expr, dart_type, &var_types) {
+                                    if let Expr::As { expr, dart_type, span } = e
+                                        && self.check_as_expr(expr, dart_type, &var_types) {
                                             diagnostics.push(Diagnostic::new(
                                                 "avoid-unnecessary-type-casts",
                                                 Severity::Warning,
@@ -395,7 +386,6 @@ impl Rule for AvoidUnnecessaryTypeCasts {
                                                 DiagSpan { start: span.start, end: span.end },
                                             ));
                                         }
-                                    }
                                 });
                             }
                         });
@@ -419,8 +409,8 @@ impl Rule for AvoidUnnecessaryTypeCasts {
                                         };
                                         for expr in root_exprs {
                                             self.visit_exprs(expr, &mut |e| {
-                                                if let Expr::As { expr, dart_type, span } = e {
-                                                    if self.check_as_expr(expr, dart_type, &var_types) {
+                                                if let Expr::As { expr, dart_type, span } = e
+                                                    && self.check_as_expr(expr, dart_type, &var_types) {
                                                         diagnostics.push(Diagnostic::new(
                                                             "avoid-unnecessary-type-casts",
                                                             Severity::Warning,
@@ -429,7 +419,6 @@ impl Rule for AvoidUnnecessaryTypeCasts {
                                                             DiagSpan { start: span.start, end: span.end },
                                                         ));
                                                     }
-                                                }
                                             });
                                         }
                                     });
@@ -449,8 +438,8 @@ impl Rule for AvoidUnnecessaryTypeCasts {
                                         };
                                         for expr in root_exprs {
                                             self.visit_exprs(expr, &mut |e| {
-                                                if let Expr::As { expr, dart_type, span } = e {
-                                                    if self.check_as_expr(expr, dart_type, &var_types) {
+                                                if let Expr::As { expr, dart_type, span } = e
+                                                    && self.check_as_expr(expr, dart_type, &var_types) {
                                                         diagnostics.push(Diagnostic::new(
                                                             "avoid-unnecessary-type-casts",
                                                             Severity::Warning,
@@ -459,7 +448,6 @@ impl Rule for AvoidUnnecessaryTypeCasts {
                                                             DiagSpan { start: span.start, end: span.end },
                                                         ));
                                                     }
-                                                }
                                             });
                                         }
                                     });

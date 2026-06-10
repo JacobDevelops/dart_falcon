@@ -22,25 +22,19 @@ impl Rule for AvoidUnusedParameters {
                 }
                 TopLevelDecl::Class(class) => {
                     for member in &class.members {
-                        match member {
-                            ClassMember::Method(method) => {
-                                if let Some(body) = &method.body {
-                                    if method.name.name != "noSuchMethod" {
-                                        check_function_params(&method.params, body, &mut diags, ctx);
-                                    }
+                        if let ClassMember::Method(method) = member
+                            && let Some(body) = &method.body
+                                && method.name.name != "noSuchMethod" {
+                                    check_function_params(&method.params, body, &mut diags, ctx);
                                 }
-                            }
-                            _ => {}
-                        }
                     }
                 }
                 TopLevelDecl::Extension(ext) => {
                     for member in &ext.members {
-                        if let ClassMember::Method(method) = member {
-                            if let Some(body) = &method.body {
+                        if let ClassMember::Method(method) = member
+                            && let Some(body) = &method.body {
                                 check_function_params(&method.params, body, &mut diags, ctx);
                             }
-                        }
                     }
                 }
                 _ => {}
@@ -251,8 +245,8 @@ impl Rule for AvoidUnusedParameters {
                     let chars: Vec<char> = lit.raw.chars().collect();
                     let mut i = 0;
                     while i < chars.len() {
-                        if chars[i] == '$' && i + 1 < chars.len() {
-                            if chars[i + 1].is_alphabetic() || chars[i + 1] == '_' {
+                        if chars[i] == '$' && i + 1 < chars.len()
+                            && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_') {
                                 let start = i + 1;
                                 let mut end = start;
                                 while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
@@ -262,7 +256,6 @@ impl Rule for AvoidUnusedParameters {
                                 i = end;
                                 continue;
                             }
-                        }
                         i += 1;
                     }
                 }

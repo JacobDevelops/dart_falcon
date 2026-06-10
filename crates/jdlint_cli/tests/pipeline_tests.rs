@@ -16,11 +16,11 @@ fn test_run_check_no_files_returns_zero() {
     assert_eq!(exit_code, 0);
 }
 
-/// Test 2: Dart file found but no rules registered returns zero
+/// Test 2: A violation-free Dart file returns zero
 #[test]
-fn test_run_check_with_dart_file_no_rules_returns_zero() {
+fn test_run_check_with_clean_dart_file_returns_zero() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("test.dart"), "void main() {}").unwrap();
+    fs::write(temp.path().join("test.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
@@ -47,7 +47,7 @@ fn test_run_check_max_errors_zero() {
 #[test]
 fn test_run_check_json_format_no_panic() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("test.dart"), "void main() {}").unwrap();
+    fs::write(temp.path().join("test.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: false,
@@ -61,7 +61,7 @@ fn test_run_check_json_format_no_panic() {
 #[test]
 fn test_run_check_quiet_mode() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("test.dart"), "void main() {}").unwrap();
+    fs::write(temp.path().join("test.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
@@ -85,11 +85,11 @@ fn test_run_check_with_config_path_nonexistent_returns_error() {
     assert_eq!(exit_code, 1);
 }
 
-/// Test 7: --parallel flag runs analysis and still returns zero (no rules)
+/// Test 7: --parallel flag runs analysis and returns zero on violation-free files
 #[test]
-fn test_run_check_parallel_flag_no_rules_zero() {
+fn test_run_check_parallel_flag_clean_returns_zero() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("a.dart"), "void main() {}").unwrap();
+    fs::write(temp.path().join("a.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
     fs::write(temp.path().join("b.dart"), "class Foo {}").unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
@@ -104,7 +104,7 @@ fn test_run_check_parallel_flag_no_rules_zero() {
 #[test]
 fn test_run_check_custom_exit_code_no_violations_returns_zero() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("test.dart"), "void main() {}").unwrap();
+    fs::write(temp.path().join("test.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,

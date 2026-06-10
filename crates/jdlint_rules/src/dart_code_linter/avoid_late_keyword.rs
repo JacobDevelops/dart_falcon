@@ -86,11 +86,10 @@ fn check_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             }
         }
         Stmt::For(for_stmt) => {
-            if let Some(ForInit::VarDecl(local)) = &for_stmt.init {
-                if local.is_late {
+            if let Some(ForInit::VarDecl(local)) = &for_stmt.init
+                && local.is_late {
                     diags.push(make_diag(ctx, &local.span));
                 }
-            }
             check_stmt(&for_stmt.body, diags, ctx);
         }
         Stmt::While(s) => check_stmt(&s.body, diags, ctx),
