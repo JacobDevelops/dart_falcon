@@ -6,8 +6,17 @@ description = "LSP server implementation (JSON-RPC 2.0 / LSP 3.17) for falcon"
 
 [dependencies]
 falcon_analyze = { path = "../falcon_analyze" }
+falcon_dart_parser = { path = "../falcon_dart_parser" }
 falcon_diagnostics = { path = "../falcon_diagnostics" }
 falcon_config = { path = "../falcon_config" }
+falcon_rules = { path = "../falcon_rules" }
+falcon_syntax = { path = "../falcon_syntax" }
 lsp-server.workspace = true
 lsp-types.workspace = true
 serde_json.workspace = true
+crossbeam-channel = "0.5"
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serde.workspace = true

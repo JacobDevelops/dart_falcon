@@ -1,8 +1,16 @@
 //! LSP server implementation (JSON-RPC 2.0, LSP 3.17).
 //!
-//! Handles initialize, textDocument/didOpen, textDocument/didChange,
-//! and publishes diagnostics via textDocument/publishDiagnostics.
+//! Single-threaded message loop over `lsp-server`; full-text document sync;
+//! per-document AST cache with config-driven rule reloads. Architecture and
+//! cache-invalidation rules: `.omc/docs/LSP_CACHING_DESIGN.md`.
+//!
+//! Handlers: initialize/initialized/shutdown, textDocument/didOpen,
+//! didChange (debounced), didSave, didClose, textDocument/hover, and
+//! workspace/didChangeWatchedFiles (falcon.json reload). Diagnostics are
+//! published via textDocument/publishDiagnostics.
 
 pub mod server;
+pub mod state;
 
-pub use server::run_server;
+pub use server::{run_server, run_with_connection, ServerOptions};
+pub use state::{uri_to_path, DocumentState, LspState};

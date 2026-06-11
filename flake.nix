@@ -17,6 +17,8 @@
         pkgs = import nixpkgs { inherit system overlays; };
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
+          # wasm32-wasip2 builds the Zed extension (extensions/falcon-zed)
+          targets = [ "wasm32-wasip2" ];
         };
         rustPlatform = pkgs.makeRustPlatform {
           cargo = rustToolchain;

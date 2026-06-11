@@ -7,7 +7,7 @@ use clap::ValueEnum;
 use falcon_analyze::{analyze_parallel, analyze_sequential, RuleRegistry};
 use falcon_config::{load_config, load_or_default, FalconConfig};
 use falcon_diagnostics::{Diagnostic, Severity};
-use falcon_rules::all_rules;
+use falcon_rules::enabled_rules;
 
 use crate::file_walker::walk_files;
 use crate::output;
@@ -63,19 +63,12 @@ pub struct CheckOutput {
     pub exit_code: i32,
 }
 
-/// Register every rule that the config does not explicitly disable.
-/// Rules absent from `config.rules` default to enabled (Config-as-Contract:
-/// the shipped falcon.json lists every rule explicitly).
+/// Register every rule that the config does not explicitly disable
+/// (enablement semantics live in `falcon_rules::enabled_rules`).
 fn build_registry(config: &FalconConfig) -> RuleRegistry {
     let mut registry = RuleRegistry::new();
-    for rule in all_rules() {
-        let enabled = config
-            .rules
-            .get(rule.name())
-            .is_none_or(|rc| rc.enabled);
-        if enabled {
-            registry.register(rule);
-        }
+    for rule in enabled_rules(config) {
+        registry.register(rule);
     }
     registry
 }

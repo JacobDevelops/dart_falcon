@@ -27,10 +27,13 @@ pub fn run_cli() -> i32 {
             error_exit_code: exit_code,
             parallel,
         }),
-        crate::args::Command::Lsp => {
-            tracing::info!("LSP server not yet implemented (M5)");
-            0
-        }
+        crate::args::Command::Lsp => match falcon_lsp::run_server() {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("error: LSP server failed: {}", e);
+                1
+            }
+        },
         crate::args::Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             0

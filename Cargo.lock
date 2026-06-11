@@ -324,6 +324,7 @@ dependencies = [
  "falcon_analyze",
  "falcon_config",
  "falcon_diagnostics",
+ "falcon_lsp",
  "falcon_rules",
  "glob",
  "insta",
@@ -365,12 +366,19 @@ dependencies = [
 name = "falcon_lsp"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-channel",
  "falcon_analyze",
  "falcon_config",
+ "falcon_dart_parser",
  "falcon_diagnostics",
+ "falcon_rules",
+ "falcon_syntax",
  "lsp-server",
  "lsp-types",
+ "serde",
  "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

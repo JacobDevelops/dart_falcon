@@ -1,0 +1,20 @@
+# Zed extension crate — intentionally NOT a member of the repo workspace:
+# it compiles to wasm32-wasip2 and is built by Zed itself when installed
+# as a dev extension.
+# Standalone workspace so the repo's root workspace doesn't try to build
+# this crate for native targets.
+[workspace]
+
+[package]
+name = "falcon-zed"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "0.7"

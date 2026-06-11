@@ -1,0 +1,55 @@
+{
+  "name": "falcon-vscode",
+  "displayName": "Falcon Dart Linter",
+  "description": "Fast Dart lint diagnostics from the falcon language server",
+  "version": "0.1.0",
+  "publisher": "jacobsanderson",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:dart"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "dart",
+        "extensions": [
+          ".dart"
+        ],
+        "aliases": [
+          "Dart"
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Falcon",
+      "properties": {
+        "falcon.binaryPath": {
+          "type": "string",
+          "default": "falcon",
+          "description": "Path to the falcon binary (absolute path, or a name resolved via PATH)."
+        },
+        "falcon.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the LSP communication between VS Code and the falcon server."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

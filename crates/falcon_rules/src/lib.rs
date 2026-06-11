@@ -10,6 +10,24 @@ pub mod dart_code_linter;
 pub mod pyramid_lint;
 
 use falcon_analyze::Rule;
+use falcon_config::FalconConfig;
+
+/// Return the rules the config does not explicitly disable.
+///
+/// Rules absent from `config.rules` default to enabled (Config-as-Contract:
+/// the shipped falcon.json lists every rule explicitly). Shared by the CLI
+/// pipeline and the LSP server so both filter identically.
+pub fn enabled_rules(config: &FalconConfig) -> Vec<Box<dyn Rule>> {
+    all_rules()
+        .into_iter()
+        .filter(|rule| {
+            config
+                .rules
+                .get(rule.name())
+                .is_none_or(|rc| rc.enabled)
+        })
+        .collect()
+}
 
 /// Return all implemented lint rules.
 pub fn all_rules() -> Vec<Box<dyn Rule>> {

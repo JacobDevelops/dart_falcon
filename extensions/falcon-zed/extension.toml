@@ -1,0 +1,11 @@
+id = "falcon"
+name = "Falcon Dart Linter"
+version = "0.1.0"
+schema_version = 1
+authors = ["Jacob Sanderson <jacob@jacobdevelops.com>"]
+description = "Fast Dart lint diagnostics from the falcon language server"
+repository = "https://github.com/jacobsanderson/dart_falcon"
+
+[language_servers.falcon]
+name = "Falcon"
+languages = ["Dart"]

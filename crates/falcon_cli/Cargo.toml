@@ -9,6 +9,7 @@ falcon_analyze = { path = "../falcon_analyze" }
 falcon_diagnostics = { path = "../falcon_diagnostics" }
 falcon_config = { path = "../falcon_config" }
 falcon_rules = { path = "../falcon_rules" }
+falcon_lsp = { path = "../falcon_lsp" }
 clap.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

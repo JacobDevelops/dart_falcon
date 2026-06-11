@@ -46,6 +46,34 @@ pub struct Span {
     pub end: usize,
 }
 
+/// Convert an LSP `Position` (0-based line + character) back to a byte offset
+/// in `source` — the inverse of [`byte_to_lsp_position`].
+///
+/// Positions past the end of a line clamp to that line's newline; positions
+/// past the last line clamp to `source.len()`. Like `byte_to_lsp_position`,
+/// `character` counts Unicode scalar values rather than UTF-16 code units
+/// (a Phase 1 simplification; both directions are consistent with each other).
+pub fn lsp_position_to_byte(source: &str, position: Position) -> usize {
+    let mut line = 0u32;
+    let mut character = 0u32;
+    for (i, c) in source.char_indices() {
+        if line == position.line && character == position.character {
+            return i;
+        }
+        if line > position.line {
+            // Requested character was past the end of its line; clamp there.
+            return i.saturating_sub(1);
+        }
+        if c == '\n' {
+            line += 1;
+            character = 0;
+        } else {
+            character += 1;
+        }
+    }
+    source.len()
+}
+
 /// Convert a byte offset in `source` to an LSP `Position` (0-based line + character).
 pub fn byte_to_lsp_position(source: &str, offset: usize) -> Position {
     let clamped = offset.min(source.len());
