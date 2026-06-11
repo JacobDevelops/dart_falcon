@@ -28,19 +28,21 @@ impl Rule for AvoidTopLevelMemberAccess {
 
         for decl in &program.declarations {
             if let TopLevelDecl::Variable(v) = decl
-                && !v.is_const && !v.is_final {
-                    // Report the declaration itself
-                    diags.push(Diagnostic::new(
-                        "avoid-top-level-member-access",
-                        Severity::Warning,
-                        "Avoid using non-const top-level members",
-                        ctx.file_path.to_string_lossy().into_owned(),
-                        DiagSpan {
-                            start: v.span.start,
-                            end: v.span.end,
-                        },
-                    ));
-                }
+                && !v.is_const
+                && !v.is_final
+            {
+                // Report the declaration itself
+                diags.push(Diagnostic::new(
+                    "avoid-top-level-member-access",
+                    Severity::Warning,
+                    "Avoid using non-const top-level members",
+                    ctx.file_path.to_string_lossy().into_owned(),
+                    DiagSpan {
+                        start: v.span.start,
+                        end: v.span.end,
+                    },
+                ));
+            }
         }
 
         for decl in &program.declarations {
@@ -51,18 +53,21 @@ impl Rule for AvoidTopLevelMemberAccess {
             if let TopLevelDecl::Class(c) = decl {
                 for member in &c.members {
                     if let ClassMember::Field(f) = member
-                        && f.is_static && !f.is_final && !f.is_const {
-                            diags.push(Diagnostic::new(
-                                "avoid-top-level-member-access",
-                                Severity::Warning,
-                                "Avoid using non-const top-level members",
-                                ctx.file_path.to_string_lossy().into_owned(),
-                                DiagSpan {
-                                    start: f.span.start,
-                                    end: f.span.end,
-                                },
-                            ));
-                        }
+                        && f.is_static
+                        && !f.is_final
+                        && !f.is_const
+                    {
+                        diags.push(Diagnostic::new(
+                            "avoid-top-level-member-access",
+                            Severity::Warning,
+                            "Avoid using non-const top-level members",
+                            ctx.file_path.to_string_lossy().into_owned(),
+                            DiagSpan {
+                                start: f.span.start,
+                                end: f.span.end,
+                            },
+                        ));
+                    }
                 }
             }
         }
@@ -258,7 +263,12 @@ fn scan_expr(
             scan_expr(left, diags, ctx, top_level_vars);
             scan_expr(right, diags, ctx, top_level_vars);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx, top_level_vars);
             scan_expr(then_expr, diags, ctx, top_level_vars);
             scan_expr(else_expr, diags, ctx, top_level_vars);

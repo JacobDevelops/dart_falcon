@@ -50,7 +50,10 @@ fn scan_source(source: &str, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
                             Severity::Warning,
                             "Comments should start with an uppercase letter",
                             ctx.file_path.to_string_lossy().into_owned(),
-                            DiagSpan { start: comment_start, end: comment_start + 2 },
+                            DiagSpan {
+                                start: comment_start,
+                                end: comment_start + 2,
+                            },
                         ));
                     }
                 }

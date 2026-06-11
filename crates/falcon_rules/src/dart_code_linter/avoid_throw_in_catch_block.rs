@@ -84,21 +84,13 @@ fn check_function_body(
     }
 }
 
-fn check_stmts(
-    stmts: &[Stmt],
-    diagnostics: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
+fn check_stmts(stmts: &[Stmt], diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     for stmt in stmts {
         check_stmt(stmt, diagnostics, ctx);
     }
 }
 
-fn check_stmt(
-    stmt: &Stmt,
-    diagnostics: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
+fn check_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match stmt {
         Stmt::TryCatch(try_catch) => {
             check_stmts(&try_catch.body.stmts, diagnostics, ctx);
@@ -141,21 +133,13 @@ fn check_stmt(
     }
 }
 
-fn check_throws_in_catch(
-    block: &Block,
-    diagnostics: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
+fn check_throws_in_catch(block: &Block, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     for stmt in &block.stmts {
         collect_throws(stmt, diagnostics, ctx);
     }
 }
 
-fn collect_throws(
-    stmt: &Stmt,
-    diagnostics: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
+fn collect_throws(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match stmt {
         Stmt::Throw(throw_stmt) if !throw_stmt.is_rethrow => {
             diagnostics.push(Diagnostic::new(

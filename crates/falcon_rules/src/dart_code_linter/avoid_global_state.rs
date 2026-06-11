@@ -13,7 +13,9 @@ impl Rule for AvoidGlobalState {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             match decl {
-                TopLevelDecl::Variable(var) if is_mutable(var.is_const, var.is_final, var.is_late) => {
+                TopLevelDecl::Variable(var)
+                    if is_mutable(var.is_const, var.is_final, var.is_late) =>
+                {
                     diags.push(make_diag(ctx, &var.span));
                 }
                 TopLevelDecl::Class(class) => check_static_fields(&class.members, &mut diags, ctx),
@@ -33,9 +35,11 @@ fn is_mutable(is_const: bool, is_final: bool, is_late: bool) -> bool {
 fn check_static_fields(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     for member in members {
         if let ClassMember::Field(field) = member
-            && field.is_static && is_mutable(field.is_const, field.is_final, field.is_late) {
-                diags.push(make_diag(ctx, &field.span));
-            }
+            && field.is_static
+            && is_mutable(field.is_const, field.is_final, field.is_late)
+        {
+            diags.push(make_diag(ctx, &field.span));
+        }
     }
 }
 
@@ -45,6 +49,9 @@ fn make_diag(ctx: &AnalyzeContext, span: &Span) -> Diagnostic {
         Severity::Warning,
         "Avoid mutable global state — use const or final declarations instead",
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     )
 }

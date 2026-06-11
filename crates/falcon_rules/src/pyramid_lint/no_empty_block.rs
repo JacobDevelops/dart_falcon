@@ -28,7 +28,10 @@ fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Severity::Warning,
         "Avoid empty blocks. Add a statement or a comment explaining why it is empty.",
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     ));
 }
 

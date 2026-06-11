@@ -15,18 +15,20 @@ impl AvoidPassingAsyncWhenSyncExpected {
                     true
                 }
             }
-            DartType::Named(named) => {
-                named.segments.last().is_some_and(|seg| seg.name == "Function")
-            }
+            DartType::Named(named) => named
+                .segments
+                .last()
+                .is_some_and(|seg| seg.name == "Function"),
             _ => false,
         }
     }
 
     fn is_future_type(dart_type: &DartType) -> bool {
         match dart_type {
-            DartType::Named(named) => {
-                named.segments.last().is_some_and(|seg| seg.name == "Future")
-            }
+            DartType::Named(named) => named
+                .segments
+                .last()
+                .is_some_and(|seg| seg.name == "Future"),
             _ => false,
         }
     }
@@ -120,7 +122,9 @@ impl AvoidPassingAsyncWhenSyncExpected {
                     Self::visit_exprs(&named_arg.value, f);
                 }
             }
-            Expr::Cascade { object, sections, .. } => {
+            Expr::Cascade {
+                object, sections, ..
+            } => {
                 Self::visit_exprs(object, f);
                 for section in sections {
                     match &section.op {
@@ -217,8 +221,7 @@ impl AvoidPassingAsyncWhenSyncExpected {
             match stmt {
                 Stmt::Block(block) => Self::visit_stmts(&block.stmts, f),
                 Stmt::If(if_stmt) => {
-                    if let IfCondition::Expr(_) = &if_stmt.condition {
-                    }
+                    if let IfCondition::Expr(_) = &if_stmt.condition {}
                     Self::visit_stmts(&[*if_stmt.then_branch.clone()], f);
                     if let Some(else_branch) = &if_stmt.else_branch {
                         Self::visit_stmts(&[*else_branch.clone()], f);
@@ -271,20 +274,22 @@ impl AvoidPassingAsyncWhenSyncExpected {
         let mut violations = Vec::new();
 
         if let Some(callee_name) = Self::get_callee_name(callee_expr)
-            && let Some(param_types) = param_map.get(&callee_name) {
-                for (idx, arg) in args.positional.iter().enumerate() {
-                    if let Expr::FuncExpr {
-                        is_async: true,
-                        span: func_span,
-                        ..
-                    } = arg
-                        && idx < param_types.len()
-                            && let Some(Some(param_type)) = param_types.get(idx)
-                                && Self::is_non_future_function_type(param_type) {
-                                    violations.push(func_span.clone());
-                                }
+            && let Some(param_types) = param_map.get(&callee_name)
+        {
+            for (idx, arg) in args.positional.iter().enumerate() {
+                if let Expr::FuncExpr {
+                    is_async: true,
+                    span: func_span,
+                    ..
+                } = arg
+                    && idx < param_types.len()
+                    && let Some(Some(param_type)) = param_types.get(idx)
+                    && Self::is_non_future_function_type(param_type)
+                {
+                    violations.push(func_span.clone());
                 }
             }
+        }
 
         violations
     }
@@ -308,8 +313,7 @@ impl Rule for AvoidPassingAsyncWhenSyncExpected {
                             if let Stmt::Expr(expr_stmt) = stmt {
                                 Self::visit_exprs(&expr_stmt.expr, &mut |expr| {
                                     if let Expr::Call { callee, args, .. } = expr {
-                                        let violations =
-                                            Self::check_call(callee, args, &param_map);
+                                        let violations = Self::check_call(callee, args, &param_map);
                                         for span in violations {
                                             diagnostics.push(Diagnostic::new(
                                                 "avoid-passing-async-when-sync-expected",
@@ -331,15 +335,16 @@ impl Rule for AvoidPassingAsyncWhenSyncExpected {
                 TopLevelDecl::Class(class) => {
                     for member in &class.members {
                         if let ClassMember::Method(method) = member
-                            && let Some(FunctionBody::Block(block)) = &method.body {
-                                Self::visit_stmts(&block.stmts, &mut |stmt| {
-                                    if let Stmt::Expr(expr_stmt) = stmt {
-                                        Self::visit_exprs(&expr_stmt.expr, &mut |expr| {
-                                            if let Expr::Call { callee, args, .. } = expr {
-                                                let violations =
-                                                    Self::check_call(callee, args, &param_map);
-                                                for span in violations {
-                                                    diagnostics.push(Diagnostic::new(
+                            && let Some(FunctionBody::Block(block)) = &method.body
+                        {
+                            Self::visit_stmts(&block.stmts, &mut |stmt| {
+                                if let Stmt::Expr(expr_stmt) = stmt {
+                                    Self::visit_exprs(&expr_stmt.expr, &mut |expr| {
+                                        if let Expr::Call { callee, args, .. } = expr {
+                                            let violations =
+                                                Self::check_call(callee, args, &param_map);
+                                            for span in violations {
+                                                diagnostics.push(Diagnostic::new(
                                                         "avoid-passing-async-when-sync-expected",
                                                         Severity::Warning,
                                                         "Avoid passing an async function where a synchronous callback is expected",
@@ -349,12 +354,12 @@ impl Rule for AvoidPassingAsyncWhenSyncExpected {
                                                             end: span.end,
                                                         },
                                                     ));
-                                                }
                                             }
-                                        });
-                                    }
-                                });
-                            }
+                                        }
+                                    });
+                                }
+                            });
+                        }
                     }
                 }
                 _ => {}

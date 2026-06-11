@@ -1126,7 +1126,58 @@ Use .last property instead of [length - 1] to access the last element.
 
 ---
 
-## 22. avoid_abbreviations_in_doc_comments
+## 22. prefer-iterable-of
+
+**Rule ID:** `prefer-iterable-of`  
+**Source:** dart_code_linter  
+**Complexity:** SIMPLE (1–2h)  
+**Default Severity:** warning  
+
+### Description
+
+Recommends using the `.of()` constructor instead of `.from()` for `List`, `Set`, and `Iterable`. The `.of()` constructor is more efficient and idiomatic in Dart.
+
+### Phase 1 Heuristic
+
+Detect constructor invocations `List.from(...)`, `Set.from(...)`, and `Iterable.from(...)`. Suggest using `.of()` instead.
+
+### Configuration
+
+No configuration required.
+
+### Examples
+
+**Bad (triggers rule):**
+```dart
+final a = List<int>.from(other);
+final b = Set<String>.from(names);
+final c = Iterable.from(data);
+```
+
+**Good (does NOT trigger):**
+```dart
+final a = List<int>.of(other);
+final b = Set<String>.of(names);
+final c = Iterable.of(data);
+final d = Map.from(map);  // Map.from is OK, not in scope
+```
+
+### Diagnostic Message
+
+```
+Prefer using the 'of' constructor instead of 'from'.
+```
+
+### Acceptance Criteria (M4.8)
+
+- Detects `.from()` constructor on `List`, `Set`, and `Iterable` only
+- Does NOT flag `Map.from()` or other types
+- Flags nested `.from()` calls within arguments
+- All test cases pass
+
+---
+
+## 23. avoid_abbreviations_in_doc_comments
 
 **Rule ID:** `avoid_abbreviations_in_doc_comments`  
 **Source:** pyramid_lint  
@@ -1178,7 +1229,7 @@ Avoid abbreviations in documentation comments. Use 'implementation' instead of '
 
 ---
 
-## 23. avoid_empty_blocks
+## 24. avoid_empty_blocks
 
 **Rule ID:** `avoid_empty_blocks`  
 **Source:** pyramid_lint  
@@ -1201,7 +1252,7 @@ Refer to rule #11 acceptance criteria.
 
 ---
 
-## 24. avoid_inverted_boolean_expressions
+## 25. avoid_inverted_boolean_expressions
 
 **Rule ID:** `avoid_inverted_boolean_expressions`  
 **Source:** pyramid_lint  
@@ -1250,7 +1301,7 @@ Avoid double negation. Use the value directly or apply a single negation.
 
 ---
 
-## 25. avoid_nested_if
+## 26. avoid_nested_if
 
 **Rule ID:** `avoid_nested_if`  
 **Source:** pyramid_lint  
@@ -1308,7 +1359,7 @@ Avoid deeply nested if-statements. Consider combining conditions or extracting t
 
 ---
 
-## 26. avoid_positional_fields_in_records
+## 27. avoid_positional_fields_in_records
 
 **Rule ID:** `avoid_positional_fields_in_records`  
 **Source:** pyramid_lint  
@@ -1355,7 +1406,7 @@ Use named fields in records for better clarity. Write ({int x, String y}) instea
 
 ---
 
-## 27. boolean_prefixes
+## 28. boolean_prefixes
 
 **Rule ID:** `boolean_prefixes`  
 **Source:** pyramid_lint  
@@ -1407,7 +1458,7 @@ Boolean variables should use a prefix like 'is', 'has', or 'can'. Use 'isActive'
 
 ---
 
-## 28. correct_order_for_super_dispose
+## 29. correct_order_for_super_dispose
 
 **Rule ID:** `correct_order_for_super_dispose`  
 **Source:** pyramid_lint  
@@ -1461,7 +1512,7 @@ Call super.dispose() at the end of the dispose method, after cleaning up resourc
 
 ---
 
-## 29. max_lines_for_file
+## 30. max_lines_for_file
 
 **Rule ID:** `max_lines_for_file`  
 **Source:** pyramid_lint  
@@ -1507,7 +1558,7 @@ File exceeds the maximum line count of 500 lines. Consider splitting into multip
 
 ---
 
-## 30. max_lines_for_function
+## 31. max_lines_for_function
 
 **Rule ID:** `max_lines_for_function`  
 **Source:** pyramid_lint  
@@ -1557,7 +1608,7 @@ Function exceeds the maximum line count of 100 lines. Consider extracting logic.
 
 ---
 
-## 31. max_parameters_for_function
+## 32. max_parameters_for_function
 
 **Rule ID:** `max_parameters_for_function`  
 **Source:** pyramid_lint  
@@ -1606,7 +1657,7 @@ Function has too many parameters (6 > 5). Consider using a class or record.
 
 ---
 
-## 32. max_switch_cases
+## 33. max_switch_cases
 
 **Rule ID:** `max_switch_cases`  
 **Source:** pyramid_lint  
@@ -1660,7 +1711,7 @@ Switch statement has too many cases (15 > 10). Consider using a map or pattern m
 
 ---
 
-## 33. no_duplicate_case_values
+## 34. no_duplicate_case_values
 
 **Rule ID:** `no_duplicate_case_values`  
 **Source:** pyramid_lint  
@@ -1714,7 +1765,7 @@ Duplicate case value 1. The second case is unreachable.
 
 ---
 
-## 34. no_magic_number (SIMPLE variant)
+## 35. no_magic_number (SIMPLE variant)
 
 **Rule IDs:** `no-magic-number` (dart_code_linter, COMPLEX), `no_magic_number` (pyramid_lint, SIMPLE variant)  
 **Source:** dart_code_linter + pyramid_lint (shared implementation)  
@@ -1764,7 +1815,7 @@ Avoid magic numbers. Use a named constant instead. For example: const int THRESH
 
 ---
 
-## 35. prefer_declaring_const_constructor
+## 36. prefer_declaring_const_constructor
 
 **Rule ID:** `prefer_declaring_const_constructor`  
 **Source:** pyramid_lint  
@@ -1817,7 +1868,7 @@ This constructor can be const. Mark it with 'const' for better optimization.
 
 ---
 
-## 36. prefer_iterable_any
+## 37. prefer_iterable_any
 
 **Rule ID:** `prefer_iterable_any`  
 **Source:** pyramid_lint  
@@ -1864,7 +1915,7 @@ Use .any() instead of .where().isNotEmpty for better readability.
 
 ---
 
-## 37. prefer_iterable_every
+## 38. prefer_iterable_every
 
 **Rule ID:** `prefer_iterable_every`  
 **Source:** pyramid_lint  
@@ -1911,7 +1962,7 @@ Use .every() instead of !.where().isEmpty for better readability.
 
 ---
 
-## 38. prefer_underscore_for_unused_callback_parameters
+## 39. prefer_underscore_for_unused_callback_parameters
 
 **Rule ID:** `prefer_underscore_for_unused_callback_parameters`  
 **Source:** pyramid_lint  
@@ -1958,7 +2009,7 @@ Use underscore (_) for unused callback parameters.
 
 ---
 
-## 39. use_spacer_as_expanded_child
+## 40. use_spacer_as_expanded_child
 
 **Rule ID:** `use_spacer_as_expanded_child`  
 **Source:** pyramid_lint  
@@ -2007,7 +2058,7 @@ Use Spacer() instead of an empty Container() as an Expanded child. It's more exp
 
 # PART 2: MEDIUM RULES
 
-## 40. avoid-global-state
+## 41. avoid-global-state
 
 **Rule ID:** `avoid-global-state`  
 **Source:** dart_code_linter  
@@ -2057,7 +2108,7 @@ Avoid using mutable global state. Use dependency injection or class members inst
 
 ---
 
-## 41. avoid-passing-async-when-sync-expected
+## 42. avoid-passing-async-when-sync-expected
 
 **Rule ID:** `avoid-passing-async-when-sync-expected`  
 **Source:** dart_code_linter  
@@ -2113,7 +2164,7 @@ Avoid passing async functions to synchronous callbacks. The async function won't
 
 ---
 
-## 42. avoid-redundant-async
+## 43. avoid-redundant-async
 
 **Rule ID:** `avoid-redundant-async`  
 **Source:** dart_code_linter  
@@ -2174,7 +2225,7 @@ Remove redundant async. This function has only one await and no error handling.
 
 ---
 
-## 43. avoid-returning-widgets
+## 44. avoid-returning-widgets
 
 **Rule ID:** `avoid-returning-widgets`  
 **Source:** dart_code_linter  
@@ -2240,7 +2291,7 @@ Avoid returning widgets from non-build methods. Return data instead, and constru
 
 ---
 
-## 44. avoid-unnecessary-type-assertions
+## 45. avoid-unnecessary-type-assertions
 
 **Rule ID:** `avoid-unnecessary-type-assertions`  
 **Source:** dart_code_linter  
@@ -2293,7 +2344,7 @@ Unnecessary type assertion. Variable is already known to be of type int.
 
 ---
 
-## 45. avoid-unnecessary-type-casts
+## 46. avoid-unnecessary-type-casts
 
 **Rule ID:** `avoid-unnecessary-type-casts`  
 **Source:** dart_code_linter  
@@ -2346,7 +2397,7 @@ Unnecessary type cast. Variable is already known to be of type int.
 
 ---
 
-## 46. avoid-unrelated-type-assertions
+## 47. avoid-unrelated-type-assertions
 
 **Rule ID:** `avoid-unrelated-type-assertions`  
 **Source:** dart_code_linter  
@@ -2399,7 +2450,7 @@ This type assertion is always false. The variable can never be of type String.
 
 ---
 
-## 47. avoid-unused-parameters
+## 48. avoid-unused-parameters
 
 **Rule IDs:** `avoid-unused-parameters` (dart_code_linter), `avoid_unused_parameters` (pyramid_lint)  
 **Source:** dart_code_linter + pyramid_lint (shared implementation)  
@@ -2460,7 +2511,7 @@ Parameter 'unused' is never used. Remove it or use '_' to indicate it's intentio
 
 ---
 
-## 48. prefer-conditional-expressions
+## 49. prefer-conditional-expressions
 
 **Rule ID:** `prefer-conditional-expressions`  
 **Source:** dart_code_linter  
@@ -2519,7 +2570,7 @@ Use a conditional expression instead of an if/else block for simple value return
 
 ---
 
-## 49. prefer-extracting-callbacks
+## 50. prefer-extracting-callbacks
 
 **Rule ID:** `prefer-extracting-callbacks`  
 **Source:** dart_code_linter  
@@ -2578,7 +2629,7 @@ Extract this large callback to a named function for better readability.
 
 ---
 
-## 50. prefer-trailing-comma
+## 51. prefer-trailing-comma
 
 **Rule ID:** `prefer-trailing-comma`  
 **Source:** dart_code_linter  
@@ -2634,7 +2685,7 @@ Add a trailing comma to multi-line argument lists for cleaner diffs.
 
 ---
 
-## 51. avoid_mutable_global_variables
+## 52. avoid_mutable_global_variables
 
 **Rule ID:** `avoid_mutable_global_variables`  
 **Source:** pyramid_lint  
@@ -2681,7 +2732,7 @@ Avoid mutable global variables. Use const for top-level declarations only.
 
 ---
 
-## 52. prefer_dedicated_media_query_methods
+## 53. prefer_dedicated_media_query_methods
 
 **Rule ID:** `prefer_dedicated_media_query_methods`  
 **Source:** pyramid_lint  
@@ -2728,7 +2779,7 @@ Use MediaQuery.of(context).displayWidth instead of .size.width for clarity.
 
 ---
 
-## 53. unnecessary_flutter_imports
+## 54. unnecessary_flutter_imports
 
 **Rule ID:** `unnecessary_flutter_imports`  
 **Source:** pyramid_lint  
@@ -2786,7 +2837,7 @@ Unused import 'package:flutter/material.dart'. Remove it or use one of its symbo
 
 # PART 3: COMPLEX RULES
 
-## 54. member-ordering
+## 55. member-ordering
 
 **Rule ID:** `member-ordering`  
 **Source:** dart_code_linter  
@@ -2844,7 +2895,7 @@ Member ordering incorrect. Should be: constants, static fields, instance fields,
 
 ---
 
-## 55. no-magic-number (COMPLEX variant)
+## 56. no-magic-number (COMPLEX variant)
 
 **Rule IDs:** `no-magic-number` (dart_code_linter), `no_magic_number` (pyramid_lint)  
 **Source:** dart_code_linter + pyramid_lint (shared, but COMPLEX variant for dart_code_linter)  
@@ -2879,7 +2930,7 @@ See rule #34 diagnostic.
 
 ---
 
-## 56. class_members_ordering
+## 57. class_members_ordering
 
 **Rule ID:** `class_members_ordering`  
 **Source:** pyramid_lint  
@@ -2913,7 +2964,7 @@ See rule #54 diagnostic.
 
 ---
 
-## 57. use_once_constructors_once_provider
+## 58. use_once_constructors_once_provider
 
 **Rule ID:** `use_once_constructors_once_provider`  
 **Source:** pyramid_lint  
@@ -2962,7 +3013,7 @@ OnceProvider should be wrapped with .once(). Use OnceProvider(...).once() for pr
 
 ---
 
-## 58. unnecessary_nullable_return_type
+## 59. unnecessary_nullable_return_type
 
 **Rule ID:** `unnecessary_nullable_return_type`  
 **Source:** pyramid_lint  
@@ -3018,6 +3069,170 @@ Function return type is unnecessarily nullable. Remove '?' from the return type.
 - All test cases pass
 
 ---
+
+## 59. prefer-correct-type-name
+
+**Rule ID:** `prefer-correct-type-name`  
+**Source:** dart_code_linter  
+**Complexity:** SIMPLE (1–2h)  
+**Default Severity:** warning  
+
+### Description
+
+Validates that type declaration names follow UpperCamelCase convention and meet length constraints. Type names should be descriptive, starting with an uppercase letter, and between 3 and 40 characters (after stripping a single leading underscore for privacy).
+
+### Phase 1 Heuristic
+
+For each top-level type declaration (class, mixin, mixin class, enum, extension with name, extension type, type alias), extract the name identifier. Check if the name (after stripping a single leading underscore) satisfies:
+- First character is uppercase (A–Z)
+- Length is between 3 and 40 characters (inclusive)
+- Does not contain the dollar sign ($)
+
+### Configuration
+
+No configuration required.
+
+### Examples
+
+**Bad (triggers rule):**
+```dart
+class foo {}  // lowercase
+class Ab {}  // too short (2 chars)
+enum color { red, green }  // lowercase
+mixin mx {}  // too short (2 chars)
+typedef cb = void Function();  // too short (2 chars)
+class Foo$Bar {}  // contains $
+class VeryLongNameThatExceedsTheFortyCharacterLimit {}  // too long (41+ chars)
+```
+
+**Good (does NOT trigger):**
+```dart
+class Foo {}  // UpperCamelCase, 3 chars
+class HttpClient {}  // UpperCamelCase
+class _Internal {}  // private, stripped to "Internal" (8 chars, uppercase)
+enum Color { red, green }  // UpperCamelCase
+mixin Loggable {}  // UpperCamelCase
+typedef Callback = void Function();  // UpperCamelCase
+extension StringX on String {}  // UpperCamelCase
+extension on String {}  // unnamed extension (not checked)
+```
+
+### Diagnostic Message
+
+```
+Type name '<name>' should be in UpperCamelCase and between 3 and 40 characters.
+```
+
+### Acceptance Criteria (M4.8)
+
+- Detects type names that violate UpperCamelCase
+- Detects names shorter than 3 or longer than 40 characters
+- Detects names with non-ASCII uppercase start
+- Detects dollar signs in type names
+- Respects privacy convention (strips single leading underscore)
+- Skips unnamed extensions
+- All test cases pass
+
+---
+
+## 61. use-design-system-item
+
+**Rule ID:** `use-design-system-item`  
+**Source:** dart_code_linter  
+**Complexity:** SIMPLE (1–2h)  
+**Default Severity:** warning  
+
+### Description
+
+Enforces the use of design-system components instead of directly using disallowed UI constructors. This rule is purely configuration-driven and requires an explicit `items` list to be active. With no configuration, the rule is a no-op.
+
+### Phase 1 Heuristic
+
+Parse configured items from the rule's `items` option. For each configured class name, traverse the full AST and flag all `new` expressions (constructor calls) whose type name matches a disallowed class. Extract the base type name from the `DartType::Named` segments and compare against configured class names.
+
+### Configuration
+
+Required `items` (default: `[]`, empty array—rule is no-op without configuration).  
+Each item is an object with:
+- `class_name` (string, required): The disallowed constructor type name.
+- `use_instead` (string, optional): The design-system replacement to suggest.
+
+Example `falcon.json`:
+```json
+{
+  "rules": {
+    "use-design-system-item": {
+      "enabled": true,
+      "options": {
+        "items": [
+          {
+            "class_name": "MaterialButton",
+            "use_instead": "DsButton"
+          },
+          {
+            "class_name": "ElevatedButton",
+            "use_instead": "DsElevatedButton"
+          },
+          {
+            "class_name": "Text",
+            "use_instead": null
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+### Examples
+
+**Bad (triggers rule with config above):**
+```dart
+Widget build(BuildContext context) {
+  return MaterialButton(onPressed: () {});  // ✗ use DsButton instead
+}
+
+ElevatedButton(onPressed: () {}, child: Text('OK'))  // ✗ use DsElevatedButton
+```
+
+**Good (does NOT trigger with default/empty config):**
+```dart
+Widget build(BuildContext context) {
+  return AppContainer(
+    child: AppText('hello'),
+  );
+}
+```
+
+**Good (does NOT trigger with config above):**
+```dart
+Widget build(BuildContext context) {
+  return DsButton(onPressed: () {});  // ✓ using design system
+}
+
+DsElevatedButton(onPressed: () {}, child: DsText('OK'))  // ✓ using design system
+```
+
+### Diagnostic Message
+
+With `use_instead`:
+```
+Use 'DsButton' from the design system instead of 'MaterialButton'.
+```
+
+Without `use_instead`:
+```
+Use the design system equivalent instead of 'Text'.
+```
+
+### Acceptance Criteria (M4.8)
+
+- Returns empty diagnostics with no configuration (rule is a no-op).
+- Safely parses config items without panicking on malformed JSON or missing fields.
+- Detects all `new` expressions of disallowed classes throughout the AST.
+- Extracts base type name correctly from qualified type names (e.g., `foo.Bar` → `Bar`).
+- Emits correct diagnostic message with or without `use_instead` suggestion.
+- All test cases pass.
 
 ---
 

@@ -43,7 +43,10 @@ fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext
                             Severity::Warning,
                             "Duplicate expression — extract to a shared variable",
                             ctx.file_path.to_string_lossy().into_owned(),
-                            DiagSpan { start: span.start, end: span.end },
+                            DiagSpan {
+                                start: span.start,
+                                end: span.end,
+                            },
                         ));
                     } else {
                         seen.push((src, init.span()));

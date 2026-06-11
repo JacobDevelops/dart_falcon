@@ -108,14 +108,22 @@ fn check_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn check_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::Index { object, index, span, .. } => {
+        Expr::Index {
+            object,
+            index,
+            span,
+            ..
+        } => {
             if is_length_minus_one(object, index) {
                 diags.push(Diagnostic::new(
                     "prefer-last",
                     Severity::Warning,
                     "Prefer .last over [length - 1] to access the last element",
                     ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan { start: span.start, end: span.end },
+                    DiagSpan {
+                        start: span.start,
+                        end: span.end,
+                    },
                 ));
             }
             check_expr(object, diags, ctx);
@@ -132,7 +140,12 @@ fn check_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             check_expr(left, diags, ctx);
             check_expr(right, diags, ctx);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             check_expr(condition, diags, ctx);
             check_expr(then_expr, diags, ctx);
             check_expr(else_expr, diags, ctx);
@@ -153,13 +166,23 @@ fn is_length_minus_one(object: &Expr, index: &Expr) -> bool {
         _ => return false,
     };
     match index {
-        Expr::Binary { op: BinaryOp::Sub, left, right, .. } => {
+        Expr::Binary {
+            op: BinaryOp::Sub,
+            left,
+            right,
+            ..
+        } => {
             if !matches!(right.as_ref(), Expr::IntLit { value, .. } if value == "1") {
                 return false;
             }
             match left.as_ref() {
-                Expr::Field { object: len_obj, field, .. } => {
-                    field.name == "length" && matches!(len_obj.as_ref(), Expr::Ident(id) if &id.name == obj_name)
+                Expr::Field {
+                    object: len_obj,
+                    field,
+                    ..
+                } => {
+                    field.name == "length"
+                        && matches!(len_obj.as_ref(), Expr::Ident(id) if &id.name == obj_name)
                 }
                 _ => false,
             }

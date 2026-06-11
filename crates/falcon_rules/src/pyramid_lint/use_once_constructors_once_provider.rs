@@ -18,11 +18,7 @@ impl Rule for UseOnceConstructorsOnceProvider {
     }
 }
 
-const ONCE_PROVIDERS: &[&str] = &[
-    "OnceProvider",
-    "FutureProvider",
-    "StateProvider",
-];
+const ONCE_PROVIDERS: &[&str] = &["OnceProvider", "FutureProvider", "StateProvider"];
 
 fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match decl {
@@ -165,7 +161,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         }
         Expr::Unary { operand, .. } => scan_expr(operand, diags, ctx),
         Expr::PostfixIncDec { operand, .. } => scan_expr(operand, diags, ctx),
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
@@ -173,7 +174,9 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Expr::Assign { value, .. } => scan_expr(value, diags, ctx),
         Expr::Is { expr: e, .. } => scan_expr(e, diags, ctx),
         Expr::As { expr: e, .. } => scan_expr(e, diags, ctx),
-        Expr::Cascade { object, sections, .. } => {
+        Expr::Cascade {
+            object, sections, ..
+        } => {
             scan_expr(object, diags, ctx);
             for section in sections {
                 scan_cascade_section(section, diags, ctx);
@@ -199,7 +202,11 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     }
 }
 
-fn scan_cascade_section(section: &CascadeSection, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_cascade_section(
+    section: &CascadeSection,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
     match &section.op {
         CascadeOp::Field(_, _) => {}
         CascadeOp::Index(idx_expr, _) => {
@@ -258,6 +265,9 @@ fn flag_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Severity::Warning,
         "OnceProvider and similar Riverpod providers should use .once() factory method",
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     ));
 }

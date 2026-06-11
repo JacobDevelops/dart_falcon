@@ -26,16 +26,21 @@ fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Severity::Warning,
         "Constructor could be declared as const.",
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     ));
 }
 
 fn all_fields_const_or_final(class_decl: &ClassDecl) -> bool {
     for member in &class_decl.members {
         if let ClassMember::Field(field) = member
-            && !field.is_final && !field.is_const {
-                return false;
-            }
+            && !field.is_final
+            && !field.is_const
+        {
+            return false;
+        }
     }
     true
 }

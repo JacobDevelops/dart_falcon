@@ -122,7 +122,9 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::Call { callee, args, span, .. } => {
+        Expr::Call {
+            callee, args, span, ..
+        } => {
             check_border_radius_only_call(callee, args, span, diags, ctx);
             scan_expr(callee, diags, ctx);
             for arg in &args.positional {
@@ -142,7 +144,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(right, diags, ctx);
         }
         Expr::Unary { operand, .. } => scan_expr(operand, diags, ctx),
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
@@ -177,40 +184,51 @@ fn check_border_radius_only_call(
 ) {
     if let Expr::Field { object, field, .. } = callee
         && let Expr::Ident(ident) = object.as_ref()
-            && ident.name == "BorderRadius" && field.name == "only"
-                && all_border_radii_equal(args) {
-                    let source = ctx.source;
-                    let start_line = source[..span.start].chars().filter(|&c| c == '\n').count();
-                    let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
+        && ident.name == "BorderRadius"
+        && field.name == "only"
+        && all_border_radii_equal(args)
+    {
+        let source = ctx.source;
+        let start_line = source[..span.start].chars().filter(|&c| c == '\n').count();
+        let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
 
-                    let report_span = if start_line == end_line {
-                        // Single line - report at start
-                        DiagSpan { start: span.start, end: span.end }
-                    } else {
-                        // Multi-line - check if opening line contains the closing paren or comment marker
-                        let opening_line_end = source[span.start..]
-                            .find('\n')
-                            .map(|off| span.start + off)
-                            .unwrap_or(source.len());
-                        let opening_line_text = &source[span.start..opening_line_end];
+        let report_span = if start_line == end_line {
+            // Single line - report at start
+            DiagSpan {
+                start: span.start,
+                end: span.end,
+            }
+        } else {
+            // Multi-line - check if opening line contains the closing paren or comment marker
+            let opening_line_end = source[span.start..]
+                .find('\n')
+                .map(|off| span.start + off)
+                .unwrap_or(source.len());
+            let opening_line_text = &source[span.start..opening_line_end];
 
-                        if opening_line_text.contains("*/") {
-                            // Comment is on opening line
-                            DiagSpan { start: span.start, end: span.start + 1 }
-                        } else {
-                            // Comment is on closing line - report at end
-                            DiagSpan { start: span.end - 1, end: span.end }
-                        }
-                    };
-
-                    diags.push(Diagnostic::new(
-                        "prefer-const-border-radius",
-                        Severity::Warning,
-                        "BorderRadius.only() with all equal radii should use BorderRadius.circular().",
-                        ctx.file_path.to_string_lossy().into_owned(),
-                        report_span,
-                    ));
+            if opening_line_text.contains("*/") {
+                // Comment is on opening line
+                DiagSpan {
+                    start: span.start,
+                    end: span.start + 1,
                 }
+            } else {
+                // Comment is on closing line - report at end
+                DiagSpan {
+                    start: span.end - 1,
+                    end: span.end,
+                }
+            }
+        };
+
+        diags.push(Diagnostic::new(
+            "prefer-const-border-radius",
+            Severity::Warning,
+            "BorderRadius.only() with all equal radii should use BorderRadius.circular().",
+            ctx.file_path.to_string_lossy().into_owned(),
+            report_span,
+        ));
+    }
 }
 
 fn all_border_radii_equal(args: &ArgList) -> bool {
@@ -231,7 +249,9 @@ fn all_border_radii_equal(args: &ArgList) -> bool {
     }
 
     // All four must be present and equal
-    if let (Some(tl), Some(tr), Some(bl), Some(br)) = (top_left, top_right, bottom_left, bottom_right) {
+    if let (Some(tl), Some(tr), Some(bl), Some(br)) =
+        (top_left, top_right, bottom_left, bottom_right)
+    {
         tl == tr && tr == bl && bl == br
     } else {
         false
@@ -242,10 +262,13 @@ fn extract_radius_value(expr: &Expr) -> Option<String> {
     // Extract the numeric value from Radius.circular(X)
     if let Expr::Call { callee, args, .. } = expr
         && let Expr::Field { object, field, .. } = callee.as_ref()
-            && let Expr::Ident(ident) = object.as_ref()
-                && ident.name == "Radius" && field.name == "circular" && args.positional.len() == 1 {
-                    return expr_to_string(&args.positional[0]);
-                }
+        && let Expr::Ident(ident) = object.as_ref()
+        && ident.name == "Radius"
+        && field.name == "circular"
+        && args.positional.len() == 1
+    {
+        return expr_to_string(&args.positional[0]);
+    }
     None
 }
 

@@ -93,21 +93,13 @@ fn visit_class_member(
     }
 }
 
-fn visit_field_decl(
-    field: &FieldDecl,
-    diagnostics: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
+fn visit_field_decl(field: &FieldDecl, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let Some(field_type) = &field.field_type {
         check_dart_type(field_type, diagnostics, ctx);
     }
 }
 
-fn visit_method_decl(
-    method: &MethodDecl,
-    diagnostics: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
+fn visit_method_decl(method: &MethodDecl, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let Some(return_type) = &method.return_type {
         check_dart_type(return_type, diagnostics, ctx);
     }
@@ -117,11 +109,7 @@ fn visit_method_decl(
     }
 }
 
-fn visit_getter_decl(
-    getter: &GetterDecl,
-    diagnostics: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
+fn visit_getter_decl(getter: &GetterDecl, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let Some(return_type) = &getter.return_type {
         check_dart_type(return_type, diagnostics, ctx);
     }
@@ -130,11 +118,7 @@ fn visit_getter_decl(
     }
 }
 
-fn visit_setter_decl(
-    setter: &SetterDecl,
-    diagnostics: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
+fn visit_setter_decl(setter: &SetterDecl, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let Some(param_type) = &setter.param_type {
         check_dart_type(param_type, diagnostics, ctx);
     }
@@ -241,9 +225,7 @@ fn visit_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
                         visit_local_var_decl(var_decl, diagnostics, ctx);
                     }
                     ForInit::ForIn {
-                        var_type,
-                        iterable,
-                        ..
+                        var_type, iterable, ..
                     } => {
                         if let Some(vtype) = var_type {
                             check_dart_type(vtype, diagnostics, ctx);
@@ -371,11 +353,15 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
             visit_expr(then_expr, diagnostics, ctx);
             visit_expr(else_expr, diagnostics, ctx);
         }
-        Expr::Is { expr, dart_type, .. } => {
+        Expr::Is {
+            expr, dart_type, ..
+        } => {
             visit_expr(expr, diagnostics, ctx);
             check_dart_type(dart_type, diagnostics, ctx);
         }
-        Expr::As { expr, dart_type, .. } => {
+        Expr::As {
+            expr, dart_type, ..
+        } => {
             visit_expr(expr, diagnostics, ctx);
             check_dart_type(dart_type, diagnostics, ctx);
         }
@@ -404,9 +390,7 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
             }
         }
         Expr::Cascade {
-            object,
-            sections,
-            ..
+            object, sections, ..
         } => {
             visit_expr(object, diagnostics, ctx);
             for section in sections {
@@ -434,9 +418,7 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
             }
         }
         Expr::List {
-            type_arg,
-            elements,
-            ..
+            type_arg, elements, ..
         } => {
             if let Some(type_arg) = type_arg {
                 check_dart_type(type_arg, diagnostics, ctx);
@@ -446,9 +428,7 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
             }
         }
         Expr::Map {
-            type_args,
-            entries,
-            ..
+            type_args, entries, ..
         } => {
             for type_arg in type_args {
                 check_dart_type(type_arg, diagnostics, ctx);
@@ -459,9 +439,7 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
             }
         }
         Expr::Set {
-            type_arg,
-            elements,
-            ..
+            type_arg, elements, ..
         } => {
             if let Some(type_arg) = type_arg {
                 check_dart_type(type_arg, diagnostics, ctx);
@@ -475,16 +453,12 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
                 visit_expr(&field.value, diagnostics, ctx);
             }
         }
-        Expr::FuncExpr {
-            params, body, ..
-        } => {
+        Expr::FuncExpr { params, body, .. } => {
             visit_formal_param_list(params, diagnostics, ctx);
             visit_function_body(body, diagnostics, ctx);
         }
         Expr::New {
-            dart_type,
-            args,
-            ..
+            dart_type, args, ..
         } => {
             check_dart_type(dart_type, diagnostics, ctx);
             for expr in &args.positional {

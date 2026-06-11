@@ -57,20 +57,25 @@ fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext
     // Check pairs: LocalVar immediately followed by Return of that var
     for i in 0..stmts.len().saturating_sub(1) {
         if let Stmt::LocalVar(local) = &stmts[i]
-            && local.declarators.len() == 1 {
-                let var_name = &local.declarators[0].name.name;
-                if let Stmt::Return(ret) = &stmts[i + 1]
-                    && let Some(Expr::Ident(ident)) = &ret.value
-                        && &ident.name == var_name {
-                            diags.push(Diagnostic::new(
-                                "prefer-immediate-return",
-                                Severity::Warning,
-                                "Prefer returning the value directly instead of assigning to a variable first",
-                                ctx.file_path.to_string_lossy().into_owned(),
-                                DiagSpan { start: local.span.start, end: local.span.end },
-                            ));
-                        }
+            && local.declarators.len() == 1
+        {
+            let var_name = &local.declarators[0].name.name;
+            if let Stmt::Return(ret) = &stmts[i + 1]
+                && let Some(Expr::Ident(ident)) = &ret.value
+                && &ident.name == var_name
+            {
+                diags.push(Diagnostic::new(
+                    "prefer-immediate-return",
+                    Severity::Warning,
+                    "Prefer returning the value directly instead of assigning to a variable first",
+                    ctx.file_path.to_string_lossy().into_owned(),
+                    DiagSpan {
+                        start: local.span.start,
+                        end: local.span.end,
+                    },
+                ));
             }
+        }
     }
 
     // Recurse into nested blocks

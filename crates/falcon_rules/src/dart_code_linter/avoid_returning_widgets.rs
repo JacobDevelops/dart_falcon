@@ -16,8 +16,9 @@ impl Rule for AvoidReturningWidgets {
             match decl {
                 TopLevelDecl::Function(f) => {
                     if let Some(ret_type) = &f.return_type
-                        && contains_widget_type(ret_type) {
-                            diags.push(Diagnostic::new(
+                        && contains_widget_type(ret_type)
+                    {
+                        diags.push(Diagnostic::new(
                                 "avoid-returning-widgets",
                                 Severity::Warning,
                                 "Functions should not return Widget directly; extract to a separate widget class",
@@ -27,7 +28,7 @@ impl Rule for AvoidReturningWidgets {
                                     end: f.span.end,
                                 },
                             ));
-                        }
+                    }
                 }
                 TopLevelDecl::Class(c) => {
                     for member in &c.members {
@@ -59,9 +60,7 @@ fn is_widget_type(dart_type: &DartType) -> bool {
                 let name = &last.name;
                 // Only flag Widget, StatelessWidget, and StatefulWidget
                 // Don't flag specific widget subclasses like Card, Container, etc.
-                name == "Widget"
-                    || name == "StatelessWidget"
-                    || name == "StatefulWidget"
+                name == "Widget" || name == "StatelessWidget" || name == "StatefulWidget"
             } else {
                 false
             }
@@ -81,7 +80,9 @@ fn contains_widget_type(dart_type: &DartType) -> bool {
             if let Some(last) = nt.segments.last() {
                 let name = &last.name;
                 // Only check wrapped type for specific async/wrapper types
-                if (name == "Future" || name == "Stream" || name == "Completer") && !nt.type_args.is_empty() {
+                if (name == "Future" || name == "Stream" || name == "Completer")
+                    && !nt.type_args.is_empty()
+                {
                     // Check if the type argument is a Widget type
                     if let Some(first_arg) = nt.type_args.first() {
                         return is_widget_type(first_arg);
@@ -109,38 +110,38 @@ fn check_class_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &A
         ClassMember::Method(m) => {
             if let Some(ret_type) = &m.return_type
                 && contains_widget_type(ret_type)
-                    && m.name.name != "build"
-                    && !has_override_annotation(&m.annotations)
-                {
-                    diags.push(Diagnostic::new(
-                        "avoid-returning-widgets",
-                        Severity::Warning,
-                        "Methods should not return Widget directly; extract to a separate widget class",
-                        ctx.file_path.to_string_lossy().into_owned(),
-                        DiagSpan {
-                            start: m.name.span.start,
-                            end: m.name.span.end,
-                        },
-                    ));
-                }
+                && m.name.name != "build"
+                && !has_override_annotation(&m.annotations)
+            {
+                diags.push(Diagnostic::new(
+                    "avoid-returning-widgets",
+                    Severity::Warning,
+                    "Methods should not return Widget directly; extract to a separate widget class",
+                    ctx.file_path.to_string_lossy().into_owned(),
+                    DiagSpan {
+                        start: m.name.span.start,
+                        end: m.name.span.end,
+                    },
+                ));
+            }
         }
         ClassMember::Getter(g) => {
             if let Some(ret_type) = &g.return_type
                 && contains_widget_type(ret_type)
-                    && g.name.name != "build"
-                    && !has_override_annotation(&g.annotations)
-                {
-                    diags.push(Diagnostic::new(
-                        "avoid-returning-widgets",
-                        Severity::Warning,
-                        "Getters should not return Widget directly; extract to a separate widget class",
-                        ctx.file_path.to_string_lossy().into_owned(),
-                        DiagSpan {
-                            start: g.span.start,
-                            end: g.span.end,
-                        },
-                    ));
-                }
+                && g.name.name != "build"
+                && !has_override_annotation(&g.annotations)
+            {
+                diags.push(Diagnostic::new(
+                    "avoid-returning-widgets",
+                    Severity::Warning,
+                    "Getters should not return Widget directly; extract to a separate widget class",
+                    ctx.file_path.to_string_lossy().into_owned(),
+                    DiagSpan {
+                        start: g.span.start,
+                        end: g.span.end,
+                    },
+                ));
+            }
         }
         _ => {}
     }

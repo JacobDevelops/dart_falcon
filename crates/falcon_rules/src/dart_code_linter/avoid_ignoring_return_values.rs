@@ -179,18 +179,19 @@ fn check_ignored_return_value(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &An
             if !matches!(
                 field.name.as_str(),
                 "forEach" | "addListener" | "removeListener" | "notifyListeners"
-            ) => {
-                diags.push(Diagnostic::new(
-                    "avoid-ignoring-return-values",
-                    Severity::Warning,
-                    "The return value is not being used",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: expr.span().start,
-                        end: expr.span().end,
-                    },
-                ));
-            }
+            ) =>
+        {
+            diags.push(Diagnostic::new(
+                "avoid-ignoring-return-values",
+                Severity::Warning,
+                "The return value is not being used",
+                ctx.file_path.to_string_lossy().into_owned(),
+                DiagSpan {
+                    start: expr.span().start,
+                    end: expr.span().end,
+                },
+            ));
+        }
         _ => {}
     }
 }
@@ -211,7 +212,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(target, diags, ctx);
             scan_expr(value, diags, ctx);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);

@@ -126,7 +126,10 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                         Severity::Warning,
                         "Both branches of if/else are identical — remove the condition",
                         ctx.file_path.to_string_lossy().into_owned(),
-                        DiagSpan { start: last.start, end: last.end },
+                        DiagSpan {
+                            start: last.start,
+                            end: last.end,
+                        },
                     ));
                 }
             }
@@ -168,7 +171,12 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::Conditional { condition, then_expr, else_expr, span } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            span,
+        } => {
             let then_src = normalize(span_src(ctx.source, then_expr.span()));
             let else_src = normalize(span_src(ctx.source, else_expr.span()));
             if then_src == else_src {
@@ -177,7 +185,10 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                     Severity::Warning,
                     "Both branches of ternary are identical — remove the condition",
                     ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan { start: span.start, end: span.end },
+                    DiagSpan {
+                        start: span.start,
+                        end: span.end,
+                    },
                 ));
             }
             scan_expr(condition, diags, ctx);

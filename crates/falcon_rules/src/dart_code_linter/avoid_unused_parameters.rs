@@ -24,17 +24,19 @@ impl Rule for AvoidUnusedParameters {
                     for member in &class.members {
                         if let ClassMember::Method(method) = member
                             && let Some(body) = &method.body
-                                && method.name.name != "noSuchMethod" {
-                                    check_function_params(&method.params, body, &mut diags, ctx);
-                                }
+                            && method.name.name != "noSuchMethod"
+                        {
+                            check_function_params(&method.params, body, &mut diags, ctx);
+                        }
                     }
                 }
                 TopLevelDecl::Extension(ext) => {
                     for member in &ext.members {
                         if let ClassMember::Method(method) = member
-                            && let Some(body) = &method.body {
-                                check_function_params(&method.params, body, &mut diags, ctx);
-                            }
+                            && let Some(body) = &method.body
+                        {
+                            check_function_params(&method.params, body, &mut diags, ctx);
+                        }
                     }
                 }
                 _ => {}
@@ -176,13 +178,11 @@ impl Rule for AvoidUnusedParameters {
                     Stmt::Expr(expr_stmt) => {
                         collect_from_expr(&expr_stmt.expr, names);
                     }
-                    Stmt::LocalFunc(local_func) => {
-                        match &local_func.body {
-                            FunctionBody::Block(block) => collect_from_stmts(&block.stmts, names),
-                            FunctionBody::Arrow(expr, _) => collect_from_expr(expr, names),
-                            FunctionBody::Native(_, _) => {}
-                        }
-                    }
+                    Stmt::LocalFunc(local_func) => match &local_func.body {
+                        FunctionBody::Block(block) => collect_from_stmts(&block.stmts, names),
+                        FunctionBody::Arrow(expr, _) => collect_from_expr(expr, names),
+                        FunctionBody::Native(_, _) => {}
+                    },
                     _ => {}
                 }
             }
@@ -245,17 +245,21 @@ impl Rule for AvoidUnusedParameters {
                     let chars: Vec<char> = lit.raw.chars().collect();
                     let mut i = 0;
                     while i < chars.len() {
-                        if chars[i] == '$' && i + 1 < chars.len()
-                            && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_') {
-                                let start = i + 1;
-                                let mut end = start;
-                                while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
-                                    end += 1;
-                                }
-                                names.insert(chars[start..end].iter().collect());
-                                i = end;
-                                continue;
+                        if chars[i] == '$'
+                            && i + 1 < chars.len()
+                            && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_')
+                        {
+                            let start = i + 1;
+                            let mut end = start;
+                            while end < chars.len()
+                                && (chars[end].is_alphanumeric() || chars[end] == '_')
+                            {
+                                end += 1;
                             }
+                            names.insert(chars[start..end].iter().collect());
+                            i = end;
+                            continue;
+                        }
                         i += 1;
                     }
                 }
@@ -386,7 +390,9 @@ impl Rule for AvoidUnusedParameters {
                         collect_from_collection_elem(else_el, names);
                     }
                 }
-                CollectionElement::For { iterable, element, .. } => {
+                CollectionElement::For {
+                    iterable, element, ..
+                } => {
                     collect_from_expr(iterable, names);
                     collect_from_collection_elem(element, names);
                 }

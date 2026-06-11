@@ -157,7 +157,11 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::Unary { op: UnaryOp::Bang, operand, span } => {
+        Expr::Unary {
+            op: UnaryOp::Bang,
+            operand,
+            span,
+        } => {
             // Check if operand is also a bang unary
             if is_bang_unary(operand) {
                 // Double negation (or more): emit one diagnostic at this outer bang
@@ -166,12 +170,20 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                     Severity::Warning,
                     "Avoid inverted boolean expressions. Simplify the double negation.",
                     ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan { start: span.start, end: span.end },
+                    DiagSpan {
+                        start: span.start,
+                        end: span.end,
+                    },
                 ));
                 // Skip past all consecutive leading bangs to avoid re-flagging inner bangs
                 let mut current = operand.as_ref();
                 loop {
-                    if let Expr::Unary { op: UnaryOp::Bang, operand: next, .. } = current {
+                    if let Expr::Unary {
+                        op: UnaryOp::Bang,
+                        operand: next,
+                        ..
+                    } = current
+                    {
                         current = next.as_ref();
                     } else {
                         // Found the first non-bang operand, scan from here
@@ -202,7 +214,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(target, diags, ctx);
             scan_expr(value, diags, ctx);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
@@ -235,5 +252,11 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 }
 
 fn is_bang_unary(expr: &Expr) -> bool {
-    matches!(expr, Expr::Unary { op: UnaryOp::Bang, .. })
+    matches!(
+        expr,
+        Expr::Unary {
+            op: UnaryOp::Bang,
+            ..
+        }
+    )
 }

@@ -87,9 +87,10 @@ fn check_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         }
         Stmt::For(for_stmt) => {
             if let Some(ForInit::VarDecl(local)) = &for_stmt.init
-                && local.is_late {
-                    diags.push(make_diag(ctx, &local.span));
-                }
+                && local.is_late
+            {
+                diags.push(make_diag(ctx, &local.span));
+            }
             check_stmt(&for_stmt.body, diags, ctx);
         }
         Stmt::While(s) => check_stmt(&s.body, diags, ctx),
@@ -116,6 +117,9 @@ fn make_diag(ctx: &AnalyzeContext, span: &Span) -> Diagnostic {
         Severity::Warning,
         "Avoid using the late keyword — use nullable types or initialize immediately instead",
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     )
 }

@@ -45,7 +45,9 @@ fn check_ident(ident: &Identifier, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeCon
 }
 
 fn check_params(params: &FormalParamList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for param in params.positional.iter()
+    for param in params
+        .positional
+        .iter()
         .chain(params.optional_positional.iter())
         .chain(params.named.iter())
     {
@@ -158,8 +160,14 @@ fn make_diag(ctx: &AnalyzeContext, span: &Span, name: &str) -> Diagnostic {
     Diagnostic::new(
         "prefer-correct-identifier-length",
         Severity::Warning,
-        format!("Identifier '{}' is too short — use a more descriptive name", name),
+        format!(
+            "Identifier '{}' is too short — use a more descriptive name",
+            name
+        ),
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     )
 }

@@ -85,14 +85,24 @@ fn walk(stmt: &Stmt, nested_in_if: bool, diags: &mut Vec<Diagnostic>, ctx: &Anal
                 }
             }
         }
-        Stmt::Block(b) => b.stmts.iter().for_each(|s| walk(s, nested_in_if, diags, ctx)),
+        Stmt::Block(b) => b
+            .stmts
+            .iter()
+            .for_each(|s| walk(s, nested_in_if, diags, ctx)),
         Stmt::While(w) => walk(&w.body, false, diags, ctx),
         Stmt::DoWhile(d) => walk(&d.body, false, diags, ctx),
         Stmt::For(f) => walk(&f.body, false, diags, ctx),
         Stmt::TryCatch(tc) => {
-            tc.body.stmts.iter().for_each(|s| walk(s, false, diags, ctx));
+            tc.body
+                .stmts
+                .iter()
+                .for_each(|s| walk(s, false, diags, ctx));
             for catch in &tc.catches {
-                catch.body.stmts.iter().for_each(|s| walk(s, false, diags, ctx));
+                catch
+                    .body
+                    .stmts
+                    .iter()
+                    .for_each(|s| walk(s, false, diags, ctx));
             }
             if let Some(fin) = &tc.finally {
                 fin.stmts.iter().for_each(|s| walk(s, false, diags, ctx));

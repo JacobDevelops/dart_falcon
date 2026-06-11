@@ -52,9 +52,10 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
 fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let ClassMember::Method(m) = member
         && m.name.name == "dispose"
-            && let Some(FunctionBody::Block(block)) = &m.body {
-                check_dispose_method(block, diags, ctx);
-            }
+        && let Some(FunctionBody::Block(block)) = &m.body
+    {
+        check_dispose_method(block, diags, ctx);
+    }
 }
 
 fn check_dispose_method(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
@@ -63,24 +64,31 @@ fn check_dispose_method(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &Analyz
 
     for (idx, stmt) in block.stmts.iter().enumerate() {
         if let Stmt::Expr(ExprStmt { expr, .. }) = stmt
-            && is_super_dispose_call(expr) && idx != last_index {
-                // super.dispose() is not the last statement
-                diags.push(Diagnostic::new(
-                    "correct_order_for_super_dispose",
-                    Severity::Warning,
-                    "super.dispose() should be called last in the dispose method.",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan { start: expr.span().start, end: expr.span().end },
-                ));
-            }
+            && is_super_dispose_call(expr)
+            && idx != last_index
+        {
+            // super.dispose() is not the last statement
+            diags.push(Diagnostic::new(
+                "correct_order_for_super_dispose",
+                Severity::Warning,
+                "super.dispose() should be called last in the dispose method.",
+                ctx.file_path.to_string_lossy().into_owned(),
+                DiagSpan {
+                    start: expr.span().start,
+                    end: expr.span().end,
+                },
+            ));
+        }
     }
 }
 
 fn is_super_dispose_call(expr: &Expr) -> bool {
     if let Expr::Call { callee, .. } = expr
         && let Expr::Field { object, field, .. } = callee.as_ref()
-            && matches!(object.as_ref(), Expr::Super { .. }) && field.name == "dispose" {
-                return true;
-            }
+        && matches!(object.as_ref(), Expr::Super { .. })
+        && field.name == "dispose"
+    {
+        return true;
+    }
     false
 }

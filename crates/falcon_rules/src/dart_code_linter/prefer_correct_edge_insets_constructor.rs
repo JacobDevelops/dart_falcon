@@ -129,11 +129,18 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::New { dart_type, args, span, .. } => {
+        Expr::New {
+            dart_type,
+            args,
+            span,
+            ..
+        } => {
             check_edge_insets_only(dart_type, args, span, diags, ctx);
             scan_args(args, diags, ctx);
         }
-        Expr::Call { callee, args, span, .. } => {
+        Expr::Call {
+            callee, args, span, ..
+        } => {
             check_edge_insets_only_call(callee, args, span, diags, ctx);
             scan_expr(callee, diags, ctx);
             scan_args(args, diags, ctx);
@@ -148,7 +155,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(right, diags, ctx);
         }
         Expr::Unary { operand, .. } => scan_expr(operand, diags, ctx),
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
@@ -186,11 +198,20 @@ fn scan_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
     }
 }
 
-fn scan_collection_elem(elem: &CollectionElement, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_collection_elem(
+    elem: &CollectionElement,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
     match elem {
         CollectionElement::Expr(e) => scan_expr(e, diags, ctx),
         CollectionElement::Spread { expr, .. } => scan_expr(expr, diags, ctx),
-        CollectionElement::If { condition, then_elem, else_elem, .. } => {
+        CollectionElement::If {
+            condition,
+            then_elem,
+            else_elem,
+            ..
+        } => {
             if let IfCondition::Expr(e) = condition {
                 scan_expr(e, diags, ctx);
             }
@@ -199,7 +220,9 @@ fn scan_collection_elem(elem: &CollectionElement, diags: &mut Vec<Diagnostic>, c
                 scan_collection_elem(ee, diags, ctx);
             }
         }
-        CollectionElement::For { iterable, element, .. } => {
+        CollectionElement::For {
+            iterable, element, ..
+        } => {
             scan_expr(iterable, diags, ctx);
             scan_collection_elem(element, diags, ctx);
         }
@@ -215,42 +238,53 @@ fn check_edge_insets_only_call(
 ) {
     if let Expr::Field { object, field, .. } = callee
         && let Expr::Ident(ident) = object.as_ref()
-            && ident.name == "EdgeInsets" && field.name == "only" {
-                let should_flag = should_use_better_constructor(args);
-                if should_flag {
-                    let source = ctx.source;
-                    let start_line = source[..span.start].chars().filter(|&c| c == '\n').count();
-                    let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
+        && ident.name == "EdgeInsets"
+        && field.name == "only"
+    {
+        let should_flag = should_use_better_constructor(args);
+        if should_flag {
+            let source = ctx.source;
+            let start_line = source[..span.start].chars().filter(|&c| c == '\n').count();
+            let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
 
-                    let report_span = if start_line == end_line {
-                        // Single line - report at start
-                        DiagSpan { start: span.start, end: span.end }
-                    } else {
-                        // Multi-line - check if opening line contains comment marker
-                        let opening_line_end = source[span.start..]
-                            .find('\n')
-                            .map(|off| span.start + off)
-                            .unwrap_or(source.len());
-                        let opening_line_text = &source[span.start..opening_line_end];
-
-                        if opening_line_text.contains("*/") {
-                            // Comment is on opening line
-                            DiagSpan { start: span.start, end: span.start + 1 }
-                        } else {
-                            // Comment is on closing line
-                            DiagSpan { start: span.end - 1, end: span.end }
-                        }
-                    };
-
-                    diags.push(Diagnostic::new(
-                        "prefer-correct-edge-insets-constructor",
-                        Severity::Warning,
-                        "EdgeInsets.only() should use EdgeInsets.symmetric() or EdgeInsets.all().",
-                        ctx.file_path.to_string_lossy().into_owned(),
-                        report_span,
-                    ));
+            let report_span = if start_line == end_line {
+                // Single line - report at start
+                DiagSpan {
+                    start: span.start,
+                    end: span.end,
                 }
-            }
+            } else {
+                // Multi-line - check if opening line contains comment marker
+                let opening_line_end = source[span.start..]
+                    .find('\n')
+                    .map(|off| span.start + off)
+                    .unwrap_or(source.len());
+                let opening_line_text = &source[span.start..opening_line_end];
+
+                if opening_line_text.contains("*/") {
+                    // Comment is on opening line
+                    DiagSpan {
+                        start: span.start,
+                        end: span.start + 1,
+                    }
+                } else {
+                    // Comment is on closing line
+                    DiagSpan {
+                        start: span.end - 1,
+                        end: span.end,
+                    }
+                }
+            };
+
+            diags.push(Diagnostic::new(
+                "prefer-correct-edge-insets-constructor",
+                Severity::Warning,
+                "EdgeInsets.only() should use EdgeInsets.symmetric() or EdgeInsets.all().",
+                ctx.file_path.to_string_lossy().into_owned(),
+                report_span,
+            ));
+        }
+    }
 }
 
 fn check_edge_insets_only(
@@ -261,18 +295,23 @@ fn check_edge_insets_only(
     ctx: &AnalyzeContext,
 ) {
     if let DartType::Named(nt) = dart_type
-        && nt.segments.len() == 1 && nt.segments[0].name == "EdgeInsets" {
-            let should_flag = should_use_better_constructor(args);
-            if should_flag {
-                diags.push(Diagnostic::new(
-                    "prefer-correct-edge-insets-constructor",
-                    Severity::Warning,
-                    "EdgeInsets.only() should use EdgeInsets.symmetric() or EdgeInsets.all().",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan { start: span.start, end: span.end },
-                ));
-            }
+        && nt.segments.len() == 1
+        && nt.segments[0].name == "EdgeInsets"
+    {
+        let should_flag = should_use_better_constructor(args);
+        if should_flag {
+            diags.push(Diagnostic::new(
+                "prefer-correct-edge-insets-constructor",
+                Severity::Warning,
+                "EdgeInsets.only() should use EdgeInsets.symmetric() or EdgeInsets.all().",
+                ctx.file_path.to_string_lossy().into_owned(),
+                DiagSpan {
+                    start: span.start,
+                    end: span.end,
+                },
+            ));
         }
+    }
 }
 
 fn should_use_better_constructor(args: &ArgList) -> bool {
@@ -293,24 +332,32 @@ fn should_use_better_constructor(args: &ArgList) -> bool {
     }
 
     // Check if all four are present and equal -> should use .all()
-    if let (Some(l), Some(r), Some(t), Some(b)) = (left.clone(), right.clone(), top.clone(), bottom.clone())
-        && l == r && r == t && t == b {
-            return true;
-        }
+    if let (Some(l), Some(r), Some(t), Some(b)) =
+        (left.clone(), right.clone(), top.clone(), bottom.clone())
+        && l == r
+        && r == t
+        && t == b
+    {
+        return true;
+    }
 
     // Check if only top and bottom are present and equal -> should use .symmetric(vertical: ...)
-    if left.is_none() && right.is_none()
+    if left.is_none()
+        && right.is_none()
         && let (Some(t), Some(b)) = (top.clone(), bottom.clone())
-            && t == b {
-                return true;
-            }
+        && t == b
+    {
+        return true;
+    }
 
     // Check if only left and right are present and equal -> should use .symmetric(horizontal: ...)
-    if top.is_none() && bottom.is_none()
+    if top.is_none()
+        && bottom.is_none()
         && let (Some(l), Some(r)) = (left.clone(), right.clone())
-            && l == r {
-                return true;
-            }
+        && l == r
+    {
+        return true;
+    }
 
     false
 }

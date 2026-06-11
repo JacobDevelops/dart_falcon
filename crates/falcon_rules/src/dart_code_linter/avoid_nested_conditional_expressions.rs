@@ -206,30 +206,36 @@ fn visit_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
     }
 }
 
-fn visit_expr(expr: &Expr, inside_nested: bool, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if !inside_nested && is_nested_conditional(expr)
+fn visit_expr(
+    expr: &Expr,
+    inside_nested: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
+    if !inside_nested
+        && is_nested_conditional(expr)
         && let Expr::Conditional {
             span,
             condition,
             then_expr,
             else_expr,
         } = expr
-        {
-            diagnostics.push(Diagnostic::new(
-                "avoid-nested-conditional-expressions",
-                Severity::Warning,
-                "Avoid nested conditional expressions",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
-            ));
-            visit_expr(condition, true, diagnostics, ctx);
-            visit_expr(then_expr, true, diagnostics, ctx);
-            visit_expr(else_expr, true, diagnostics, ctx);
-            return;
-        }
+    {
+        diagnostics.push(Diagnostic::new(
+            "avoid-nested-conditional-expressions",
+            Severity::Warning,
+            "Avoid nested conditional expressions",
+            ctx.file_path.to_string_lossy().into_owned(),
+            DiagSpan {
+                start: span.start,
+                end: span.end,
+            },
+        ));
+        visit_expr(condition, true, diagnostics, ctx);
+        visit_expr(then_expr, true, diagnostics, ctx);
+        visit_expr(else_expr, true, diagnostics, ctx);
+        return;
+    }
 
     match expr {
         Expr::Unary { operand, .. } => {
@@ -278,14 +284,20 @@ fn visit_expr(expr: &Expr, inside_nested: bool, diagnostics: &mut Vec<Diagnostic
                 visit_expr(&named_arg.value, inside_nested, diagnostics, ctx);
             }
         }
-        Expr::Cascade { object, sections, .. } => {
+        Expr::Cascade {
+            object, sections, ..
+        } => {
             visit_expr(object, inside_nested, diagnostics, ctx);
             for section in sections {
                 match &section.op {
                     CascadeOp::Index(idx, _) => visit_expr(idx, inside_nested, diagnostics, ctx),
                     CascadeOp::Call(_, _, args) => {
-                        for a in &args.positional { visit_expr(a, inside_nested, diagnostics, ctx); }
-                        for na in &args.named { visit_expr(&na.value, inside_nested, diagnostics, ctx); }
+                        for a in &args.positional {
+                            visit_expr(a, inside_nested, diagnostics, ctx);
+                        }
+                        for na in &args.named {
+                            visit_expr(&na.value, inside_nested, diagnostics, ctx);
+                        }
                     }
                     CascadeOp::Assign(tgt, _, val) => {
                         visit_expr(tgt, inside_nested, diagnostics, ctx);
@@ -373,7 +385,9 @@ fn visit_collection_element(
                 visit_collection_element(ee, inside_nested, diagnostics, ctx);
             }
         }
-        CollectionElement::For { iterable, element, .. } => {
+        CollectionElement::For {
+            iterable, element, ..
+        } => {
             visit_expr(iterable, inside_nested, diagnostics, ctx);
             visit_collection_element(element, inside_nested, diagnostics, ctx);
         }
@@ -401,7 +415,9 @@ fn contains_conditional(expr: &Expr) -> bool {
         Expr::Conditional { .. } => true,
         Expr::Unary { operand, .. } => contains_conditional(operand),
         Expr::PostfixIncDec { operand, .. } => contains_conditional(operand),
-        Expr::Binary { left, right, .. } => contains_conditional(left) || contains_conditional(right),
+        Expr::Binary { left, right, .. } => {
+            contains_conditional(left) || contains_conditional(right)
+        }
         Expr::Assign { target, value, .. } => {
             contains_conditional(target) || contains_conditional(value)
         }
@@ -427,21 +443,31 @@ fn contains_conditional(expr: &Expr) -> bool {
             }
             false
         }
-        Expr::Cascade { object, sections, .. } => {
+        Expr::Cascade {
+            object, sections, ..
+        } => {
             if contains_conditional(object) {
                 return true;
             }
             for section in sections {
                 match &section.op {
                     CascadeOp::Index(idx, _) => {
-                        if contains_conditional(idx) { return true; }
+                        if contains_conditional(idx) {
+                            return true;
+                        }
                     }
                     CascadeOp::Call(_, _, args) => {
-                        if args.positional.iter().any(contains_conditional) { return true; }
-                        if args.named.iter().any(|na| contains_conditional(&na.value)) { return true; }
+                        if args.positional.iter().any(contains_conditional) {
+                            return true;
+                        }
+                        if args.named.iter().any(|na| contains_conditional(&na.value)) {
+                            return true;
+                        }
                     }
                     CascadeOp::Assign(tgt, _, val) => {
-                        if contains_conditional(tgt) || contains_conditional(val) { return true; }
+                        if contains_conditional(tgt) || contains_conditional(val) {
+                            return true;
+                        }
                     }
                     CascadeOp::Field(_, _) => {}
                 }
@@ -501,9 +527,10 @@ fn contains_conditional(expr: &Expr) -> bool {
             }
             for arm in arms {
                 if let Some(guard) = &arm.guard
-                    && contains_conditional(guard) {
-                        return true;
-                    }
+                    && contains_conditional(guard)
+                {
+                    return true;
+                }
                 if contains_conditional(&arm.body) {
                     return true;
                 }
@@ -526,20 +553,22 @@ fn contains_conditional_in_elem(elem: &CollectionElement) -> bool {
             ..
         } => {
             if let IfCondition::Expr(cond) = condition
-                && contains_conditional(cond) {
-                    return true;
-                }
+                && contains_conditional(cond)
+            {
+                return true;
+            }
             if contains_conditional_in_elem(then_elem) {
                 return true;
             }
             if let Some(ee) = else_elem
-                && contains_conditional_in_elem(ee) {
-                    return true;
-                }
+                && contains_conditional_in_elem(ee)
+            {
+                return true;
+            }
             false
         }
-        CollectionElement::For { iterable, element, .. } => {
-            contains_conditional(iterable) || contains_conditional_in_elem(element)
-        }
+        CollectionElement::For {
+            iterable, element, ..
+        } => contains_conditional(iterable) || contains_conditional_in_elem(element),
     }
 }

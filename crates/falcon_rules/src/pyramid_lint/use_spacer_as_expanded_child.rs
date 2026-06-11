@@ -129,14 +129,22 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::New { dart_type, args, span, .. } => {
+        Expr::New {
+            dart_type,
+            args,
+            span,
+            ..
+        } => {
             if let DartType::Named(nt) = dart_type
-                && nt.segments.len() == 1 {
-                    check_expanded(&nt.segments[0].name, args, span, diags, ctx);
-                }
+                && nt.segments.len() == 1
+            {
+                check_expanded(&nt.segments[0].name, args, span, diags, ctx);
+            }
             scan_args(args, diags, ctx);
         }
-        Expr::Call { callee, args, span, .. } => {
+        Expr::Call {
+            callee, args, span, ..
+        } => {
             if let Expr::Ident(id) = callee.as_ref() {
                 check_expanded(&id.name, args, span, diags, ctx);
             }
@@ -153,7 +161,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(right, diags, ctx);
         }
         Expr::Unary { operand, .. } => scan_expr(operand, diags, ctx),
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
@@ -191,11 +204,20 @@ fn scan_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
     }
 }
 
-fn scan_collection_elem(elem: &CollectionElement, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_collection_elem(
+    elem: &CollectionElement,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
     match elem {
         CollectionElement::Expr(e) => scan_expr(e, diags, ctx),
         CollectionElement::Spread { expr, .. } => scan_expr(expr, diags, ctx),
-        CollectionElement::If { condition, then_elem, else_elem, .. } => {
+        CollectionElement::If {
+            condition,
+            then_elem,
+            else_elem,
+            ..
+        } => {
             if let IfCondition::Expr(e) = condition {
                 scan_expr(e, diags, ctx);
             }
@@ -204,7 +226,9 @@ fn scan_collection_elem(elem: &CollectionElement, diags: &mut Vec<Diagnostic>, c
                 scan_collection_elem(ee, diags, ctx);
             }
         }
-        CollectionElement::For { iterable, element, .. } => {
+        CollectionElement::For {
+            iterable, element, ..
+        } => {
             scan_expr(iterable, diags, ctx);
             scan_collection_elem(element, diags, ctx);
         }
@@ -228,7 +252,10 @@ fn check_expanded(
                 Severity::Warning,
                 "Use Spacer() instead of an Expanded with an empty Container or SizedBox child.",
                 ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan { start: span.start, end: span.end },
+                DiagSpan {
+                    start: span.start,
+                    end: span.end,
+                },
             ));
             return;
         }
@@ -253,9 +280,11 @@ fn is_empty_spacer_widget(expr: &Expr) -> bool {
 /// (`Container(...)`) or an explicit `new`/`const` (`Container(...)`).
 fn widget_construction(expr: &Expr) -> Option<(&str, &ArgList)> {
     match expr {
-        Expr::New { dart_type: DartType::Named(nt), args, .. } if nt.segments.len() == 1 => {
-            Some((nt.segments[0].name.as_str(), args))
-        }
+        Expr::New {
+            dart_type: DartType::Named(nt),
+            args,
+            ..
+        } if nt.segments.len() == 1 => Some((nt.segments[0].name.as_str(), args)),
         Expr::Call { callee, args, .. } => {
             if let Expr::Ident(id) = callee.as_ref() {
                 Some((id.name.as_str(), args))

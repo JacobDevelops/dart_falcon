@@ -146,11 +146,20 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     }
 }
 
-fn scan_collection_elem(elem: &CollectionElement, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_collection_elem(
+    elem: &CollectionElement,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
     match elem {
         CollectionElement::Expr(e) => scan_expr(e, diags, ctx),
         CollectionElement::Spread { expr: e, .. } => scan_expr(e, diags, ctx),
-        CollectionElement::If { condition, then_elem, else_elem, .. } => {
+        CollectionElement::If {
+            condition,
+            then_elem,
+            else_elem,
+            ..
+        } => {
             match condition {
                 IfCondition::Expr(e) => scan_expr(e, diags, ctx),
                 IfCondition::Case(e, _) => scan_expr(e, diags, ctx),
@@ -160,7 +169,9 @@ fn scan_collection_elem(elem: &CollectionElement, diags: &mut Vec<Diagnostic>, c
                 scan_collection_elem(ee, diags, ctx);
             }
         }
-        CollectionElement::For { iterable, element, .. } => {
+        CollectionElement::For {
+            iterable, element, ..
+        } => {
             scan_expr(iterable, diags, ctx);
             scan_collection_elem(element, diags, ctx);
         }
@@ -182,7 +193,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                 scan_expr(&named.value, diags, ctx);
             }
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
@@ -211,7 +227,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                 match elem {
                     CollectionElement::Expr(e) => scan_expr(e, diags, ctx),
                     CollectionElement::Spread { expr: e, .. } => scan_expr(e, diags, ctx),
-                    CollectionElement::If { condition, then_elem, else_elem, .. } => {
+                    CollectionElement::If {
+                        condition,
+                        then_elem,
+                        else_elem,
+                        ..
+                    } => {
                         match condition {
                             IfCondition::Expr(e) => scan_expr(e, diags, ctx),
                             IfCondition::Case(e, _) => scan_expr(e, diags, ctx),
@@ -221,7 +242,9 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                             scan_collection_elem(ee, diags, ctx);
                         }
                     }
-                    CollectionElement::For { iterable, element, .. } => {
+                    CollectionElement::For {
+                        iterable, element, ..
+                    } => {
                         scan_expr(iterable, diags, ctx);
                         scan_collection_elem(element, diags, ctx);
                     }

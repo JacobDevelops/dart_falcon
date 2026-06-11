@@ -18,18 +18,22 @@ impl AvoidUnnecessaryTypeCasts {
                 }) => {
                     if let Some(var_t) = var_type
                         && let DartType::Named(named) = var_t
-                            && !named.is_nullable {
-                                for declarator in declarators {
-                                    var_types.insert(declarator.name.name.clone(), var_t.clone());
-                                }
-                            }
+                        && !named.is_nullable
+                    {
+                        for declarator in declarators {
+                            var_types.insert(declarator.name.name.clone(), var_t.clone());
+                        }
+                    }
                 }
                 Stmt::If(IfStmt {
                     then_branch,
                     else_branch,
                     ..
                 }) => {
-                    if let Stmt::Block(Block { stmts: then_stmts, .. }) = then_branch.as_ref() {
+                    if let Stmt::Block(Block {
+                        stmts: then_stmts, ..
+                    }) = then_branch.as_ref()
+                    {
                         let nested = self.collect_local_vars(then_stmts);
                         var_types.extend(nested);
                     }
@@ -38,10 +42,10 @@ impl AvoidUnnecessaryTypeCasts {
                         && let Stmt::Block(Block {
                             stmts: else_stmts, ..
                         }) = else_stmt.as_ref()
-                        {
-                            let nested = self.collect_local_vars(else_stmts);
-                            var_types.extend(nested);
-                        }
+                    {
+                        let nested = self.collect_local_vars(else_stmts);
+                        var_types.extend(nested);
+                    }
                 }
                 Stmt::Block(Block { stmts, .. }) => {
                     let nested = self.collect_local_vars(stmts);
@@ -59,41 +63,60 @@ impl AvoidUnnecessaryTypeCasts {
         for member in &class.members {
             if let ClassMember::Field(field) = member
                 && let Some(field_type) = &field.field_type
-                    && let DartType::Named(named) = field_type
-                        && !named.is_nullable {
-                            for declarator in &field.declarators {
-                                map.insert(declarator.name.name.clone(), field_type.clone());
-                            }
-                        }
+                && let DartType::Named(named) = field_type
+                && !named.is_nullable
+            {
+                for declarator in &field.declarators {
+                    map.insert(declarator.name.name.clone(), field_type.clone());
+                }
+            }
         }
         map
     }
 
     fn types_match(declared: &DartType, cast_type: &DartType) -> bool {
         if let (DartType::Named(decl), DartType::Named(cast)) = (declared, cast_type) {
-            if decl.is_nullable { return false; }
+            if decl.is_nullable {
+                return false;
+            }
             let decl_name = decl.segments.first().map(|s| s.name.as_str());
             let cast_name = cast.segments.first().map(|s| s.name.as_str());
-            if decl_name != cast_name { return false; }
-            if cast.type_args.len() != decl.type_args.len() { return false; }
-            if cast.type_args.is_empty() { return true; }
-            cast.type_args.iter().zip(decl.type_args.iter()).all(|(c, d)| {
-                if let (DartType::Named(cn), DartType::Named(dn)) = (c, d) {
-                    cn.segments.first().map(|s| s.name.as_str()) == dn.segments.first().map(|s| s.name.as_str())
-                } else {
-                    false
-                }
-            })
+            if decl_name != cast_name {
+                return false;
+            }
+            if cast.type_args.len() != decl.type_args.len() {
+                return false;
+            }
+            if cast.type_args.is_empty() {
+                return true;
+            }
+            cast.type_args
+                .iter()
+                .zip(decl.type_args.iter())
+                .all(|(c, d)| {
+                    if let (DartType::Named(cn), DartType::Named(dn)) = (c, d) {
+                        cn.segments.first().map(|s| s.name.as_str())
+                            == dn.segments.first().map(|s| s.name.as_str())
+                    } else {
+                        false
+                    }
+                })
         } else {
             false
         }
     }
 
-    fn check_as_expr(&self, expr: &Expr, dart_type: &DartType, var_types: &HashMap<String, DartType>) -> bool {
+    fn check_as_expr(
+        &self,
+        expr: &Expr,
+        dart_type: &DartType,
+        var_types: &HashMap<String, DartType>,
+    ) -> bool {
         if let Expr::Ident(Identifier { name, .. }) = expr
-            && let Some(declared) = var_types.get(name) {
-                return Self::types_match(declared, dart_type);
-            }
+            && let Some(declared) = var_types.get(name)
+        {
+            return Self::types_match(declared, dart_type);
+        }
         false
     }
 
@@ -140,7 +163,9 @@ impl AvoidUnnecessaryTypeCasts {
                     self.visit_exprs(&named_arg.value, f);
                 }
             }
-            Expr::Cascade { object, sections, .. } => {
+            Expr::Cascade {
+                object, sections, ..
+            } => {
                 self.visit_exprs(object, f);
                 for section in sections {
                     match &section.op {
@@ -304,12 +329,16 @@ impl AvoidUnnecessaryTypeCasts {
                     }
                     self.visit_stmts(&[body.as_ref().clone()], f);
                 }
-                Stmt::While(WhileStmt { condition, body, .. }) => {
+                Stmt::While(WhileStmt {
+                    condition, body, ..
+                }) => {
                     let mut expr_visitor = |_: &Expr| {};
                     self.visit_exprs(condition, &mut expr_visitor);
                     self.visit_stmts(&[body.as_ref().clone()], f);
                 }
-                Stmt::DoWhile(DoWhileStmt { body, condition, .. }) => {
+                Stmt::DoWhile(DoWhileStmt {
+                    body, condition, ..
+                }) => {
                     self.visit_stmts(&[body.as_ref().clone()], f);
                     let mut expr_visitor = |_: &Expr| {};
                     self.visit_exprs(condition, &mut expr_visitor);

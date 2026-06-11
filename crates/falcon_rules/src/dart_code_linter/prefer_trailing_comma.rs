@@ -27,7 +27,10 @@ fn has_trailing_comma(source: &str, args_span: &Span) -> bool {
     // args_span covers `(arg1, arg2)` inclusive
     // closing `)` is at args_span.end - 1; scan backwards past whitespace
     let bytes = source.as_bytes();
-    let close = args_span.end.saturating_sub(1).min(source.len().saturating_sub(1));
+    let close = args_span
+        .end
+        .saturating_sub(1)
+        .min(source.len().saturating_sub(1));
     let mut i = close;
     // Walk backwards past whitespace
     while i > args_span.start {
@@ -59,7 +62,10 @@ fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext)
         Severity::Warning,
         "Add a trailing comma to the argument list",
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: diag_pos, end: args.span.end },
+        DiagSpan {
+            start: diag_pos,
+            end: args.span.end,
+        },
     ));
 }
 
@@ -185,7 +191,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(target, diags, ctx);
             scan_expr(value, diags, ctx);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);

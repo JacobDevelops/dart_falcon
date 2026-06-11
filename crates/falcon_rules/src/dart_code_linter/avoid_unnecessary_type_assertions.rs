@@ -26,17 +26,32 @@ impl Rule for AvoidUnnecessaryTypeAssertions {
                         match member {
                             ClassMember::Method(method) => {
                                 if let Some(body) = &method.body {
-                                    analyze_function_body_with_scope(body, &field_scope, &mut diags, ctx);
+                                    analyze_function_body_with_scope(
+                                        body,
+                                        &field_scope,
+                                        &mut diags,
+                                        ctx,
+                                    );
                                 }
                             }
                             ClassMember::Getter(getter) => {
                                 if let Some(body) = &getter.body {
-                                    analyze_function_body_with_scope(body, &field_scope, &mut diags, ctx);
+                                    analyze_function_body_with_scope(
+                                        body,
+                                        &field_scope,
+                                        &mut diags,
+                                        ctx,
+                                    );
                                 }
                             }
                             ClassMember::Constructor(ctor) => {
                                 if let Some(body) = &ctor.body {
-                                    analyze_function_body_with_scope(body, &field_scope, &mut diags, ctx);
+                                    analyze_function_body_with_scope(
+                                        body,
+                                        &field_scope,
+                                        &mut diags,
+                                        ctx,
+                                    );
                                 }
                             }
                             _ => {}
@@ -56,21 +71,18 @@ fn collect_class_fields(class_decl: &ClassDecl) -> HashMap<String, DartType> {
     for member in &class_decl.members {
         if let ClassMember::Field(field) = member
             && let Some(field_type) = &field.field_type
-                && let DartType::Named(named) = field_type
-                    && !named.is_nullable {
-                        for declarator in &field.declarators {
-                            map.insert(declarator.name.name.clone(), field_type.clone());
-                        }
-                    }
+            && let DartType::Named(named) = field_type
+            && !named.is_nullable
+        {
+            for declarator in &field.declarators {
+                map.insert(declarator.name.name.clone(), field_type.clone());
+            }
+        }
     }
     map
 }
 
-fn analyze_function_body(
-    body: &FunctionBody,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
+fn analyze_function_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     analyze_function_body_with_scope(body, &HashMap::new(), diags, ctx);
 }
 
@@ -94,11 +106,7 @@ fn analyze_function_body_with_scope(
     }
 }
 
-fn analyze_block(
-    block: &Block,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
+fn analyze_block(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     let mut scope_map: HashMap<String, DartType> = HashMap::new();
     for stmt in &block.stmts {
         analyze_statement(stmt, &mut scope_map, diags, ctx);
@@ -109,13 +117,15 @@ fn type_args_match(declared_args: &[DartType], cast_args: &[DartType]) -> bool {
     if cast_args.is_empty() {
         return true;
     }
-    declared_args.len() == cast_args.len() && declared_args.iter().zip(cast_args.iter()).all(|(x, y)| {
-        if let (DartType::Named(xn), DartType::Named(yn)) = (x, y) {
-            xn.segments.first().map(|s| s.name.as_str()) == yn.segments.first().map(|s| s.name.as_str())
-        } else {
-            false
-        }
-    })
+    declared_args.len() == cast_args.len()
+        && declared_args.iter().zip(cast_args.iter()).all(|(x, y)| {
+            if let (DartType::Named(xn), DartType::Named(yn)) = (x, y) {
+                xn.segments.first().map(|s| s.name.as_str())
+                    == yn.segments.first().map(|s| s.name.as_str())
+            } else {
+                false
+            }
+        })
 }
 
 fn analyze_statement(
@@ -128,11 +138,12 @@ fn analyze_statement(
         Stmt::LocalVar(local_var) => {
             if let Some(var_type) = &local_var.var_type
                 && let DartType::Named(named) = var_type
-                    && !named.is_nullable {
-                        for declarator in &local_var.declarators {
-                            scope_map.insert(declarator.name.name.clone(), var_type.clone());
-                        }
-                    }
+                && !named.is_nullable
+            {
+                for declarator in &local_var.declarators {
+                    scope_map.insert(declarator.name.name.clone(), var_type.clone());
+                }
+            }
             for declarator in &local_var.declarators {
                 if let Some(init) = &declarator.initializer {
                     analyze_expression(init, scope_map, diags, ctx);
@@ -232,30 +243,31 @@ fn analyze_expression(
         } => {
             if let Expr::Ident(ident) = &**operand
                 && let DartType::Named(cast_named) = dart_type
-                    && let Some(declared) = scope_map.get(&ident.name)
-                        && let DartType::Named(declared_named) = declared
-                            && !declared_named.is_nullable {
-                                let decl_name = declared_named.segments.first().map(|s| s.name.as_str());
-                                let cast_name = cast_named.segments.first().map(|s| s.name.as_str());
-                                if decl_name == cast_name && type_args_match(&declared_named.type_args, &cast_named.type_args) {
-                                    diags.push(Diagnostic::new(
-                                        "avoid-unnecessary-type-assertions",
-                                        Severity::Warning,
-                                        "Unnecessary type assertion — variable is already known to be this type",
-                                        ctx.file_path.to_string_lossy().into_owned(),
-                                        DiagSpan {
-                                            start: span.start,
-                                            end: span.end,
-                                        },
-                                    ));
-                                }
-                            }
+                && let Some(declared) = scope_map.get(&ident.name)
+                && let DartType::Named(declared_named) = declared
+                && !declared_named.is_nullable
+            {
+                let decl_name = declared_named.segments.first().map(|s| s.name.as_str());
+                let cast_name = cast_named.segments.first().map(|s| s.name.as_str());
+                if decl_name == cast_name
+                    && type_args_match(&declared_named.type_args, &cast_named.type_args)
+                {
+                    diags.push(Diagnostic::new(
+                        "avoid-unnecessary-type-assertions",
+                        Severity::Warning,
+                        "Unnecessary type assertion — variable is already known to be this type",
+                        ctx.file_path.to_string_lossy().into_owned(),
+                        DiagSpan {
+                            start: span.start,
+                            end: span.end,
+                        },
+                    ));
+                }
+            }
 
             analyze_expression(operand, scope_map, diags, ctx);
         }
-        Expr::Binary {
-            left, right, ..
-        } => {
+        Expr::Binary { left, right, .. } => {
             analyze_expression(left, scope_map, diags, ctx);
             analyze_expression(right, scope_map, diags, ctx);
         }
@@ -275,20 +287,14 @@ fn analyze_expression(
         Expr::PostfixIncDec { operand, .. } => {
             analyze_expression(operand, scope_map, diags, ctx);
         }
-        Expr::Assign {
-            target,
-            value,
-            ..
-        } => {
+        Expr::Assign { target, value, .. } => {
             analyze_expression(target, scope_map, diags, ctx);
             analyze_expression(value, scope_map, diags, ctx);
         }
         Expr::Field { object, .. } => {
             analyze_expression(object, scope_map, diags, ctx);
         }
-        Expr::Index {
-            object, index, ..
-        } => {
+        Expr::Index { object, index, .. } => {
             analyze_expression(object, scope_map, diags, ctx);
             analyze_expression(index, scope_map, diags, ctx);
         }
@@ -301,7 +307,9 @@ fn analyze_expression(
                 analyze_expression(&named_arg.value, scope_map, diags, ctx);
             }
         }
-        Expr::Cascade { object, sections, .. } => {
+        Expr::Cascade {
+            object, sections, ..
+        } => {
             analyze_expression(object, scope_map, diags, ctx);
             for section in sections {
                 match &section.op {

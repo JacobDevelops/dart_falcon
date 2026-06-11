@@ -32,7 +32,10 @@ fn flag_literal(value: &str, span: &Span, diags: &mut Vec<Diagnostic>, ctx: &Ana
             Severity::Warning,
             "Avoid using magic numbers. Define a named constant instead.",
             ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan { start: span.start, end: span.end },
+            DiagSpan {
+                start: span.start,
+                end: span.end,
+            },
         ));
     }
 }
@@ -103,7 +106,13 @@ fn scan_declarators(
 fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match member {
         ClassMember::Field(f) => {
-            scan_declarators(&f.declarators, f.is_const, f.field_type.is_some(), diags, ctx);
+            scan_declarators(
+                &f.declarators,
+                f.is_const,
+                f.field_type.is_some(),
+                diags,
+                ctx,
+            );
         }
         ClassMember::Method(m) => {
             if let Some(body) = &m.body {
@@ -157,7 +166,13 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             }
         }
         Stmt::LocalVar(lv) => {
-            scan_declarators(&lv.declarators, lv.is_const, lv.var_type.is_some(), diags, ctx);
+            scan_declarators(
+                &lv.declarators,
+                lv.is_const,
+                lv.var_type.is_some(),
+                diags,
+                ctx,
+            );
         }
         Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx),
         Stmt::If(i) => {
@@ -234,7 +249,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(target, diags, ctx);
             scan_expr(value, diags, ctx);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);

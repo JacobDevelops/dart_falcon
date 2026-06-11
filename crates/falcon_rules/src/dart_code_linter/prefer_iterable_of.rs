@@ -2,11 +2,11 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
-pub struct PreferIterableAny;
+pub struct PreferIterableOf;
 
-impl Rule for PreferIterableAny {
+impl Rule for PreferIterableOf {
     fn name(&self) -> &'static str {
-        "prefer_iterable_any"
+        "prefer-iterable-of"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -18,33 +18,61 @@ impl Rule for PreferIterableAny {
     }
 }
 
-fn is_where_is_not_empty(expr: &Expr) -> Option<Span> {
-    // Match: something.where(...).isNotEmpty
-    if let Expr::Field {
-        object,
-        field,
-        span,
-        ..
-    } = expr
-        && field.name == "isNotEmpty"
-        && let Expr::Call { callee, .. } = &**object
-        && let Expr::Field {
-            object: _where_object,
-            field: where_field,
-            ..
-        } = &**callee
-        && where_field.name == "where"
+fn is_iterable_base(name: &str) -> bool {
+    name == "List" || name == "Set" || name == "Iterable"
+}
+
+/// True for the `Expr::New` form, `new List.from(...)` / `new Set.from(...)`.
+///
+/// The parser may represent this two ways depending on how the named constructor binds:
+///   * `dart_type = List`, `constructor_name = Some("from")`, or
+///   * the `.from` is folded into the qualified type name, giving
+///     `dart_type = Named { segments: [.., "List", "from"] }`, `constructor_name = None`.
+fn is_from_constructor(dart_type: &DartType, constructor_name: &Option<Identifier>) -> bool {
+    let DartType::Named(nt) = dart_type else {
+        return false;
+    };
+    // Case A: `.from` kept as a separate named constructor.
+    if let Some(ctor) = constructor_name
+        && ctor.name == "from"
+        && let Some(last) = nt.segments.last()
     {
-        return Some(span.clone());
+        return is_iterable_base(&last.name);
     }
-    None
+    // Case B: `.from` folded into the qualified type name -> [.., base, "from"].
+    let segs = &nt.segments;
+    segs.len() >= 2
+        && segs.last().is_some_and(|s| s.name == "from")
+        && is_iterable_base(&segs[segs.len() - 2].name)
+}
+
+/// Resolve the base type name of a receiver expression.
+/// `List`            -> `Expr::Ident("List")`
+/// `List<int>`       -> `Expr::Call { callee: Ident("List"), type_args: [int], .. }` (type instantiation)
+fn base_type_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Ident(id) => Some(id.name.as_str()),
+        Expr::Call { callee, .. } => base_type_name(callee),
+        _ => None,
+    }
+}
+
+/// True for `List.from(...)` / `List<int>.from(...)` parsed as `Call(Field(receiver, "from"), args)`.
+fn is_from_static_call(callee: &Expr) -> bool {
+    if let Expr::Field { object, field, .. } = callee
+        && field.name == "from"
+        && let Some(base) = base_type_name(object)
+    {
+        return is_iterable_base(base);
+    }
+    false
 }
 
 fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     diags.push(Diagnostic::new(
-        "prefer_iterable_any",
+        "prefer-iterable-of",
         Severity::Warning,
-        "Use .any() instead of .where().isNotEmpty.",
+        "Prefer using the 'of' constructor instead of 'from'.",
         ctx.file_path.to_string_lossy().into_owned(),
         DiagSpan {
             start: span.start,
@@ -75,28 +103,53 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
                 scan_member(m, diags, ctx);
             }
         }
+        TopLevelDecl::Variable(v) => {
+            for d in &v.declarators {
+                if let Some(init) = &d.initializer {
+                    scan_expr(init, diags, ctx);
+                }
+            }
+        }
         _ => {}
     }
 }
 
 fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let body = match member {
-        ClassMember::Method(m) => m.body.as_ref(),
-        ClassMember::Constructor(c) => c.body.as_ref(),
-        ClassMember::Getter(g) => g.body.as_ref(),
-        ClassMember::Setter(s) => s.body.as_ref(),
-        _ => None,
-    };
-    if let Some(b) = body {
-        scan_body(b, diags, ctx);
+    match member {
+        ClassMember::Field(f) => {
+            for d in &f.declarators {
+                if let Some(init) = &d.initializer {
+                    scan_expr(init, diags, ctx);
+                }
+            }
+        }
+        ClassMember::Method(m) => {
+            if let Some(body) = &m.body {
+                scan_body(body, diags, ctx);
+            }
+        }
+        ClassMember::Constructor(c) => {
+            if let Some(body) = &c.body {
+                scan_body(body, diags, ctx);
+            }
+        }
+        ClassMember::Getter(g) => {
+            if let Some(body) = &g.body {
+                scan_body(body, diags, ctx);
+            }
+        }
+        ClassMember::Setter(s) => {
+            if let Some(body) = &s.body {
+                scan_body(body, diags, ctx);
+            }
+        }
+        _ => {}
     }
 }
 
 fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match body {
-        FunctionBody::Block(b) => {
-            scan_stmts(&b.stmts, diags, ctx);
-        }
+        FunctionBody::Block(b) => scan_stmts(&b.stmts, diags, ctx),
         FunctionBody::Arrow(e, _) => scan_expr(e, diags, ctx),
         FunctionBody::Native(_, _) => {}
     }
@@ -110,9 +163,7 @@ fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext)
 
 fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match stmt {
-        Stmt::Block(b) => {
-            scan_stmts(&b.stmts, diags, ctx);
-        }
+        Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx),
         Stmt::Expr(e) => scan_expr(&e.expr, diags, ctx),
         Stmt::Return(r) => {
             if let Some(v) = &r.value {
@@ -171,13 +222,32 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 }
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if let Some(span) = is_where_is_not_empty(expr) {
-        flag(&span, diags, ctx);
-    }
-
     match expr {
+        Expr::New {
+            is_const: _,
+            dart_type,
+            constructor_name,
+            args,
+            span,
+        } => {
+            if is_from_constructor(dart_type, constructor_name) {
+                flag(span, diags, ctx);
+            }
+            // Recurse into arguments
+            for arg in &args.positional {
+                scan_expr(arg, diags, ctx);
+            }
+            for named in &args.named {
+                scan_expr(&named.value, diags, ctx);
+            }
+        }
         Expr::FuncExpr { body, .. } => scan_body(body, diags, ctx),
-        Expr::Call { callee, args, .. } => {
+        Expr::Call {
+            callee, args, span, ..
+        } => {
+            if is_from_static_call(callee) {
+                flag(span, diags, ctx);
+            }
             scan_expr(callee, diags, ctx);
             for arg in &args.positional {
                 scan_expr(arg, diags, ctx);
@@ -206,6 +276,11 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
         }
+        Expr::Assign { target, value, .. } => {
+            scan_expr(target, diags, ctx);
+            scan_expr(value, diags, ctx);
+        }
+        Expr::Await { expr: inner, .. } => scan_expr(inner, diags, ctx),
         _ => {}
     }
 }

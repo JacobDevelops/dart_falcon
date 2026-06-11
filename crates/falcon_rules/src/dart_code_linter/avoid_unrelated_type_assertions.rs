@@ -8,13 +8,28 @@ pub struct AvoidUnrelatedTypeAssertions;
 impl AvoidUnrelatedTypeAssertions {
     fn is_incompatible_type(&self, literal_category: &str, type_name: &str) -> bool {
         match literal_category {
-            "String" => matches!(type_name, "int" | "double" | "bool" | "List" | "Map" | "Set"),
-            "int" => matches!(type_name, "String" | "bool" | "List" | "Map" | "Set" | "double"),
-            "double" => matches!(type_name, "String" | "bool" | "List" | "Map" | "Set" | "int"),
-            "bool" => matches!(type_name, "String" | "int" | "double" | "List" | "Map" | "Set"),
+            "String" => matches!(
+                type_name,
+                "int" | "double" | "bool" | "List" | "Map" | "Set"
+            ),
+            "int" => matches!(
+                type_name,
+                "String" | "bool" | "List" | "Map" | "Set" | "double"
+            ),
+            "double" => matches!(
+                type_name,
+                "String" | "bool" | "List" | "Map" | "Set" | "int"
+            ),
+            "bool" => matches!(
+                type_name,
+                "String" | "int" | "double" | "List" | "Map" | "Set"
+            ),
             "List" => matches!(type_name, "String" | "int" | "double" | "bool" | "Map"),
             "Map" => matches!(type_name, "String" | "int" | "double" | "bool" | "List"),
-            "Set" => matches!(type_name, "String" | "int" | "double" | "bool" | "List" | "Map"),
+            "Set" => matches!(
+                type_name,
+                "String" | "int" | "double" | "bool" | "List" | "Map"
+            ),
             _ => false,
         }
     }
@@ -34,9 +49,7 @@ impl AvoidUnrelatedTypeAssertions {
 
     fn get_first_segment(dart_type: &DartType) -> Option<String> {
         match dart_type {
-            DartType::Named(named) => {
-                named.segments.first().map(|first| first.name.clone())
-            }
+            DartType::Named(named) => named.segments.first().map(|first| first.name.clone()),
             _ => None,
         }
     }
@@ -66,14 +79,16 @@ impl AvoidUnrelatedTypeAssertions {
                 }) => {
                     for declarator in declarators {
                         if let Some(init_expr) = &declarator.initializer
-                            && let Some(inferred) = Self::infer_type_from_expr(init_expr) {
-                                var_types.insert(declarator.name.name.clone(), inferred);
-                            }
+                            && let Some(inferred) = Self::infer_type_from_expr(init_expr)
+                        {
+                            var_types.insert(declarator.name.name.clone(), inferred);
+                        }
 
                         if let Some(var_t) = var_type
-                            && let Some(type_name) = Self::get_first_segment(var_t) {
-                                var_types.insert(declarator.name.name.clone(), type_name);
-                            }
+                            && let Some(type_name) = Self::get_first_segment(var_t)
+                        {
+                            var_types.insert(declarator.name.name.clone(), type_name);
+                        }
                     }
                 }
                 Stmt::If(IfStmt {
@@ -81,7 +96,10 @@ impl AvoidUnrelatedTypeAssertions {
                     else_branch,
                     ..
                 }) => {
-                    if let Stmt::Block(Block { stmts: then_stmts, .. }) = then_branch.as_ref() {
+                    if let Stmt::Block(Block {
+                        stmts: then_stmts, ..
+                    }) = then_branch.as_ref()
+                    {
                         let nested = self.collect_local_vars(then_stmts);
                         var_types.extend(nested);
                     }
@@ -90,10 +108,10 @@ impl AvoidUnrelatedTypeAssertions {
                         && let Stmt::Block(Block {
                             stmts: else_stmts, ..
                         }) = else_stmt.as_ref()
-                        {
-                            let nested = self.collect_local_vars(else_stmts);
-                            var_types.extend(nested);
-                        }
+                    {
+                        let nested = self.collect_local_vars(else_stmts);
+                        var_types.extend(nested);
+                    }
                 }
                 Stmt::Block(Block { stmts, .. }) => {
                     let nested = self.collect_local_vars(stmts);
@@ -106,17 +124,24 @@ impl AvoidUnrelatedTypeAssertions {
         var_types
     }
 
-    fn check_is_expr(&self, expr: &Expr, dart_type: &DartType, var_types: &HashMap<String, String>) -> bool {
+    fn check_is_expr(
+        &self,
+        expr: &Expr,
+        dart_type: &DartType,
+        var_types: &HashMap<String, String>,
+    ) -> bool {
         if let Some(category) = Self::get_literal_category(expr)
-            && let Some(type_name) = Self::get_first_segment(dart_type) {
-                return self.is_incompatible_type(category, &type_name);
-            }
+            && let Some(type_name) = Self::get_first_segment(dart_type)
+        {
+            return self.is_incompatible_type(category, &type_name);
+        }
 
         if let Expr::Ident(Identifier { name, .. }) = expr
             && let Some(var_type) = var_types.get(name)
-                && let Some(assert_type) = Self::get_first_segment(dart_type) {
-                    return self.is_incompatible_type(var_type, &assert_type);
-                }
+            && let Some(assert_type) = Self::get_first_segment(dart_type)
+        {
+            return self.is_incompatible_type(var_type, &assert_type);
+        }
 
         false
     }
@@ -164,7 +189,9 @@ impl AvoidUnrelatedTypeAssertions {
                     self.visit_exprs(&named_arg.value, f);
                 }
             }
-            Expr::Cascade { object, sections, .. } => {
+            Expr::Cascade {
+                object, sections, ..
+            } => {
                 self.visit_exprs(object, f);
                 for section in sections {
                     match &section.op {
@@ -328,12 +355,16 @@ impl AvoidUnrelatedTypeAssertions {
                     }
                     self.visit_stmts(&[body.as_ref().clone()], f);
                 }
-                Stmt::While(WhileStmt { condition, body, .. }) => {
+                Stmt::While(WhileStmt {
+                    condition, body, ..
+                }) => {
                     let mut expr_visitor = |_: &Expr| {};
                     self.visit_exprs(condition, &mut expr_visitor);
                     self.visit_stmts(&[body.as_ref().clone()], f);
                 }
-                Stmt::DoWhile(DoWhileStmt { body, condition, .. }) => {
+                Stmt::DoWhile(DoWhileStmt {
+                    body, condition, ..
+                }) => {
                     self.visit_stmts(&[body.as_ref().clone()], f);
                     let mut expr_visitor = |_: &Expr| {};
                     self.visit_exprs(condition, &mut expr_visitor);

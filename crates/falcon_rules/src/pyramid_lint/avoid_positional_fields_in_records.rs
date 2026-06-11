@@ -26,7 +26,10 @@ fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Severity::Warning,
         MESSAGE,
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     ));
 }
 
@@ -90,9 +93,11 @@ fn check_declarators(
 ) {
     for d in declarators {
         if let Some(init) = &d.initializer
-            && !has_type && record_literal_has_positional(init) {
-                flag(init.span(), diags, ctx);
-            }
+            && !has_type
+            && record_literal_has_positional(init)
+        {
+            flag(init.span(), diags, ctx);
+        }
     }
 }
 

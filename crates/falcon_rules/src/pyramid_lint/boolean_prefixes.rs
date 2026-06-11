@@ -27,7 +27,10 @@ fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Severity::Warning,
         MESSAGE,
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     ));
 }
 
@@ -45,7 +48,12 @@ fn has_valid_boolean_prefix(name: &str) -> bool {
 }
 
 /// Flag a declared name when its type is `bool` and the name lacks an accepted prefix.
-fn check_named(ty: Option<&DartType>, name: &Identifier, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn check_named(
+    ty: Option<&DartType>,
+    name: &Identifier,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
     if is_bool_type(ty) && !has_valid_boolean_prefix(&name.name) {
         flag(&name.span, diags, ctx);
     }

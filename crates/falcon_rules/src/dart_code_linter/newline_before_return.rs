@@ -43,15 +43,19 @@ fn has_blank_line_before(source: &str, pos: usize) -> bool {
 fn check_stmts_for_return(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     for stmt in stmts.iter().skip(1) {
         if let Stmt::Return(ret) = stmt
-            && !has_blank_line_before(ctx.source, ret.span.start) {
-                diags.push(Diagnostic::new(
-                    "newline-before-return",
-                    Severity::Warning,
-                    "Add a blank line before return statement",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan { start: ret.span.start, end: ret.span.end },
-                ));
-            }
+            && !has_blank_line_before(ctx.source, ret.span.start)
+        {
+            diags.push(Diagnostic::new(
+                "newline-before-return",
+                Severity::Warning,
+                "Add a blank line before return statement",
+                ctx.file_path.to_string_lossy().into_owned(),
+                DiagSpan {
+                    start: ret.span.start,
+                    end: ret.span.end,
+                },
+            ));
+        }
     }
 }
 

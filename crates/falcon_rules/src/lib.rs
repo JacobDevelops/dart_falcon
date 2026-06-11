@@ -64,6 +64,10 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(dart_code_linter::prefer_correct_edge_insets_constructor::PreferCorrectEdgeInsetsConstructor),
         Box::new(dart_code_linter::avoid_returning_widgets::AvoidReturningWidgets),
         Box::new(dart_code_linter::prefer_extracting_callbacks::PreferExtractingCallbacks),
+        // Audit gap-fill — dart_code_linter rules named in plan M4.3/M4.5
+        Box::new(dart_code_linter::prefer_iterable_of::PreferIterableOf),
+        Box::new(dart_code_linter::prefer_correct_type_name::PreferCorrectTypeName),
+        Box::new(dart_code_linter::use_design_system_item::UseDesignSystemItem),
         // M4.6 — pyramid_lint
         Box::new(pyramid_lint::use_spacer_as_expanded_child::UseSpacerAsExpandedChild),
         Box::new(pyramid_lint::prefer_dedicated_media_query_methods::PreferDedicatedMediaQueryMethods),

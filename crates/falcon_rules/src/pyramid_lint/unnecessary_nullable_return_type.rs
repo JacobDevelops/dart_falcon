@@ -23,10 +23,11 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         TopLevelDecl::Function(f) => {
             if let Some(return_type) = &f.return_type
                 && is_nullable_type(return_type)
-                    && let Some(body) = &f.body
-                        && !body_can_return_null(body) {
-                            flag_return_type(return_type, diags, ctx);
-                        }
+                && let Some(body) = &f.body
+                && !body_can_return_null(body)
+            {
+                flag_return_type(return_type, diags, ctx);
+            }
         }
         TopLevelDecl::Class(c) => {
             for m in &c.members {
@@ -52,17 +53,19 @@ fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
         ClassMember::Method(m) => {
             if let Some(return_type) = &m.return_type
                 && is_nullable_type(return_type)
-                    && let Some(body) = &m.body
-                        && !body_can_return_null(body) {
-                            flag_return_type(return_type, diags, ctx);
-                        }
+                && let Some(body) = &m.body
+                && !body_can_return_null(body)
+            {
+                flag_return_type(return_type, diags, ctx);
+            }
         }
         ClassMember::Getter(g) => {
             if let Some(body) = &g.body
-                && !body_can_return_null(body) {
-                    // Getter return type must be inferred from the return value or body expression
-                    // For now, we'll skip getters since they don't have explicit return types
-                }
+                && !body_can_return_null(body)
+            {
+                // Getter return type must be inferred from the return value or body expression
+                // For now, we'll skip getters since they don't have explicit return types
+            }
         }
         _ => {}
     }
@@ -133,9 +136,10 @@ fn stmts_can_return_null(stmts: &[Stmt]) -> bool {
                     }
                 }
                 if let Some(fin) = &tc.finally
-                    && stmts_can_return_null(&fin.stmts) {
-                        return true;
-                    }
+                    && stmts_can_return_null(&fin.stmts)
+                {
+                    return true;
+                }
             }
             Stmt::While(w) => {
                 if stmts_can_return_null_from_stmt(&w.body) {
@@ -152,10 +156,9 @@ fn stmts_can_return_null(stmts: &[Stmt]) -> bool {
                     return true;
                 }
             }
-            Stmt::Switch(s)
-                if switch_can_return_null(s) => {
-                    return true;
-                }
+            Stmt::Switch(s) if switch_can_return_null(s) => {
+                return true;
+            }
             _ => {}
         }
     }
@@ -208,6 +211,9 @@ fn flag_return_type(ty: &DartType, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeCon
         Severity::Warning,
         "Function return type is unnecessarily nullable",
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     ));
 }

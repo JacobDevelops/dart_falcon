@@ -108,14 +108,22 @@ fn check_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn check_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::Index { object, index, span, .. } => {
+        Expr::Index {
+            object,
+            index,
+            span,
+            ..
+        } => {
             if is_zero(index) {
                 diags.push(Diagnostic::new(
                     "prefer-first",
                     Severity::Warning,
                     "Prefer .first over [0] to access the first element",
                     ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan { start: span.start, end: span.end },
+                    DiagSpan {
+                        start: span.start,
+                        end: span.end,
+                    },
                 ));
             }
             check_expr(object, diags, ctx);
@@ -132,7 +140,12 @@ fn check_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             check_expr(left, diags, ctx);
             check_expr(right, diags, ctx);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             check_expr(condition, diags, ctx);
             check_expr(then_expr, diags, ctx);
             check_expr(else_expr, diags, ctx);

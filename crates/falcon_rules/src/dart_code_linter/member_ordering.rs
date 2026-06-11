@@ -39,7 +39,10 @@ fn member_category(member: &ClassMember) -> u8 {
         ClassMember::Method(m) if m.is_static => 4,
         ClassMember::Getter(g) if g.is_static => 4,
         ClassMember::Setter(s) if s.is_static => 4,
-        ClassMember::Method(_) | ClassMember::Getter(_) | ClassMember::Setter(_) | ClassMember::Operator(_) => 5,
+        ClassMember::Method(_)
+        | ClassMember::Getter(_)
+        | ClassMember::Setter(_)
+        | ClassMember::Operator(_) => 5,
         ClassMember::Error(_) => u8::MAX,
     }
 }

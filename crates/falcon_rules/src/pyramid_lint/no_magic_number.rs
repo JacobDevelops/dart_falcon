@@ -34,7 +34,10 @@ fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Severity::Warning,
         "Avoid magic numbers. Extract this value into a named constant.",
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     ));
 }
 
@@ -173,7 +176,11 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Stmt::TryCatch(tc) => {
             tc.body.stmts.iter().for_each(|s| scan_stmt(s, diags, ctx));
             for catch in &tc.catches {
-                catch.body.stmts.iter().for_each(|s| scan_stmt(s, diags, ctx));
+                catch
+                    .body
+                    .stmts
+                    .iter()
+                    .for_each(|s| scan_stmt(s, diags, ctx));
             }
             if let Some(fin) = &tc.finally {
                 fin.stmts.iter().for_each(|s| scan_stmt(s, diags, ctx));
@@ -207,7 +214,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(target, diags, ctx);
             scan_expr(value, diags, ctx);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
@@ -223,7 +235,9 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(callee, diags, ctx);
             scan_args(args, diags, ctx);
         }
-        Expr::Cascade { object, sections, .. } => {
+        Expr::Cascade {
+            object, sections, ..
+        } => {
             scan_expr(object, diags, ctx);
             for s in sections {
                 match &s.op {
@@ -276,17 +290,27 @@ fn scan_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
     }
 }
 
-fn scan_collection_element(el: &CollectionElement, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_collection_element(
+    el: &CollectionElement,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
     match el {
         CollectionElement::Expr(e) => scan_expr(e, diags, ctx),
         CollectionElement::Spread { expr, .. } => scan_expr(expr, diags, ctx),
-        CollectionElement::If { then_elem, else_elem, .. } => {
+        CollectionElement::If {
+            then_elem,
+            else_elem,
+            ..
+        } => {
             scan_collection_element(then_elem, diags, ctx);
             if let Some(ee) = else_elem {
                 scan_collection_element(ee, diags, ctx);
             }
         }
-        CollectionElement::For { iterable, element, .. } => {
+        CollectionElement::For {
+            iterable, element, ..
+        } => {
             scan_expr(iterable, diags, ctx);
             scan_collection_element(element, diags, ctx);
         }

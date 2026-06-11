@@ -129,7 +129,12 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::Field { object, field, span, .. } => {
+        Expr::Field {
+            object,
+            field,
+            span,
+            ..
+        } => {
             check_media_query_size_field(object, field, span, diags, ctx);
             scan_expr(object, diags, ctx);
         }
@@ -146,7 +151,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(right, diags, ctx);
         }
         Expr::Unary { operand, .. } => scan_expr(operand, diags, ctx),
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
@@ -187,11 +197,20 @@ fn scan_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
     }
 }
 
-fn scan_collection_elem(elem: &CollectionElement, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_collection_elem(
+    elem: &CollectionElement,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
     match elem {
         CollectionElement::Expr(e) => scan_expr(e, diags, ctx),
         CollectionElement::Spread { expr, .. } => scan_expr(expr, diags, ctx),
-        CollectionElement::If { condition, then_elem, else_elem, .. } => {
+        CollectionElement::If {
+            condition,
+            then_elem,
+            else_elem,
+            ..
+        } => {
             if let IfCondition::Expr(e) = condition {
                 scan_expr(e, diags, ctx);
             }
@@ -200,7 +219,9 @@ fn scan_collection_elem(elem: &CollectionElement, diags: &mut Vec<Diagnostic>, c
                 scan_collection_elem(ee, diags, ctx);
             }
         }
-        CollectionElement::For { iterable, element, .. } => {
+        CollectionElement::For {
+            iterable, element, ..
+        } => {
             scan_expr(iterable, diags, ctx);
             scan_collection_elem(element, diags, ctx);
         }
@@ -215,25 +236,32 @@ fn check_media_query_size_field(
     ctx: &AnalyzeContext,
 ) {
     // Check if accessing .width or .height on MediaQuery.of(context).size
-    if (field.name == "width" || field.name == "height")
-        && is_media_query_size(object) {
-            diags.push(Diagnostic::new(
-                "prefer_dedicated_media_query_methods",
-                Severity::Warning,
-                "Use MediaQuery.sizeOf(context) instead of MediaQuery.of(context).size.",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan { start: span.start, end: span.end },
-            ));
-        }
+    if (field.name == "width" || field.name == "height") && is_media_query_size(object) {
+        diags.push(Diagnostic::new(
+            "prefer_dedicated_media_query_methods",
+            Severity::Warning,
+            "Use MediaQuery.sizeOf(context) instead of MediaQuery.of(context).size.",
+            ctx.file_path.to_string_lossy().into_owned(),
+            DiagSpan {
+                start: span.start,
+                end: span.end,
+            },
+        ));
+    }
 }
 
 fn is_media_query_size(expr: &Expr) -> bool {
     if let Expr::Field { object, field, .. } = expr
         && field.name == "size"
-            && let Expr::Call { callee, args, .. } = object.as_ref()
-                && let Expr::Field { object: mq_obj, field: method, .. } = callee.as_ref()
-                    && let Expr::Ident(ident) = mq_obj.as_ref() {
-                        return ident.name == "MediaQuery" && method.name == "of" && args.positional.len() == 1;
-                    }
+        && let Expr::Call { callee, args, .. } = object.as_ref()
+        && let Expr::Field {
+            object: mq_obj,
+            field: method,
+            ..
+        } = callee.as_ref()
+        && let Expr::Ident(ident) = mq_obj.as_ref()
+    {
+        return ident.name == "MediaQuery" && method.name == "of" && args.positional.len() == 1;
+    }
     false
 }

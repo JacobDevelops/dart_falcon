@@ -44,9 +44,10 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
 
 fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let ClassMember::Method(m) = member
-        && let Some(body) = &m.body {
-            check_function(&m.params, body, diags, ctx);
-        }
+        && let Some(body) = &m.body
+    {
+        check_function(&m.params, body, diags, ctx);
+    }
 }
 
 /// Check a function/method's parameters against its body, then descend into any
@@ -79,7 +80,10 @@ fn check_function(
                 Severity::Warning,
                 "Parameter is never used. Rename it to `_` or remove it.",
                 ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan { start: param.name.span.start, end: param.name.span.end },
+                DiagSpan {
+                    start: param.name.span.start,
+                    end: param.name.span.end,
+                },
             ));
         }
     }
@@ -107,16 +111,27 @@ fn scan_nested_fns(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContex
         Stmt::For(f) => scan_nested_fns(&f.body, diags, ctx),
         Stmt::Switch(sw) => {
             for case in &sw.cases {
-                case.body.iter().for_each(|s| scan_nested_fns(s, diags, ctx));
+                case.body
+                    .iter()
+                    .for_each(|s| scan_nested_fns(s, diags, ctx));
             }
         }
         Stmt::TryCatch(tc) => {
-            tc.body.stmts.iter().for_each(|s| scan_nested_fns(s, diags, ctx));
+            tc.body
+                .stmts
+                .iter()
+                .for_each(|s| scan_nested_fns(s, diags, ctx));
             for catch in &tc.catches {
-                catch.body.stmts.iter().for_each(|s| scan_nested_fns(s, diags, ctx));
+                catch
+                    .body
+                    .stmts
+                    .iter()
+                    .for_each(|s| scan_nested_fns(s, diags, ctx));
             }
             if let Some(fin) = &tc.finally {
-                fin.stmts.iter().for_each(|s| scan_nested_fns(s, diags, ctx));
+                fin.stmts
+                    .iter()
+                    .for_each(|s| scan_nested_fns(s, diags, ctx));
             }
         }
         _ => {}
@@ -194,9 +209,16 @@ fn collect_used_stmt(stmt: &Stmt, used: &mut HashSet<String>) {
             }
         }
         Stmt::TryCatch(tc) => {
-            tc.body.stmts.iter().for_each(|s| collect_used_stmt(s, used));
+            tc.body
+                .stmts
+                .iter()
+                .for_each(|s| collect_used_stmt(s, used));
             for catch in &tc.catches {
-                catch.body.stmts.iter().for_each(|s| collect_used_stmt(s, used));
+                catch
+                    .body
+                    .stmts
+                    .iter()
+                    .for_each(|s| collect_used_stmt(s, used));
             }
             if let Some(fin) = &tc.finally {
                 fin.stmts.iter().for_each(|s| collect_used_stmt(s, used));
@@ -229,7 +251,12 @@ fn collect_used_expr(expr: &Expr, used: &mut HashSet<String>) {
             collect_used_expr(target, used);
             collect_used_expr(value, used);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             collect_used_expr(condition, used);
             collect_used_expr(then_expr, used);
             collect_used_expr(else_expr, used);
@@ -245,7 +272,9 @@ fn collect_used_expr(expr: &Expr, used: &mut HashSet<String>) {
             collect_used_expr(callee, used);
             collect_used_args(args, used);
         }
-        Expr::Cascade { object, sections, .. } => {
+        Expr::Cascade {
+            object, sections, ..
+        } => {
             collect_used_expr(object, used);
             for s in sections {
                 match &s.op {
@@ -270,7 +299,9 @@ fn collect_used_expr(expr: &Expr, used: &mut HashSet<String>) {
                 collect_used_expr(&entry.value, used);
             }
         }
-        Expr::Record { fields, .. } => fields.iter().for_each(|f| collect_used_expr(&f.value, used)),
+        Expr::Record { fields, .. } => fields
+            .iter()
+            .for_each(|f| collect_used_expr(&f.value, used)),
         Expr::FuncExpr { body, .. } => collect_used_body(body, used),
         Expr::New { args, .. } => collect_used_args(args, used),
         Expr::Await { expr, .. } => collect_used_expr(expr, used),
@@ -302,13 +333,19 @@ fn collect_used_collection_element(el: &CollectionElement, used: &mut HashSet<St
     match el {
         CollectionElement::Expr(e) => collect_used_expr(e, used),
         CollectionElement::Spread { expr, .. } => collect_used_expr(expr, used),
-        CollectionElement::If { then_elem, else_elem, .. } => {
+        CollectionElement::If {
+            then_elem,
+            else_elem,
+            ..
+        } => {
             collect_used_collection_element(then_elem, used);
             if let Some(ee) = else_elem {
                 collect_used_collection_element(ee, used);
             }
         }
-        CollectionElement::For { iterable, element, .. } => {
+        CollectionElement::For {
+            iterable, element, ..
+        } => {
             collect_used_expr(iterable, used);
             collect_used_collection_element(element, used);
         }

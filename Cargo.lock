@@ -379,8 +379,10 @@ version = "0.1.0"
 dependencies = [
  "falcon_analyze",
  "falcon_config",
+ "falcon_dart_parser",
  "falcon_diagnostics",
  "falcon_syntax",
+ "serde_json",
 ]
 
 [[package]]

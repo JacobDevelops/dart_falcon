@@ -24,7 +24,10 @@ fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Severity::Warning,
         "Duplicate case value in switch statement.",
         ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start: span.start, end: span.end },
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
     ));
 }
 
@@ -53,19 +56,21 @@ fn pattern_value_key(pattern: &Pattern) -> Option<String> {
 }
 
 fn check_switch_cases(switch_stmt: &SwitchStmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let mut seen_values: std::collections::HashMap<String, (Span, Box<Pattern>)> = std::collections::HashMap::new();
+    let mut seen_values: std::collections::HashMap<String, (Span, Box<Pattern>)> =
+        std::collections::HashMap::new();
 
     for case in &switch_stmt.cases {
         for case_kind in &case.cases {
             if let SwitchCaseKind::Pattern(pattern, _) = case_kind
-                && let Some(key) = pattern_value_key(pattern) {
-                    if let Some((_first_span, _first_pattern)) = seen_values.get(&key) {
-                        // This is a duplicate; flag the current occurrence using the case span
-                        flag(&case.span, diags, ctx);
-                    } else {
-                        seen_values.insert(key, (case.span.clone(), pattern.clone()));
-                    }
+                && let Some(key) = pattern_value_key(pattern)
+            {
+                if let Some((_first_span, _first_pattern)) = seen_values.get(&key) {
+                    // This is a duplicate; flag the current occurrence using the case span
+                    flag(&case.span, diags, ctx);
+                } else {
+                    seen_values.insert(key, (case.span.clone(), pattern.clone()));
                 }
+            }
         }
     }
 }
@@ -184,7 +189,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                 scan_expr(&named.value, diags, ctx);
             }
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);

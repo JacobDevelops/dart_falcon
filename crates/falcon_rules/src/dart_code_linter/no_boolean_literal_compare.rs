@@ -150,7 +150,12 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::Binary { op, left, right, span } => {
+        Expr::Binary {
+            op,
+            left,
+            right,
+            span,
+        } => {
             if matches!(op, BinaryOp::EqEq | BinaryOp::NotEq) {
                 let left_bool = matches!(left.as_ref(), Expr::BoolLit { .. });
                 let right_bool = matches!(right.as_ref(), Expr::BoolLit { .. });
@@ -160,7 +165,10 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                         Severity::Warning,
                         "Avoid comparing boolean values to boolean literals",
                         ctx.file_path.to_string_lossy().into_owned(),
-                        DiagSpan { start: span.start, end: span.end },
+                        DiagSpan {
+                            start: span.start,
+                            end: span.end,
+                        },
                     ));
                 }
             }
@@ -181,7 +189,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(target, diags, ctx);
             scan_expr(value, diags, ctx);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);

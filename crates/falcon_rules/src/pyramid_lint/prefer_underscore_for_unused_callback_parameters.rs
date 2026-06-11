@@ -20,7 +20,10 @@ impl Rule for PreferUnderscoreForUnusedCallbackParameters {
 }
 
 fn is_underscore_name(name: &str) -> bool {
-    name == "_" || name == "__" || name == "___" || (name.starts_with('_') && name.chars().all(|c| c == '_'))
+    name == "_"
+        || name == "__"
+        || name == "___"
+        || (name.starts_with('_') && name.chars().all(|c| c == '_'))
 }
 
 fn collect_identifiers_in_expr(expr: &Expr, names: &mut HashSet<String>) {
@@ -52,7 +55,9 @@ fn collect_identifiers_in_expr(expr: &Expr, names: &mut HashSet<String>) {
                     } else if (bytes[i] as char).is_alphabetic() || bytes[i] == b'_' {
                         // Collect $identifier
                         let mut ident = String::new();
-                        while i < bytes.len() && ((bytes[i] as char).is_alphanumeric() || bytes[i] == b'_') {
+                        while i < bytes.len()
+                            && ((bytes[i] as char).is_alphanumeric() || bytes[i] == b'_')
+                        {
                             ident.push(bytes[i] as char);
                             i += 1;
                         }
@@ -84,7 +89,12 @@ fn collect_identifiers_in_expr(expr: &Expr, names: &mut HashSet<String>) {
             collect_identifiers_in_expr(left, names);
             collect_identifiers_in_expr(right, names);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             collect_identifiers_in_expr(condition, names);
             collect_identifiers_in_expr(then_expr, names);
             collect_identifiers_in_expr(else_expr, names);
@@ -286,7 +296,9 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::FuncExpr { params, body, span, .. } => {
+        Expr::FuncExpr {
+            params, body, span, ..
+        } => {
             check_closure_params_inline(params, body, diags, ctx, span);
             match &**body {
                 FunctionBody::Block(_) | FunctionBody::Native(_, _) => {
@@ -316,7 +328,12 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(left, diags, ctx);
             scan_expr(right, diags, ctx);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             scan_expr(condition, diags, ctx);
             scan_expr(then_expr, diags, ctx);
             scan_expr(else_expr, diags, ctx);
@@ -325,7 +342,13 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     }
 }
 
-fn check_closure_params_inline(params: &FormalParamList, body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, closure_span: &Span) {
+fn check_closure_params_inline(
+    params: &FormalParamList,
+    body: &FunctionBody,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+    closure_span: &Span,
+) {
     let all_params: Vec<_> = params
         .positional
         .iter()
@@ -361,9 +384,12 @@ fn check_closure_params_inline(params: &FormalParamList, body: &FunctionBody, di
                 Severity::Warning,
                 "Unused callback parameter should be named '_'.",
                 ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan { start: closure_span.start, end: closure_span.end },
+                DiagSpan {
+                    start: closure_span.start,
+                    end: closure_span.end,
+                },
             ));
-            break;  // Only flag the first unused parameter
+            break; // Only flag the first unused parameter
         }
     }
 }

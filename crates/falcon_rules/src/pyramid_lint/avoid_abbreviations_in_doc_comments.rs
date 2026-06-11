@@ -21,8 +21,8 @@ fn scan_source(source: &str, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
 
     // Abbreviations to flag (derived from corpus bad.dart)
     let abbreviations = [
-        "impl", "func", "config", "repo", "param", "util", "var", "arg", "cfg",
-        "e.g.", "i.e.", "etc.",
+        "impl", "func", "config", "repo", "param", "util", "var", "arg", "cfg", "e.g.", "i.e.",
+        "etc.",
     ];
 
     let mut byte_offset = 0;
@@ -40,7 +40,10 @@ fn scan_source(source: &str, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
                         Severity::Warning,
                         format!("Avoid abbreviation '{}' in doc comments", abbr),
                         ctx.file_path.to_string_lossy().into_owned(),
-                        DiagSpan { start: byte_offset, end: byte_offset + line.len() },
+                        DiagSpan {
+                            start: byte_offset,
+                            end: byte_offset + line.len(),
+                        },
                     ));
                     break; // Only one diagnostic per line
                 }
