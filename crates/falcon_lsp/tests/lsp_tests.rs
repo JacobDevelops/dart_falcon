@@ -19,12 +19,12 @@ use lsp_types::{
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, FileChangeType, FileEvent, Hover,
     HoverParams, InitializeResult, Position, PublishDiagnosticsParams,
     TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, TextDocumentSyncCapability, Uri,
-    VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    TextDocumentPositionParams, TextDocumentSyncCapability, Uri, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams,
 };
 use tempfile::TempDir;
 
-use falcon_lsp::{run_with_connection, ServerOptions};
+use falcon_lsp::{ServerOptions, run_with_connection};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(5);
 const VIOLATING_SRC: &str = "void f() {\n  dynamic x = 1;\n  print(x);\n}\n";
@@ -202,9 +202,10 @@ impl TestClient {
 }
 
 fn has_rule(params: &PublishDiagnosticsParams, rule: &str) -> bool {
-    params.diagnostics.iter().any(|d| {
-        matches!(&d.code, Some(lsp_types::NumberOrString::String(code)) if code == rule)
-    })
+    params
+        .diagnostics
+        .iter()
+        .any(|d| matches!(&d.code, Some(lsp_types::NumberOrString::String(code)) if code == rule))
 }
 
 /// M5.1: initialize/initialized/shutdown cycle with shape validation.
@@ -314,8 +315,11 @@ fn hover_reports_diagnostics_under_cursor() {
             },
         );
         let resp = client.recv_response(&id);
-        serde_json::from_value(resp.result.expect("hover must return a result (possibly null)"))
-            .expect("Hover shape")
+        serde_json::from_value(
+            resp.result
+                .expect("hover must return a result (possibly null)"),
+        )
+        .expect("Hover shape")
     };
 
     // Line 2 (0-based 1) holds `dynamic x = 1;`.

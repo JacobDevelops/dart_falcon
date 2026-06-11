@@ -23,7 +23,7 @@ fn corpus_root() -> Option<PathBuf> {
 
 /// Directories that are not project-owned Dart source — skip them entirely.
 const SKIP_DIRS: &[&str] = &[
-    ".direnv",   // nix/direnv cached inputs
+    ".direnv", // nix/direnv cached inputs
     ".dart_tool",
     ".pub-cache",
     "build",
@@ -32,8 +32,7 @@ const SKIP_DIRS: &[&str] = &[
 ];
 
 fn is_skip_dir(name: &str) -> bool {
-    SKIP_DIRS.contains(&name)
-        || name.starts_with("result")  // nix result, result-1, result-11, …
+    SKIP_DIRS.contains(&name) || name.starts_with("result") // nix result, result-1, result-11, …
 }
 
 fn collect_dart_files(root: &Path) -> Vec<PathBuf> {
@@ -64,7 +63,11 @@ fn corpus_parses_without_panic() {
 
     // Target: jfit mobile app lib — the primary corpus per the M1 plan.
     let mobile_lib = root.join("apps/mobile/lib");
-    let search_root = if mobile_lib.exists() { mobile_lib } else { root.clone() };
+    let search_root = if mobile_lib.exists() {
+        mobile_lib
+    } else {
+        root.clone()
+    };
 
     let files = collect_dart_files(&search_root);
     assert!(
@@ -95,15 +98,16 @@ fn corpus_parses_without_panic() {
 
     // Report files with parse errors (informational — not a hard failure yet).
     if !error_files.is_empty() {
-        eprintln!(
-            "\nParse errors in {error_count}/{total} corpus files (informational):"
-        );
+        eprintln!("\nParse errors in {error_count}/{total} corpus files (informational):");
         for (path, n) in &error_files {
             eprintln!("  {n} error(s): {}", path.display());
         }
     }
 
-    println!("Corpus: {total} files parsed, {error_count} had parse errors, {} clean", total - error_count);
+    println!(
+        "Corpus: {total} files parsed, {error_count} had parse errors, {} clean",
+        total - error_count
+    );
 
     // Hard limit: at most 20 % of files may have parse errors.
     // This threshold will tighten as the parser matures.
@@ -124,7 +128,11 @@ fn corpus_no_panics_on_generated_files() {
 
     // Focus on the mobile app lib directory which is the primary target.
     let mobile_lib = root.join("apps/mobile/lib");
-    let search_root = if mobile_lib.exists() { mobile_lib } else { root };
+    let search_root = if mobile_lib.exists() {
+        mobile_lib
+    } else {
+        root
+    };
 
     let files = collect_dart_files(&search_root);
     let total = files.len();
@@ -143,33 +151,50 @@ fn corpus_no_panics_on_generated_files() {
         let _ = parse(&source);
     }
 
-    println!("no-panic check: parsed {total} files under {}", search_root.display());
+    println!(
+        "no-panic check: parsed {total} files under {}",
+        search_root.display()
+    );
 }
 
 #[test]
 fn diag_show_errors() {
     let path = "/home/jacob/Documents/Developer/jfit/apps/mobile/lib/firebase_options.dart";
     let source = std::fs::read_to_string(path).unwrap_or_default();
-    if source.is_empty() { return; }
+    if source.is_empty() {
+        return;
+    }
     let lines: Vec<&str> = source.lines().collect();
     let (_, errors) = parse(&source);
     for e in errors.iter().take(15) {
         let before = &source[..e.offset.min(source.len())];
         let line_no = before.lines().count();
         let line_text = lines.get(line_no.saturating_sub(1)).unwrap_or(&"");
-        eprintln!("L{line_no}: {} | snippet: {}", e.message, &line_text.trim()[..line_text.trim().len().min(60)]);
+        eprintln!(
+            "L{line_no}: {} | snippet: {}",
+            e.message,
+            &line_text.trim()[..line_text.trim().len().min(60)]
+        );
     }
 }
 
 #[test]
 fn diag_error_distribution() {
-    let Some(root) = corpus_root() else { return; };
+    let Some(root) = corpus_root() else {
+        return;
+    };
     let mobile_lib = root.join("apps/mobile/lib");
-    let search_root = if mobile_lib.exists() { mobile_lib } else { root };
+    let search_root = if mobile_lib.exists() {
+        mobile_lib
+    } else {
+        root
+    };
     let files = collect_dart_files(&search_root);
     let mut msg_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for path in &files {
-        let Ok(source) = std::fs::read_to_string(path) else { continue; };
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
         let (_, errors) = parse(&source);
         for e in &errors {
             // Normalize message to first 60 chars
@@ -189,7 +214,9 @@ fn diag_error_distribution() {
 fn diag_onboarding_errors() {
     let path = "/home/jacob/Documents/Developer/jfit/apps/mobile/lib/features/onboarding/data/onboarding_repository.dart";
     let source = std::fs::read_to_string(path).unwrap_or_default();
-    if source.is_empty() { return; }
+    if source.is_empty() {
+        return;
+    }
     let lines: Vec<&str> = source.lines().collect();
     let (_, errors) = parse(&source);
     for e in &errors {
@@ -204,7 +231,9 @@ fn diag_onboarding_errors() {
 fn diag_app_providers_errors() {
     let path = "/home/jacob/Documents/Developer/jfit/apps/mobile/lib/core/app_providers.dart";
     let source = std::fs::read_to_string(path).unwrap_or_default();
-    if source.is_empty() { return; }
+    if source.is_empty() {
+        return;
+    }
     let lines: Vec<&str> = source.lines().collect();
     let (_, errors) = parse(&source);
     for e in &errors {

@@ -170,7 +170,9 @@ fn test_type_named_span() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else { panic!("expected var") };
+    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+        panic!("expected var")
+    };
     assert!(v.var_type.is_some());
     let span = v.var_type.as_ref().unwrap().span();
     assert!(span.end > span.start);
@@ -182,7 +184,9 @@ fn test_type_generic_span() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else { panic!("expected var") };
+    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+        panic!("expected var")
+    };
     assert!(v.var_type.is_some());
     let span = v.var_type.as_ref().unwrap().span();
     assert!(span.end > span.start);
@@ -196,7 +200,9 @@ fn test_identifier_basic() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
     assert_eq!(cls.name.name, "Foo");
     assert!(cls.name.span.end > cls.name.span.start);
 }
@@ -207,7 +213,9 @@ fn test_identifier_with_underscore() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Function(fun) = &prog.declarations[0] else { panic!("expected function") };
+    let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
+        panic!("expected function")
+    };
     assert_eq!(fun.name.name, "_privateFunc");
 }
 
@@ -219,9 +227,15 @@ fn test_string_lit_node_value() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else { panic!("expected var") };
-    let Some(init) = &v.declarators[0].initializer else { panic!("expected init") };
-    let Expr::StringLit(lit) = init else { panic!("expected string lit") };
+    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+        panic!("expected var")
+    };
+    let Some(init) = &v.declarators[0].initializer else {
+        panic!("expected init")
+    };
+    let Expr::StringLit(lit) = init else {
+        panic!("expected string lit")
+    };
     // The value should be decoded (without quotes)
     assert!(!lit.value.is_empty());
     // The raw should preserve original text
@@ -234,9 +248,15 @@ fn test_string_lit_node_span() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else { panic!("expected var") };
-    let Some(init) = &v.declarators[0].initializer else { panic!("expected init") };
-    let Expr::StringLit(lit) = init else { panic!("expected string lit") };
+    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+        panic!("expected var")
+    };
+    let Some(init) = &v.declarators[0].initializer else {
+        panic!("expected init")
+    };
+    let Expr::StringLit(lit) = init else {
+        panic!("expected string lit")
+    };
     assert!(lit.span.end > lit.span.start);
 }
 
@@ -248,7 +268,9 @@ fn test_class_member_span() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
     assert_eq!(cls.members.len(), 2);
 
     // Each member should have a span
@@ -264,8 +286,12 @@ fn test_field_declarator_span() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
-    let ClassMember::Field(fld) = &cls.members[0] else { panic!("expected field") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
+    let ClassMember::Field(fld) = &cls.members[0] else {
+        panic!("expected field")
+    };
     assert_eq!(fld.declarators.len(), 3);
 
     for declarator in &fld.declarators {
@@ -281,7 +307,9 @@ fn test_function_type_span() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::TypeAlias(alias) = &prog.declarations[0] else { panic!("expected type alias") };
+    let TopLevelDecl::TypeAlias(alias) = &prog.declarations[0] else {
+        panic!("expected type alias")
+    };
     let span = alias.aliased.span();
     assert!(span.end > span.start);
 }
@@ -294,9 +322,15 @@ fn test_named_type_simple() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else { panic!("expected var") };
-    let Some(typ) = &v.var_type else { panic!("expected type") };
-    let DartType::Named(named) = typ else { panic!("expected named type") };
+    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+        panic!("expected var")
+    };
+    let Some(typ) = &v.var_type else {
+        panic!("expected type")
+    };
+    let DartType::Named(named) = typ else {
+        panic!("expected named type")
+    };
     assert_eq!(named.segments.len(), 1);
 }
 
@@ -306,9 +340,15 @@ fn test_named_type_qualified() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else { panic!("expected var") };
-    let Some(typ) = &v.var_type else { panic!("expected type") };
-    let DartType::Named(named) = typ else { panic!("expected named type") };
+    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+        panic!("expected var")
+    };
+    let Some(typ) = &v.var_type else {
+        panic!("expected type")
+    };
+    let DartType::Named(named) = typ else {
+        panic!("expected named type")
+    };
     assert_eq!(named.segments.len(), 3);
 }
 
@@ -318,9 +358,15 @@ fn test_named_type_with_args() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else { panic!("expected var") };
-    let Some(typ) = &v.var_type else { panic!("expected type") };
-    let DartType::Named(named) = typ else { panic!("expected named type") };
+    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+        panic!("expected var")
+    };
+    let Some(typ) = &v.var_type else {
+        panic!("expected type")
+    };
+    let DartType::Named(named) = typ else {
+        panic!("expected named type")
+    };
     assert_eq!(named.type_args.len(), 1);
 }
 
@@ -330,8 +376,12 @@ fn test_named_type_nullable() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else { panic!("expected var") };
-    let Some(typ) = &v.var_type else { panic!("expected type") };
+    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+        panic!("expected var")
+    };
+    let Some(typ) = &v.var_type else {
+        panic!("expected type")
+    };
     assert!(typ.is_nullable());
 }
 
@@ -343,7 +393,9 @@ fn test_formal_param_positional() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Function(fun) = &prog.declarations[0] else { panic!("expected function") };
+    let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
+        panic!("expected function")
+    };
     assert_eq!(fun.params.positional.len(), 1);
 }
 
@@ -353,7 +405,9 @@ fn test_formal_param_named() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Function(fun) = &prog.declarations[0] else { panic!("expected function") };
+    let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
+        panic!("expected function")
+    };
     assert_eq!(fun.params.named.len(), 1);
 }
 
@@ -363,7 +417,9 @@ fn test_formal_param_optional() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Function(fun) = &prog.declarations[0] else { panic!("expected function") };
+    let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
+        panic!("expected function")
+    };
     assert_eq!(fun.params.optional_positional.len(), 1);
 }
 
@@ -373,7 +429,9 @@ fn test_formal_param_multiple_kinds() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Function(fun) = &prog.declarations[0] else { panic!("expected function") };
+    let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
+        panic!("expected function")
+    };
     assert_eq!(fun.params.positional.len(), 1);
     assert_eq!(fun.params.optional_positional.len(), 1);
     assert_eq!(fun.params.named.len(), 1);
@@ -387,10 +445,14 @@ fn test_local_var_decl() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Function(fun) = &prog.declarations[0] else { panic!("expected function") };
+    let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
+        panic!("expected function")
+    };
     match &fun.body {
         Some(FunctionBody::Block(b)) => {
-            let Stmt::LocalVar(local_var) = &b.stmts[0] else { panic!("expected local var") };
+            let Stmt::LocalVar(local_var) = &b.stmts[0] else {
+                panic!("expected local var")
+            };
             assert_eq!(local_var.declarators.len(), 1);
         }
         _ => panic!("expected block body"),
@@ -403,10 +465,14 @@ fn test_local_var_final() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Function(fun) = &prog.declarations[0] else { panic!("expected function") };
+    let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
+        panic!("expected function")
+    };
     match &fun.body {
         Some(FunctionBody::Block(b)) => {
-            let Stmt::LocalVar(local_var) = &b.stmts[0] else { panic!("expected local var") };
+            let Stmt::LocalVar(local_var) = &b.stmts[0] else {
+                panic!("expected local var")
+            };
             assert!(local_var.is_final);
         }
         _ => panic!("expected block body"),
@@ -421,7 +487,9 @@ fn test_type_param_simple() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
     assert_eq!(cls.type_params.len(), 1);
     assert_eq!(cls.type_params[0].name.name, "T");
 }
@@ -432,7 +500,9 @@ fn test_type_param_with_bound() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
     assert_eq!(cls.type_params.len(), 1);
     assert!(cls.type_params[0].bound.is_some());
 }
@@ -443,7 +513,9 @@ fn test_type_params_multiple() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
     assert_eq!(cls.type_params.len(), 2);
 }
 
@@ -455,7 +527,9 @@ fn test_annotation_simple() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
     assert_eq!(cls.annotations.len(), 1);
 }
 
@@ -465,7 +539,9 @@ fn test_annotation_with_args() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
     assert_eq!(cls.annotations.len(), 1);
     assert!(cls.annotations[0].args.is_some());
 }
@@ -478,8 +554,12 @@ fn test_constructor_default() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
-    let ClassMember::Constructor(ctor) = &cls.members[0] else { panic!("expected constructor") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
+    let ClassMember::Constructor(ctor) = &cls.members[0] else {
+        panic!("expected constructor")
+    };
     assert_eq!(ctor.name.name, "Foo");
     assert!(!ctor.is_const);
     assert!(!ctor.is_factory);
@@ -491,8 +571,12 @@ fn test_constructor_const() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
-    let ClassMember::Constructor(ctor) = &cls.members[0] else { panic!("expected constructor") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
+    let ClassMember::Constructor(ctor) = &cls.members[0] else {
+        panic!("expected constructor")
+    };
     assert!(ctor.is_const);
 }
 
@@ -502,8 +586,12 @@ fn test_constructor_factory() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
-    let ClassMember::Constructor(ctor) = &cls.members[0] else { panic!("expected constructor") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
+    let ClassMember::Constructor(ctor) = &cls.members[0] else {
+        panic!("expected constructor")
+    };
     assert!(ctor.is_factory);
 }
 
@@ -513,8 +601,12 @@ fn test_constructor_named() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
-    let ClassMember::Constructor(ctor) = &cls.members[0] else { panic!("expected constructor") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
+    let ClassMember::Constructor(ctor) = &cls.members[0] else {
+        panic!("expected constructor")
+    };
     assert!(ctor.constructor_name.is_some());
 }
 
@@ -526,8 +618,12 @@ fn test_method_basic() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
-    let ClassMember::Method(meth) = &cls.members[0] else { panic!("expected method") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
+    let ClassMember::Method(meth) = &cls.members[0] else {
+        panic!("expected method")
+    };
     assert_eq!(meth.name.name, "bar");
 }
 
@@ -537,8 +633,12 @@ fn test_method_async() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
-    let ClassMember::Method(meth) = &cls.members[0] else { panic!("expected method") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
+    let ClassMember::Method(meth) = &cls.members[0] else {
+        panic!("expected method")
+    };
     assert!(meth.is_async);
 }
 
@@ -548,8 +648,12 @@ fn test_method_static() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
-    let ClassMember::Method(meth) = &cls.members[0] else { panic!("expected method") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
+    let ClassMember::Method(meth) = &cls.members[0] else {
+        panic!("expected method")
+    };
     assert!(meth.is_static);
 }
 
@@ -559,8 +663,12 @@ fn test_method_abstract() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
-    let ClassMember::Method(meth) = &cls.members[0] else { panic!("expected method") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
+    let ClassMember::Method(meth) = &cls.members[0] else {
+        panic!("expected method")
+    };
     assert!(meth.is_abstract);
 }
 
@@ -572,7 +680,9 @@ fn test_getter() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
     assert!(matches!(&cls.members[0], ClassMember::Getter(_)));
 }
 
@@ -582,7 +692,9 @@ fn test_setter() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
     assert!(matches!(&cls.members[0], ClassMember::Setter(_)));
 }
 
@@ -594,7 +706,9 @@ fn test_operator_overload() {
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else { panic!("expected class") };
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
     assert!(matches!(&cls.members[0], ClassMember::Operator(_)));
 }
 

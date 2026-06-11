@@ -103,5 +103,9 @@ fn test_walk_jfit_mobile_lib_214_dart_files() {
         return;
     }
     let results = walk_files(&[jfit_lib], &[]);
-    assert_eq!(results.len(), 214, "expected 214 dart files in jfit mobile lib");
+    assert_eq!(
+        results.len(),
+        214,
+        "expected 214 dart files in jfit mobile lib"
+    );
 }

@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use falcon_dart_parser::parser::parse;
 
 // 10 representative Dart 3.x snippets covering the major grammar productions.
@@ -199,7 +199,11 @@ fn bench_parse_corpus(c: &mut Criterion) {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("/home/jacob/Documents/Developer/jfit"));
     let mobile_lib = corpus_root.join("apps/mobile/lib");
-    let search_root = if mobile_lib.exists() { mobile_lib } else { corpus_root };
+    let search_root = if mobile_lib.exists() {
+        mobile_lib
+    } else {
+        corpus_root
+    };
 
     if !search_root.exists() {
         return;
@@ -226,7 +230,9 @@ fn bench_parse_corpus(c: &mut Criterion) {
 
 fn collect_dart_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(root) else { return out; };
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return out;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -241,5 +247,10 @@ fn collect_dart_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     out
 }
 
-criterion_group!(benches, bench_parse_50_files, bench_parse_single_snippets, bench_parse_corpus);
+criterion_group!(
+    benches,
+    bench_parse_50_files,
+    bench_parse_single_snippets,
+    bench_parse_corpus
+);
 criterion_main!(benches);

@@ -27,7 +27,10 @@ pub struct Identifier {
 
 impl Identifier {
     pub fn new(name: impl Into<String>, span: Span) -> Self {
-        Self { name: name.into(), span }
+        Self {
+            name: name.into(),
+            span,
+        }
     }
 }
 
@@ -227,10 +230,26 @@ pub struct ConstructorDecl {
 
 #[derive(Debug, Clone)]
 pub enum ConstructorInitializer {
-    SuperCall { call_name: Option<Identifier>, args: ArgList, span: Span },
-    ThisCall { call_name: Option<Identifier>, args: ArgList, span: Span },
-    FieldInit { field: Identifier, value: Expr, span: Span },
-    Assert { condition: Expr, message: Option<Expr>, span: Span },
+    SuperCall {
+        call_name: Option<Identifier>,
+        args: ArgList,
+        span: Span,
+    },
+    ThisCall {
+        call_name: Option<Identifier>,
+        args: ArgList,
+        span: Span,
+    },
+    FieldInit {
+        field: Identifier,
+        value: Expr,
+        span: Span,
+    },
+    Assert {
+        condition: Expr,
+        message: Option<Expr>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -758,64 +777,176 @@ pub struct ExprStmt {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    IntLit { value: String, span: Span },
-    DoubleLit { value: String, span: Span },
+    IntLit {
+        value: String,
+        span: Span,
+    },
+    DoubleLit {
+        value: String,
+        span: Span,
+    },
     StringLit(StringLitNode),
-    BoolLit { value: bool, span: Span },
-    NullLit { span: Span },
+    BoolLit {
+        value: bool,
+        span: Span,
+    },
+    NullLit {
+        span: Span,
+    },
     Ident(Identifier),
-    This { span: Span },
-    Super { span: Span },
+    This {
+        span: Span,
+    },
+    Super {
+        span: Span,
+    },
 
     // Prefix unary
-    Unary { op: UnaryOp, operand: Box<Expr>, span: Span },
+    Unary {
+        op: UnaryOp,
+        operand: Box<Expr>,
+        span: Span,
+    },
     // Postfix (++ / --)
-    PostfixIncDec { op: PostfixIncDec, operand: Box<Expr>, span: Span },
+    PostfixIncDec {
+        op: PostfixIncDec,
+        operand: Box<Expr>,
+        span: Span,
+    },
     // Binary
-    Binary { op: BinaryOp, left: Box<Expr>, right: Box<Expr>, span: Span },
+    Binary {
+        op: BinaryOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
     // Assignment
-    Assign { target: Box<Expr>, op: AssignOp, value: Box<Expr>, span: Span },
+    Assign {
+        target: Box<Expr>,
+        op: AssignOp,
+        value: Box<Expr>,
+        span: Span,
+    },
     // Conditional ternary
-    Conditional { condition: Box<Expr>, then_expr: Box<Expr>, else_expr: Box<Expr>, span: Span },
+    Conditional {
+        condition: Box<Expr>,
+        then_expr: Box<Expr>,
+        else_expr: Box<Expr>,
+        span: Span,
+    },
     // Type tests
-    Is { expr: Box<Expr>, dart_type: DartType, negated: bool, span: Span },
-    As { expr: Box<Expr>, dart_type: DartType, span: Span },
+    Is {
+        expr: Box<Expr>,
+        dart_type: DartType,
+        negated: bool,
+        span: Span,
+    },
+    As {
+        expr: Box<Expr>,
+        dart_type: DartType,
+        span: Span,
+    },
 
     // Member access
-    Field { object: Box<Expr>, field: Identifier, is_null_safe: bool, span: Span },
+    Field {
+        object: Box<Expr>,
+        field: Identifier,
+        is_null_safe: bool,
+        span: Span,
+    },
     // Index access
-    Index { object: Box<Expr>, index: Box<Expr>, is_null_safe: bool, span: Span },
+    Index {
+        object: Box<Expr>,
+        index: Box<Expr>,
+        is_null_safe: bool,
+        span: Span,
+    },
     // Function / method call
-    Call { callee: Box<Expr>, type_args: Vec<DartType>, args: ArgList, span: Span },
+    Call {
+        callee: Box<Expr>,
+        type_args: Vec<DartType>,
+        args: ArgList,
+        span: Span,
+    },
     // Cascade
-    Cascade { object: Box<Expr>, sections: Vec<CascadeSection>, span: Span },
+    Cascade {
+        object: Box<Expr>,
+        sections: Vec<CascadeSection>,
+        span: Span,
+    },
 
     // Collections
-    List { is_const: bool, type_arg: Option<DartType>, elements: Vec<CollectionElement>, span: Span },
-    Map { is_const: bool, type_args: Vec<DartType>, entries: Vec<MapEntry>, span: Span },
-    Set { is_const: bool, type_arg: Option<DartType>, elements: Vec<CollectionElement>, span: Span },
+    List {
+        is_const: bool,
+        type_arg: Option<DartType>,
+        elements: Vec<CollectionElement>,
+        span: Span,
+    },
+    Map {
+        is_const: bool,
+        type_args: Vec<DartType>,
+        entries: Vec<MapEntry>,
+        span: Span,
+    },
+    Set {
+        is_const: bool,
+        type_arg: Option<DartType>,
+        elements: Vec<CollectionElement>,
+        span: Span,
+    },
 
     // Records
-    Record { fields: Vec<RecordField>, span: Span },
+    Record {
+        fields: Vec<RecordField>,
+        span: Span,
+    },
 
     // Function expressions
-    FuncExpr { type_params: Vec<TypeParam>, params: FormalParamList, is_async: bool, is_generator: bool, body: Box<FunctionBody>, span: Span },
+    FuncExpr {
+        type_params: Vec<TypeParam>,
+        params: FormalParamList,
+        is_async: bool,
+        is_generator: bool,
+        body: Box<FunctionBody>,
+        span: Span,
+    },
 
     // Instantiation / new
-    New { is_const: bool, dart_type: DartType, constructor_name: Option<Identifier>, args: ArgList, span: Span },
+    New {
+        is_const: bool,
+        dart_type: DartType,
+        constructor_name: Option<Identifier>,
+        args: ArgList,
+        span: Span,
+    },
 
     // Await
-    Await { expr: Box<Expr>, span: Span },
+    Await {
+        expr: Box<Expr>,
+        span: Span,
+    },
     // Throw expression
-    Throw { expr: Box<Expr>, span: Span },
+    Throw {
+        expr: Box<Expr>,
+        span: Span,
+    },
 
     // Switch expression (Dart 3.x)
-    Switch { subject: Box<Expr>, arms: Vec<SwitchExprArm>, span: Span },
+    Switch {
+        subject: Box<Expr>,
+        arms: Vec<SwitchExprArm>,
+        span: Span,
+    },
 
     // Postfix null-assertion  expr!
-    NullAssert { operand: Box<Expr>, span: Span },
+    NullAssert {
+        operand: Box<Expr>,
+        span: Span,
+    },
 
-    Error { span: Span },
+    Error {
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -872,12 +1003,26 @@ pub enum PostfixIncDec {
 
 #[derive(Debug, Clone)]
 pub enum BinaryOp {
-    Add, Sub, Mul, Div, Mod, IntDiv,
-    EqEq, NotEq,
-    Lt, Gt, LtEq, GtEq,
-    And, Or,
-    BitAnd, BitOr, BitXor,
-    Shl, Shr, UShr,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    IntDiv,
+    EqEq,
+    NotEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    And,
+    Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    UShr,
     NullCoalesce,
     IfNull, // alias for NullCoalesce; same thing
 }
@@ -885,9 +1030,18 @@ pub enum BinaryOp {
 #[derive(Debug, Clone)]
 pub enum AssignOp {
     Eq,
-    PlusEq, MinusEq, MulEq, DivEq, ModEq, IntDivEq,
-    AndEq, OrEq, XorEq,
-    ShlEq, ShrEq, UShrEq,
+    PlusEq,
+    MinusEq,
+    MulEq,
+    DivEq,
+    ModEq,
+    IntDivEq,
+    AndEq,
+    OrEq,
+    XorEq,
+    ShlEq,
+    ShrEq,
+    UShrEq,
     NullCoalesceEq,
 }
 
@@ -908,9 +1062,24 @@ pub enum CascadeOp {
 #[derive(Debug, Clone)]
 pub enum CollectionElement {
     Expr(Expr),
-    Spread { expr: Expr, is_null_aware: bool, span: Span },
-    If { condition: IfCondition, then_elem: Box<CollectionElement>, else_elem: Option<Box<CollectionElement>>, span: Span },
-    For { variable: Identifier, var_type: Option<DartType>, iterable: Expr, element: Box<CollectionElement>, span: Span },
+    Spread {
+        expr: Expr,
+        is_null_aware: bool,
+        span: Span,
+    },
+    If {
+        condition: IfCondition,
+        then_elem: Box<CollectionElement>,
+        else_elem: Option<Box<CollectionElement>>,
+        span: Span,
+    },
+    For {
+        variable: Identifier,
+        var_type: Option<DartType>,
+        iterable: Expr,
+        element: Box<CollectionElement>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -953,22 +1122,56 @@ pub struct SwitchExprArm {
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Wildcard { type_: Option<DartType>, span: Span },
-    Variable { type_: Option<DartType>, name: Identifier, span: Span },
+    Wildcard {
+        type_: Option<DartType>,
+        span: Span,
+    },
+    Variable {
+        type_: Option<DartType>,
+        name: Identifier,
+        span: Span,
+    },
     Literal(LiteralPattern),
     Const(ConstPattern),
     List(ListPattern),
     Record(RecordPattern),
     Map(MapPattern),
     Object(ObjectPattern),
-    LogicalAnd { left: Box<Pattern>, right: Box<Pattern>, span: Span },
-    LogicalOr { left: Box<Pattern>, right: Box<Pattern>, span: Span },
-    Relational { op: RelationalPatternOp, value: Expr, span: Span },
-    Cast { inner: Box<Pattern>, cast_type: DartType, span: Span },
-    NullCheck { inner: Box<Pattern>, span: Span },
-    NullAssert { inner: Box<Pattern>, span: Span },
-    ParenPattern { inner: Box<Pattern>, span: Span },
-    Error { span: Span },
+    LogicalAnd {
+        left: Box<Pattern>,
+        right: Box<Pattern>,
+        span: Span,
+    },
+    LogicalOr {
+        left: Box<Pattern>,
+        right: Box<Pattern>,
+        span: Span,
+    },
+    Relational {
+        op: RelationalPatternOp,
+        value: Expr,
+        span: Span,
+    },
+    Cast {
+        inner: Box<Pattern>,
+        cast_type: DartType,
+        span: Span,
+    },
+    NullCheck {
+        inner: Box<Pattern>,
+        span: Span,
+    },
+    NullAssert {
+        inner: Box<Pattern>,
+        span: Span,
+    },
+    ParenPattern {
+        inner: Box<Pattern>,
+        span: Span,
+    },
+    Error {
+        span: Span,
+    },
 }
 
 impl Pattern {
@@ -1073,7 +1276,12 @@ pub struct ObjectPatternField {
 
 #[derive(Debug, Clone)]
 pub enum RelationalPatternOp {
-    Eq, NotEq, Lt, Gt, LtEq, GtEq,
+    Eq,
+    NotEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
 }
 
 // ── Error node ────────────────────────────────────────────────────────────────

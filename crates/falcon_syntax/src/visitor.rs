@@ -212,7 +212,10 @@ pub fn walk_function_decl<V: Visitor>(v: &mut V, node: &FunctionDecl) {
         v.visit_dart_type(ret);
     }
     v.visit_identifier(&node.name);
-    for param in node.params.positional.iter()
+    for param in node
+        .params
+        .positional
+        .iter()
         .chain(&node.params.optional_positional)
         .chain(&node.params.named)
     {
@@ -269,7 +272,10 @@ pub fn walk_constructor_decl<V: Visitor>(v: &mut V, node: &ConstructorDecl) {
         v.visit_annotation(ann);
     }
     v.visit_identifier(&node.name);
-    for param in node.params.positional.iter()
+    for param in node
+        .params
+        .positional
+        .iter()
         .chain(&node.params.optional_positional)
         .chain(&node.params.named)
     {
@@ -288,7 +294,10 @@ pub fn walk_method_decl<V: Visitor>(v: &mut V, node: &MethodDecl) {
         v.visit_dart_type(ret);
     }
     v.visit_identifier(&node.name);
-    for param in node.params.positional.iter()
+    for param in node
+        .params
+        .positional
+        .iter()
         .chain(&node.params.optional_positional)
         .chain(&node.params.named)
     {
@@ -379,7 +388,12 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
             if let Some(ref init) = x.init {
                 match init {
                     ForInit::VarDecl(d) => v.visit_stmt(&Stmt::LocalVar(d.clone())),
-                    ForInit::ForIn { var_type, name, iterable, .. } => {
+                    ForInit::ForIn {
+                        var_type,
+                        name,
+                        iterable,
+                        ..
+                    } => {
                         if let Some(t) = var_type {
                             v.visit_dart_type(t);
                         }
@@ -502,12 +516,22 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
             v.visit_expr(target);
             v.visit_expr(value);
         }
-        Expr::Conditional { condition, then_expr, else_expr, .. } => {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             v.visit_expr(condition);
             v.visit_expr(then_expr);
             v.visit_expr(else_expr);
         }
-        Expr::Is { expr, dart_type, .. } | Expr::As { expr, dart_type, .. } => {
+        Expr::Is {
+            expr, dart_type, ..
+        }
+        | Expr::As {
+            expr, dart_type, ..
+        } => {
             v.visit_expr(expr);
             v.visit_dart_type(dart_type);
         }
@@ -520,7 +544,9 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
             v.visit_expr(callee);
             walk_arg_list(v, args);
         }
-        Expr::Cascade { object, sections, .. } => {
+        Expr::Cascade {
+            object, sections, ..
+        } => {
             v.visit_expr(object);
             for section in sections {
                 walk_cascade_section(v, section);
@@ -543,7 +569,9 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
             }
         }
         Expr::FuncExpr { params, body, .. } => {
-            for param in params.positional.iter()
+            for param in params
+                .positional
+                .iter()
                 .chain(&params.optional_positional)
                 .chain(&params.named)
             {
@@ -551,11 +579,15 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
             }
             walk_function_body(v, body);
         }
-        Expr::New { dart_type, args, .. } => {
+        Expr::New {
+            dart_type, args, ..
+        } => {
             v.visit_dart_type(dart_type);
             walk_arg_list(v, args);
         }
-        Expr::Await { expr, .. } | Expr::Throw { expr, .. } | Expr::NullAssert { operand: expr, .. } => v.visit_expr(expr),
+        Expr::Await { expr, .. }
+        | Expr::Throw { expr, .. }
+        | Expr::NullAssert { operand: expr, .. } => v.visit_expr(expr),
         Expr::Switch { subject, arms, .. } => {
             v.visit_expr(subject);
             for arm in arms {
@@ -616,7 +648,9 @@ pub fn walk_pattern<V: Visitor>(v: &mut V, node: &Pattern) {
             v.visit_pattern(right);
         }
         Pattern::Relational { value, .. } => v.visit_expr(value),
-        Pattern::Cast { inner, cast_type, .. } => {
+        Pattern::Cast {
+            inner, cast_type, ..
+        } => {
             v.visit_pattern(inner);
             v.visit_dart_type(cast_type);
         }
@@ -677,7 +711,12 @@ fn walk_collection_element<V: Visitor>(v: &mut V, elem: &CollectionElement) {
     match elem {
         CollectionElement::Expr(e) => v.visit_expr(e),
         CollectionElement::Spread { expr, .. } => v.visit_expr(expr),
-        CollectionElement::If { condition, then_elem, else_elem, .. } => {
+        CollectionElement::If {
+            condition,
+            then_elem,
+            else_elem,
+            ..
+        } => {
             match condition {
                 IfCondition::Expr(e) => v.visit_expr(e),
                 IfCondition::Case(e, p) => {
@@ -690,7 +729,9 @@ fn walk_collection_element<V: Visitor>(v: &mut V, elem: &CollectionElement) {
                 walk_collection_element(v, else_e);
             }
         }
-        CollectionElement::For { iterable, element, .. } => {
+        CollectionElement::For {
+            iterable, element, ..
+        } => {
             v.visit_expr(iterable);
             walk_collection_element(v, element);
         }

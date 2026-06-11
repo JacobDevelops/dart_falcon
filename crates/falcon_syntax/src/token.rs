@@ -165,10 +165,10 @@ pub enum TokenKind {
     QmarkQmarkEq, // ??=
 
     // ── Null / conditional ────────────────────────────────────────────────────
-    Qmark,          // ?
-    QmarkQmark,     // ??
-    QmarkDot,       // ?.
-    QmarkLBracket,  // ?[
+    Qmark,         // ?
+    QmarkQmark,    // ??
+    QmarkDot,      // ?.
+    QmarkLBracket, // ?[
 
     // ── Increment / decrement ─────────────────────────────────────────────────
     PlusPlus,
@@ -188,10 +188,10 @@ pub enum TokenKind {
 
     // ── Dot family ────────────────────────────────────────────────────────────
     Dot,
-    DotDot,             // ..  cascade
-    DotDotQmark,        // ?.. null-safe cascade
-    DotDotDot,          // ... spread
-    DotDotDotQmark,     // ...? null-aware spread
+    DotDot,         // ..  cascade
+    DotDotQmark,    // ?.. null-safe cascade
+    DotDotDot,      // ... spread
+    DotDotDotQmark, // ...? null-aware spread
 
     // ── Arrow ─────────────────────────────────────────────────────────────────
     Arrow, // =>

@@ -12,5 +12,5 @@
 pub mod server;
 pub mod state;
 
-pub use server::{run_server, run_with_connection, ServerOptions};
-pub use state::{uri_to_path, DocumentState, LspState};
+pub use server::{ServerOptions, run_server, run_with_connection};
+pub use state::{DocumentState, LspState, uri_to_path};

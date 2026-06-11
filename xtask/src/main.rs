@@ -15,13 +15,21 @@ fn main() {
             eprintln!("  validate-rules  Validate rule implementations against golden corpus");
             eprintln!();
             eprintln!("codegen usage:");
-            eprintln!("  cargo xtask codegen rule --name <snake_name> --module <dart_code_linter|pyramid_lint> [--rule-id <id>]");
+            eprintln!(
+                "  cargo xtask codegen rule --name <snake_name> --module <dart_code_linter|pyramid_lint> [--rule-id <id>]"
+            );
             eprintln!();
             eprintln!("validate-rules flags:");
-            eprintln!("  --corpus <path>      Path to corpus directory (default: crates/falcon_rules/tests/corpus)");
-            eprintln!("  --threshold <float>  Fuzzy message match threshold 0.0-1.0 (default: 0.85)");
+            eprintln!(
+                "  --corpus <path>      Path to corpus directory (default: crates/falcon_rules/tests/corpus)"
+            );
+            eprintln!(
+                "  --threshold <float>  Fuzzy message match threshold 0.0-1.0 (default: 0.85)"
+            );
             eprintln!("  --rule <name>        Filter to a single rule");
-            eprintln!("  --falcon-bin <path>  Path to falcon binary (default: target/debug/falcon)");
+            eprintln!(
+                "  --falcon-bin <path>  Path to falcon binary (default: target/debug/falcon)"
+            );
             eprintln!("  --json               Output results as JSON");
             std::process::exit(1);
         }
@@ -74,7 +82,9 @@ impl Rule for {struct_name} {{
 /// `cargo xtask codegen rule --name avoid_foo --module dart_code_linter [--rule-id avoid-foo]`
 fn codegen(args: &[String]) {
     if args.first().map(|s| s.as_str()) != Some("rule") {
-        eprintln!("Usage: cargo xtask codegen rule --name <snake_name> --module <dart_code_linter|pyramid_lint> [--rule-id <id>]");
+        eprintln!(
+            "Usage: cargo xtask codegen rule --name <snake_name> --module <dart_code_linter|pyramid_lint> [--rule-id <id>]"
+        );
         std::process::exit(1);
     }
 
@@ -143,7 +153,10 @@ fn codegen(args: &[String]) {
     if !bad.exists() {
         fs::write(
             &bad,
-            format!("// TODO: violations annotated as /* expect: {} */\n", rule_id),
+            format!(
+                "// TODO: violations annotated as /* expect: {} */\n",
+                rule_id
+            ),
         )
         .expect("write bad.dart");
     }
@@ -161,13 +174,20 @@ fn codegen(args: &[String]) {
         "  1. add `pub mod {};` to crates/falcon_rules/src/{}{}",
         name,
         module,
-        if module == "pyramid_lint" { "/mod.rs" } else { ".rs" }
+        if module == "pyramid_lint" {
+            "/mod.rs"
+        } else {
+            ".rs"
+        }
     );
     println!(
         "  2. register `Box::new({}::{}::{})` in all_rules() (crates/falcon_rules/src/lib.rs)",
         module, name, struct_name
     );
-    println!("  3. implement the rule, fill in fixtures, then run `cargo xtask validate-rules --rule {}`", rule_id);
+    println!(
+        "  3. implement the rule, fill in fixtures, then run `cargo xtask validate-rules --rule {}`",
+        rule_id
+    );
 }
 
 // ── Validation harness ──────────────────────────────────────────────────────
@@ -214,7 +234,11 @@ fn parse_expectations(source: &str) -> Vec<Expectation> {
                     }
                 });
                 if !rule.is_empty() {
-                    exps.push(Expectation { rule, line: line_num, expected_msg });
+                    exps.push(Expectation {
+                        rule,
+                        line: line_num,
+                        expected_msg,
+                    });
                 }
                 search = &after[end + 2..];
             } else {
@@ -263,8 +287,13 @@ fn run_falcon(
     if trimmed.is_empty() || trimmed == "[]" {
         return Ok(Vec::new());
     }
-    serde_json::from_str::<Vec<DiagnosticJson>>(trimmed)
-        .map_err(|e| format!("JSON parse error: {}\nOutput was: {}", e, &trimmed[..trimmed.len().min(200)]))
+    serde_json::from_str::<Vec<DiagnosticJson>>(trimmed).map_err(|e| {
+        format!(
+            "JSON parse error: {}\nOutput was: {}",
+            e,
+            &trimmed[..trimmed.len().min(200)]
+        )
+    })
 }
 
 #[derive(Debug)]
@@ -329,7 +358,9 @@ fn validate_file(
                 continue;
             }
             // Rule + line match. If expected_msg set, do fuzzy check.
-            let msg_ok = exp.expected_msg.as_ref()
+            let msg_ok = exp
+                .expected_msg
+                .as_ref()
                 .map(|em| fuzzy_match(em, &diag.message) >= threshold)
                 .unwrap_or(true);
             if msg_ok {
@@ -338,15 +369,17 @@ fn validate_file(
                 continue 'exp_loop;
             }
         }
-        missed.push(MissedExpectation { rule: exp.rule.clone(), line: exp.line });
+        missed.push(MissedExpectation {
+            rule: exp.rule.clone(),
+            line: exp.line,
+        });
     }
 
     let false_positives: Vec<UnexpectedDiagnostic> = raw_diags
         .iter()
         .enumerate()
         .filter(|(i, d)| {
-            !matched_diag_indices.contains(i)
-                && rule_filter.map(|r| d.rule == r).unwrap_or(true)
+            !matched_diag_indices.contains(i) && rule_filter.map(|r| d.rule == r).unwrap_or(true)
         })
         .map(|(_, d)| {
             let line = byte_offset_to_line(source, d.span.start);
@@ -414,7 +447,10 @@ fn validate_rules(args: &[String]) {
     }
 
     if !corpus_path.exists() {
-        eprintln!("error: corpus path does not exist: {}", corpus_path.display());
+        eprintln!(
+            "error: corpus path does not exist: {}",
+            corpus_path.display()
+        );
         std::process::exit(1);
     }
 

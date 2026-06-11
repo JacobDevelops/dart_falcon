@@ -1,6 +1,6 @@
 use clap::{CommandFactory, Parser};
 use falcon_cli::args::Cli;
-use falcon_cli::{run_check, CheckOptions};
+use falcon_cli::{CheckOptions, run_check};
 use std::fs;
 use tempfile::tempdir;
 
@@ -30,7 +30,13 @@ fn test_check_format_json_parses() {
 #[test]
 fn test_check_exclude_parses() {
     let args = vec![
-        "falcon", "check", ".", "--exclude", "**/build/**", "--exclude", "**/.dart_tool/**",
+        "falcon",
+        "check",
+        ".",
+        "--exclude",
+        "**/build/**",
+        "--exclude",
+        "**/.dart_tool/**",
     ];
     let result = Cli::try_parse_from(&args);
     assert!(result.is_ok());
@@ -81,7 +87,11 @@ fn test_run_check_integration_clean_file_exit_zero() {
     let dir = tempdir().unwrap();
     // A non-empty body avoids avoid_empty_blocks and the program uses no magic
     // numbers, so a fully clean program makes the pipeline exit 0.
-    fs::write(dir.path().join("test.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
+    fs::write(
+        dir.path().join("test.dart"),
+        "void main() {\n  print('ok');\n}\n",
+    )
+    .unwrap();
     let code = run_check(CheckOptions {
         paths: vec![dir.path().to_path_buf()],
         quiet: true,
@@ -141,5 +151,8 @@ fn test_version_subcommand_parses() {
     let args = vec!["falcon", "version"];
     let result = Cli::try_parse_from(&args);
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap().command, falcon_cli::args::Command::Version));
+    assert!(matches!(
+        result.unwrap().command,
+        falcon_cli::args::Command::Version
+    ));
 }

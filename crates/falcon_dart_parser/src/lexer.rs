@@ -200,10 +200,21 @@ impl<'src> Lexer<'src> {
                             while depth > 0 {
                                 match self.cur() {
                                     None => return self.make(TokenKind::Error, start),
-                                    Some('{') => { self.advance(); depth += 1; }
-                                    Some('}') => { self.advance(); depth -= 1; }
-                                    Some('\\') => { self.advance(); self.advance(); }
-                                    _ => { self.advance(); }
+                                    Some('{') => {
+                                        self.advance();
+                                        depth += 1;
+                                    }
+                                    Some('}') => {
+                                        self.advance();
+                                        depth -= 1;
+                                    }
+                                    Some('\\') => {
+                                        self.advance();
+                                        self.advance();
+                                    }
+                                    _ => {
+                                        self.advance();
+                                    }
                                 }
                             }
                         }
@@ -328,39 +339,71 @@ impl<'src> Lexer<'src> {
             ':' => TokenKind::Colon,
 
             '+' => {
-                if self.eat_if('+') { TokenKind::PlusPlus }
-                else if self.eat_if('=') { TokenKind::PlusEq }
-                else { TokenKind::Plus }
+                if self.eat_if('+') {
+                    TokenKind::PlusPlus
+                } else if self.eat_if('=') {
+                    TokenKind::PlusEq
+                } else {
+                    TokenKind::Plus
+                }
             }
             '-' => {
-                if self.eat_if('-') { TokenKind::MinusMinus }
-                else if self.eat_if('=') { TokenKind::MinusEq }
-                else { TokenKind::Minus }
+                if self.eat_if('-') {
+                    TokenKind::MinusMinus
+                } else if self.eat_if('=') {
+                    TokenKind::MinusEq
+                } else {
+                    TokenKind::Minus
+                }
             }
             '*' => {
-                if self.eat_if('=') { TokenKind::StarEq } else { TokenKind::Star }
+                if self.eat_if('=') {
+                    TokenKind::StarEq
+                } else {
+                    TokenKind::Star
+                }
             }
             '%' => {
-                if self.eat_if('=') { TokenKind::PercentEq } else { TokenKind::Percent }
+                if self.eat_if('=') {
+                    TokenKind::PercentEq
+                } else {
+                    TokenKind::Percent
+                }
             }
             '~' => {
                 if self.eat_if('/') {
-                    if self.eat_if('=') { TokenKind::TildeSlashEq } else { TokenKind::TildeSlash }
+                    if self.eat_if('=') {
+                        TokenKind::TildeSlashEq
+                    } else {
+                        TokenKind::TildeSlash
+                    }
                 } else {
                     TokenKind::Tilde
                 }
             }
             '=' => {
-                if self.eat_if('=') { TokenKind::EqEq }
-                else if self.eat_if('>') { TokenKind::Arrow }
-                else { TokenKind::Eq }
+                if self.eat_if('=') {
+                    TokenKind::EqEq
+                } else if self.eat_if('>') {
+                    TokenKind::Arrow
+                } else {
+                    TokenKind::Eq
+                }
             }
             '!' => {
-                if self.eat_if('=') { TokenKind::BangEq } else { TokenKind::Bang }
+                if self.eat_if('=') {
+                    TokenKind::BangEq
+                } else {
+                    TokenKind::Bang
+                }
             }
             '<' => {
                 if self.eat_if('<') {
-                    if self.eat_if('=') { TokenKind::LtLtEq } else { TokenKind::LtLt }
+                    if self.eat_if('=') {
+                        TokenKind::LtLtEq
+                    } else {
+                        TokenKind::LtLt
+                    }
                 } else if self.eat_if('=') {
                     TokenKind::LtEq
                 } else {
@@ -372,9 +415,17 @@ impl<'src> Lexer<'src> {
                 if self.cur() == Some('>') && self.peek(1) == Some('>') {
                     self.advance(); // second >
                     self.advance(); // third >
-                    if self.eat_if('=') { TokenKind::GtGtGtEq } else { TokenKind::GtGtGt }
+                    if self.eat_if('=') {
+                        TokenKind::GtGtGtEq
+                    } else {
+                        TokenKind::GtGtGt
+                    }
                 } else if self.eat_if('>') {
-                    if self.eat_if('=') { TokenKind::GtGtEq } else { TokenKind::GtGt }
+                    if self.eat_if('=') {
+                        TokenKind::GtGtEq
+                    } else {
+                        TokenKind::GtGt
+                    }
                 } else if self.eat_if('=') {
                     TokenKind::GtEq
                 } else {
@@ -382,21 +433,37 @@ impl<'src> Lexer<'src> {
                 }
             }
             '&' => {
-                if self.eat_if('&') { TokenKind::AmpAmp }
-                else if self.eat_if('=') { TokenKind::AmpEq }
-                else { TokenKind::Amp }
+                if self.eat_if('&') {
+                    TokenKind::AmpAmp
+                } else if self.eat_if('=') {
+                    TokenKind::AmpEq
+                } else {
+                    TokenKind::Amp
+                }
             }
             '|' => {
-                if self.eat_if('|') { TokenKind::PipePipe }
-                else if self.eat_if('=') { TokenKind::PipeEq }
-                else { TokenKind::Pipe }
+                if self.eat_if('|') {
+                    TokenKind::PipePipe
+                } else if self.eat_if('=') {
+                    TokenKind::PipeEq
+                } else {
+                    TokenKind::Pipe
+                }
             }
             '^' => {
-                if self.eat_if('=') { TokenKind::CaretEq } else { TokenKind::Caret }
+                if self.eat_if('=') {
+                    TokenKind::CaretEq
+                } else {
+                    TokenKind::Caret
+                }
             }
             '?' => {
                 if self.eat_if('?') {
-                    if self.eat_if('=') { TokenKind::QmarkQmarkEq } else { TokenKind::QmarkQmark }
+                    if self.eat_if('=') {
+                        TokenKind::QmarkQmarkEq
+                    } else {
+                        TokenKind::QmarkQmark
+                    }
                 } else if self.cur() == Some('.') && self.peek(1) == Some('.') {
                     self.advance(); // .
                     self.advance(); // .
@@ -412,7 +479,11 @@ impl<'src> Lexer<'src> {
             '.' => {
                 if self.eat_if('.') {
                     if self.eat_if('.') {
-                        if self.eat_if('?') { TokenKind::DotDotDotQmark } else { TokenKind::DotDotDot }
+                        if self.eat_if('?') {
+                            TokenKind::DotDotDotQmark
+                        } else {
+                            TokenKind::DotDotDot
+                        }
                     } else {
                         TokenKind::DotDot
                     }
@@ -423,8 +494,12 @@ impl<'src> Lexer<'src> {
                     }
                     if matches!(self.cur(), Some('e' | 'E')) {
                         self.advance();
-                        if matches!(self.cur(), Some('+' | '-')) { self.advance(); }
-                        while matches!(self.cur(), Some('0'..='9')) { self.advance(); }
+                        if matches!(self.cur(), Some('+' | '-')) {
+                            self.advance();
+                        }
+                        while matches!(self.cur(), Some('0'..='9')) {
+                            self.advance();
+                        }
                     }
                     return self.make(TokenKind::DoubleLit, start);
                 } else {

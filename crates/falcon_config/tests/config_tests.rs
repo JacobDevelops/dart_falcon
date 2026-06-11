@@ -1,4 +1,6 @@
-use falcon_config::{load_config, load_or_default, find_config, FalconConfig, RuleConfig, ConfigError};
+use falcon_config::{
+    ConfigError, FalconConfig, RuleConfig, find_config, load_config, load_or_default,
+};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -100,15 +102,22 @@ fn test_rule_config_disabled() {
 #[test]
 fn test_rule_config_with_options() {
     let path = temp_file_path("rule_with_options.json");
-    let json = r#"{"rules": {"my_rule": {"enabled": true, "options": {"key": "value", "number": 42}}}}"#;
+    let json =
+        r#"{"rules": {"my_rule": {"enabled": true, "options": {"key": "value", "number": 42}}}}"#;
     fs::write(&path, json).expect("write temp file");
 
     let cfg = load_config(&path).expect("load config");
     let rule = cfg.rules.get("my_rule").expect("rule exists");
     assert!(rule.enabled);
     assert_eq!(rule.options.len(), 2);
-    assert_eq!(rule.options.get("key").and_then(|v| v.as_str()), Some("value"));
-    assert_eq!(rule.options.get("number").and_then(|v| v.as_i64()), Some(42));
+    assert_eq!(
+        rule.options.get("key").and_then(|v| v.as_str()),
+        Some("value")
+    );
+    assert_eq!(
+        rule.options.get("number").and_then(|v| v.as_i64()),
+        Some(42)
+    );
 
     cleanup(&path);
 }

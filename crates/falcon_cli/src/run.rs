@@ -1,6 +1,6 @@
 use clap::Parser;
 
-use crate::analyze_pipeline::{run_check, CheckOptions};
+use crate::analyze_pipeline::{CheckOptions, run_check};
 use crate::args::Cli;
 
 pub fn run_cli() -> i32 {

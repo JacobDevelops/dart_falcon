@@ -1,4 +1,4 @@
-use falcon_diagnostics::{byte_to_lsp_position, ContextLine, Diagnostic, Severity, Span};
+use falcon_diagnostics::{ContextLine, Diagnostic, Severity, Span, byte_to_lsp_position};
 
 #[test]
 fn test_diagnostic_new() {
@@ -93,7 +93,13 @@ fn test_format_text_error() {
 #[test]
 fn test_format_text_warning() {
     let span = Span { start: 0, end: 5 };
-    let diag = Diagnostic::new("WRN001", Severity::Warning, "warning msg", "other.dart", span);
+    let diag = Diagnostic::new(
+        "WRN001",
+        Severity::Warning,
+        "warning msg",
+        "other.dart",
+        span,
+    );
     let text = diag.format_text();
 
     assert!(text.contains("warning"));
@@ -125,7 +131,10 @@ fn test_format_lsp_severity_error() {
     let diag = Diagnostic::new("DCL001", Severity::Error, "test", "file.dart", span);
     let lsp_diag = diag.format_lsp(source);
 
-    assert_eq!(lsp_diag.severity, Some(lsp_types::DiagnosticSeverity::ERROR));
+    assert_eq!(
+        lsp_diag.severity,
+        Some(lsp_types::DiagnosticSeverity::ERROR)
+    );
 }
 
 #[test]

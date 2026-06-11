@@ -20,12 +20,7 @@ use falcon_config::FalconConfig;
 pub fn enabled_rules(config: &FalconConfig) -> Vec<Box<dyn Rule>> {
     all_rules()
         .into_iter()
-        .filter(|rule| {
-            config
-                .rules
-                .get(rule.name())
-                .is_none_or(|rc| rc.enabled)
-        })
+        .filter(|rule| config.rules.get(rule.name()).is_none_or(|rc| rc.enabled))
         .collect()
 }
 

@@ -355,7 +355,10 @@ fn all_rules_run_jfit_20_files_no_panic() {
         rules.len()
     );
     // At least one rule must fire somewhere across 20 real-world files
-    assert!(total_diags > 0, "no diagnostics emitted on jfit corpus — rules may not be scanning");
+    assert!(
+        total_diags > 0,
+        "no diagnostics emitted on jfit corpus — rules may not be scanning"
+    );
 }
 
 #[test]

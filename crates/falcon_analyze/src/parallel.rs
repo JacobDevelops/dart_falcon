@@ -18,7 +18,11 @@ fn analyze_file(
     let span = info_span!("analyze_file", file = %path.display());
     let _enter = span.enter();
     let (program, _parse_errors) = parse(source);
-    let ctx = AnalyzeContext { file_path: path, source, config };
+    let ctx = AnalyzeContext {
+        file_path: path,
+        source,
+        config,
+    };
     let diagnostics = registry.run_all(&program, &ctx);
     info!(file = %path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
     diagnostics

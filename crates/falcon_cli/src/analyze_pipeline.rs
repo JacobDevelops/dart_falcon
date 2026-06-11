@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use tracing::{info, warn};
 
 use clap::ValueEnum;
-use falcon_analyze::{analyze_parallel, analyze_sequential, RuleRegistry};
-use falcon_config::{load_config, load_or_default, FalconConfig};
+use falcon_analyze::{RuleRegistry, analyze_parallel, analyze_sequential};
+use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_rules::enabled_rules;
 

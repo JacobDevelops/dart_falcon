@@ -12,7 +12,10 @@ impl<'src> Parser<'src> {
             stmts.push(self.parse_stmt());
         }
         self.expect(TokenKind::RBrace);
-        Block { stmts, span: self.span_from(start) }
+        Block {
+            stmts,
+            span: self.span_from(start),
+        }
     }
 
     pub(super) fn parse_stmt(&mut self) -> Stmt {
@@ -49,19 +52,37 @@ impl<'src> Parser<'src> {
                 self.advance();
                 let value = self.parse_expr();
                 self.eat(TokenKind::Semicolon);
-                Stmt::Throw(ThrowStmt { value, is_rethrow: false, span: self.span_from(start) })
+                Stmt::Throw(ThrowStmt {
+                    value,
+                    is_rethrow: false,
+                    span: self.span_from(start),
+                })
             }
             TokenKind::Break => {
                 self.advance();
-                let label = if self.is_ident_like() { self.parse_ident() } else { None };
+                let label = if self.is_ident_like() {
+                    self.parse_ident()
+                } else {
+                    None
+                };
                 self.eat(TokenKind::Semicolon);
-                Stmt::Break(BreakStmt { label, span: self.span_from(start) })
+                Stmt::Break(BreakStmt {
+                    label,
+                    span: self.span_from(start),
+                })
             }
             TokenKind::Continue => {
                 self.advance();
-                let label = if self.is_ident_like() { self.parse_ident() } else { None };
+                let label = if self.is_ident_like() {
+                    self.parse_ident()
+                } else {
+                    None
+                };
                 self.eat(TokenKind::Semicolon);
-                Stmt::Continue(ContinueStmt { label, span: self.span_from(start) })
+                Stmt::Continue(ContinueStmt {
+                    label,
+                    span: self.span_from(start),
+                })
             }
             TokenKind::Assert => self.parse_assert_stmt(),
             TokenKind::Yield => self.parse_yield_stmt(),
@@ -69,7 +90,9 @@ impl<'src> Parser<'src> {
                 self.advance();
                 self.eat(TokenKind::Semicolon);
                 Stmt::Throw(ThrowStmt {
-                    value: Expr::Error { span: self.span_from(start) },
+                    value: Expr::Error {
+                        span: self.span_from(start),
+                    },
                     is_rethrow: true,
                     span: self.span_from(start),
                 })
@@ -77,7 +100,9 @@ impl<'src> Parser<'src> {
             TokenKind::Semicolon => {
                 self.advance();
                 Stmt::Expr(ExprStmt {
-                    expr: Expr::NullLit { span: self.span_from(start) },
+                    expr: Expr::NullLit {
+                        span: self.span_from(start),
+                    },
                     span: self.span_from(start),
                 })
             }
@@ -151,7 +176,16 @@ impl<'src> Parser<'src> {
             if self.eat(TokenKind::In).is_some() {
                 let iterable = self.parse_expr();
                 self.expect(TokenKind::RParen);
-                return (Some(ForInit::ForIn { is_final, var_type, name, iterable: Box::new(iterable) }), None, Vec::new());
+                return (
+                    Some(ForInit::ForIn {
+                        is_final,
+                        var_type,
+                        name,
+                        iterable: Box::new(iterable),
+                    }),
+                    None,
+                    Vec::new(),
+                );
             }
             let (decl, cond, update) = self.finish_c_style_for(is_final, var_type, name, saved);
             return (Some(ForInit::VarDecl(decl)), cond, update);
@@ -165,7 +199,8 @@ impl<'src> Parser<'src> {
             let _ = self.eat(TokenKind::Var);
             let var_type = self.try_parse_type_for_for_decl();
             let name = self.expect_ident();
-            let (decl, cond, update) = self.finish_c_style_for_with_late(is_late, is_final, var_type, name, saved);
+            let (decl, cond, update) =
+                self.finish_c_style_for_with_late(is_late, is_final, var_type, name, saved);
             return (Some(ForInit::VarDecl(decl)), cond, update);
         }
 
@@ -178,7 +213,12 @@ impl<'src> Parser<'src> {
                     let iterable = self.parse_expr();
                     self.expect(TokenKind::RParen);
                     return (
-                        Some(ForInit::ForIn { is_final: false, var_type: Some(ty), name, iterable: Box::new(iterable) }),
+                        Some(ForInit::ForIn {
+                            is_final: false,
+                            var_type: Some(ty),
+                            name,
+                            iterable: Box::new(iterable),
+                        }),
                         None,
                         Vec::new(),
                     );
@@ -204,7 +244,12 @@ impl<'src> Parser<'src> {
             let iterable = self.parse_expr();
             self.expect(TokenKind::RParen);
             return (
-                Some(ForInit::ForIn { is_final: false, var_type: None, name, iterable: Box::new(iterable) }),
+                Some(ForInit::ForIn {
+                    is_final: false,
+                    var_type: None,
+                    name,
+                    iterable: Box::new(iterable),
+                }),
                 None,
                 Vec::new(),
             );
@@ -223,10 +268,17 @@ impl<'src> Parser<'src> {
     }
 
     fn try_parse_type_for_for_decl(&mut self) -> Option<DartType> {
-        if !self.is_type_start() { return None; }
+        if !self.is_type_start() {
+            return None;
+        }
         let saved = self.pos;
         let ty = self.parse_type();
-        if self.is_ident_like() { Some(ty) } else { self.pos = saved; None }
+        if self.is_ident_like() {
+            Some(ty)
+        } else {
+            self.pos = saved;
+            None
+        }
     }
 
     fn finish_c_style_for(
@@ -237,13 +289,29 @@ impl<'src> Parser<'src> {
         _saved: usize,
     ) -> (LocalVarDecl, Option<Expr>, Vec<Expr>) {
         let decl_start = first_name.span.start;
-        let init = if self.eat(TokenKind::Eq).is_some() { Some(self.parse_expr()) } else { None };
-        let mut declarators = vec![VarDeclarator { name: first_name, initializer: init, span: self.span_from(decl_start) }];
+        let init = if self.eat(TokenKind::Eq).is_some() {
+            Some(self.parse_expr())
+        } else {
+            None
+        };
+        let mut declarators = vec![VarDeclarator {
+            name: first_name,
+            initializer: init,
+            span: self.span_from(decl_start),
+        }];
         while self.eat(TokenKind::Comma).is_some() {
             let ds = self.cur().offset;
             let n = self.expect_ident();
-            let iv = if self.eat(TokenKind::Eq).is_some() { Some(self.parse_expr()) } else { None };
-            declarators.push(VarDeclarator { name: n, initializer: iv, span: self.span_from(ds) });
+            let iv = if self.eat(TokenKind::Eq).is_some() {
+                Some(self.parse_expr())
+            } else {
+                None
+            };
+            declarators.push(VarDeclarator {
+                name: n,
+                initializer: iv,
+                span: self.span_from(ds),
+            });
         }
         let span = self.span_from(decl_start);
         self.expect(TokenKind::Semicolon);
@@ -251,7 +319,18 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::Semicolon);
         let update = self.parse_expr_list_until(TokenKind::RParen);
         self.expect(TokenKind::RParen);
-        (LocalVarDecl { is_final, is_const: false, is_late: false, var_type, declarators, span }, cond, update)
+        (
+            LocalVarDecl {
+                is_final,
+                is_const: false,
+                is_late: false,
+                var_type,
+                declarators,
+                span,
+            },
+            cond,
+            update,
+        )
     }
 
     fn finish_c_style_for_with_late(
@@ -263,13 +342,29 @@ impl<'src> Parser<'src> {
         _saved: usize,
     ) -> (LocalVarDecl, Option<Expr>, Vec<Expr>) {
         let decl_start = first_name.span.start;
-        let init = if self.eat(TokenKind::Eq).is_some() { Some(self.parse_expr()) } else { None };
-        let mut declarators = vec![VarDeclarator { name: first_name, initializer: init, span: self.span_from(decl_start) }];
+        let init = if self.eat(TokenKind::Eq).is_some() {
+            Some(self.parse_expr())
+        } else {
+            None
+        };
+        let mut declarators = vec![VarDeclarator {
+            name: first_name,
+            initializer: init,
+            span: self.span_from(decl_start),
+        }];
         while self.eat(TokenKind::Comma).is_some() {
             let ds = self.cur().offset;
             let n = self.expect_ident();
-            let iv = if self.eat(TokenKind::Eq).is_some() { Some(self.parse_expr()) } else { None };
-            declarators.push(VarDeclarator { name: n, initializer: iv, span: self.span_from(ds) });
+            let iv = if self.eat(TokenKind::Eq).is_some() {
+                Some(self.parse_expr())
+            } else {
+                None
+            };
+            declarators.push(VarDeclarator {
+                name: n,
+                initializer: iv,
+                span: self.span_from(ds),
+            });
         }
         let span = self.span_from(decl_start);
         self.expect(TokenKind::Semicolon);
@@ -277,18 +372,35 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::Semicolon);
         let update = self.parse_expr_list_until(TokenKind::RParen);
         self.expect(TokenKind::RParen);
-        (LocalVarDecl { is_final, is_const: false, is_late, var_type, declarators, span }, cond, update)
+        (
+            LocalVarDecl {
+                is_final,
+                is_const: false,
+                is_late,
+                var_type,
+                declarators,
+                span,
+            },
+            cond,
+            update,
+        )
     }
 
     fn parse_optional_expr_before(&mut self, stop: TokenKind) -> Option<Expr> {
-        if self.at(stop) { None } else { Some(self.parse_expr()) }
+        if self.at(stop) {
+            None
+        } else {
+            Some(self.parse_expr())
+        }
     }
 
     fn parse_expr_list_until(&mut self, stop: TokenKind) -> Vec<Expr> {
         let mut exprs = Vec::new();
         while self.cur().kind != stop && !self.at(TokenKind::Eof) {
             exprs.push(self.parse_expr());
-            if self.eat(TokenKind::Comma).is_none() { break; }
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
         }
         exprs
     }
@@ -300,7 +412,11 @@ impl<'src> Parser<'src> {
         let condition = self.parse_expr();
         self.expect(TokenKind::RParen);
         let body = self.parse_stmt();
-        Stmt::While(WhileStmt { condition, body: Box::new(body), span: self.span_from(start) })
+        Stmt::While(WhileStmt {
+            condition,
+            body: Box::new(body),
+            span: self.span_from(start),
+        })
     }
 
     fn parse_do_while_stmt(&mut self) -> Stmt {
@@ -312,7 +428,11 @@ impl<'src> Parser<'src> {
         let condition = self.parse_expr();
         self.expect(TokenKind::RParen);
         self.eat(TokenKind::Semicolon);
-        Stmt::DoWhile(DoWhileStmt { body: Box::new(body), condition, span: self.span_from(start) })
+        Stmt::DoWhile(DoWhileStmt {
+            body: Box::new(body),
+            condition,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_switch_stmt(&mut self) -> Stmt {
@@ -332,7 +452,11 @@ impl<'src> Parser<'src> {
                 if self.at(TokenKind::Case) {
                     self.advance();
                     let pattern = self.parse_pattern();
-                    let guard = if self.eat(TokenKind::When).is_some() { Some(self.parse_expr()) } else { None };
+                    let guard = if self.eat(TokenKind::When).is_some() {
+                        Some(self.parse_expr())
+                    } else {
+                        None
+                    };
                     self.expect(TokenKind::Colon);
                     case_kinds.push(SwitchCaseKind::Pattern(Box::new(pattern), Box::new(guard)));
                 } else if self.at(TokenKind::Default) {
@@ -348,7 +472,10 @@ impl<'src> Parser<'src> {
             }
 
             if case_kinds.is_empty() {
-                self.error(format!("expected case or default, got {:?}", self.cur().kind));
+                self.error(format!(
+                    "expected case or default, got {:?}",
+                    self.cur().kind
+                ));
                 self.advance();
                 continue;
             }
@@ -361,11 +488,19 @@ impl<'src> Parser<'src> {
             {
                 body.push(self.parse_stmt());
             }
-            cases.push(SwitchCase { cases: case_kinds, body, span: self.span_from(case_start) });
+            cases.push(SwitchCase {
+                cases: case_kinds,
+                body,
+                span: self.span_from(case_start),
+            });
         }
 
         self.expect(TokenKind::RBrace);
-        Stmt::Switch(SwitchStmt { subject, cases, span: self.span_from(start) })
+        Stmt::Switch(SwitchStmt {
+            subject,
+            cases,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_try_stmt(&mut self) -> Stmt {
@@ -386,7 +521,11 @@ impl<'src> Parser<'src> {
             let (exception_var, stack_trace_var) = if self.eat(TokenKind::Catch).is_some() {
                 self.expect(TokenKind::LParen);
                 let e = self.expect_ident();
-                let s = if self.eat(TokenKind::Comma).is_some() { Some(self.expect_ident()) } else { None };
+                let s = if self.eat(TokenKind::Comma).is_some() {
+                    Some(self.expect_ident())
+                } else {
+                    None
+                };
                 self.expect(TokenKind::RParen);
                 (Some(e), s)
             } else {
@@ -408,7 +547,12 @@ impl<'src> Parser<'src> {
             None
         };
 
-        Stmt::TryCatch(TryCatchStmt { body, catches, finally, span: self.span_from(start) })
+        Stmt::TryCatch(TryCatchStmt {
+            body,
+            catches,
+            finally,
+            span: self.span_from(start),
+        })
     }
 
     fn is_on_keyword(&self) -> bool {
@@ -418,13 +562,19 @@ impl<'src> Parser<'src> {
     fn parse_return_stmt(&mut self) -> Stmt {
         let start = self.cur().offset;
         self.advance(); // return
-        let value = if !self.at(TokenKind::Semicolon) && !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+        let value = if !self.at(TokenKind::Semicolon)
+            && !self.at(TokenKind::RBrace)
+            && !self.at(TokenKind::Eof)
+        {
             Some(self.parse_expr())
         } else {
             None
         };
         self.eat(TokenKind::Semicolon);
-        Stmt::Return(ReturnStmt { value, span: self.span_from(start) })
+        Stmt::Return(ReturnStmt {
+            value,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_assert_stmt(&mut self) -> Stmt {
@@ -440,7 +590,11 @@ impl<'src> Parser<'src> {
         self.eat(TokenKind::Comma); // optional trailing comma
         self.expect(TokenKind::RParen);
         self.eat(TokenKind::Semicolon);
-        Stmt::Assert(AssertStmt { condition, message, span: self.span_from(start) })
+        Stmt::Assert(AssertStmt {
+            condition,
+            message,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_yield_stmt(&mut self) -> Stmt {
@@ -449,7 +603,11 @@ impl<'src> Parser<'src> {
         let is_star = self.eat(TokenKind::Star).is_some();
         let value = self.parse_expr();
         self.eat(TokenKind::Semicolon);
-        Stmt::Yield(YieldStmt { is_star, value, span: self.span_from(start) })
+        Stmt::Yield(YieldStmt {
+            is_star,
+            value,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_expr_or_local_decl_stmt(&mut self) -> Stmt {
@@ -461,9 +619,7 @@ impl<'src> Parser<'src> {
         }
 
         // late / final / var → definitely a var decl
-        if self.at(TokenKind::Late)
-            || self.at_any(&[TokenKind::Final, TokenKind::Var])
-        {
+        if self.at(TokenKind::Late) || self.at_any(&[TokenKind::Final, TokenKind::Var]) {
             return self.parse_local_var_decl(start);
         }
         // `const` can be either a var decl or a const expression (constructor/collection).
@@ -500,7 +656,11 @@ impl<'src> Parser<'src> {
                 let name = self.expect_ident();
                 // local function: name followed by ( or <
                 if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
-                    let type_params = if self.at(TokenKind::Lt) { self.parse_type_params() } else { Vec::new() };
+                    let type_params = if self.at(TokenKind::Lt) {
+                        self.parse_type_params()
+                    } else {
+                        Vec::new()
+                    };
                     let params = self.parse_formal_param_list();
                     let (is_async, is_generator) = self.parse_async_marker();
                     if let Some(body) = self.parse_function_body() {
@@ -521,13 +681,29 @@ impl<'src> Parser<'src> {
                 } else if self.at_any(&[TokenKind::Eq, TokenKind::Semicolon, TokenKind::Comma]) {
                     // Typed var decl
                     let ds = name.span.start;
-                    let init = if self.eat(TokenKind::Eq).is_some() { Some(self.parse_expr()) } else { None };
-                    let mut declarators = vec![VarDeclarator { name, initializer: init, span: self.span_from(ds) }];
+                    let init = if self.eat(TokenKind::Eq).is_some() {
+                        Some(self.parse_expr())
+                    } else {
+                        None
+                    };
+                    let mut declarators = vec![VarDeclarator {
+                        name,
+                        initializer: init,
+                        span: self.span_from(ds),
+                    }];
                     while self.eat(TokenKind::Comma).is_some() {
                         let d2 = self.cur().offset;
                         let n = self.expect_ident();
-                        let iv = if self.eat(TokenKind::Eq).is_some() { Some(self.parse_expr()) } else { None };
-                        declarators.push(VarDeclarator { name: n, initializer: iv, span: self.span_from(d2) });
+                        let iv = if self.eat(TokenKind::Eq).is_some() {
+                            Some(self.parse_expr())
+                        } else {
+                            None
+                        };
+                        declarators.push(VarDeclarator {
+                            name: n,
+                            initializer: iv,
+                            span: self.span_from(d2),
+                        });
                     }
                     self.eat(TokenKind::Semicolon);
                     return Stmt::LocalVar(LocalVarDecl {
@@ -550,7 +726,10 @@ impl<'src> Parser<'src> {
 
         let expr = self.parse_expr();
         self.eat(TokenKind::Semicolon);
-        Stmt::Expr(ExprStmt { expr, span: self.span_from(start) })
+        Stmt::Expr(ExprStmt {
+            expr,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_local_var_decl(&mut self, start: usize) -> Stmt {
@@ -562,23 +741,51 @@ impl<'src> Parser<'src> {
         let var_type = if self.is_type_start() {
             let saved = self.pos;
             let ty = self.parse_type();
-            if self.is_ident_like() { Some(ty) } else { self.pos = saved; None }
+            if self.is_ident_like() {
+                Some(ty)
+            } else {
+                self.pos = saved;
+                None
+            }
         } else {
             None
         };
 
         let ds = self.cur().offset;
         let name = self.expect_ident();
-        let init = if self.eat(TokenKind::Eq).is_some() { Some(self.parse_expr()) } else { None };
-        let mut declarators = vec![VarDeclarator { name, initializer: init, span: self.span_from(ds) }];
+        let init = if self.eat(TokenKind::Eq).is_some() {
+            Some(self.parse_expr())
+        } else {
+            None
+        };
+        let mut declarators = vec![VarDeclarator {
+            name,
+            initializer: init,
+            span: self.span_from(ds),
+        }];
         while self.eat(TokenKind::Comma).is_some() {
             let d2 = self.cur().offset;
             let n = self.expect_ident();
-            let iv = if self.eat(TokenKind::Eq).is_some() { Some(self.parse_expr()) } else { None };
-            declarators.push(VarDeclarator { name: n, initializer: iv, span: self.span_from(d2) });
+            let iv = if self.eat(TokenKind::Eq).is_some() {
+                Some(self.parse_expr())
+            } else {
+                None
+            };
+            declarators.push(VarDeclarator {
+                name: n,
+                initializer: iv,
+                span: self.span_from(d2),
+            });
         }
         self.eat(TokenKind::Semicolon);
-        Stmt::LocalVar(LocalVarDecl { is_final, is_const, is_late, var_type, declarators, span: self.span_from(start) })
+        Stmt::LocalVar(LocalVarDecl {
+            is_final,
+            is_const,
+            is_late,
+            var_type,
+            declarators,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_local_var_or_func_after_annotations(&mut self, start: usize) -> Stmt {
@@ -589,8 +796,16 @@ impl<'src> Parser<'src> {
             if self.is_ident_like() {
                 let name = self.expect_ident();
                 let ds = name.span.start;
-                let init = if self.eat(TokenKind::Eq).is_some() { Some(self.parse_expr()) } else { None };
-                let declarators = vec![VarDeclarator { name, initializer: init, span: self.span_from(ds) }];
+                let init = if self.eat(TokenKind::Eq).is_some() {
+                    Some(self.parse_expr())
+                } else {
+                    None
+                };
+                let declarators = vec![VarDeclarator {
+                    name,
+                    initializer: init,
+                    span: self.span_from(ds),
+                }];
                 self.eat(TokenKind::Semicolon);
                 return Stmt::LocalVar(LocalVarDecl {
                     is_final: false,
@@ -605,6 +820,9 @@ impl<'src> Parser<'src> {
         }
         let expr = self.parse_expr();
         self.eat(TokenKind::Semicolon);
-        Stmt::Expr(ExprStmt { expr, span: self.span_from(start) })
+        Stmt::Expr(ExprStmt {
+            expr,
+            span: self.span_from(start),
+        })
     }
 }

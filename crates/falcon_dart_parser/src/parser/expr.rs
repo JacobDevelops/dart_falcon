@@ -36,7 +36,12 @@ impl<'src> Parser<'src> {
         self.advance();
         let rhs = self.parse_assign(); // right-associative
         let span = self.span_from(start);
-        Expr::Assign { target: Box::new(lhs), op, value: Box::new(rhs), span }
+        Expr::Assign {
+            target: Box::new(lhs),
+            op,
+            value: Box::new(rhs),
+            span,
+        }
     }
 
     // ── Conditional ternary ───────────────────────────────────────────────────
@@ -67,7 +72,12 @@ impl<'src> Parser<'src> {
         while self.eat(TokenKind::QmarkQmark).is_some() {
             let rhs = self.parse_or();
             let span = self.span_from(start);
-            lhs = Expr::Binary { op: BinaryOp::NullCoalesce, left: Box::new(lhs), right: Box::new(rhs), span };
+            lhs = Expr::Binary {
+                op: BinaryOp::NullCoalesce,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span,
+            };
         }
         lhs
     }
@@ -80,7 +90,12 @@ impl<'src> Parser<'src> {
         while self.eat(TokenKind::PipePipe).is_some() {
             let rhs = self.parse_and();
             let span = self.span_from(start);
-            lhs = Expr::Binary { op: BinaryOp::Or, left: Box::new(lhs), right: Box::new(rhs), span };
+            lhs = Expr::Binary {
+                op: BinaryOp::Or,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span,
+            };
         }
         lhs
     }
@@ -93,7 +108,12 @@ impl<'src> Parser<'src> {
         while self.eat(TokenKind::AmpAmp).is_some() {
             let rhs = self.parse_equality();
             let span = self.span_from(start);
-            lhs = Expr::Binary { op: BinaryOp::And, left: Box::new(lhs), right: Box::new(rhs), span };
+            lhs = Expr::Binary {
+                op: BinaryOp::And,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span,
+            };
         }
         lhs
     }
@@ -110,7 +130,12 @@ impl<'src> Parser<'src> {
         };
         self.advance();
         let rhs = self.parse_relational();
-        Expr::Binary { op, left: Box::new(lhs), right: Box::new(rhs), span: self.span_from(start) }
+        Expr::Binary {
+            op,
+            left: Box::new(lhs),
+            right: Box::new(rhs),
+            span: self.span_from(start),
+        }
     }
 
     // ── Relational / type tests ───────────────────────────────────────────────
@@ -119,20 +144,65 @@ impl<'src> Parser<'src> {
         let start = self.cur().offset;
         let lhs = self.parse_bitwise_or();
         match self.cur().kind {
-            TokenKind::Lt => { self.advance(); let r = self.parse_bitwise_or(); Expr::Binary { op: BinaryOp::Lt, left: Box::new(lhs), right: Box::new(r), span: self.span_from(start) } }
-            TokenKind::Gt => { self.advance(); let r = self.parse_bitwise_or(); Expr::Binary { op: BinaryOp::Gt, left: Box::new(lhs), right: Box::new(r), span: self.span_from(start) } }
-            TokenKind::LtEq => { self.advance(); let r = self.parse_bitwise_or(); Expr::Binary { op: BinaryOp::LtEq, left: Box::new(lhs), right: Box::new(r), span: self.span_from(start) } }
-            TokenKind::GtEq => { self.advance(); let r = self.parse_bitwise_or(); Expr::Binary { op: BinaryOp::GtEq, left: Box::new(lhs), right: Box::new(r), span: self.span_from(start) } }
+            TokenKind::Lt => {
+                self.advance();
+                let r = self.parse_bitwise_or();
+                Expr::Binary {
+                    op: BinaryOp::Lt,
+                    left: Box::new(lhs),
+                    right: Box::new(r),
+                    span: self.span_from(start),
+                }
+            }
+            TokenKind::Gt => {
+                self.advance();
+                let r = self.parse_bitwise_or();
+                Expr::Binary {
+                    op: BinaryOp::Gt,
+                    left: Box::new(lhs),
+                    right: Box::new(r),
+                    span: self.span_from(start),
+                }
+            }
+            TokenKind::LtEq => {
+                self.advance();
+                let r = self.parse_bitwise_or();
+                Expr::Binary {
+                    op: BinaryOp::LtEq,
+                    left: Box::new(lhs),
+                    right: Box::new(r),
+                    span: self.span_from(start),
+                }
+            }
+            TokenKind::GtEq => {
+                self.advance();
+                let r = self.parse_bitwise_or();
+                Expr::Binary {
+                    op: BinaryOp::GtEq,
+                    left: Box::new(lhs),
+                    right: Box::new(r),
+                    span: self.span_from(start),
+                }
+            }
             TokenKind::Is => {
                 self.advance();
                 let negated = self.eat(TokenKind::Bang).is_some();
                 let dart_type = self.parse_type();
-                Expr::Is { expr: Box::new(lhs), dart_type, negated, span: self.span_from(start) }
+                Expr::Is {
+                    expr: Box::new(lhs),
+                    dart_type,
+                    negated,
+                    span: self.span_from(start),
+                }
             }
             TokenKind::As => {
                 self.advance();
                 let dart_type = self.parse_type();
-                Expr::As { expr: Box::new(lhs), dart_type, span: self.span_from(start) }
+                Expr::As {
+                    expr: Box::new(lhs),
+                    dart_type,
+                    span: self.span_from(start),
+                }
             }
             _ => lhs,
         }
@@ -145,7 +215,12 @@ impl<'src> Parser<'src> {
         let mut lhs = self.parse_bitwise_xor();
         while self.eat(TokenKind::Pipe).is_some() {
             let rhs = self.parse_bitwise_xor();
-            lhs = Expr::Binary { op: BinaryOp::BitOr, left: Box::new(lhs), right: Box::new(rhs), span: self.span_from(start) };
+            lhs = Expr::Binary {
+                op: BinaryOp::BitOr,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span: self.span_from(start),
+            };
         }
         lhs
     }
@@ -155,7 +230,12 @@ impl<'src> Parser<'src> {
         let mut lhs = self.parse_bitwise_and();
         while self.eat(TokenKind::Caret).is_some() {
             let rhs = self.parse_bitwise_and();
-            lhs = Expr::Binary { op: BinaryOp::BitXor, left: Box::new(lhs), right: Box::new(rhs), span: self.span_from(start) };
+            lhs = Expr::Binary {
+                op: BinaryOp::BitXor,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span: self.span_from(start),
+            };
         }
         lhs
     }
@@ -165,7 +245,12 @@ impl<'src> Parser<'src> {
         let mut lhs = self.parse_shift();
         while self.eat(TokenKind::Amp).is_some() {
             let rhs = self.parse_shift();
-            lhs = Expr::Binary { op: BinaryOp::BitAnd, left: Box::new(lhs), right: Box::new(rhs), span: self.span_from(start) };
+            lhs = Expr::Binary {
+                op: BinaryOp::BitAnd,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span: self.span_from(start),
+            };
         }
         lhs
     }
@@ -184,7 +269,12 @@ impl<'src> Parser<'src> {
             };
             self.advance();
             let rhs = self.parse_additive();
-            lhs = Expr::Binary { op, left: Box::new(lhs), right: Box::new(rhs), span: self.span_from(start) };
+            lhs = Expr::Binary {
+                op,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span: self.span_from(start),
+            };
         }
         lhs
     }
@@ -202,7 +292,12 @@ impl<'src> Parser<'src> {
             };
             self.advance();
             let rhs = self.parse_multiplicative();
-            lhs = Expr::Binary { op, left: Box::new(lhs), right: Box::new(rhs), span: self.span_from(start) };
+            lhs = Expr::Binary {
+                op,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span: self.span_from(start),
+            };
         }
         lhs
     }
@@ -222,7 +317,12 @@ impl<'src> Parser<'src> {
             };
             self.advance();
             let rhs = self.parse_unary();
-            lhs = Expr::Binary { op, left: Box::new(lhs), right: Box::new(rhs), span: self.span_from(start) };
+            lhs = Expr::Binary {
+                op,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span: self.span_from(start),
+            };
         }
         lhs
     }
@@ -235,37 +335,63 @@ impl<'src> Parser<'src> {
             TokenKind::Minus => {
                 self.advance();
                 let operand = self.parse_unary();
-                Expr::Unary { op: UnaryOp::Minus, operand: Box::new(operand), span: self.span_from(start) }
+                Expr::Unary {
+                    op: UnaryOp::Minus,
+                    operand: Box::new(operand),
+                    span: self.span_from(start),
+                }
             }
             TokenKind::Bang => {
                 self.advance();
                 let operand = self.parse_unary();
-                Expr::Unary { op: UnaryOp::Bang, operand: Box::new(operand), span: self.span_from(start) }
+                Expr::Unary {
+                    op: UnaryOp::Bang,
+                    operand: Box::new(operand),
+                    span: self.span_from(start),
+                }
             }
             TokenKind::Tilde => {
                 self.advance();
                 let operand = self.parse_unary();
-                Expr::Unary { op: UnaryOp::Tilde, operand: Box::new(operand), span: self.span_from(start) }
+                Expr::Unary {
+                    op: UnaryOp::Tilde,
+                    operand: Box::new(operand),
+                    span: self.span_from(start),
+                }
             }
             TokenKind::PlusPlus => {
                 self.advance();
                 let operand = self.parse_unary();
-                Expr::Unary { op: UnaryOp::PlusPlus, operand: Box::new(operand), span: self.span_from(start) }
+                Expr::Unary {
+                    op: UnaryOp::PlusPlus,
+                    operand: Box::new(operand),
+                    span: self.span_from(start),
+                }
             }
             TokenKind::MinusMinus => {
                 self.advance();
                 let operand = self.parse_unary();
-                Expr::Unary { op: UnaryOp::MinusMinus, operand: Box::new(operand), span: self.span_from(start) }
+                Expr::Unary {
+                    op: UnaryOp::MinusMinus,
+                    operand: Box::new(operand),
+                    span: self.span_from(start),
+                }
             }
             TokenKind::Await => {
                 self.advance();
                 let operand = self.parse_unary();
-                Expr::Await { expr: Box::new(operand), span: self.span_from(start) }
+                Expr::Await {
+                    expr: Box::new(operand),
+                    span: self.span_from(start),
+                }
             }
             TokenKind::Throw => {
                 self.advance();
                 let operand = self.parse_expr();
-                Expr::Throw { expr: Box::new(operand), span: self.span_from(start) }
+                Expr::Throw {
+                    expr: Box::new(operand),
+                    span: self.span_from(start),
+                }
             }
             _ => self.parse_postfix(),
         }
@@ -282,16 +408,27 @@ impl<'src> Parser<'src> {
                 // Postfix ++ / --
                 TokenKind::PlusPlus => {
                     self.advance();
-                    expr = Expr::PostfixIncDec { op: PostfixIncDec::Increment, operand: Box::new(expr), span: self.span_from(start) };
+                    expr = Expr::PostfixIncDec {
+                        op: PostfixIncDec::Increment,
+                        operand: Box::new(expr),
+                        span: self.span_from(start),
+                    };
                 }
                 TokenKind::MinusMinus => {
                     self.advance();
-                    expr = Expr::PostfixIncDec { op: PostfixIncDec::Decrement, operand: Box::new(expr), span: self.span_from(start) };
+                    expr = Expr::PostfixIncDec {
+                        op: PostfixIncDec::Decrement,
+                        operand: Box::new(expr),
+                        span: self.span_from(start),
+                    };
                 }
                 // Null-assertion  expr!
                 TokenKind::Bang => {
                     self.advance();
-                    expr = Expr::NullAssert { operand: Box::new(expr), span: self.span_from(start) };
+                    expr = Expr::NullAssert {
+                        operand: Box::new(expr),
+                        span: self.span_from(start),
+                    };
                 }
                 // Member access  .field  ?.field  .new (constructor tear-off)
                 TokenKind::Dot | TokenKind::QmarkDot => {
@@ -304,7 +441,12 @@ impl<'src> Parser<'src> {
                     } else {
                         self.expect_ident()
                     };
-                    expr = Expr::Field { object: Box::new(expr), field, is_null_safe, span: self.span_from(start) };
+                    expr = Expr::Field {
+                        object: Box::new(expr),
+                        field,
+                        is_null_safe,
+                        span: self.span_from(start),
+                    };
                 }
                 // Index  [i]  ?[i]
                 TokenKind::LBracket | TokenKind::QmarkLBracket => {
@@ -312,12 +454,22 @@ impl<'src> Parser<'src> {
                     self.advance();
                     let index = self.parse_expr();
                     self.expect(TokenKind::RBracket);
-                    expr = Expr::Index { object: Box::new(expr), index: Box::new(index), is_null_safe, span: self.span_from(start) };
+                    expr = Expr::Index {
+                        object: Box::new(expr),
+                        index: Box::new(index),
+                        is_null_safe,
+                        span: self.span_from(start),
+                    };
                 }
                 // Call  (args)  with optional type args
                 TokenKind::LParen => {
                     let args = self.parse_arg_list();
-                    expr = Expr::Call { callee: Box::new(expr), type_args: Vec::new(), args, span: self.span_from(start) };
+                    expr = Expr::Call {
+                        callee: Box::new(expr),
+                        type_args: Vec::new(),
+                        args,
+                        span: self.span_from(start),
+                    };
                 }
                 // Generic call  <T>(args)
                 TokenKind::Lt => {
@@ -329,12 +481,26 @@ impl<'src> Parser<'src> {
                     if self.at(TokenKind::LParen) {
                         // Generic call: expr<T>(args)
                         let args = self.parse_arg_list();
-                        expr = Expr::Call { callee: Box::new(expr), type_args, args, span: self.span_from(start) };
+                        expr = Expr::Call {
+                            callee: Box::new(expr),
+                            type_args,
+                            args,
+                            span: self.span_from(start),
+                        };
                     } else if self.at(TokenKind::Dot) || self.at(TokenKind::QmarkDot) {
                         // Type instantiation expression: Name<T>.method(args) — keep type args,
                         // represent as Call with empty args; next iteration handles the `.`.
-                        let empty_args = ArgList { positional: Vec::new(), named: Vec::new(), span: self.span_from(start) };
-                        expr = Expr::Call { callee: Box::new(expr), type_args, args: empty_args, span: self.span_from(start) };
+                        let empty_args = ArgList {
+                            positional: Vec::new(),
+                            named: Vec::new(),
+                            span: self.span_from(start),
+                        };
+                        expr = Expr::Call {
+                            callee: Box::new(expr),
+                            type_args,
+                            args: empty_args,
+                            span: self.span_from(start),
+                        };
                     } else {
                         // Not a call or type instantiation — restore position and any spurious errors
                         self.pos = saved;
@@ -358,16 +524,29 @@ impl<'src> Parser<'src> {
                         };
                         self.expect(TokenKind::Arrow);
                         let body = self.parse_expr();
-                        arms.push(SwitchExprArm { pattern, guard, body, span: self.span_from(arm_start) });
+                        arms.push(SwitchExprArm {
+                            pattern,
+                            guard,
+                            body,
+                            span: self.span_from(arm_start),
+                        });
                         self.eat(TokenKind::Comma);
                     }
                     self.expect(TokenKind::RBrace);
-                    expr = Expr::Switch { subject: Box::new(expr), arms, span: self.span_from(start) };
+                    expr = Expr::Switch {
+                        subject: Box::new(expr),
+                        arms,
+                        span: self.span_from(start),
+                    };
                 }
                 // Cascade  ..  ?..
                 TokenKind::DotDot | TokenKind::DotDotQmark => {
                     let sections = self.parse_cascade_sections();
-                    expr = Expr::Cascade { object: Box::new(expr), sections, span: self.span_from(start) };
+                    expr = Expr::Cascade {
+                        object: Box::new(expr),
+                        sections,
+                        span: self.span_from(start),
+                    };
                 }
                 _ => break,
             }
@@ -394,7 +573,11 @@ impl<'src> Parser<'src> {
             } else if self.is_ident_like() {
                 let name = self.expect_ident();
                 if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
-                    let type_args = if self.at(TokenKind::Lt) { self.parse_type_args() } else { Vec::new() };
+                    let type_args = if self.at(TokenKind::Lt) {
+                        self.parse_type_args()
+                    } else {
+                        Vec::new()
+                    };
                     let args = self.parse_arg_list();
                     CascadeOp::Call(name, type_args, args)
                 } else if let Some(assign_op) = self.try_parse_assign_op() {
@@ -407,7 +590,10 @@ impl<'src> Parser<'src> {
             } else {
                 break;
             };
-            sections.push(CascadeSection { op, span: self.span_from(start) });
+            sections.push(CascadeSection {
+                op,
+                span: self.span_from(start),
+            });
         }
         sections
     }
@@ -442,12 +628,18 @@ impl<'src> Parser<'src> {
             TokenKind::IntLit => {
                 let text = self.cur_text().to_string();
                 self.advance();
-                Expr::IntLit { value: text, span: self.span_from(start) }
+                Expr::IntLit {
+                    value: text,
+                    span: self.span_from(start),
+                }
             }
             TokenKind::DoubleLit => {
                 let text = self.cur_text().to_string();
                 self.advance();
-                Expr::DoubleLit { value: text, span: self.span_from(start) }
+                Expr::DoubleLit {
+                    value: text,
+                    span: self.span_from(start),
+                }
             }
             TokenKind::StringLit => {
                 // Adjacent string literals are implicitly concatenated in Dart.
@@ -464,23 +656,35 @@ impl<'src> Parser<'src> {
             }
             TokenKind::True => {
                 self.advance();
-                Expr::BoolLit { value: true, span: self.span_from(start) }
+                Expr::BoolLit {
+                    value: true,
+                    span: self.span_from(start),
+                }
             }
             TokenKind::False => {
                 self.advance();
-                Expr::BoolLit { value: false, span: self.span_from(start) }
+                Expr::BoolLit {
+                    value: false,
+                    span: self.span_from(start),
+                }
             }
             TokenKind::Null => {
                 self.advance();
-                Expr::NullLit { span: self.span_from(start) }
+                Expr::NullLit {
+                    span: self.span_from(start),
+                }
             }
             TokenKind::This => {
                 self.advance();
-                Expr::This { span: self.span_from(start) }
+                Expr::This {
+                    span: self.span_from(start),
+                }
             }
             TokenKind::Super => {
                 self.advance();
-                Expr::Super { span: self.span_from(start) }
+                Expr::Super {
+                    span: self.span_from(start),
+                }
             }
             // Switch expression (primary form): `switch (expr) { pattern => expr, ... }`
             TokenKind::Switch => self.parse_switch_expr_primary(start),
@@ -496,11 +700,18 @@ impl<'src> Parser<'src> {
             TokenKind::Lt => {
                 let type_args = self.parse_type_args();
                 match self.cur().kind {
-                    TokenKind::LBracket => self.parse_list_literal(false, type_args.into_iter().next(), start),
+                    TokenKind::LBracket => {
+                        self.parse_list_literal(false, type_args.into_iter().next(), start)
+                    }
                     TokenKind::LBrace => self.parse_map_or_set_literal(false, type_args, start),
                     _ => {
-                        self.error("expected '[' or '{' after type arguments in collection literal".to_string());
-                        Expr::Error { span: self.span_from(start) }
+                        self.error(
+                            "expected '[' or '{' after type arguments in collection literal"
+                                .to_string(),
+                        );
+                        Expr::Error {
+                            span: self.span_from(start),
+                        }
                     }
                 }
             }
@@ -517,9 +728,19 @@ impl<'src> Parser<'src> {
             TokenKind::New => {
                 self.advance();
                 let dart_type = self.parse_type();
-                let constructor_name = if self.eat(TokenKind::Dot).is_some() { Some(self.expect_ident()) } else { None };
+                let constructor_name = if self.eat(TokenKind::Dot).is_some() {
+                    Some(self.expect_ident())
+                } else {
+                    None
+                };
                 let args = self.parse_arg_list();
-                Expr::New { is_const: false, dart_type, constructor_name, args, span: self.span_from(start) }
+                Expr::New {
+                    is_const: false,
+                    dart_type,
+                    constructor_name,
+                    args,
+                    span: self.span_from(start),
+                }
             }
             // function expression: (params) => / (params) {
             // handled by falling through to identifier parse then seeing no ident
@@ -528,9 +749,14 @@ impl<'src> Parser<'src> {
                 Expr::Ident(id)
             }
             _ => {
-                self.error(format!("unexpected token in expression: {:?}", self.cur().kind));
+                self.error(format!(
+                    "unexpected token in expression: {:?}",
+                    self.cur().kind
+                ));
                 self.advance();
-                Expr::Error { span: self.span_from(start) }
+                Expr::Error {
+                    span: self.span_from(start),
+                }
             }
         }
     }
@@ -539,40 +765,66 @@ impl<'src> Parser<'src> {
         self.advance(); // (
         if self.at(TokenKind::RParen) {
             self.advance();
-            return Expr::Record { fields: Vec::new(), span: self.span_from(start) };
+            return Expr::Record {
+                fields: Vec::new(),
+                span: self.span_from(start),
+            };
         }
         // Detect named first field before calling parse_expr, so `:` stays in stream.
-        let (first_name, first_value) = if self.is_ident_like() && self.peek(1).kind == TokenKind::Colon {
-            let name = self.expect_ident();
-            self.advance(); // :
-            let value = self.parse_expr();
-            (Some(name), value)
-        } else {
-            (None, self.parse_expr())
-        };
+        let (first_name, first_value) =
+            if self.is_ident_like() && self.peek(1).kind == TokenKind::Colon {
+                let name = self.expect_ident();
+                self.advance(); // :
+                let value = self.parse_expr();
+                (Some(name), value)
+            } else {
+                (None, self.parse_expr())
+            };
         if self.eat(TokenKind::RParen).is_some() {
             if first_name.is_none() {
                 return first_value;
             }
-            let fields = vec![RecordField { name: first_name, value: first_value, span: self.span_from(start) }];
-            return Expr::Record { fields, span: self.span_from(start) };
+            let fields = vec![RecordField {
+                name: first_name,
+                value: first_value,
+                span: self.span_from(start),
+            }];
+            return Expr::Record {
+                fields,
+                span: self.span_from(start),
+            };
         }
-        let mut fields = vec![RecordField { name: first_name, value: first_value, span: self.span_from(start) }];
+        let mut fields = vec![RecordField {
+            name: first_name,
+            value: first_value,
+            span: self.span_from(start),
+        }];
         while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
             let f_start = self.cur().offset;
             if self.is_ident_like() && self.peek(1).kind == TokenKind::Colon {
                 let name = self.expect_ident();
                 self.advance(); // :
                 let value = self.parse_expr();
-                fields.push(RecordField { name: Some(name), value, span: self.span_from(f_start) });
+                fields.push(RecordField {
+                    name: Some(name),
+                    value,
+                    span: self.span_from(f_start),
+                });
             } else {
                 let value = self.parse_expr();
-                fields.push(RecordField { name: None, value, span: self.span_from(f_start) });
+                fields.push(RecordField {
+                    name: None,
+                    value,
+                    span: self.span_from(f_start),
+                });
             }
         }
         self.eat(TokenKind::Comma);
         self.expect(TokenKind::RParen);
-        Expr::Record { fields, span: self.span_from(start) }
+        Expr::Record {
+            fields,
+            span: self.span_from(start),
+        }
     }
 
     /// Returns `true` when the `(` at `self.pos` starts a function expression
@@ -589,10 +841,7 @@ impl<'src> Parser<'src> {
         // Fast path — modifier keyword right after `(`
         if matches!(
             self.peek(1).kind,
-            TokenKind::Final
-                | TokenKind::Var
-                | TokenKind::Required
-                | TokenKind::Covariant
+            TokenKind::Final | TokenKind::Var | TokenKind::Required | TokenKind::Covariant
         ) {
             return true;
         }
@@ -630,9 +879,19 @@ impl<'src> Parser<'src> {
         let (is_async, is_generator) = self.parse_async_marker();
         let body = self.parse_function_body().unwrap_or_else(|| {
             self.error("expected function body after parameter list".to_string());
-            FunctionBody::Block(Block { stmts: Vec::new(), span: self.span_from(start) })
+            FunctionBody::Block(Block {
+                stmts: Vec::new(),
+                span: self.span_from(start),
+            })
         });
-        Expr::FuncExpr { type_params: Vec::new(), params, is_async, is_generator, body: Box::new(body), span: self.span_from(start) }
+        Expr::FuncExpr {
+            type_params: Vec::new(),
+            params,
+            is_async,
+            is_generator,
+            body: Box::new(body),
+            span: self.span_from(start),
+        }
     }
 
     fn parse_switch_expr_primary(&mut self, start: usize) -> Expr {
@@ -653,47 +912,91 @@ impl<'src> Parser<'src> {
             };
             self.expect(TokenKind::Arrow);
             let body = self.parse_expr();
-            arms.push(SwitchExprArm { pattern, guard, body, span: self.span_from(arm_start) });
+            arms.push(SwitchExprArm {
+                pattern,
+                guard,
+                body,
+                span: self.span_from(arm_start),
+            });
             self.eat(TokenKind::Comma);
         }
         self.expect(TokenKind::RBrace);
-        Expr::Switch { subject: Box::new(subject), arms, span: self.span_from(start) }
+        Expr::Switch {
+            subject: Box::new(subject),
+            arms,
+            span: self.span_from(start),
+        }
     }
 
-    fn parse_list_literal(&mut self, is_const: bool, type_arg: Option<DartType>, start: usize) -> Expr {
+    fn parse_list_literal(
+        &mut self,
+        is_const: bool,
+        type_arg: Option<DartType>,
+        start: usize,
+    ) -> Expr {
         self.advance(); // [
         let mut elements = Vec::new();
         while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
             elements.push(self.parse_collection_element());
-            if self.eat(TokenKind::Comma).is_none() { break; }
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
         }
         self.expect(TokenKind::RBracket);
-        Expr::List { is_const, type_arg, elements, span: self.span_from(start) }
+        Expr::List {
+            is_const,
+            type_arg,
+            elements,
+            span: self.span_from(start),
+        }
     }
 
-    fn parse_map_or_set_literal(&mut self, is_const: bool, type_args: Vec<DartType>, start: usize) -> Expr {
+    fn parse_map_or_set_literal(
+        &mut self,
+        is_const: bool,
+        type_args: Vec<DartType>,
+        start: usize,
+    ) -> Expr {
         self.advance(); // {
         if self.at(TokenKind::RBrace) {
             self.advance();
             // Empty literal — default to map
-            return Expr::Map { is_const, type_args, entries: Vec::new(), span: self.span_from(start) };
+            return Expr::Map {
+                is_const,
+                type_args,
+                entries: Vec::new(),
+                span: self.span_from(start),
+            };
         }
         // Peek: if first element has a colon it's a map; otherwise set
         let first = self.parse_expr();
         if self.eat(TokenKind::Colon).is_some() {
             let value = self.parse_expr();
             let e_span = self.span_from(start);
-            let mut entries = vec![MapEntry { key: first, value, span: e_span }];
+            let mut entries = vec![MapEntry {
+                key: first,
+                value,
+                span: e_span,
+            }];
             while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RBrace) {
                 let k = self.parse_expr();
                 self.expect(TokenKind::Colon);
                 let v = self.parse_expr();
                 let sp = self.span_from(start);
-                entries.push(MapEntry { key: k, value: v, span: sp });
+                entries.push(MapEntry {
+                    key: k,
+                    value: v,
+                    span: sp,
+                });
             }
             self.eat(TokenKind::Comma);
             self.expect(TokenKind::RBrace);
-            Expr::Map { is_const, type_args, entries, span: self.span_from(start) }
+            Expr::Map {
+                is_const,
+                type_args,
+                entries,
+                span: self.span_from(start),
+            }
         } else {
             let mut elements = vec![CollectionElement::Expr(first)];
             while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RBrace) {
@@ -702,7 +1005,12 @@ impl<'src> Parser<'src> {
             self.eat(TokenKind::Comma);
             self.expect(TokenKind::RBrace);
             let type_arg = type_args.into_iter().next();
-            Expr::Set { is_const, type_arg, elements, span: self.span_from(start) }
+            Expr::Set {
+                is_const,
+                type_arg,
+                elements,
+                span: self.span_from(start),
+            }
         }
     }
 
@@ -713,7 +1021,11 @@ impl<'src> Parser<'src> {
                 let is_null_aware = self.cur().kind == TokenKind::DotDotDotQmark;
                 self.advance();
                 let expr = self.parse_expr();
-                CollectionElement::Spread { expr, is_null_aware, span: self.span_from(start) }
+                CollectionElement::Spread {
+                    expr,
+                    is_null_aware,
+                    span: self.span_from(start),
+                }
             }
             TokenKind::If => {
                 self.advance(); // if
@@ -731,14 +1043,22 @@ impl<'src> Parser<'src> {
                 let then_elem = Box::new(self.parse_collection_element());
                 let else_elem = if self.eat(TokenKind::Else).is_some() {
                     Some(Box::new(self.parse_collection_element()))
-                } else { None };
-                CollectionElement::If { condition, then_elem, else_elem, span: self.span_from(start) }
+                } else {
+                    None
+                };
+                CollectionElement::If {
+                    condition,
+                    then_elem,
+                    else_elem,
+                    span: self.span_from(start),
+                }
             }
             TokenKind::For => {
                 self.advance(); // for
                 self.expect(TokenKind::LParen);
                 // Consume optional var/final/const keyword
-                let _ = self.eat(TokenKind::Var)
+                let _ = self
+                    .eat(TokenKind::Var)
                     .or_else(|| self.eat(TokenKind::Final))
                     .or_else(|| self.eat(TokenKind::Const));
                 // Try to parse an optional type annotation before the variable name
@@ -746,7 +1066,12 @@ impl<'src> Parser<'src> {
                     let saved = self.pos;
                     if self.is_type_start() && !self.at(TokenKind::LParen) {
                         let ty = self.parse_type();
-                        if self.is_ident_like() { Some(ty) } else { self.pos = saved; None }
+                        if self.is_ident_like() {
+                            Some(ty)
+                        } else {
+                            self.pos = saved;
+                            None
+                        }
                     } else {
                         None
                     }
@@ -756,7 +1081,13 @@ impl<'src> Parser<'src> {
                 let iterable = self.parse_expr();
                 self.expect(TokenKind::RParen);
                 let element = Box::new(self.parse_collection_element());
-                CollectionElement::For { variable, var_type, iterable, element, span: self.span_from(start) }
+                CollectionElement::For {
+                    variable,
+                    var_type,
+                    iterable,
+                    element,
+                    span: self.span_from(start),
+                }
             }
             _ => CollectionElement::Expr(self.parse_expr()),
         }
@@ -770,20 +1101,32 @@ impl<'src> Parser<'src> {
             TokenKind::Lt => {
                 let type_args = self.parse_type_args();
                 match self.cur().kind {
-                    TokenKind::LBracket => self.parse_list_literal(true, type_args.into_iter().next(), start),
+                    TokenKind::LBracket => {
+                        self.parse_list_literal(true, type_args.into_iter().next(), start)
+                    }
                     TokenKind::LBrace => self.parse_map_or_set_literal(true, type_args, start),
-                    _ => Expr::Error { span: self.span_from(start) },
+                    _ => Expr::Error {
+                        span: self.span_from(start),
+                    },
                 }
             }
             _ => {
                 // const constructor
                 let dart_type = self.parse_type();
-                let constructor_name = if self.eat(TokenKind::Dot).is_some() { Some(self.expect_ident()) } else { None };
+                let constructor_name = if self.eat(TokenKind::Dot).is_some() {
+                    Some(self.expect_ident())
+                } else {
+                    None
+                };
                 let args = self.parse_arg_list();
-                Expr::New { is_const: true, dart_type, constructor_name, args, span: self.span_from(start) }
+                Expr::New {
+                    is_const: true,
+                    dart_type,
+                    constructor_name,
+                    args,
+                    span: self.span_from(start),
+                }
             }
         }
     }
-
 }
-

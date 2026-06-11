@@ -14,7 +14,9 @@ impl<'src> Parser<'src> {
             self.advance();
             // `void Function(...)` is a function type returning void
             if self.at(TokenKind::Function) && self.peek(1).kind == TokenKind::LParen {
-                let ret = DartType::Void { span: self.span_from(start) };
+                let ret = DartType::Void {
+                    span: self.span_from(start),
+                };
                 return self.parse_function_type(Some(ret), start);
             }
             let nullable = self.eat(TokenKind::Qmark).is_some();
@@ -89,7 +91,12 @@ impl<'src> Parser<'src> {
 
             let is_nullable = self.eat(TokenKind::Qmark).is_some();
             let span = self.span_from(start);
-            return DartType::Named(NamedType { segments, type_args, is_nullable, span });
+            return DartType::Named(NamedType {
+                segments,
+                type_args,
+                is_nullable,
+                span,
+            });
         }
 
         // Record type: (type, name: type)
@@ -99,7 +106,9 @@ impl<'src> Parser<'src> {
 
         // Fallback: produce dynamic
         self.error(format!("expected type, got {:?}", self.cur().kind));
-        DartType::Dynamic { span: self.span_from(start) }
+        DartType::Dynamic {
+            span: self.span_from(start),
+        }
     }
 
     pub(super) fn is_type_start(&self) -> bool {
@@ -110,17 +119,52 @@ impl<'src> Parser<'src> {
         use TokenKind::*;
         matches!(
             self.peek(offset).kind,
-            Ident | Abstract | As | Base | Covariant | Deferred | Dynamic | Export
-                | Extension | External | Factory | Function | Get | Hide | Implements
-                | Import | Interface | Late | Library | Mixin | Operator | Part
-                | Required | Sealed | Set | Show | Static | Type | Typedef
-                | Async | Await | Sync | Yield | When | On | Override
+            Ident
+                | Abstract
+                | As
+                | Base
+                | Covariant
+                | Deferred
+                | Dynamic
+                | Export
+                | Extension
+                | External
+                | Factory
+                | Function
+                | Get
+                | Hide
+                | Implements
+                | Import
+                | Interface
+                | Late
+                | Library
+                | Mixin
+                | Operator
+                | Part
+                | Required
+                | Sealed
+                | Set
+                | Show
+                | Static
+                | Type
+                | Typedef
+                | Async
+                | Await
+                | Sync
+                | Yield
+                | When
+                | On
+                | Override
         )
     }
 
     fn parse_function_type(&mut self, return_type: Option<DartType>, start: usize) -> DartType {
         self.advance(); // Function keyword
-        let type_params = if self.at(TokenKind::Lt) { self.parse_type_params() } else { Vec::new() };
+        let type_params = if self.at(TokenKind::Lt) {
+            self.parse_type_params()
+        } else {
+            Vec::new()
+        };
         self.expect(TokenKind::LParen);
         let params = self.parse_function_type_params();
         self.expect(TokenKind::RParen);
@@ -140,8 +184,13 @@ impl<'src> Parser<'src> {
         let mut in_named = false;
         let mut in_optional = false;
 
-        if self.at(TokenKind::LBrace) { self.advance(); in_named = true; }
-        else if self.at(TokenKind::LBracket) { self.advance(); in_optional = true; }
+        if self.at(TokenKind::LBrace) {
+            self.advance();
+            in_named = true;
+        } else if self.at(TokenKind::LBracket) {
+            self.advance();
+            in_optional = true;
+        }
 
         while !self.at(TokenKind::RParen)
             && !self.at(TokenKind::RBrace)
@@ -149,21 +198,32 @@ impl<'src> Parser<'src> {
             && !self.at(TokenKind::Eof)
         {
             let is_required = self.eat(TokenKind::Required).is_some();
-            let _ = self.eat(TokenKind::Final).or_else(|| self.eat(TokenKind::Covariant));
+            let _ = self
+                .eat(TokenKind::Final)
+                .or_else(|| self.eat(TokenKind::Covariant));
             let param_type = self.parse_type();
             // Optional name
-            let name = if self.is_ident_like() { self.parse_ident() } else { None };
+            let name = if self.is_ident_like() {
+                self.parse_ident()
+            } else {
+                None
+            };
             params.push(FunctionTypeParam {
                 name,
                 param_type,
                 is_required,
                 is_named: in_named,
             });
-            if !self.at(TokenKind::Comma) { break; }
+            if !self.at(TokenKind::Comma) {
+                break;
+            }
             self.advance();
         }
-        if in_named { self.eat(TokenKind::RBrace); }
-        else if in_optional { self.eat(TokenKind::RBracket); }
+        if in_named {
+            self.eat(TokenKind::RBrace);
+        } else if in_optional {
+            self.eat(TokenKind::RBracket);
+        }
         params
     }
 
@@ -179,27 +239,43 @@ impl<'src> Parser<'src> {
                     let field_type = self.parse_type();
                     let name = self.expect_ident();
                     named.push(NamedRecordField { name, field_type });
-                    if self.eat(TokenKind::Comma).is_none() { break; }
+                    if self.eat(TokenKind::Comma).is_none() {
+                        break;
+                    }
                 }
                 self.eat(TokenKind::RBrace);
             } else {
                 positional.push(self.parse_type());
                 // Skip optional name
-                if (self.is_ident_like() && !self.at(TokenKind::Comma)
-                    && self.peek(1).kind == TokenKind::Comma || self.peek(1).kind == TokenKind::RParen)
-                    && self.is_ident_like() { self.advance(); }
+                if (self.is_ident_like()
+                    && !self.at(TokenKind::Comma)
+                    && self.peek(1).kind == TokenKind::Comma
+                    || self.peek(1).kind == TokenKind::RParen)
+                    && self.is_ident_like()
+                {
+                    self.advance();
+                }
             }
-            if self.eat(TokenKind::Comma).is_none() { break; }
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
         }
         self.expect(TokenKind::RParen);
         let is_nullable = self.eat(TokenKind::Qmark).is_some();
-        DartType::Record(RecordType { positional, named, is_nullable, span: self.span_from(start) })
+        DartType::Record(RecordType {
+            positional,
+            named,
+            is_nullable,
+            span: self.span_from(start),
+        })
     }
 
     // ── Type parameters <T extends Bound, U> ──────────────────────────────────
 
     pub(super) fn parse_type_params(&mut self) -> Vec<TypeParam> {
-        if !self.at(TokenKind::Lt) { return Vec::new(); }
+        if !self.at(TokenKind::Lt) {
+            return Vec::new();
+        }
         self.advance(); // <
         let mut params = Vec::new();
         while !self.at(TokenKind::Gt) && !self.at(TokenKind::GtGt) && !self.at(TokenKind::Eof) {
@@ -210,10 +286,20 @@ impl<'src> Parser<'src> {
             } else {
                 None
             };
-            params.push(TypeParam { name, bound, span: self.span_from(start) });
-            if self.eat(TokenKind::Comma).is_none() { break; }
+            params.push(TypeParam {
+                name,
+                bound,
+                span: self.span_from(start),
+            });
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
         }
-        if self.at(TokenKind::GtGt) { self.advance(); } else { self.eat(TokenKind::Gt); }
+        if self.at(TokenKind::GtGt) {
+            self.advance();
+        } else {
+            self.eat(TokenKind::Gt);
+        }
         params
     }
 
@@ -231,14 +317,18 @@ impl<'src> Parser<'src> {
             self.advance();
             while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
                 optional_positional.push(self.parse_formal_param(false));
-                if self.eat(TokenKind::Comma).is_none() { break; }
+                if self.eat(TokenKind::Comma).is_none() {
+                    break;
+                }
             }
             self.eat(TokenKind::RBracket);
         } else if self.at(TokenKind::LBrace) {
             self.advance();
             while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
                 named.push(self.parse_formal_param(true));
-                if self.eat(TokenKind::Comma).is_none() { break; }
+                if self.eat(TokenKind::Comma).is_none() {
+                    break;
+                }
             }
             self.eat(TokenKind::RBrace);
         } else {
@@ -247,7 +337,9 @@ impl<'src> Parser<'src> {
                     self.advance();
                     while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
                         optional_positional.push(self.parse_formal_param(false));
-                        if self.eat(TokenKind::Comma).is_none() { break; }
+                        if self.eat(TokenKind::Comma).is_none() {
+                            break;
+                        }
                     }
                     self.eat(TokenKind::RBracket);
                     self.eat(TokenKind::Comma);
@@ -255,19 +347,28 @@ impl<'src> Parser<'src> {
                     self.advance();
                     while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
                         named.push(self.parse_formal_param(true));
-                        if self.eat(TokenKind::Comma).is_none() { break; }
+                        if self.eat(TokenKind::Comma).is_none() {
+                            break;
+                        }
                     }
                     self.eat(TokenKind::RBrace);
                     break;
                 } else {
                     positional.push(self.parse_formal_param(false));
-                    if self.eat(TokenKind::Comma).is_none() { break; }
+                    if self.eat(TokenKind::Comma).is_none() {
+                        break;
+                    }
                 }
             }
         }
 
         self.expect(TokenKind::RParen);
-        FormalParamList { positional, optional_positional, named, span: self.span_from(start) }
+        FormalParamList {
+            positional,
+            optional_positional,
+            named,
+            span: self.span_from(start),
+        }
     }
 
     fn parse_formal_param(&mut self, is_named: bool) -> FormalParam {

@@ -12,7 +12,9 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::RecvTimeoutError;
-use lsp_server::{Connection, ErrorCode, Message, Notification as ServerNotification, Request, Response};
+use lsp_server::{
+    Connection, ErrorCode, Message, Notification as ServerNotification, Request, Response,
+};
 use lsp_types::notification::{
     DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
     DidSaveTextDocument, Notification as _, PublishDiagnostics,
@@ -27,7 +29,7 @@ use lsp_types::{
 };
 use tracing::{debug, info, warn};
 
-use falcon_diagnostics::{lsp_position_to_byte, Diagnostic};
+use falcon_diagnostics::{Diagnostic, lsp_position_to_byte};
 
 use crate::state::LspState;
 
@@ -52,15 +54,17 @@ impl Default for ServerOptions {
 /// Capabilities advertised in the initialize response.
 fn server_capabilities() -> ServerCapabilities {
     ServerCapabilities {
-        text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
-            open_close: Some(true),
-            change: Some(TextDocumentSyncKind::FULL),
-            will_save: None,
-            will_save_wait_until: None,
-            save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
-                include_text: Some(true),
-            })),
-        })),
+        text_document_sync: Some(TextDocumentSyncCapability::Options(
+            TextDocumentSyncOptions {
+                open_close: Some(true),
+                change: Some(TextDocumentSyncKind::FULL),
+                will_save: None,
+                will_save_wait_until: None,
+                save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                    include_text: Some(true),
+                })),
+            },
+        )),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         ..Default::default()
     }
@@ -236,8 +240,10 @@ fn hover(state: &LspState, params: &HoverParams) -> Option<Hover> {
         .uri
         .as_str();
     let document = state.document(uri)?;
-    let offset =
-        lsp_position_to_byte(&document.text, params.text_document_position_params.position);
+    let offset = lsp_position_to_byte(
+        &document.text,
+        params.text_document_position_params.position,
+    );
     let lines: Vec<String> = document
         .last_diagnostics
         .iter()

@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
@@ -249,20 +249,16 @@ fn bench_per_rule(c: &mut Criterion) {
 
     for rule in &rules {
         let rule_name = rule.name().to_string();
-        c.bench_with_input(
-            BenchmarkId::new("rule", &rule_name),
-            &rule_name,
-            |b, _| {
-                b.iter(|| {
-                    let ctx = AnalyzeContext {
-                        file_path: &path,
-                        source: snippet,
-                        config: &config,
-                    };
-                    let _ = rule.analyze(&program, &ctx);
-                });
-            },
-        );
+        c.bench_with_input(BenchmarkId::new("rule", &rule_name), &rule_name, |b, _| {
+            b.iter(|| {
+                let ctx = AnalyzeContext {
+                    file_path: &path,
+                    source: snippet,
+                    config: &config,
+                };
+                let _ = rule.analyze(&program, &ctx);
+            });
+        });
     }
 }
 
@@ -276,10 +272,7 @@ fn collect_dart_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
         let path = entry.path();
         if path.is_dir() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !matches!(
-                name,
-                ".direnv" | ".dart_tool" | "build" | ".pub-cache"
-            ) {
+            if !matches!(name, ".direnv" | ".dart_tool" | "build" | ".pub-cache") {
                 out.extend(collect_dart_files(&path));
             }
         } else if path.extension().is_some_and(|e| e == "dart") {

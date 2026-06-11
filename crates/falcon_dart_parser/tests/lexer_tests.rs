@@ -1,4 +1,4 @@
-use falcon_dart_parser::lexer::{filter_trivia, Lexer};
+use falcon_dart_parser::lexer::{Lexer, filter_trivia};
 use falcon_syntax::token::TokenKind;
 
 // ── Literals ──────────────────────────────────────────────────────────────────
@@ -542,10 +542,7 @@ fn test_filter_trivia_removes_whitespace() {
 fn test_filter_trivia_removes_comments() {
     let raw_tokens = Lexer::new("foo // comment\nbar").tokenize();
     let filtered = filter_trivia(raw_tokens);
-    assert_eq!(
-        filtered.len(),
-        3
-    ); // foo, bar, eof
+    assert_eq!(filtered.len(), 3); // foo, bar, eof
     assert_eq!(filtered[0].kind, TokenKind::Ident);
     assert_eq!(filtered[1].kind, TokenKind::Ident);
 }

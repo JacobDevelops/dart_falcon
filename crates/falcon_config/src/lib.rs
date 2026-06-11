@@ -3,9 +3,9 @@
 //! `FalconConfig` is the contract; every field and its default is
 //! documented here. No magic or implicit behavior (Principle 6).
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 
 /// Top-level falcon.json configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -113,7 +113,11 @@ pub fn load_or_default(start_dir: &Path) -> FalconConfig {
         Some(path) => match load_config(&path) {
             Ok(cfg) => cfg,
             Err(e) => {
-                eprintln!("warning: failed to load config from {}: {}", path.display(), e);
+                eprintln!(
+                    "warning: failed to load config from {}: {}",
+                    path.display(),
+                    e
+                );
                 FalconConfig::default()
             }
         },

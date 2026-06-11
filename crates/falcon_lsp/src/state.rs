@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_config::{load_config, load_or_default, FalconConfig};
+use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::parse;
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::enabled_rules;
@@ -107,10 +107,7 @@ impl LspState {
     /// (re-parsing only when it actually differs), then analyze.
     pub fn save(&mut self, uri: &str, text: Option<String>) -> Vec<Diagnostic> {
         if let Some(text) = text {
-            let differs = self
-                .documents
-                .get(uri)
-                .is_some_and(|doc| doc.text != text);
+            let differs = self.documents.get(uri).is_some_and(|doc| doc.text != text);
             if differs {
                 let version = self.documents.get(uri).and_then(|d| d.version);
                 self.change(uri, text, version);
@@ -141,12 +138,7 @@ impl LspState {
             .iter()
             .flat_map(|rule| rule.analyze(&doc.program, &ctx))
             .collect();
-        diagnostics.sort_by(|a, b| {
-            a.span
-                .start
-                .cmp(&b.span.start)
-                .then(a.rule.cmp(b.rule))
-        });
+        diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start).then(a.rule.cmp(b.rule)));
         doc.analyze_count += 1;
         doc.last_diagnostics = diagnostics.clone();
         debug!(uri, count = diagnostics.len(), "analyzed document");
@@ -173,7 +165,11 @@ impl LspState {
 fn load_from(path: Option<&Path>) -> FalconConfig {
     match path {
         Some(p) => load_config(p).unwrap_or_else(|e| {
-            warn!("failed to load config from {}: {} — using defaults", p.display(), e);
+            warn!(
+                "failed to load config from {}: {} — using defaults",
+                p.display(),
+                e
+            );
             FalconConfig::default()
         }),
         None => match std::env::current_dir() {

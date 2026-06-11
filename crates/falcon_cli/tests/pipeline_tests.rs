@@ -1,6 +1,6 @@
 //! Integration tests for the analyze pipeline.
 
-use falcon_cli::{run_check, CheckOptions, OutputFormat};
+use falcon_cli::{CheckOptions, OutputFormat, run_check};
 use std::fs;
 use tempfile::tempdir;
 
@@ -20,7 +20,11 @@ fn test_run_check_no_files_returns_zero() {
 #[test]
 fn test_run_check_with_clean_dart_file_returns_zero() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("test.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
+    fs::write(
+        temp.path().join("test.dart"),
+        "void main() {\n  print('ok');\n}\n",
+    )
+    .unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
@@ -47,7 +51,11 @@ fn test_run_check_max_errors_zero() {
 #[test]
 fn test_run_check_json_format_no_panic() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("test.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
+    fs::write(
+        temp.path().join("test.dart"),
+        "void main() {\n  print('ok');\n}\n",
+    )
+    .unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: false,
@@ -61,7 +69,11 @@ fn test_run_check_json_format_no_panic() {
 #[test]
 fn test_run_check_quiet_mode() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("test.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
+    fs::write(
+        temp.path().join("test.dart"),
+        "void main() {\n  print('ok');\n}\n",
+    )
+    .unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
@@ -89,7 +101,11 @@ fn test_run_check_with_config_path_nonexistent_returns_error() {
 #[test]
 fn test_run_check_parallel_flag_clean_returns_zero() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("a.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
+    fs::write(
+        temp.path().join("a.dart"),
+        "void main() {\n  print('ok');\n}\n",
+    )
+    .unwrap();
     fs::write(temp.path().join("b.dart"), "class Foo {}").unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
@@ -104,7 +120,11 @@ fn test_run_check_parallel_flag_clean_returns_zero() {
 #[test]
 fn test_run_check_custom_exit_code_no_violations_returns_zero() {
     let temp = tempdir().unwrap();
-    fs::write(temp.path().join("test.dart"), "void main() {\n  print('ok');\n}\n").unwrap();
+    fs::write(
+        temp.path().join("test.dart"),
+        "void main() {\n  print('ok');\n}\n",
+    )
+    .unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
@@ -230,7 +250,11 @@ fn test_config_max_errors_and_cli_precedence() {
     let mut opts = options_for(temp.path(), Some(config));
     opts.max_errors = Some(2);
     let out = collect_check(&opts).unwrap();
-    assert_eq!(out.diagnostics.len(), 2, "CLI max_errors must override config");
+    assert_eq!(
+        out.diagnostics.len(),
+        2,
+        "CLI max_errors must override config"
+    );
 }
 
 /// Parallel and sequential runs produce identical, deterministically ordered output.

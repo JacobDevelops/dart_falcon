@@ -10,7 +10,7 @@ use falcon_syntax::ast::*;
 use falcon_syntax::token::{Token, TokenKind};
 use tracing::debug;
 
-use crate::lexer::{filter_trivia, Lexer};
+use crate::lexer::{Lexer, filter_trivia};
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -47,13 +47,20 @@ pub(super) struct Parser<'src> {
 
 impl<'src> Parser<'src> {
     pub(super) fn new(tokens: Vec<Token>, src: &'src str) -> Self {
-        Self { tokens, pos: 0, src, errors: Vec::new() }
+        Self {
+            tokens,
+            pos: 0,
+            src,
+            errors: Vec::new(),
+        }
     }
 
     // ── Cursor ────────────────────────────────────────────────────────────────
 
     pub(super) fn cur(&self) -> &Token {
-        self.tokens.get(self.pos).unwrap_or_else(|| self.tokens.last().unwrap())
+        self.tokens
+            .get(self.pos)
+            .unwrap_or_else(|| self.tokens.last().unwrap())
     }
 
     pub(super) fn peek(&self, offset: usize) -> &Token {
@@ -78,25 +85,28 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn eat(&mut self, kind: TokenKind) -> Option<Token> {
-        if self.at(kind) { Some(self.advance()) } else { None }
+        if self.at(kind) {
+            Some(self.advance())
+        } else {
+            None
+        }
     }
 
     pub(super) fn expect(&mut self, kind: TokenKind) -> Token {
         if self.at(kind.clone()) {
             self.advance()
         } else {
-            self.error(format!(
-                "expected {:?}, got {:?}",
-                kind,
-                self.cur().kind
-            ));
+            self.error(format!("expected {:?}, got {:?}", kind, self.cur().kind));
             self.cur().clone()
         }
     }
 
     pub(super) fn error(&mut self, msg: impl Into<String>) {
         let offset = self.cur().offset;
-        self.errors.push(ParseError { message: msg.into(), offset });
+        self.errors.push(ParseError {
+            message: msg.into(),
+            offset,
+        });
     }
 
     /// Advance past tokens until we reach one of the synchronisation tokens.
@@ -134,11 +144,42 @@ impl<'src> Parser<'src> {
         use TokenKind::*;
         matches!(
             self.cur().kind,
-            Ident | Abstract | As | Base | Covariant | Deferred | Dynamic | Export
-                | Extension | External | Factory | Function | Get | Hide | Implements
-                | Import | Interface | Late | Library | Mixin | Operator | Part
-                | Required | Sealed | Set | Show | Static | Type | Typedef
-                | Async | Await | Sync | Yield | When | On | Override
+            Ident
+                | Abstract
+                | As
+                | Base
+                | Covariant
+                | Deferred
+                | Dynamic
+                | Export
+                | Extension
+                | External
+                | Factory
+                | Function
+                | Get
+                | Hide
+                | Implements
+                | Import
+                | Interface
+                | Late
+                | Library
+                | Mixin
+                | Operator
+                | Part
+                | Required
+                | Sealed
+                | Set
+                | Show
+                | Static
+                | Type
+                | Typedef
+                | Async
+                | Await
+                | Sync
+                | Yield
+                | When
+                | On
+                | Override
         )
     }
 
@@ -172,15 +213,23 @@ impl<'src> Parser<'src> {
             while self.eat(TokenKind::Dot).is_some() {
                 name.push(self.expect_ident());
             }
-            let constructor_name =
-                if self.eat(TokenKind::Dot).is_some() { Some(self.expect_ident()) } else { None };
+            let constructor_name = if self.eat(TokenKind::Dot).is_some() {
+                Some(self.expect_ident())
+            } else {
+                None
+            };
             let args = if self.at(TokenKind::LParen) {
                 Some(self.parse_arg_list())
             } else {
                 None
             };
             let span = self.span_from(start);
-            anns.push(Annotation { name, constructor_name, args, span });
+            anns.push(Annotation {
+                name,
+                constructor_name,
+                args,
+                span,
+            });
         }
         anns
     }
@@ -216,7 +265,10 @@ impl<'src> Parser<'src> {
 
         while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
             // Check for trailing comma
-            if self.at(TokenKind::Comma) { self.advance(); continue; }
+            if self.at(TokenKind::Comma) {
+                self.advance();
+                continue;
+            }
 
             // Named arg: name: expr
             if (self.is_ident_like() || self.at(TokenKind::Ident))
@@ -226,7 +278,11 @@ impl<'src> Parser<'src> {
                 let name = self.expect_ident();
                 self.advance(); // :
                 let value = self.parse_expr();
-                named.push(NamedArg { name, value, span: self.span_from(arg_start) });
+                named.push(NamedArg {
+                    name,
+                    value,
+                    span: self.span_from(arg_start),
+                });
             } else {
                 positional.push(self.parse_expr());
             }
@@ -236,7 +292,11 @@ impl<'src> Parser<'src> {
             }
         }
         self.expect(TokenKind::RParen);
-        ArgList { positional, named, span: self.span_from(start) }
+        ArgList {
+            positional,
+            named,
+            span: self.span_from(start),
+        }
     }
 
     // ── Type argument list <T, U> ──────────────────────────────────────────────
@@ -318,4 +378,3 @@ impl<'src> Parser<'src> {
         }
     }
 }
-

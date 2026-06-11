@@ -20,7 +20,11 @@ impl<'src> Parser<'src> {
         while self.eat(TokenKind::PipePipe).is_some() {
             let right = self.parse_logical_and_pattern();
             let span = self.span_from(start);
-            left = Pattern::LogicalOr { left: Box::new(left), right: Box::new(right), span };
+            left = Pattern::LogicalOr {
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
         }
         left
     }
@@ -31,7 +35,11 @@ impl<'src> Parser<'src> {
         while self.eat(TokenKind::AmpAmp).is_some() {
             let right = self.parse_relational_pattern();
             let span = self.span_from(start);
-            left = Pattern::LogicalAnd { left: Box::new(left), right: Box::new(right), span };
+            left = Pattern::LogicalAnd {
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
         }
         left
     }
@@ -51,7 +59,11 @@ impl<'src> Parser<'src> {
         if let Some(op) = op {
             self.advance();
             let value = self.parse_expr();
-            return Pattern::Relational { op, value, span: self.span_from(start) };
+            return Pattern::Relational {
+                op,
+                value,
+                span: self.span_from(start),
+            };
         }
         self.parse_postfix_pattern()
     }
@@ -62,14 +74,24 @@ impl<'src> Parser<'src> {
         loop {
             if self.eat(TokenKind::Qmark).is_some() {
                 let span = self.span_from(start);
-                inner = Pattern::NullCheck { inner: Box::new(inner), span };
+                inner = Pattern::NullCheck {
+                    inner: Box::new(inner),
+                    span,
+                };
             } else if self.eat(TokenKind::Bang).is_some() {
                 let span = self.span_from(start);
-                inner = Pattern::NullAssert { inner: Box::new(inner), span };
+                inner = Pattern::NullAssert {
+                    inner: Box::new(inner),
+                    span,
+                };
             } else if self.eat(TokenKind::As).is_some() {
                 let cast_type = self.parse_type();
                 let span = self.span_from(start);
-                inner = Pattern::Cast { inner: Box::new(inner), cast_type, span };
+                inner = Pattern::Cast {
+                    inner: Box::new(inner),
+                    cast_type,
+                    span,
+                };
             } else {
                 break;
             }
@@ -118,7 +140,9 @@ impl<'src> Parser<'src> {
         }
 
         // Negative number literal: -intLit or -doubleLit
-        if self.at(TokenKind::Minus) && matches!(self.peek(1).kind, TokenKind::IntLit | TokenKind::DoubleLit) {
+        if self.at(TokenKind::Minus)
+            && matches!(self.peek(1).kind, TokenKind::IntLit | TokenKind::DoubleLit)
+        {
             self.advance(); // -
             let tok = self.advance();
             let text = self.tok_text(&tok).to_string();
@@ -127,7 +151,10 @@ impl<'src> Parser<'src> {
             } else {
                 LiteralPatternValue::NegDouble(text)
             };
-            return Pattern::Literal(LiteralPattern { value, span: self.span_from(start) });
+            return Pattern::Literal(LiteralPattern {
+                value,
+                span: self.span_from(start),
+            });
         }
 
         // Number literals
@@ -165,7 +192,10 @@ impl<'src> Parser<'src> {
         // Wildcard: _
         if self.at(TokenKind::Ident) && self.cur_text() == "_" {
             self.advance();
-            return Pattern::Wildcard { type_: None, span: self.span_from(start) };
+            return Pattern::Wildcard {
+                type_: None,
+                span: self.span_from(start),
+            };
         }
 
         // var / final → variable pattern  (var x, final x, final Type x)
@@ -174,26 +204,45 @@ impl<'src> Parser<'src> {
             // var _ is a wildcard
             if self.at(TokenKind::Ident) && self.cur_text() == "_" {
                 self.advance();
-                return Pattern::Wildcard { type_: None, span: self.span_from(start) };
+                return Pattern::Wildcard {
+                    type_: None,
+                    span: self.span_from(start),
+                };
             }
             let name = self.expect_ident();
-            return Pattern::Variable { type_: None, name, span: self.span_from(start) };
+            return Pattern::Variable {
+                type_: None,
+                name,
+                span: self.span_from(start),
+            };
         }
         if self.at(TokenKind::Final) {
             self.advance();
             let var_type = if self.is_type_start() {
                 let saved = self.pos;
                 let ty = self.parse_type();
-                if self.is_ident_like() { Some(ty) } else { self.pos = saved; None }
+                if self.is_ident_like() {
+                    Some(ty)
+                } else {
+                    self.pos = saved;
+                    None
+                }
             } else {
                 None
             };
             if self.at(TokenKind::Ident) && self.cur_text() == "_" {
                 self.advance();
-                return Pattern::Wildcard { type_: var_type, span: self.span_from(start) };
+                return Pattern::Wildcard {
+                    type_: var_type,
+                    span: self.span_from(start),
+                };
             }
             let name = self.expect_ident();
-            return Pattern::Variable { type_: var_type, name, span: self.span_from(start) };
+            return Pattern::Variable {
+                type_: var_type,
+                name,
+                span: self.span_from(start),
+            };
         }
 
         // Named type → either object pattern `Type(...)` or typed variable/wildcard `Type _` / `Type name`
@@ -202,7 +251,9 @@ impl<'src> Parser<'src> {
         }
 
         self.error(format!("expected pattern, got {:?}", self.cur().kind));
-        Pattern::Error { span: self.span_from(start) }
+        Pattern::Error {
+            span: self.span_from(start),
+        }
     }
 
     fn parse_paren_or_record_pattern(&mut self, start: usize) -> Pattern {
@@ -210,7 +261,10 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::RParen) {
             self.advance();
             // Empty record pattern ()
-            return Pattern::Record(RecordPattern { fields: Vec::new(), span: self.span_from(start) });
+            return Pattern::Record(RecordPattern {
+                fields: Vec::new(),
+                span: self.span_from(start),
+            });
         }
 
         // Peek: if it looks like a record (has named fields or multiple positional), parse as record
@@ -218,7 +272,9 @@ impl<'src> Parser<'src> {
         let saved = self.pos;
 
         // Try named field first: `name: pattern`
-        if (self.is_ident_like() || self.at(TokenKind::Ident)) && self.peek(1).kind == TokenKind::Colon {
+        if (self.is_ident_like() || self.at(TokenKind::Ident))
+            && self.peek(1).kind == TokenKind::Colon
+        {
             return self.parse_record_pattern_body(start);
         }
 
@@ -228,10 +284,16 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::Comma) {
             // More elements → record pattern
             let _ = saved;
-            let mut fields = vec![RecordPatternField { name: None, pattern: first, span: self.span_from(start) }];
+            let mut fields = vec![RecordPatternField {
+                name: None,
+                pattern: first,
+                span: self.span_from(start),
+            }];
             while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
                 let fs = self.cur().offset;
-                let name = if (self.is_ident_like() || self.at(TokenKind::Ident)) && self.peek(1).kind == TokenKind::Colon {
+                let name = if (self.is_ident_like() || self.at(TokenKind::Ident))
+                    && self.peek(1).kind == TokenKind::Colon
+                {
                     let n = self.expect_ident();
                     self.advance(); // :
                     Some(n)
@@ -239,15 +301,25 @@ impl<'src> Parser<'src> {
                     None
                 };
                 let pattern = self.parse_pattern();
-                fields.push(RecordPatternField { name, pattern, span: self.span_from(fs) });
+                fields.push(RecordPatternField {
+                    name,
+                    pattern,
+                    span: self.span_from(fs),
+                });
             }
             self.eat(TokenKind::Comma);
             self.expect(TokenKind::RParen);
-            Pattern::Record(RecordPattern { fields, span: self.span_from(start) })
+            Pattern::Record(RecordPattern {
+                fields,
+                span: self.span_from(start),
+            })
         } else {
             // Single element → parenthesised pattern
             self.expect(TokenKind::RParen);
-            Pattern::ParenPattern { inner: Box::new(first), span: self.span_from(start) }
+            Pattern::ParenPattern {
+                inner: Box::new(first),
+                span: self.span_from(start),
+            }
         }
     }
 
@@ -255,7 +327,9 @@ impl<'src> Parser<'src> {
         let mut fields = Vec::new();
         while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
             let fs = self.cur().offset;
-            let name = if (self.is_ident_like() || self.at(TokenKind::Ident)) && self.peek(1).kind == TokenKind::Colon {
+            let name = if (self.is_ident_like() || self.at(TokenKind::Ident))
+                && self.peek(1).kind == TokenKind::Colon
+            {
                 let n = self.expect_ident();
                 self.advance(); // :
                 Some(n)
@@ -263,11 +337,20 @@ impl<'src> Parser<'src> {
                 None
             };
             let pattern = self.parse_pattern();
-            fields.push(RecordPatternField { name, pattern, span: self.span_from(fs) });
-            if self.eat(TokenKind::Comma).is_none() { break; }
+            fields.push(RecordPatternField {
+                name,
+                pattern,
+                span: self.span_from(fs),
+            });
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
         }
         self.expect(TokenKind::RParen);
-        Pattern::Record(RecordPattern { fields, span: self.span_from(start) })
+        Pattern::Record(RecordPattern {
+            fields,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_list_pattern(&mut self, start: usize) -> Pattern {
@@ -288,10 +371,16 @@ impl<'src> Parser<'src> {
             } else {
                 elements.push(ListPatternElement::Pattern(self.parse_pattern()));
             }
-            if self.eat(TokenKind::Comma).is_none() { break; }
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
         }
         self.expect(TokenKind::RBracket);
-        Pattern::List(ListPattern { type_arg, elements, span: self.span_from(start) })
+        Pattern::List(ListPattern {
+            type_arg,
+            elements,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_map_pattern(&mut self, start: usize) -> Pattern {
@@ -302,18 +391,30 @@ impl<'src> Parser<'src> {
             // Rest entry: ...
             if self.at(TokenKind::DotDotDot) {
                 self.advance();
-                if self.eat(TokenKind::Comma).is_none() { break; }
+                if self.eat(TokenKind::Comma).is_none() {
+                    break;
+                }
                 continue;
             }
             let es = self.cur().offset;
             let key = self.parse_expr();
             self.expect(TokenKind::Colon);
             let pattern = self.parse_pattern();
-            entries.push(MapPatternEntry { key, pattern, span: self.span_from(es) });
-            if self.eat(TokenKind::Comma).is_none() { break; }
+            entries.push(MapPatternEntry {
+                key,
+                pattern,
+                span: self.span_from(es),
+            });
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
         }
         self.expect(TokenKind::RBrace);
-        Pattern::Map(MapPattern { type_args, entries, span: self.span_from(start) })
+        Pattern::Map(MapPattern {
+            type_args,
+            entries,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_const_pattern(&mut self, start: usize) -> Pattern {
@@ -327,7 +428,10 @@ impl<'src> Parser<'src> {
                 name.push(self.expect_ident());
             }
         }
-        Pattern::Const(ConstPattern { name, span: self.span_from(start) })
+        Pattern::Const(ConstPattern {
+            name,
+            span: self.span_from(start),
+        })
     }
 
     fn parse_type_led_pattern(&mut self, start: usize) -> Pattern {
@@ -352,11 +456,19 @@ impl<'src> Parser<'src> {
                         Pattern::Variable { name, .. } => name.clone(),
                         _ => Identifier::new("<shorthand>", self.cur_span()),
                     };
-                    fields.push(ObjectPatternField { name: field_name, pattern: Some(inner), span: self.span_from(fs) });
-                    if self.eat(TokenKind::Comma).is_none() { break; }
+                    fields.push(ObjectPatternField {
+                        name: field_name,
+                        pattern: Some(inner),
+                        span: self.span_from(fs),
+                    });
+                    if self.eat(TokenKind::Comma).is_none() {
+                        break;
+                    }
                     continue;
                 }
-                let name = if (self.is_ident_like() || self.at(TokenKind::Ident)) && self.peek(1).kind == TokenKind::Colon {
+                let name = if (self.is_ident_like() || self.at(TokenKind::Ident))
+                    && self.peek(1).kind == TokenKind::Colon
+                {
                     let n = self.expect_ident();
                     self.advance(); // :
                     Some(n)
@@ -373,32 +485,50 @@ impl<'src> Parser<'src> {
                     pattern,
                     span: self.span_from(fs),
                 });
-                if self.eat(TokenKind::Comma).is_none() { break; }
+                if self.eat(TokenKind::Comma).is_none() {
+                    break;
+                }
             }
             self.eat(TokenKind::Comma);
             self.expect(TokenKind::RParen);
-            return Pattern::Object(ObjectPattern { type_: ty, fields, span: self.span_from(start) });
+            return Pattern::Object(ObjectPattern {
+                type_: ty,
+                fields,
+                span: self.span_from(start),
+            });
         }
 
         // Wildcard typed: Type _
         if self.at(TokenKind::Ident) && self.cur_text() == "_" {
             self.advance();
-            return Pattern::Wildcard { type_: Some(ty), span: self.span_from(start) };
+            return Pattern::Wildcard {
+                type_: Some(ty),
+                span: self.span_from(start),
+            };
         }
 
         // Typed variable: Type name
         if self.is_ident_like() {
             let name = self.expect_ident();
-            return Pattern::Variable { type_: Some(ty), name, span: self.span_from(start) };
+            return Pattern::Variable {
+                type_: Some(ty),
+                name,
+                span: self.span_from(start),
+            };
         }
 
         // Just a type by itself — treat as const pattern with type name
         match ty {
             DartType::Named(ref nt) => {
                 let name = nt.segments.clone();
-                Pattern::Const(ConstPattern { name, span: self.span_from(start) })
+                Pattern::Const(ConstPattern {
+                    name,
+                    span: self.span_from(start),
+                })
             }
-            _ => Pattern::Error { span: self.span_from(start) },
+            _ => Pattern::Error {
+                span: self.span_from(start),
+            },
         }
     }
 }
