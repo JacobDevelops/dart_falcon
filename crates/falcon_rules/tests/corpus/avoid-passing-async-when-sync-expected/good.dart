@@ -57,3 +57,39 @@ void extract() {
     _asyncWork(); // fire and forget (or capture result)
   });
 }
+
+// Good: passing sync callbacks to sync parameters
+void performAction(void Function(String, int) callback) {
+  callback('test', 42);
+}
+
+void goodAction() {
+  performAction((name, count) {
+    print('$name: $count');
+  });
+}
+
+// Good: using named function for sync callback
+class DataLoader {
+  String _fetchData() {
+    return 'data';
+  }
+
+  void loadData(String Function() fetcher) {
+    final data = fetcher();
+    print(data);
+  }
+
+  void loadGood() {
+    loadData(_fetchData);
+  }
+}
+
+// Good: sync arrow function
+void processItems(void Function(String) handler) {
+  handler('item');
+}
+
+void goodProcess() {
+  processItems((item) => print('Processing: $item'));
+}

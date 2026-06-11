@@ -32,3 +32,24 @@ void topLevel() {
 void anotherFunction() {
   print("ok");
 }
+
+// Comments starting with non-letter are OK
+void withSpecialChars() {
+  // 123 numeric start
+  int count = 0;
+
+  // @override-like patterns
+  count++;
+
+  // _underscore patterns
+  count--;
+}
+
+// Uppercase variety
+void uppercase() {
+  // A comment
+  var x = 1;
+
+  // Z comment
+  var y = 2;
+}

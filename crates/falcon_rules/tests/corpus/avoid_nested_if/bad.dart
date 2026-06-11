@@ -36,5 +36,15 @@ class NestedIfExamples {
     }
   }
 
+  void example5(bool x, bool y, bool z) {
+    if (x) {
+      if (y) {
+        if (z) { /* expect: avoid_nested_if */
+          print('deeply nested');
+        }
+      }
+    }
+  }
+
   void doSomething() {}
 }

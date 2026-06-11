@@ -23,3 +23,12 @@ class Calculator {
     return product; /* expect: newline-before-return */
   }
 }
+
+void nestedReturns() {
+  if (true) {
+    final value = 42;
+    return value; /* expect: newline-before-return */
+  }
+  print('done');
+  return; /* expect: newline-before-return */
+}

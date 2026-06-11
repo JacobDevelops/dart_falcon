@@ -32,3 +32,29 @@ class Calculator {
     return product;
   }
 }
+
+// With blank line in nested blocks
+void nestedCorrect() {
+  if (true) {
+    final value = 42;
+
+    return value;
+  }
+
+  print('done');
+
+  return;
+}
+
+// Arrow function: no block, no check needed
+int arrow(int x) => x * 2;
+
+// Conditional with proper spacing
+bool check(int x) {
+  if (x > 0) {
+
+    return true;
+  }
+
+  return false;
+}

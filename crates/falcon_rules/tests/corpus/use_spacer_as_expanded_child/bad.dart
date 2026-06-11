@@ -46,3 +46,33 @@ class BadLayout3 extends StatelessWidget {
     );
   }
 }
+
+class BadLayout4 extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text('Header'),
+        Expanded( /* expect: use_spacer_as_expanded_child */
+          child: SizedBox(width: double.infinity),
+        ),
+        Text('Footer'),
+      ],
+    );
+  }
+}
+
+class BadLayout5 extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(Icons.arrow_left),
+        Expanded( /* expect: use_spacer_as_expanded_child */
+          child: Container(decoration: BoxDecoration()),
+        ),
+        Icon(Icons.arrow_right),
+      ],
+    );
+  }
+}

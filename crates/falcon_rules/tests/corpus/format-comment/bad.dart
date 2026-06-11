@@ -26,3 +26,11 @@ void topLevel() {
   // Result is ready
   print(x);
 }
+
+void moreComments() {
+  // incorrect start /* expect: format-comment */
+  final a = 1;
+
+  // also bad /* expect: format-comment */
+  final b = 2;
+}

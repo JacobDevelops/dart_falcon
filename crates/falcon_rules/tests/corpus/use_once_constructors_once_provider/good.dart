@@ -25,3 +25,18 @@ final futureProvider = FutureProvider.once(
 final stateProvider = StateProvider.once(
   (ref) => 0,
 );
+
+// Regular providers (not OnceProvider-related) are fine
+final regularProvider = Provider(
+  (ref) => 'regular',
+);
+
+// OnceProvider variants with .once()
+final withTypeParam = OnceProvider<MyService>.once(
+  (ref) => MyService(),
+);
+
+// Different provider type entirely
+final changeNotifierProvider = ChangeNotifierProvider(
+  (ref) => MyChangeNotifier(),
+);

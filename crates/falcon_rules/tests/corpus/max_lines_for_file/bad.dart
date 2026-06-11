@@ -1,6 +1,4 @@
-/* expect: max_lines_for_file */
-// This file exceeds max_lines_for_file threshold (default: 500 lines)
-// To simulate a file with 501+ lines, this annotation indicates the violation
+/* expect: max_lines_for_file */ // File exceeds max_lines_for_file threshold (line count > 75)
 
 class ExcessivelyLongFile {
   /// Line 5

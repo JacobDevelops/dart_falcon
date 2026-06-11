@@ -38,3 +38,28 @@ class MultipleResourceDispose extends ChangeNotifier {
     timer.cancel();
   }
 }
+
+/// Bad: super.dispose in middle
+class MiddleDispose extends ChangeNotifier {
+  late ScrollController scrollController;
+
+  @override
+  void dispose() {
+    scrollController.dispose();
+    super.dispose(); /* expect: correct_order_for_super_dispose */
+    print('cleanup done');
+  }
+}
+
+/// Bad: early super call with multiple cleanups
+class EarlySuper extends ChangeNotifier {
+  late PageController pageController;
+  late TabController tabController;
+
+  @override
+  void dispose() {
+    super.dispose(); /* expect: correct_order_for_super_dispose */
+    pageController.dispose();
+    tabController.dispose();
+  }
+}

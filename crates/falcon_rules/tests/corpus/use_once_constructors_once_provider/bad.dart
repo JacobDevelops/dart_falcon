@@ -17,3 +17,11 @@ final anotherProvider = OnceProvider<String>( /* expect: use_once_constructors_o
 final badPattern = OnceProvider( /* expect: use_once_constructors_once_provider */
   create: (ref) => MyService(),
 );
+
+final futureProvider = FutureProvider( /* expect: use_once_constructors_once_provider */
+  (ref) async => 'async value',
+);
+
+final stateProvider = StateProvider( /* expect: use_once_constructors_once_provider */
+  (ref) => 42,
+);

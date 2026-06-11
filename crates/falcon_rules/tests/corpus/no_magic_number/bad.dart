@@ -20,3 +20,13 @@ void configureUI() {
   int pair = 2;
   int delta = -1;
 }
+
+// Bad: magic number in list literal
+void processValues() {
+  final values = [100, 200, 300]; /* expect: no_magic_number */ /* expect: no_magic_number */ /* expect: no_magic_number */
+}
+
+// Bad: magic number in function call
+void renderWidget() {
+  decorateBox(color: 0xFFFF0000); /* expect: no_magic_number */
+}

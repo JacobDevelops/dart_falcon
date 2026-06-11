@@ -20,4 +20,34 @@ class DataProcessor {
       return isEven && isPositive && isSmall;
     }).forEach(print);
   }
+
+  void processWithValidation(List<String> items) {
+    items.forEach((item) { /* expect: prefer-extracting-callbacks */
+      final trimmed = item.trim();
+      final lowercased = trimmed.toLowerCase();
+      if (lowercased.isNotEmpty) {
+        print(lowercased);
+      }
+    });
+  }
+
+  List<int> filterNumbers(List<int> nums) {
+    return nums.where((num) { /* expect: prefer-extracting-callbacks */
+      final doubled = num * 2;
+      final squared = doubled * doubled;
+      final final_val = squared + num;
+      return final_val > 100;
+    }).toList();
+  }
+
+  void setupHandlers(List<String> events) {
+    events.forEach((event) { /* expect: prefer-extracting-callbacks */
+      final parts = event.split(':');
+      final key = parts[0];
+      final value = parts.length > 1 ? parts[1] : '';
+      _handle(key, value);
+    });
+  }
+
+  void _handle(String key, String value) {}
 }

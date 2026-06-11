@@ -23,4 +23,23 @@ class Example {
   void process(int p1, int p2, int p3, int p4, int p5) {
     print(p1);
   }
+
+  // Good: constructor with 4 parameters
+  Example.simple(String name, int age, double height, bool active) {
+  }
+
+  // Good: single parameter
+  void singleParam(String value) {
+    print(value);
+  }
+
+  // Good: no parameters
+  void noParams() {
+    print('Called with no parameters');
+  }
+}
+
+// Good: optional parameters within limit
+void functionalApproach({String? name, int? age, double? score, bool? flag}) {
+  print('$name, $age, $score, $flag');
 }

@@ -29,3 +29,7 @@ class MyWidget {
     bottomRight: Radius.circular(12),
   );
 }
+
+void testSmallRadius() {
+  final border = BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(4), bottomLeft: Radius.circular(4), bottomRight: Radius.circular(4)); /* expect: prefer-const-border-radius */
+}

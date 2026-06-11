@@ -23,3 +23,7 @@ class Api {
     return http.get(url).then((response) => response.body); /* expect: prefer-async-await */
   }
 }
+
+void refresh() {
+  reload().then((_) => notifyListeners()); /* expect: prefer-async-await */
+}

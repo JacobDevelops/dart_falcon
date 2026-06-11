@@ -32,3 +32,58 @@ void handleValue(int x) {
       print('other');
   }
 }
+
+// Good: switch with 10 cases (at the limit)
+void handleStatus(int code) {
+  switch (code) {
+    case 200:
+      print('ok');
+      break;
+    case 201:
+      print('created');
+      break;
+    case 204:
+      print('no content');
+      break;
+    case 301:
+      print('moved permanently');
+      break;
+    case 304:
+      print('not modified');
+      break;
+    case 400:
+      print('bad request');
+      break;
+    case 401:
+      print('unauthorized');
+      break;
+    case 403:
+      print('forbidden');
+      break;
+    case 404:
+      print('not found');
+      break;
+    default:
+      print('other');
+  }
+}
+
+// Good: switch with 5 cases well under limit
+void processType(String type) {
+  switch (type) {
+    case 'int':
+      print('integer');
+      break;
+    case 'double':
+      print('floating point');
+      break;
+    case 'string':
+      print('text');
+      break;
+    case 'bool':
+      print('boolean');
+      break;
+    default:
+      print('unknown type');
+  }
+}

@@ -23,3 +23,19 @@ class Coordinate {
 
   Coordinate(this.latitude, this.longitude, this.label); /* expect: prefer_declaring_const_constructor */
 }
+
+// Bad: immutable model with final fields
+class Size {
+  final double width;
+  final double height;
+
+  Size(this.width, this.height); /* expect: prefer_declaring_const_constructor */
+}
+
+// Bad: all-final constructor
+class Duration {
+  final int seconds;
+  final int milliseconds;
+
+  Duration(this.seconds, this.milliseconds); /* expect: prefer_declaring_const_constructor */
+}

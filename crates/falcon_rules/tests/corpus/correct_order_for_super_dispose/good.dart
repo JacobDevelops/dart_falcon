@@ -49,3 +49,29 @@ class SingleResourceDispose extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// Good: cleanup with super at end
+class ScrollDispose extends ChangeNotifier {
+  late ScrollController scrollController;
+
+  @override
+  void dispose() {
+    scrollController.dispose();
+    super.dispose();
+  }
+}
+
+/// Good: multiple cleanup steps then super
+class ComplexDispose extends ChangeNotifier {
+  late PageController pageController;
+  late TabController tabController;
+  late StreamSubscription streamSub;
+
+  @override
+  void dispose() {
+    pageController.dispose();
+    tabController.dispose();
+    streamSub.cancel();
+    super.dispose();
+  }
+}

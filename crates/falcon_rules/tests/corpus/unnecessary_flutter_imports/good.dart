@@ -27,3 +27,23 @@ Future<void> asyncExample() async {
   await Future.delayed(const Duration(seconds: 1));
   debugPrint('Done');
 }
+
+// Uses Stream from dart:async
+Stream<int> createStream() {
+  return Stream.fromIterable([1, 2, 3]);
+}
+
+// Uses widgets
+Widget createButton() {
+  return ElevatedButton(
+    onPressed: () {},
+    child: const Text('Click me'),
+  );
+}
+
+// Uses Color from Flutter
+void styleContainer() {
+  final container = Container(
+    color: Color.fromARGB(255, 100, 150, 200),
+  );
+}

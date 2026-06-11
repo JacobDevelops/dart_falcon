@@ -1,4 +1,4 @@
-// Bad: function with 101+ lines exceeds max (default: 100)
+// Bad: function with 101+ lines exceeds max (threshold: 100)
 void longFunction() { /* expect: max_lines_for_function */
   print('Line 2');
   print('Line 3');
@@ -100,4 +100,110 @@ void longFunction() { /* expect: max_lines_for_function */
   print('Line 99');
   print('Line 100');
   print('Line 101');
+}
+
+// Bad: method with 102 lines
+class LongMethodClass {
+  void longMethod() { /* expect: max_lines_for_function */
+    print('Method line 2');
+    print('Method line 3');
+    print('Method line 4');
+    print('Method line 5');
+    print('Method line 6');
+    print('Method line 7');
+    print('Method line 8');
+    print('Method line 9');
+    print('Method line 10');
+    print('Method line 11');
+    print('Method line 12');
+    print('Method line 13');
+    print('Method line 14');
+    print('Method line 15');
+    print('Method line 16');
+    print('Method line 17');
+    print('Method line 18');
+    print('Method line 19');
+    print('Method line 20');
+    print('Method line 21');
+    print('Method line 22');
+    print('Method line 23');
+    print('Method line 24');
+    print('Method line 25');
+    print('Method line 26');
+    print('Method line 27');
+    print('Method line 28');
+    print('Method line 29');
+    print('Method line 30');
+    print('Method line 31');
+    print('Method line 32');
+    print('Method line 33');
+    print('Method line 34');
+    print('Method line 35');
+    print('Method line 36');
+    print('Method line 37');
+    print('Method line 38');
+    print('Method line 39');
+    print('Method line 40');
+    print('Method line 41');
+    print('Method line 42');
+    print('Method line 43');
+    print('Method line 44');
+    print('Method line 45');
+    print('Method line 46');
+    print('Method line 47');
+    print('Method line 48');
+    print('Method line 49');
+    print('Method line 50');
+    print('Method line 51');
+    print('Method line 52');
+    print('Method line 53');
+    print('Method line 54');
+    print('Method line 55');
+    print('Method line 56');
+    print('Method line 57');
+    print('Method line 58');
+    print('Method line 59');
+    print('Method line 60');
+    print('Method line 61');
+    print('Method line 62');
+    print('Method line 63');
+    print('Method line 64');
+    print('Method line 65');
+    print('Method line 66');
+    print('Method line 67');
+    print('Method line 68');
+    print('Method line 69');
+    print('Method line 70');
+    print('Method line 71');
+    print('Method line 72');
+    print('Method line 73');
+    print('Method line 74');
+    print('Method line 75');
+    print('Method line 76');
+    print('Method line 77');
+    print('Method line 78');
+    print('Method line 79');
+    print('Method line 80');
+    print('Method line 81');
+    print('Method line 82');
+    print('Method line 83');
+    print('Method line 84');
+    print('Method line 85');
+    print('Method line 86');
+    print('Method line 87');
+    print('Method line 88');
+    print('Method line 89');
+    print('Method line 90');
+    print('Method line 91');
+    print('Method line 92');
+    print('Method line 93');
+    print('Method line 94');
+    print('Method line 95');
+    print('Method line 96');
+    print('Method line 97');
+    print('Method line 98');
+    print('Method line 99');
+    print('Method line 100');
+    print('Method line 101');
+  }
 }

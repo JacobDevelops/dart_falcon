@@ -28,3 +28,22 @@ class ContainerWidget extends StatelessWidget {
     );
   }
 }
+
+// Bad: accessing height in a calculation
+class DynamicHeightWidget extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final availableHeight = MediaQuery.of(context).size.height - 100; /* expect: prefer_dedicated_media_query_methods */
+    return SizedBox(height: availableHeight);
+  }
+}
+
+// Bad: using both width and height
+class ResponsiveBoxWidget extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.of(context).size.width; /* expect: prefer_dedicated_media_query_methods */
+    final h = MediaQuery.of(context).size.height; /* expect: prefer_dedicated_media_query_methods */
+    return SizedBox(width: w, height: h);
+  }
+}

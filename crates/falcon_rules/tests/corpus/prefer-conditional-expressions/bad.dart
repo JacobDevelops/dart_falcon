@@ -31,3 +31,13 @@ void printMessage(bool success) {
     print('Failed!');
   }
 }
+
+void setLabel(bool on) {
+  String label;
+  if (on) { /* expect: prefer-conditional-expressions */
+    label = 'on';
+  } else {
+    label = 'off';
+  }
+  print(label);
+}

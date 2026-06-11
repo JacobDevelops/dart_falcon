@@ -44,3 +44,20 @@ void singleArg(
 ) {
   print(veryLongArgumentName);
 }
+
+// OK: constructor with trailing comma
+final obj = MyClass(
+  field1: 'value',
+  field2: 42,
+);
+
+// OK: map with trailing comma
+final map = {
+  'key1': 'value1',
+  'key2': 'value2',
+};
+
+// OK: empty call is fine
+void emptyCall() {
+  noArgs();
+}

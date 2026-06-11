@@ -18,3 +18,13 @@ class Processor {
     combine(first, second);
   }
 }
+
+void duplicateBinaryExpression() {
+  final x = a + b;
+  final y = a + b; /* expect: prefer-moving-to-variable */
+}
+
+void duplicateMethodCall() {
+  final v1 = list.where((e) => e > 5).toList();
+  final v2 = list.where((e) => e > 5).toList(); /* expect: prefer-moving-to-variable */
+}

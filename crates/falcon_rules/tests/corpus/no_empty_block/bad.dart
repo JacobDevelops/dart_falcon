@@ -25,3 +25,24 @@ void checkValue(int x) {
   } else { /* expect: no_empty_block */
   }
 }
+
+// Bad: empty for loop
+void loopWithoutBody() {
+  for (int i = 0; i < 10; i++) { /* expect: no_empty_block */
+  }
+}
+
+// Bad: empty while loop
+void whileWithoutBody() {
+  int count = 0;
+  while (count < 5) { /* expect: no_empty_block */
+  }
+}
+
+// Bad: empty finally block
+void tryWithEmptyFinally() {
+  try {
+    print('something');
+  } finally { /* expect: no_empty_block */
+  }
+}

@@ -12,7 +12,8 @@ corpus/
 │   ├── bad.dart          # Dart code containing violations (annotated)
 │   ├── good.dart         # Dart code with no violations (no annotations)
 │   ├── bad_2.dart        # (Optional) Additional bad fixture variants
-│   └── good_2.dart       # (Optional) Additional good fixture variants
+│   ├── good_2.dart       # (Optional) Additional good fixture variants
+│   └── config.json       # (Optional) Per-rule config used when validating this dir
 ├── {another-rule-name}/
 │   ├── bad.dart
 │   └── good.dart
@@ -24,6 +25,30 @@ corpus/
 - The rule name must match the rule ID defined in the rule implementation
 - At minimum, each rule directory must contain `bad.dart` and `good.dart`
 - Additional variants (e.g., `bad_2.dart`, `good_2.dart`) are permitted for complex rules with multiple violation patterns
+- Coverage target (plan §5.7): ≥5 positive and ≥5 negative examples per rule; rules that emit at most one diagnostic per file (e.g., `max_lines_for_file`) approximate this with multiple fixture file variants
+
+### Per-Rule Config (`config.json`)
+
+Config-gated or threshold-based rules may ship a `config.json` next to their fixtures.
+The file uses the full `falcon.json` shape and is applied by both harnesses when
+validating that directory (the xtask harness passes it to the binary via `--config`;
+the in-process harness loads it with `falcon_config::load_config`):
+
+```json
+{
+  "rules": {
+    "use-design-system-item": {
+      "enabled": true,
+      "options": {
+        "items": [{ "class_name": "Container", "use_instead": "AppContainer" }]
+      }
+    }
+  }
+}
+```
+
+Without a `config.json`, fixtures are validated with the default config (every rule
+enabled, no options).
 
 ## Annotation Format
 
@@ -234,3 +259,4 @@ List<String> items = [];
 - **M4.0**: Initial corpus format specification
 - **M4.1**: Added message annotation support, validation harness
 - **M4.2**: Planned threshold calibration and rule acceptance policy
+- **M4.8**: Per-rule `config.json` support; ≥5 positive / ≥5 negative coverage target

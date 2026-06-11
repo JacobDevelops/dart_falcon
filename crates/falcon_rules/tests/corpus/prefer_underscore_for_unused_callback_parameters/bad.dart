@@ -23,3 +23,17 @@ void example4() {
   final numbers = [1, 2, 3];
   numbers.where((n) => true).toList(); /* expect: prefer_underscore_for_unused_callback_parameters */
 }
+
+// Bad: unused parameter in reduce-like operation
+void example5() {
+  final values = [1, 2, 3, 4];
+  values.fold(0, (previous, current) => previous + 1); /* expect: prefer_underscore_for_unused_callback_parameters */
+}
+
+// Bad: unused index parameter in indexed map
+void example6() {
+  final items = ['a', 'b', 'c'];
+  items.asMap().forEach((index, value) { /* expect: prefer_underscore_for_unused_callback_parameters */
+    print(value);
+  });
+}

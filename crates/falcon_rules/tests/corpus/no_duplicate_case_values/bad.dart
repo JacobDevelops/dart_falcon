@@ -27,3 +27,36 @@ void processStatus(String status) {
       break;
   }
 }
+
+// Bad: duplicate boolean cases
+void processBool(bool flag) {
+  switch (flag) {
+    case true:
+      print('True branch');
+      break;
+    case true: /* expect: no_duplicate_case_values */
+      print('Duplicate true');
+      break;
+    case false:
+      print('False branch');
+      break;
+  }
+}
+
+// Bad: double duplicate cases
+void processDouble(double value) {
+  switch (value) {
+    case 1.5:
+      print('One point five');
+      break;
+    case 2.5:
+      print('Two point five');
+      break;
+    case 1.5: /* expect: no_duplicate_case_values */
+      print('Duplicate 1.5');
+      break;
+    case 2.5: /* expect: no_duplicate_case_values */
+      print('Duplicate 2.5');
+      break;
+  }
+}

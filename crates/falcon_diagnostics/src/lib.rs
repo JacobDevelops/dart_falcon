@@ -158,3 +158,19 @@ impl fmt::Display for Severity {
         }
     }
 }
+
+impl std::str::FromStr for Severity {
+    type Err = String;
+
+    /// Parse a severity name as written in `falcon.json` `severity_override`
+    /// entries. Accepts the same names `Display` produces, plus "warn".
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "error" => Ok(Severity::Error),
+            "warning" | "warn" => Ok(Severity::Warning),
+            "info" => Ok(Severity::Info),
+            "note" => Ok(Severity::Note),
+            other => Err(format!("unknown severity: {other}")),
+        }
+    }
+}

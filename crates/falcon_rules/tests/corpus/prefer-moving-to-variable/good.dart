@@ -26,3 +26,21 @@ class Processor {
     combine(first, second);
   }
 }
+
+// Only one assignment of complex expression
+void singleComplexAssignment() {
+  final x = obj.method().chain().result;
+  print(x);
+}
+
+// Identifiers (trivial) don't trigger violation
+void identifierDuplicates() {
+  final a = variable1;
+  final b = variable1;
+}
+
+// Different chained calls
+void differentChains() {
+  final c1 = obj.method1().result;
+  final c2 = obj.method2().result;
+}

@@ -6,13 +6,16 @@ use std::process::Command;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(|s| s.as_str()) {
-        Some("codegen") => codegen(),
+        Some("codegen") => codegen(&args[1..]),
         Some("validate-rules") => validate_rules(&args[1..]),
         _ => {
             eprintln!("Usage: cargo xtask <task>");
             eprintln!("Available tasks:");
-            eprintln!("  codegen         Generate rule visitor stubs");
+            eprintln!("  codegen         Generate rule implementation + fixture stubs");
             eprintln!("  validate-rules  Validate rule implementations against golden corpus");
+            eprintln!();
+            eprintln!("codegen usage:");
+            eprintln!("  cargo xtask codegen rule --name <snake_name> --module <dart_code_linter|pyramid_lint> [--rule-id <id>]");
             eprintln!();
             eprintln!("validate-rules flags:");
             eprintln!("  --corpus <path>      Path to corpus directory (default: crates/falcon_rules/tests/corpus)");
@@ -25,8 +28,146 @@ fn main() {
     }
 }
 
-fn codegen() {
-    println!("codegen: rule visitor stubs — not yet implemented");
+// ── Codegen ─────────────────────────────────────────────────────────────────
+
+/// Convert `snake_case` to `PascalCase` for the rule struct name.
+fn pascal_case(snake: &str) -> String {
+    snake
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let mut chars = s.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+/// Render the Rule impl stub for a new rule.
+fn rule_stub(struct_name: &str, rule_id: &str) -> String {
+    format!(
+        r#"use falcon_analyze::{{AnalyzeContext, Rule}};
+use falcon_diagnostics::Diagnostic;
+use falcon_syntax::Program;
+
+pub struct {struct_name};
+
+impl Rule for {struct_name} {{
+    fn name(&self) -> &'static str {{
+        "{rule_id}"
+    }}
+
+    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {{
+        let _ = (program, ctx);
+        // TODO: walk `program.declarations` and emit diagnostics per violation.
+        Vec::new()
+    }}
+}}
+"#
+    )
+}
+
+/// Generate a rule implementation stub plus corpus fixture skeletons.
+///
+/// `cargo xtask codegen rule --name avoid_foo --module dart_code_linter [--rule-id avoid-foo]`
+fn codegen(args: &[String]) {
+    if args.first().map(|s| s.as_str()) != Some("rule") {
+        eprintln!("Usage: cargo xtask codegen rule --name <snake_name> --module <dart_code_linter|pyramid_lint> [--rule-id <id>]");
+        std::process::exit(1);
+    }
+
+    let mut name: Option<String> = None;
+    let mut module: Option<String> = None;
+    let mut rule_id: Option<String> = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--name" => {
+                i += 1;
+                name = args.get(i).cloned();
+            }
+            "--module" => {
+                i += 1;
+                module = args.get(i).cloned();
+            }
+            "--rule-id" => {
+                i += 1;
+                rule_id = args.get(i).cloned();
+            }
+            other => {
+                eprintln!("error: unknown codegen flag: {}", other);
+                std::process::exit(1);
+            }
+        }
+        i += 1;
+    }
+
+    let Some(name) = name else {
+        eprintln!("error: --name is required");
+        std::process::exit(1);
+    };
+    let Some(module) = module else {
+        eprintln!("error: --module is required");
+        std::process::exit(1);
+    };
+    if module != "dart_code_linter" && module != "pyramid_lint" {
+        eprintln!("error: --module must be dart_code_linter or pyramid_lint");
+        std::process::exit(1);
+    }
+    // dart_code_linter rule ids are kebab-case; pyramid_lint ids are snake_case.
+    let rule_id = rule_id.unwrap_or_else(|| {
+        if module == "dart_code_linter" {
+            name.replace('_', "-")
+        } else {
+            name.clone()
+        }
+    });
+
+    let root = workspace_root();
+    let rule_file = root.join(format!("crates/falcon_rules/src/{}/{}.rs", module, name));
+    let corpus_dir = root.join(format!("crates/falcon_rules/tests/corpus/{}", rule_id));
+
+    if rule_file.exists() {
+        eprintln!("error: {} already exists", rule_file.display());
+        std::process::exit(1);
+    }
+
+    let struct_name = pascal_case(&name);
+    fs::write(&rule_file, rule_stub(&struct_name, &rule_id)).expect("write rule stub");
+
+    fs::create_dir_all(&corpus_dir).expect("create corpus dir");
+    let bad = corpus_dir.join("bad.dart");
+    let good = corpus_dir.join("good.dart");
+    if !bad.exists() {
+        fs::write(
+            &bad,
+            format!("// TODO: violations annotated as /* expect: {} */\n", rule_id),
+        )
+        .expect("write bad.dart");
+    }
+    if !good.exists() {
+        fs::write(&good, "// TODO: compliant code, no annotations\n").expect("write good.dart");
+    }
+
+    println!("generated:");
+    println!("  {}", rule_file.display());
+    println!("  {}", bad.display());
+    println!("  {}", good.display());
+    println!();
+    println!("next steps:");
+    println!(
+        "  1. add `pub mod {};` to crates/falcon_rules/src/{}{}",
+        name,
+        module,
+        if module == "pyramid_lint" { "/mod.rs" } else { ".rs" }
+    );
+    println!(
+        "  2. register `Box::new({}::{}::{})` in all_rules() (crates/falcon_rules/src/lib.rs)",
+        module, name, struct_name
+    );
+    println!("  3. implement the rule, fill in fixtures, then run `cargo xtask validate-rules --rule {}`", rule_id);
 }
 
 // ── Validation harness ──────────────────────────────────────────────────────
@@ -103,9 +244,17 @@ struct SpanJson {
     end: usize,
 }
 
-fn run_falcon(falcon_bin: &str, file: &Path) -> Result<Vec<DiagnosticJson>, String> {
-    let output = Command::new(falcon_bin)
-        .args(["check", "--format", "json", file.to_str().unwrap_or("")])
+fn run_falcon(
+    falcon_bin: &str,
+    file: &Path,
+    config: Option<&Path>,
+) -> Result<Vec<DiagnosticJson>, String> {
+    let mut cmd = Command::new(falcon_bin);
+    cmd.args(["check", "--format", "json", file.to_str().unwrap_or("")]);
+    if let Some(config_path) = config {
+        cmd.args(["--config", config_path.to_str().unwrap_or("")]);
+    }
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to run falcon binary '{}': {}", falcon_bin, e))?;
 
@@ -151,6 +300,7 @@ fn validate_file(
     falcon_bin: &str,
     threshold: f64,
     rule_filter: Option<&str>,
+    config: Option<&Path>,
 ) -> FileResult {
     let all_exps = parse_expectations(source);
     let exps: Vec<Expectation> = all_exps
@@ -158,7 +308,7 @@ fn validate_file(
         .filter(|e| rule_filter.map(|r| e.rule == r).unwrap_or(true))
         .collect();
 
-    let raw_diags = run_falcon(falcon_bin, file).unwrap_or_default();
+    let raw_diags = run_falcon(falcon_bin, file, config).unwrap_or_default();
     let diags: Vec<(usize, &DiagnosticJson)> = raw_diags
         .iter()
         .enumerate()
@@ -303,6 +453,11 @@ fn validate_rules(args: &[String]) {
             .collect();
         dart_files.sort();
 
+        // Config-gated rules ship a per-rule config (`corpus/<rule>/config.json`,
+        // full falcon.json shape) that is passed to the falcon binary via --config.
+        let rule_config_path = rule_dir.join("config.json");
+        let rule_config = rule_config_path.exists().then_some(rule_config_path);
+
         for dart_file in &dart_files {
             let source = match fs::read_to_string(dart_file) {
                 Ok(s) => s,
@@ -318,6 +473,7 @@ fn validate_rules(args: &[String]) {
                 &falcon_bin,
                 threshold,
                 Some(&rule_name),
+                rule_config.as_deref(),
             );
             total_files += 1;
             total_expected += result.expected;

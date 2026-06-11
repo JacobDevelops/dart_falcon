@@ -66,14 +66,18 @@ fn parse_expectations(source: &str) -> Vec<Expectation> {
     exps
 }
 
-/// Run a single rule over `source` with the default config; return (rule-id, line) per diagnostic.
-fn run_rule(rule: &dyn Rule, file: &Path, source: &str) -> Vec<(String, usize)> {
+/// Run a single rule over `source`; return (rule-id, line) per diagnostic.
+fn run_rule(
+    rule: &dyn Rule,
+    file: &Path,
+    source: &str,
+    config: &FalconConfig,
+) -> Vec<(String, usize)> {
     let (program, _errors) = parse(source);
-    let config = FalconConfig::default();
     let ctx = AnalyzeContext {
         file_path: file,
         source,
-        config: &config,
+        config,
     };
     rule.analyze(&program, &ctx)
         .into_iter()
@@ -84,6 +88,19 @@ fn run_rule(rule: &dyn Rule, file: &Path, source: &str) -> Vec<(String, usize)> 
             )
         })
         .collect()
+}
+
+/// Load the per-rule corpus config (`corpus/<rule>/config.json`, full falcon.json
+/// shape) if present; config-gated rules like use-design-system-item need one to
+/// fire at all. Falls back to the default config.
+fn corpus_config(rule_dir: &Path) -> FalconConfig {
+    let path = rule_dir.join("config.json");
+    if path.exists() {
+        falcon_config::load_config(&path)
+            .unwrap_or_else(|e| panic!("invalid corpus config {}: {e}", path.display()))
+    } else {
+        FalconConfig::default()
+    }
 }
 
 fn dart_files(dir: &Path) -> Vec<PathBuf> {
@@ -126,6 +143,7 @@ fn corpus_matches_expectations() {
             continue;
         };
 
+        let config = corpus_config(dir);
         for file in dart_files(dir) {
             total_files += 1;
             let source = fs::read_to_string(&file)
@@ -137,7 +155,7 @@ fn corpus_matches_expectations() {
                 .collect();
             total_expectations += expectations.len();
 
-            let mut diag_lines: Vec<usize> = run_rule(*rule, &file, &source)
+            let mut diag_lines: Vec<usize> = run_rule(*rule, &file, &source, &config)
                 .into_iter()
                 .filter(|(r, _)| *r == rule_name)
                 .map(|(_, line)| line)

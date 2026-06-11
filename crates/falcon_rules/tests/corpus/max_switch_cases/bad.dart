@@ -38,3 +38,47 @@ void handleValue(int x) {
       print('other');
   }
 }
+
+// Bad: another switch with 12 cases
+void processStatus(String status) {
+  switch (status) { /* expect: max_switch_cases */
+    case 'active':
+      print('active');
+      break;
+    case 'inactive':
+      print('inactive');
+      break;
+    case 'pending':
+      print('pending');
+      break;
+    case 'processing':
+      print('processing');
+      break;
+    case 'completed':
+      print('completed');
+      break;
+    case 'failed':
+      print('failed');
+      break;
+    case 'cancelled':
+      print('cancelled');
+      break;
+    case 'paused':
+      print('paused');
+      break;
+    case 'queued':
+      print('queued');
+      break;
+    case 'error':
+      print('error');
+      break;
+    case 'warning':
+      print('warning');
+      break;
+    case 'info':
+      print('info');
+      break;
+    default:
+      print('unknown');
+  }
+}

@@ -25,3 +25,15 @@ void checkNested(List<List<int>> matrix) {
     print('Matrix has non-empty rows');
   }
 }
+
+// Bad: where with complex predicate
+void filterByStatus(List<String> statuses) {
+  final hasActive = statuses.where((s) => s == 'active' || s == 'pending').isNotEmpty; /* expect: prefer_iterable_any */
+}
+
+// Bad: where on map/set
+void checkMapKeys(Map<String, int> data) {
+  if (data.keys.where((k) => k.startsWith('test')).isNotEmpty) { /* expect: prefer_iterable_any */
+    print('Has test keys');
+  }
+}

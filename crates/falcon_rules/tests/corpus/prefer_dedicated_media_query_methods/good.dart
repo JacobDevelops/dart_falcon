@@ -40,3 +40,36 @@ class PaddingWidget extends StatelessWidget {
     );
   }
 }
+
+// Good: using sizeOf for dynamic height calculation
+class DynamicHeightWidget extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final availableHeight = MediaQuery.sizeOf(context).height - 100;
+    return SizedBox(height: availableHeight);
+  }
+}
+
+// Good: using sizeOf for both dimensions
+class ResponsiveBoxWidget extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return SizedBox(width: size.width, height: size.height);
+  }
+}
+
+// Good: using dedicated MediaQuery methods
+class DeviceInfoWidget extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final textScaleFactor = MediaQuery.of(context).textScaleFactor;
+    final orientation = MediaQuery.of(context).orientation;
+    return Column(
+      children: [
+        Text('Scale: $textScaleFactor'),
+        Text('Orientation: $orientation'),
+      ],
+    );
+  }
+}

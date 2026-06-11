@@ -1,10 +1,210 @@
 {
-  "rules": {},
+  "rules": {
+    "avoid-dynamic": {
+      "enabled": true
+    },
+    "avoid-global-state": {
+      "enabled": true
+    },
+    "avoid-ignoring-return-values": {
+      "enabled": true
+    },
+    "avoid-late-keyword": {
+      "enabled": true
+    },
+    "avoid-nested-conditional-expressions": {
+      "enabled": true
+    },
+    "avoid-non-null-assertion": {
+      "enabled": true
+    },
+    "avoid-passing-async-when-sync-expected": {
+      "enabled": true
+    },
+    "avoid-redundant-async": {
+      "enabled": true
+    },
+    "avoid-returning-widgets": {
+      "enabled": true
+    },
+    "avoid-throw-in-catch-block": {
+      "enabled": true
+    },
+    "avoid-top-level-member-access": {
+      "enabled": true
+    },
+    "avoid-unnecessary-type-assertions": {
+      "enabled": true
+    },
+    "avoid-unnecessary-type-casts": {
+      "enabled": true
+    },
+    "avoid-unrelated-type-assertions": {
+      "enabled": true
+    },
+    "avoid-unused-parameters": {
+      "enabled": true
+    },
+    "avoid_abbreviations_in_doc_comments": {
+      "enabled": true
+    },
+    "avoid_empty_blocks": {
+      "enabled": true
+    },
+    "avoid_inverted_boolean_expressions": {
+      "enabled": true
+    },
+    "avoid_mutable_global_variables": {
+      "enabled": true
+    },
+    "avoid_nested_if": {
+      "enabled": true
+    },
+    "avoid_positional_fields_in_records": {
+      "enabled": true
+    },
+    "avoid_unused_parameters": {
+      "enabled": true
+    },
+    "binary-expression-operand-order": {
+      "enabled": true
+    },
+    "boolean_prefixes": {
+      "enabled": true
+    },
+    "class_members_ordering": {
+      "enabled": true
+    },
+    "correct_order_for_super_dispose": {
+      "enabled": true
+    },
+    "double-literal-format": {
+      "enabled": true
+    },
+    "format-comment": {
+      "enabled": true
+    },
+    "max_lines_for_file": {
+      "enabled": true
+    },
+    "max_lines_for_function": {
+      "enabled": true
+    },
+    "max_parameters_for_function": {
+      "enabled": true
+    },
+    "max_switch_cases": {
+      "enabled": true
+    },
+    "member-ordering": {
+      "enabled": true
+    },
+    "newline-before-return": {
+      "enabled": true
+    },
+    "no-boolean-literal-compare": {
+      "enabled": true
+    },
+    "no-empty-block": {
+      "enabled": true
+    },
+    "no-equal-arguments": {
+      "enabled": true
+    },
+    "no-equal-then-else": {
+      "enabled": true
+    },
+    "no-magic-number": {
+      "enabled": true
+    },
+    "no-object-declaration": {
+      "enabled": true
+    },
+    "no_duplicate_case_values": {
+      "enabled": true
+    },
+    "no_empty_block": {
+      "enabled": true
+    },
+    "no_magic_number": {
+      "enabled": true
+    },
+    "prefer-async-await": {
+      "enabled": true
+    },
+    "prefer-conditional-expressions": {
+      "enabled": true
+    },
+    "prefer-const-border-radius": {
+      "enabled": true
+    },
+    "prefer-correct-edge-insets-constructor": {
+      "enabled": true
+    },
+    "prefer-correct-identifier-length": {
+      "enabled": true
+    },
+    "prefer-correct-type-name": {
+      "enabled": true
+    },
+    "prefer-extracting-callbacks": {
+      "enabled": true
+    },
+    "prefer-first": {
+      "enabled": true
+    },
+    "prefer-immediate-return": {
+      "enabled": true
+    },
+    "prefer-iterable-of": {
+      "enabled": true
+    },
+    "prefer-last": {
+      "enabled": true
+    },
+    "prefer-moving-to-variable": {
+      "enabled": true
+    },
+    "prefer-trailing-comma": {
+      "enabled": true
+    },
+    "prefer_declaring_const_constructor": {
+      "enabled": true
+    },
+    "prefer_dedicated_media_query_methods": {
+      "enabled": true
+    },
+    "prefer_iterable_any": {
+      "enabled": true
+    },
+    "prefer_iterable_every": {
+      "enabled": true
+    },
+    "prefer_underscore_for_unused_callback_parameters": {
+      "enabled": true
+    },
+    "unnecessary_flutter_imports": {
+      "enabled": true
+    },
+    "unnecessary_nullable_return_type": {
+      "enabled": true
+    },
+    "use-design-system-item": {
+      "enabled": true
+    },
+    "use_once_constructors_once_provider": {
+      "enabled": true
+    },
+    "use_spacer_as_expanded_child": {
+      "enabled": true
+    }
+  },
   "exclude_patterns": [
     ".dart_tool/**",
     "build/**",
     "**/*.g.dart",
     "**/*.freezed.dart"
   ],
+  "severity_override": {},
   "max_errors": null
 }

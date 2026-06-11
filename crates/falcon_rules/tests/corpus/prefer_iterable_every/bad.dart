@@ -25,3 +25,13 @@ void checkMatrix(List<List<int>> matrix) {
     print('All rows are non-empty');
   }
 }
+
+// Bad: where with complex predicate and length check
+void checkAllPositive(List<int> numbers) {
+  final allPositive = numbers.where((n) => n > 0 && n < 100).length == numbers.length; /* expect: prefer_iterable_every */
+}
+
+// Bad: negated where isEmpty in variable declaration
+void verifyList(List<String> items) {
+  bool hasContent = !items.where((i) => i.isNotEmpty).isEmpty; /* expect: prefer_iterable_every */
+}

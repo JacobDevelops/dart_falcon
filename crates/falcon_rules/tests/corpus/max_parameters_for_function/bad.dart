@@ -14,4 +14,18 @@ class Example {
     print(p1);
     print(p2);
   }
+
+  // Bad: constructor with 8 parameters
+  Example.build(String a, String b, int c, double d, bool e, List<String> f, Map<String, int> g, Set<int> h) { /* expect: max_parameters_for_function */
+  }
+
+  // Bad: another method with 8 parameters
+  String buildString(String a, String b, int c, double d, bool e, List<String> f, Map<String, int> g, Set<int> h) { /* expect: max_parameters_for_function */
+    return '$a-$b-$c-$d-$e-${f.length}-${g.length}-${h.length}';
+  }
+}
+
+// Bad: top-level function with 6 parameters
+void configure(int x, int y, int z, double scale, bool enabled, String name) { /* expect: max_parameters_for_function */
+  print('$x, $y, $z, $scale, $enabled, $name');
 }

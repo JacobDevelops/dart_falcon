@@ -31,3 +31,31 @@ class Widget {
 
   Widget(this.name);
 }
+
+// Good: const constructor for immutable size
+class Size {
+  final double width;
+  final double height;
+
+  const Size(this.width, this.height);
+}
+
+// Good: const constructor for immutable duration
+class Duration {
+  final int seconds;
+  final int milliseconds;
+
+  const Duration(this.seconds, this.milliseconds);
+}
+
+// Good: factory constructor (not required to be const)
+class Pair {
+  final int first;
+  final int second;
+
+  const Pair(this.first, this.second);
+
+  factory Pair.symmetric(int value) {
+    return Pair(value, value);
+  }
+}

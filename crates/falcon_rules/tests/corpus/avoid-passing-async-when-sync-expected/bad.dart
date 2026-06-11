@@ -32,3 +32,29 @@ void misuse() {
     return '$n';
   });
 }
+
+// More violations
+void performAction(void Function(String, int) callback) {
+  callback('test', 42);
+}
+
+void badAction() {
+  performAction((name, count) async { /* expect: avoid-passing-async-when-sync-expected */
+    await Future.delayed(Duration(milliseconds: 100));
+    print('$name: $count');
+  });
+}
+
+class DataLoader {
+  void loadData(String Function() fetcher) {
+    final data = fetcher();
+    print(data);
+  }
+
+  void loadBad() {
+    loadData(() async { /* expect: avoid-passing-async-when-sync-expected */
+      await Future.delayed(Duration(seconds: 1));
+      return 'data';
+    });
+  }
+}
