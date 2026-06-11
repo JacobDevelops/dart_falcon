@@ -255,3 +255,144 @@ Widget build(BuildContext context) {
         "static access `Container.of(...)` must not be flagged"
     );
 }
+
+fn collect_dart_files_recursive(root: &Path, limit: usize) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_dart_files_recursive_inner(root, &mut out, limit);
+    out
+}
+
+fn collect_dart_files_recursive_inner(dir: &Path, out: &mut Vec<PathBuf>, limit: usize) {
+    if out.len() >= limit {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        if out.len() >= limit {
+            return;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !matches!(name, ".dart_tool" | "build" | ".pub-cache" | ".direnv") {
+                collect_dart_files_recursive_inner(&path, out, limit);
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some("dart") {
+            out.push(path);
+        }
+    }
+}
+
+#[test]
+fn all_rules_no_name_collisions() {
+    let rules = all_rules();
+    let mut seen = std::collections::HashSet::new();
+    for rule in &rules {
+        let name = rule.name();
+        assert!(!name.is_empty(), "rule has empty name");
+        assert!(seen.insert(name), "duplicate rule name: {name}");
+    }
+    // Sanity: we have at least 60 rules
+    assert!(rules.len() >= 60, "expected ≥60 rules, got {}", rules.len());
+}
+
+#[test]
+fn all_rules_run_jfit_20_files_no_panic() {
+    let jfit_lib = Path::new("/home/jacob/Documents/Developer/jfit/apps/mobile/lib");
+    if !jfit_lib.exists() {
+        eprintln!("jfit corpus not found at {}, skipping", jfit_lib.display());
+        return;
+    }
+
+    let dart_files: Vec<PathBuf> = collect_dart_files_recursive(jfit_lib, 20);
+    assert!(!dart_files.is_empty(), "no dart files found in jfit corpus");
+
+    let rules = all_rules();
+    let config = FalconConfig::default();
+    let mut total_diags = 0usize;
+
+    for path in &dart_files {
+        let source = fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        let (program, _errors) = parse(&source);
+        let ctx = AnalyzeContext {
+            file_path: path,
+            source: &source,
+            config: &config,
+        };
+        for rule in &rules {
+            let diags = rule.analyze(&program, &ctx);
+            total_diags += diags.len();
+        }
+    }
+
+    eprintln!(
+        "jfit integration: {} files, {} total diagnostics across {} rules",
+        dart_files.len(),
+        total_diags,
+        rules.len()
+    );
+    // At least one rule must fire somewhere across 20 real-world files
+    assert!(total_diags > 0, "no diagnostics emitted on jfit corpus — rules may not be scanning");
+}
+
+#[test]
+fn all_rules_order_independence() {
+    let snippet = r#"
+class Foo {
+  dynamic x;
+  void doThing(a, b, c, d, e, f) {
+    var result = null;
+    if (result == null) {
+      print(result!);
+    }
+  }
+}
+"#;
+    let (program, _errors) = parse(snippet);
+    let config = FalconConfig::default();
+    let ctx = AnalyzeContext {
+        file_path: Path::new("test.dart"),
+        source: snippet,
+        config: &config,
+    };
+
+    let rules = all_rules();
+    let mid = rules.len() / 2;
+
+    // Collect all diagnostics running the full set
+    let all_diags: Vec<String> = rules
+        .iter()
+        .flat_map(|r| r.analyze(&program, &ctx))
+        .map(|d| format!("{}:{}", d.rule, d.span.start))
+        .collect();
+
+    // Collect first-half then second-half diagnostics
+    let first_half: Vec<String> = rules[..mid]
+        .iter()
+        .flat_map(|r| r.analyze(&program, &ctx))
+        .map(|d| format!("{}:{}", d.rule, d.span.start))
+        .collect();
+    let second_half: Vec<String> = rules[mid..]
+        .iter()
+        .flat_map(|r| r.analyze(&program, &ctx))
+        .map(|d| format!("{}:{}", d.rule, d.span.start))
+        .collect();
+
+    let mut combined = first_half;
+    combined.extend(second_half);
+
+    // Both must produce identical diagnostics (same rules, same input, no shared mutable state)
+    let mut all_sorted = all_diags.clone();
+    let mut combined_sorted = combined.clone();
+    all_sorted.sort();
+    combined_sorted.sort();
+    assert_eq!(
+        all_sorted, combined_sorted,
+        "rule execution is not order-independent — possible shared mutable state"
+    );
+}

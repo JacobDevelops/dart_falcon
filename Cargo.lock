@@ -377,6 +377,7 @@ dependencies = [
 name = "falcon_rules"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "falcon_analyze",
  "falcon_config",
  "falcon_dart_parser",

@@ -62,6 +62,10 @@ fn contains_word(text: &str, word: &str) -> bool {
     let word_bytes = lower_word.as_bytes();
     let text_bytes = lower_text.as_bytes();
 
+    if word_bytes.len() > text_bytes.len() {
+        return false;
+    }
+
     for i in 0..=text_bytes.len().saturating_sub(word_bytes.len()) {
         if &text_bytes[i..i + word_bytes.len()] == word_bytes {
             // Check boundaries
