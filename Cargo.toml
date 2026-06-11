@@ -46,6 +46,23 @@ description = "A fast Dart linter built in Rust"
 [dependencies]
 falcon_cli = { path = "crates/falcon_cli" }
 
+[dev-dependencies]
+criterion.workspace = true
+falcon_analyze = { path = "crates/falcon_analyze" }
+falcon_config = { path = "crates/falcon_config" }
+falcon_dart_parser = { path = "crates/falcon_dart_parser" }
+falcon_diagnostics = { path = "crates/falcon_diagnostics" }
+falcon_rules = { path = "crates/falcon_rules" }
+
 [[bin]]
 name = "falcon"
 path = "src/main.rs"
+
+[[bench]]
+name = "jfit_mobile_bench"
+harness = false
+
+# Debug symbols in bench builds so `cargo flamegraph --bench` resolves frames
+# without slowing the optimized code (M6.1 profiling setup).
+[profile.bench]
+debug = true

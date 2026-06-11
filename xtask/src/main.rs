@@ -8,11 +8,15 @@ fn main() {
     match args.first().map(|s| s.as_str()) {
         Some("codegen") => codegen(&args[1..]),
         Some("validate-rules") => validate_rules(&args[1..]),
+        Some("perf-lock") => perf_lock(&args[1..]),
         _ => {
             eprintln!("Usage: cargo xtask <task>");
             eprintln!("Available tasks:");
             eprintln!("  codegen         Generate rule implementation + fixture stubs");
             eprintln!("  validate-rules  Validate rule implementations against golden corpus");
+            eprintln!(
+                "  perf-lock       Enforce the M6 performance lock (<1000ms on jfit mobile lib)"
+            );
             eprintln!();
             eprintln!("codegen usage:");
             eprintln!(
@@ -30,6 +34,18 @@ fn main() {
             eprintln!(
                 "  --falcon-bin <path>  Path to falcon binary (default: target/debug/falcon)"
             );
+            eprintln!("  --json               Output results as JSON");
+            eprintln!();
+            eprintln!("perf-lock flags:");
+            eprintln!(
+                "  --corpus <path>      Corpus to lint (default: $JFIT_PATH or /home/jacob/Documents/Developer/jfit, subtree apps/mobile/lib)"
+            );
+            eprintln!("  --runs <N>           Timed runs to take the median of (default: 5)");
+            eprintln!("  --budget-ms <N>      Wall-clock budget in milliseconds (default: 1000)");
+            eprintln!(
+                "  --falcon-bin <path>  Path to falcon binary (default: target/release/falcon)"
+            );
+            eprintln!("  --skip-build         Don't rebuild the release binary first");
             eprintln!("  --json               Output results as JSON");
             std::process::exit(1);
         }
@@ -570,6 +586,149 @@ fn validate_rules(args: &[String]) {
     }
 
     if !all_failures.is_empty() {
+        std::process::exit(1);
+    }
+}
+
+// ── Perf lock ───────────────────────────────────────────────────────────────
+
+/// M6.3 performance lock: the release falcon binary must lint the jfit mobile
+/// lib in under the budget (default 1000ms, plan M6 exit criterion). Runs the
+/// binary N times and compares the median wall time against the budget.
+fn perf_lock(args: &[String]) {
+    let workspace = workspace_root();
+
+    let mut corpus: Option<PathBuf> = None;
+    let mut runs: usize = 5;
+    let mut budget_ms: u128 = 1000;
+    let mut falcon_bin = workspace.join("target/release/falcon");
+    let mut skip_build = false;
+    let mut json_output = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--corpus" => {
+                i += 1;
+                if i < args.len() {
+                    corpus = Some(PathBuf::from(&args[i]));
+                }
+            }
+            "--runs" => {
+                i += 1;
+                if i < args.len() {
+                    runs = args[i].parse().unwrap_or(5).max(1);
+                }
+            }
+            "--budget-ms" => {
+                i += 1;
+                if i < args.len() {
+                    budget_ms = args[i].parse().unwrap_or(1000);
+                }
+            }
+            "--falcon-bin" => {
+                i += 1;
+                if i < args.len() {
+                    falcon_bin = PathBuf::from(&args[i]);
+                }
+            }
+            "--skip-build" => skip_build = true,
+            "--json" => json_output = true,
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let corpus = corpus.unwrap_or_else(|| {
+        let root = std::env::var("JFIT_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/home/jacob/Documents/Developer/jfit"));
+        root.join("apps/mobile/lib")
+    });
+    if !corpus.exists() {
+        eprintln!("error: corpus path does not exist: {}", corpus.display());
+        std::process::exit(1);
+    }
+
+    if !skip_build {
+        eprintln!("building release falcon binary...");
+        let status = Command::new("cargo")
+            .args(["build", "--release", "--bin", "falcon"])
+            .current_dir(&workspace)
+            .status()
+            .expect("failed to spawn cargo build");
+        if !status.success() {
+            eprintln!("error: release build failed");
+            std::process::exit(1);
+        }
+    }
+    if !falcon_bin.exists() {
+        eprintln!("error: falcon binary not found: {}", falcon_bin.display());
+        std::process::exit(1);
+    }
+
+    // Warm-up run primes the OS file cache so timed runs measure the linter,
+    // not cold disk I/O.
+    let run_once = |label: &str| -> u128 {
+        let start = std::time::Instant::now();
+        let output = Command::new(&falcon_bin)
+            // --exit-code 0 keeps "violations found" from reading as failure;
+            // a non-zero exit therefore means the pipeline itself broke.
+            .args(["check", "--quiet", "--parallel", "--exit-code", "0"])
+            .arg(&corpus)
+            .output()
+            .expect("failed to spawn falcon");
+        let elapsed = start.elapsed().as_millis();
+        if !output.status.success() {
+            eprintln!(
+                "error: falcon check failed ({}): {}",
+                label,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            std::process::exit(1);
+        }
+        elapsed
+    };
+
+    run_once("warm-up");
+    let mut times: Vec<u128> = (0..runs)
+        .map(|n| {
+            let t = run_once(&format!("run {}", n + 1));
+            eprintln!("  run {}: {}ms", n + 1, t);
+            t
+        })
+        .collect();
+    times.sort_unstable();
+    let median = times[times.len() / 2];
+    let min = times[0];
+    let max = times[times.len() - 1];
+    let pass = median < budget_ms;
+
+    if json_output {
+        let report = serde_json::json!({
+            "corpus": corpus.display().to_string(),
+            "runs": runs,
+            "budget_ms": budget_ms,
+            "min_ms": min,
+            "median_ms": median,
+            "max_ms": max,
+            "pass": pass,
+        });
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    } else {
+        println!();
+        println!("── perf-lock ───────────────────────────────────────────");
+        println!("  Corpus:         {}", corpus.display());
+        println!("  Runs:           {runs}");
+        println!("  Budget:         {budget_ms}ms");
+        println!("  Min:            {min}ms");
+        println!("  Median:         {median}ms");
+        println!("  Max:            {max}ms");
+        println!("  Status:         {}", if pass { "PASS" } else { "FAIL" });
+        println!("────────────────────────────────────────────────────────");
+    }
+
+    if !pass {
         std::process::exit(1);
     }
 }
