@@ -19,5 +19,5 @@ pub use parallel::{
 pub use project::{ProjectFile, ProjectRule, ProjectRuleRegistry};
 pub use registry::RuleRegistry;
 pub use rule::Rule;
-pub use suppressions::FileSuppressions;
+pub use suppressions::{FileSuppressions, MALFORMED_SUPPRESSION, RuleLookup};
 pub use visitor::RuleVisitor;

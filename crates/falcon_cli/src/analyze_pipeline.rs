@@ -13,7 +13,8 @@ use falcon_analyze::{
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
-    ResolvedProjectRules, ResolvedRules, apply_severities, resolve_project_rules, resolve_rules,
+    ResolvedProjectRules, ResolvedRules, apply_severities, meta::suppression_lookup,
+    resolve_project_rules, resolve_rules,
 };
 use glob::Pattern;
 
@@ -74,7 +75,7 @@ pub struct CheckOutput {
 /// Build a registry from the resolved rule set (enablement semantics live in
 /// `falcon_rules::resolve_rules`).
 fn build_registry(resolved: ResolvedRules) -> RuleRegistry {
-    let mut registry = RuleRegistry::new();
+    let mut registry = RuleRegistry::with_lookup(suppression_lookup);
     for rule in resolved.rules {
         registry.register(rule);
     }
@@ -90,9 +91,11 @@ fn build_project_registry(resolved: ResolvedProjectRules) -> ProjectRuleRegistry
     registry
 }
 
-/// Honor inline `// ignore:` / `// ignore_for_file:` suppressions for
+/// Honor inline `// falcon-ignore` / `// falcon-ignore-all` suppressions for
 /// project-rule diagnostics, mirroring the per-file pass. Suppressions are read
-/// from the diagnostic's own file (matched by path) and parsed lazily.
+/// from the diagnostic's own file (matched by path) and parsed lazily. This pass
+/// only *filters*; malformed-suppression diagnostics are emitted once, by the
+/// per-file pass over the same sources.
 fn suppress_project_diags(diags: &mut Vec<Diagnostic>, files: &[ProjectFile]) {
     if diags.is_empty() {
         return;
@@ -108,7 +111,7 @@ fn suppress_project_diags(diags: &mut Vec<Diagnostic>, files: &[ProjectFile]) {
         };
         let sup = cache
             .entry(diag.file_path.clone())
-            .or_insert_with(|| FileSuppressions::from_source(src));
+            .or_insert_with(|| FileSuppressions::parse(src, &diag.file_path, suppression_lookup));
         if sup.is_empty() {
             return true;
         }

@@ -283,37 +283,80 @@ options. Path-scoped options may be added later.
 ## Suppressing diagnostics
 
 `falcon.json` turns whole rules on or off. To silence a single occurrence
-instead, use an inline comment — falcon honors the same `// ignore:` syntax as
-the Dart analyzer, so existing comments carry over unchanged.
+instead, use an inline `// falcon-ignore` comment. The shape mirrors Biome's
+`// biome-ignore lint/<group>/<rule>: <reason>`:
 
-- **Same line** — a comment after code suppresses the listed rules on that line:
+```
+// falcon-ignore <path>: <reason>
+// falcon-ignore-all <path>: <reason>
+```
+
+`<path>` names exactly one rule and always includes its section and group:
+
+- **`lint/<group>/<rule>`** for a normal (file) rule, e.g.
+  `lint/suspicious/avoid-dynamic`.
+- **`project/<group>/<rule>`** for a project (cross-file) rule, e.g.
+  `project/correctness/unused-files`.
+
+The group is the rule's category from its metadata (`complexity`,
+`correctness`, `performance`, `style`, `suspicious`), and the section is `lint`
+for file rules or `project` for project rules.
+
+> Falcon does **not** read Dart's own `// ignore:` / `// ignore_for_file:`
+> comments — those still control the Dart analyzer's own lints and have no effect
+> on falcon. Suppress a falcon diagnostic only with `// falcon-ignore`.
+
+### Placement
+
+- **Same line** — a comment after code suppresses that line:
 
   ```dart
-  dynamic x = 1; // ignore: avoid-dynamic
+  dynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic: interop boundary
   ```
 
-- **Next line** — a comment alone on its line suppresses the line below it:
+- **Next line** — a comment alone on its line suppresses the code line below it:
 
   ```dart
-  // ignore: avoid-dynamic
+  // falcon-ignore lint/suspicious/avoid-dynamic: interop boundary
   dynamic x = 1;
   ```
 
-- **Whole file** — `ignore_for_file` suppresses the listed rules anywhere in the
-  file, wherever the comment appears (conventionally at the top):
+- **Whole file** — `falcon-ignore-all`, placed anywhere (conventionally at the
+  top), suppresses the rule everywhere in the file:
 
   ```dart
-  // ignore_for_file: avoid-dynamic, prefer-const-constructors
+  // falcon-ignore-all lint/suspicious/avoid-dynamic: generated file
   ```
 
-Details:
+### Stacking multiple rules
 
-- List multiple rules separated by commas: `// ignore: rule-a, rule-b`.
-- Rule names are matched **exactly** against falcon rule names as registered
-  (e.g. `avoid-dynamic`); unknown names are ignored harmlessly.
-- The no-space form `//ignore:` is accepted, as are extra slashes (`/// ignore:`).
+One comment carries **one** rule. To suppress several rules on the same line,
+stack the comments directly above it — consecutive suppression-only lines all
+apply to the next line of code (Biome semantics):
+
+```dart
+// falcon-ignore lint/suspicious/avoid-dynamic: interop boundary
+// falcon-ignore lint/style/prefer-const-constructors: perf-tested
+final widget = build(dynamicValue);
+```
+
+### The reason is required
+
+Every `// falcon-ignore` must end with a non-empty reason after the colon. A
+comment with no reason **does not suppress**; instead falcon reports a
+`malformed-suppression` warning pointing at the comment. The same warning is
+raised when the path is malformed, when it uses the wrong group or section for a
+known rule (the message tells you the correct path), or when the rule name is
+unknown (catching typos that would otherwise silently fail to suppress).
+
+`malformed-suppression` is an internal diagnostic: it is not a configurable rule,
+does not appear in `falcon.json`, and cannot itself be suppressed.
+
+### Details
+
 - Only `//`-style line comments count; a directive inside a string literal or a
   `/* block comment */` is not treated as a suppression.
+- Rule names are matched **exactly** against falcon rule names as registered.
 
 ## `project` — project-level (cross-file) rules
 
@@ -341,8 +384,9 @@ linter and live under their own top-level `project` block, *not* under `linter`:
   **no `domains`** gating, since project rules are not domain-scoped.
 
 Project rules are grouped under their category (all three are `correctness`),
-share the same metadata table as file rules, and are suppressible with the same
-`// ignore:` / `// ignore_for_file:` comments. Configuring a project rule under
+share the same metadata table as file rules, and are suppressible with
+`// falcon-ignore project/<group>/<rule>: <reason>` comments (or the
+`// falcon-ignore-all` variant). Configuring a project rule under
 `linter.rules` (or a file rule under `project.rules`) is a mistake — falcon warns
 and steers you to the right section, and the misplaced entry does not take effect.
 

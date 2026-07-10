@@ -42,8 +42,9 @@ fn is_literal(expr: &Expr) -> bool {
 
 /// Report the *last* occurrence of each duplicated argument, matching dcl's
 /// `lastAppearance` behaviour. Reporting on the last (not first) occurrence is
-/// what lets hand-written `// ignore: no-equal-arguments` comments — which
-/// developers place on the trailing duplicate — line up and suppress the hit.
+/// what lets hand-written `// falcon-ignore lint/suspicious/no-equal-arguments`
+/// comments — which developers place on the trailing duplicate — line up and
+/// suppress the hit.
 fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     // Positional args match other positional args by full source text; named
     // args match other named args by their *value* expression text (the label

@@ -13,7 +13,7 @@ use falcon_analyze::{AnalyzeContext, FileSuppressions, Rule};
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::parse;
 use falcon_diagnostics::Diagnostic;
-use falcon_rules::{apply_severities, resolve_rules};
+use falcon_rules::{apply_severities, meta::suppression_lookup, resolve_rules};
 use falcon_syntax::Program;
 use tracing::{debug, warn};
 
@@ -138,17 +138,18 @@ impl LspState {
             .iter()
             .flat_map(|rule| rule.analyze(&doc.program, &ctx))
             .collect();
-        // Honor inline `// ignore:` suppressions (the LSP drives rules directly
-        // rather than through RuleRegistry::run_all, so it filters here too).
-        if !diagnostics.is_empty() {
-            let suppressions = FileSuppressions::from_source(&doc.text);
-            if !suppressions.is_empty() {
-                diagnostics.retain(|diag| {
-                    let line = suppressions.line_for_offset(diag.span.start);
-                    !suppressions.is_suppressed(diag.rule, line)
-                });
-            }
+        // Honor inline `// falcon-ignore` suppressions (the LSP drives rules
+        // directly rather than through RuleRegistry::run_all, so it filters and
+        // reports malformed comments here too).
+        let suppressions =
+            FileSuppressions::parse(&doc.text, &file_path.to_string_lossy(), suppression_lookup);
+        if !suppressions.is_empty() {
+            diagnostics.retain(|diag| {
+                let line = suppressions.line_for_offset(diag.span.start);
+                !suppressions.is_suppressed(diag.rule, line)
+            });
         }
+        diagnostics.extend(suppressions.into_diagnostics());
         apply_severities(&mut diagnostics, &self.config);
         diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start).then(a.rule.cmp(b.rule)));
         doc.analyze_count += 1;

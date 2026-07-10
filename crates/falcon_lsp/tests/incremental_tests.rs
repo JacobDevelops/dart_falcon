@@ -47,16 +47,35 @@ fn only_changed_file_is_reanalyzed() {
     assert_eq!(counts(&state, URI_B), (1, 1), "other file untouched");
 }
 
-/// An inline `// ignore:` comment suppresses the diagnostic through the LSP
-/// analyze path, just as it does in the CLI pipeline.
+/// An inline `// falcon-ignore` comment suppresses the diagnostic through the
+/// LSP analyze path, just as it does in the CLI pipeline.
 #[test]
 fn inline_ignore_suppresses_in_lsp() {
     let (mut state, _dir) = state_with_config("{}");
-    let suppressed = "void f() {\n  dynamic x = 1; // ignore: avoid-dynamic\n  print(x);\n}\n";
+    let suppressed = "void f() {\n  dynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic: legacy\n  print(x);\n}\n";
     let diagnostics = state.open(URI_A, suppressed.to_string(), Some(1));
     assert!(
         diagnostics.iter().all(|d| d.rule != "avoid-dynamic"),
-        "inline ignore must suppress avoid-dynamic in the LSP path"
+        "inline falcon-ignore must suppress avoid-dynamic in the LSP path"
+    );
+}
+
+/// A malformed `// falcon-ignore` (no reason) does not suppress and surfaces a
+/// `malformed-suppression` diagnostic through the LSP path.
+#[test]
+fn malformed_suppression_reported_in_lsp() {
+    let (mut state, _dir) = state_with_config("{}");
+    let src = "void f() {\n  dynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic\n  print(x);\n}\n";
+    let diagnostics = state.open(URI_A, src.to_string(), Some(1));
+    assert!(
+        diagnostics.iter().any(|d| d.rule == "avoid-dynamic"),
+        "a reasonless falcon-ignore must not suppress"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.rule == "malformed-suppression"),
+        "a reasonless falcon-ignore must report malformed-suppression"
     );
 }
 
