@@ -243,6 +243,7 @@ fn count_for_init(init: &ForInit, count: &mut usize) {
             }
         }
         ForInit::ForIn { iterable, .. } => count_expr(iterable, count),
+        ForInit::PatternForIn { iterable, .. } => count_expr(iterable, count),
         ForInit::Exprs(es) => {
             for e in es {
                 count_expr(e, count);
@@ -365,6 +366,7 @@ fn count_cascade(section: &CascadeSection, count: &mut usize) {
 fn count_collection_element(el: &CollectionElement, count: &mut usize) {
     match el {
         CollectionElement::Expr(e) => count_expr(e, count),
+        CollectionElement::NullAware { expr, .. } => count_expr(expr, count),
         CollectionElement::Spread { expr, .. } => count_expr(expr, count),
         CollectionElement::If {
             then_elem,
@@ -400,6 +402,9 @@ fn count_collection_element(el: &CollectionElement, count: &mut usize) {
                     }
                 }
                 Some(ForInit::ForIn { iterable, .. }) => {
+                    count_expr(iterable, count);
+                }
+                Some(ForInit::PatternForIn { iterable, .. }) => {
                     count_expr(iterable, count);
                 }
                 Some(ForInit::Exprs(es)) => {

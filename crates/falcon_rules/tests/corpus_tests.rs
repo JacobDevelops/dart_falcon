@@ -19,6 +19,7 @@ use falcon_analyze::{AnalyzeContext, ProjectFile, Rule};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
 use falcon_rules::dart_code_linter::use_design_system_item::UseDesignSystemItem;
+use falcon_rules::pyramid_lint::class_members_ordering::ClassMembersOrdering;
 use falcon_rules::{all_project_rules, all_rules};
 
 fn corpus_dir() -> PathBuf {
@@ -280,6 +281,82 @@ Widget build(BuildContext context) {
     assert!(
         rule.analyze(&static_program, &ctx).is_empty(),
         "static access `Container.of(...)` must not be flagged"
+    );
+}
+
+#[test]
+fn class_members_ordering_respects_order_option() {
+    // `Foo` is in the *custom* order (methods -> constructors -> fields) and out
+    // of the *default* order; `Bar` is the reverse. This lets one source assert
+    // that the `order` option (parity with `member-ordering`) drives the check.
+    let src = r#"
+class Foo {
+  void run() {}
+  Foo();
+  int value = 0;
+}
+
+class Bar {
+  Bar();
+  void run() {}
+}
+"#;
+    let (program, _errors) = parse(src);
+    let rule = ClassMembersOrdering;
+
+    // Default config → built-in pyramid order (fields → constructors → methods).
+    // `Foo.run` (a method before a field/constructor) is flagged; `Bar` is fine.
+    let default_cfg = FalconConfig::default();
+    let ctx = AnalyzeContext {
+        file_path: Path::new("t.dart"),
+        source: src,
+        config: &default_cfg,
+    };
+    let default_diags = rule.analyze(&program, &ctx);
+    assert!(
+        !default_diags.is_empty(),
+        "default order should flag Foo (method before field)"
+    );
+    assert!(
+        default_diags
+            .iter()
+            .all(|d| !d.message.contains("configured order")),
+        "default path must use the built-in message, got {default_diags:?}"
+    );
+
+    // Custom `order` → `Foo` is now correctly ordered (0 diagnostics for it) and
+    // `Bar` (constructor before method) is the out-of-order one.
+    let configured: FalconConfig = serde_json::from_value(serde_json::json!({
+        "linter": {
+            "rules": {
+                "style": {
+                    "class_members_ordering": {
+                        "level": "warn",
+                        "options": {
+                            "order": ["public-methods", "constructors", "public-fields", "private-methods"]
+                        }
+                    }
+                }
+            }
+        }
+    }))
+    .expect("valid config");
+    let ctx = AnalyzeContext {
+        file_path: Path::new("t.dart"),
+        source: src,
+        config: &configured,
+    };
+    let diags = rule.analyze(&program, &ctx);
+    assert_eq!(
+        diags.len(),
+        1,
+        "custom order should flag exactly Bar.run, got {diags:?}"
+    );
+    assert_eq!(diags[0].rule, "class_members_ordering");
+    assert!(
+        diags[0].message.contains("configured order"),
+        "order path should use the configured-order message: {}",
+        diags[0].message
     );
 }
 

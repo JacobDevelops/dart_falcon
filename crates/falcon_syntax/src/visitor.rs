@@ -400,6 +400,10 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
                         v.visit_identifier(name);
                         v.visit_expr(iterable);
                     }
+                    ForInit::PatternForIn { pattern, iterable } => {
+                        v.visit_pattern(pattern);
+                        v.visit_expr(iterable);
+                    }
                     ForInit::Exprs(exprs) => {
                         for e in exprs {
                             v.visit_expr(e);
@@ -473,6 +477,10 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
                     v.visit_expr(init);
                 }
             }
+        }
+        Stmt::PatternDecl(x) => {
+            v.visit_pattern(&x.pattern);
+            v.visit_expr(&x.init);
         }
         Stmt::LocalFunc(x) => {
             if let Some(ref ret) = x.return_type {
@@ -715,6 +723,7 @@ fn walk_cascade_section<V: Visitor>(v: &mut V, section: &CascadeSection) {
 fn walk_collection_element<V: Visitor>(v: &mut V, elem: &CollectionElement) {
     match elem {
         CollectionElement::Expr(e) => v.visit_expr(e),
+        CollectionElement::NullAware { expr, .. } => v.visit_expr(expr),
         CollectionElement::Spread { expr, .. } => v.visit_expr(expr),
         CollectionElement::If {
             condition,
@@ -779,6 +788,10 @@ fn walk_for_init<V: Visitor>(v: &mut V, init: &Option<ForInit>) {
                 v.visit_dart_type(t);
             }
             v.visit_identifier(name);
+            v.visit_expr(iterable);
+        }
+        ForInit::PatternForIn { pattern, iterable } => {
+            v.visit_pattern(pattern);
             v.visit_expr(iterable);
         }
         ForInit::Exprs(exprs) => {

@@ -46,6 +46,10 @@ pub(super) struct Parser<'src> {
     /// When set, a trailing `?` on a type is not consumed as a nullable suffix
     /// if it actually begins a conditional expression (`x is T ? a : b`).
     pub(super) suppress_conditional_qmark: bool,
+    /// When set, we are parsing the irrefutable pattern of a pattern-variable
+    /// declaration or pattern for-in header, so a bare identifier is a binding
+    /// ([`Pattern::Variable`]) rather than a constant reference.
+    pub(super) pattern_binding: bool,
 }
 
 impl<'src> Parser<'src> {
@@ -56,6 +60,7 @@ impl<'src> Parser<'src> {
             src,
             errors: Vec::new(),
             suppress_conditional_qmark: false,
+            pattern_binding: false,
         }
     }
 

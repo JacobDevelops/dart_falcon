@@ -232,6 +232,9 @@ fn visit_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
                         }
                         visit_expr(iterable, diagnostics, ctx);
                     }
+                    ForInit::PatternForIn { iterable, .. } => {
+                        visit_expr(iterable, diagnostics, ctx);
+                    }
                     ForInit::Exprs(exprs) => {
                         for expr in exprs {
                             visit_expr(expr, diagnostics, ctx);
@@ -292,6 +295,9 @@ fn visit_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         }
         Stmt::Expr(expr_stmt) => {
             visit_expr(&expr_stmt.expr, diagnostics, ctx);
+        }
+        Stmt::PatternDecl(pat_decl) => {
+            visit_expr(&pat_decl.init, diagnostics, ctx);
         }
         Stmt::Error(_) => {}
     }
@@ -433,7 +439,12 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
             elements,
             ..
         } => {
+            // A map literal (`<String, dynamic>{}`) is the map-literal arm of
+            // dcl's `_isWithinMap`: `dynamic` type arguments are exempt here too.
             for type_arg in type_args {
+                if matches!(type_arg, DartType::Dynamic { .. }) {
+                    continue;
+                }
                 check_dart_type(type_arg, diagnostics, ctx);
             }
             for entry in entries {
@@ -499,6 +510,9 @@ fn visit_collection_element(
         CollectionElement::Expr(expr) => {
             visit_expr(expr, diagnostics, ctx);
         }
+        CollectionElement::NullAware { expr, .. } => {
+            visit_expr(expr, diagnostics, ctx);
+        }
         CollectionElement::Spread { expr, .. } => {
             visit_expr(expr, diagnostics, ctx);
         }
@@ -551,6 +565,9 @@ fn visit_collection_element(
                 Some(ForInit::ForIn { iterable, .. }) => {
                     visit_expr(iterable, diagnostics, ctx);
                 }
+                Some(ForInit::PatternForIn { iterable, .. }) => {
+                    visit_expr(iterable, diagnostics, ctx);
+                }
                 Some(ForInit::Exprs(es)) => {
                     for e in es {
                         visit_expr(e, diagnostics, ctx);
@@ -584,7 +601,15 @@ fn check_dart_type(dart_type: &DartType, diagnostics: &mut Vec<Diagnostic>, ctx:
             ));
         }
         DartType::Named(named_type) => {
+            // dcl exempts `dynamic` used *directly* as a type argument of `Map`
+            // (e.g. `Map<String, dynamic>`) — the documented JSON escape hatch.
+            // A `dynamic` nested deeper (e.g. `Map<String, List<dynamic>>`) is
+            // still flagged, so only direct arguments are skipped here.
+            let is_map = named_type.segments.last().is_some_and(|s| s.name == "Map");
             for type_arg in &named_type.type_args {
+                if is_map && matches!(type_arg, DartType::Dynamic { .. }) {
+                    continue;
+                }
                 check_dart_type(type_arg, diagnostics, ctx);
             }
         }

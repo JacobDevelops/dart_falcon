@@ -1,67 +1,33 @@
-// Good examples for no-magic-number rule
-// Using named constants instead of magic numbers
+// Good examples for no-magic-number. Every non-allowed literal here sits in a
+// position dcl exempts: allow-list, variable/field initializer, collection
+// literal, const constructor, const map, DateTime, or index expression.
 
-const int kDefaultTimeout = 30;
-const int kMaxRetries = 5;
-const int kMaxConnections = 50;
-const int kDefaultPort = 8080;
-const int kMaxDimension = 800;
-const int kMinDimension = 600;
+// Allowed numbers (-1, 0, 1) are never magic, in any position.
+int allowed() => compute(0) + compute(1) + compute(-1);
 
-void testWithNamedConstant() {
-  final timeout = kDefaultTimeout;
-  sleep(timeout);
-}
-
-void testThresholdWithConstant() {
-  const int threshold = 100;
-  if (count > threshold) {
-    print("over threshold");
-  }
-}
-
-void testPaddingWithConstant() {
-  final padding = EdgeInsets.all(kDefaultPadding);
-}
+// Variable and field initializers are exempt (VariableDeclaration ancestor).
+final topLevelTimeout = 3000;
 
 class Config {
-  static final int defaultPort = kDefaultPort;
-  static final int timeout = 3000;
-  static final int maxConnections = kMaxConnections;
-}
+  final int maxRetries = 5;
+  static const int port = 8080;
 
-void testAllowedNumbersUsage() {
-  final zero = 0;
-  final one = 1;
-  final two = 2;
-  final negOne = -1;
-}
-
-void testIndexAccess() {
-  final first = list[0];
-  final last = list[list.length - 1];
-}
-
-void testLoopWithConstant() {
-  const int iterations = 10;
-  for (int i = 0; i < iterations; i++) {
-    print(i);
+  int scaled(int value) {
+    final factor = 100;
+    return factor;
   }
 }
 
-void testGenerateWithConstant() {
-  const int size = 25;
-  final list = List.generate(size, (i) => i);
-}
+// Direct elements of a list/set literal are exempt.
+List<int> sizes() => [12, 24, 48];
 
-void testMathOperations() {
-  const int base = 100;
-  final result = value * base;
-  const int increment = 20;
-  final scaled = base + increment;
-}
+// A const constructor exempts its whole argument subtree.
+Widget spacer() => const SizedBox(height: 12, width: 800);
 
-void testOffsets() {
-  final position = offset + 0;
-  final previous = index - 1;
-}
+// A const map is exempt, and so is a DateTime constructor.
+Map<String, int> durations() => const {'short': 15, 'long': 60};
+
+DateTime epoch() => DateTime(2020, 1, 1);
+
+// A literal used directly as an index is exempt.
+int firstFew(List<int> xs) => xs[5];

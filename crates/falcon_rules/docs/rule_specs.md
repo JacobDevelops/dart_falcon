@@ -475,36 +475,45 @@ Put literal values on the right side of comparisons. Write 'x == 5' instead of '
 
 ### Description
 
-Enforces consistent double literal formatting: require leading zero (0.5 not .5), forbid trailing zeros (0.5 not 1.0).
+Enforces consistent double literal *formatting*, matching dart_code_linter's
+three checks: add a missing leading zero (`.5` → `0.5`), drop a redundant leading
+zero (`05.5` → `5.5`), and drop a redundant trailing zero when the fractional
+part still has a non-zero digit (`1.50` → `1.5`). It never converts a double to
+an int: `1.0`/`24.0` are left alone because stripping that zero would change the
+value's type.
 
 ### Phase 1 Heuristic
 
-Inspect DoubleLiteral AST nodes. Check for missing leading zero and trailing zeros.
+Inspect DoubleLiteral AST nodes. Flag (in priority order) a redundant leading
+zero, a leading `.`, or a redundant trailing zero, using the same predicates as
+dart_code_linter (`mantissa.contains('.') && endsWith('0') && fractional != "0"`).
 
 ### Configuration
 
-Optional `allowLeadingDot` (default false), `allowTrailingZeros` (default false).
+None.
 
 ### Examples
 
 **Bad (triggers rule):**
 ```dart
-double x = .5;  // ✗ missing leading zero
-double y = 1.0;  // ✗ trailing zero
-double z = .0;
+double x = .5;    // ✗ missing leading zero
+double y = 1.50;  // ✗ redundant trailing zero -> 1.5
+double z = .0;    // ✗ missing leading zero
 ```
 
 **Good (does NOT trigger):**
 ```dart
 double x = 0.5;
-double y = 1;  // integer literal instead
-double z = 2.5;
+double y = 1.0;   // trailing zero is the whole fraction — NOT flagged
+double z = 24.0;  // int-ification is out of scope
 ```
 
 ### Diagnostic Message
 
 ```
-Double literals should have a leading zero (0.5 not .5) and no trailing zeros.
+Double literal shouldn't have redundant leading '0'.
+Double literal shouldn't begin with '.'.
+Double literal shouldn't have a trailing '0'.
 ```
 
 ### Acceptance Criteria (M4.8)
@@ -641,7 +650,13 @@ Flags function calls with duplicate arguments. Passing the same value twice is l
 
 ### Phase 1 Heuristic
 
-Collect all arguments in ArgumentList. Compare AST structure for equality. Report duplicates.
+Collect the arguments in an ArgumentList and report duplicates, matching
+dart_code_linter: **literal** arguments are compared by identity and so never
+match each other (two `10`s, two `true`s are never flagged), positional args
+match other positional args by source text, and named args match other named
+args by their *value* expression text. The diagnostic is reported on the **last**
+occurrence of the duplicate (so a hand-placed `// ignore` on the trailing
+argument lines up).
 
 ### Configuration
 
@@ -651,22 +666,22 @@ No configuration required.
 
 **Bad (triggers rule):**
 ```dart
-foo(x, x);  // same argument twice
+foo(x, x);     // same variable twice
 bar(a, b, a);  // first and third are equal
-Container(width: 10, height: 10);  // if width == height value
+EdgeInsets.fromLTRB(pad, 0, pad, pad);  // duplicate identifier `pad`
 ```
 
 **Good (does NOT trigger):**
 ```dart
 foo(x, y);
-bar(a, b, c);
-Container(width: 10, height: 20);
+Size(48, 48);                              // equal literals — intentional
+copyWith(isSaving: false, isSaved: false); // equal boolean literals
 ```
 
 ### Diagnostic Message
 
 ```
-Avoid passing the same argument multiple times. The argument 'x' is passed twice.
+The argument has already been passed
 ```
 
 ### Acceptance Criteria (M4.8)

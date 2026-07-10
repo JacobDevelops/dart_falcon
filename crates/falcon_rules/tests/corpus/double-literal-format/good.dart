@@ -15,10 +15,23 @@ void testIntegersAsIntegers() {
   final factor = 5;
 }
 
+// dcl checks literal *formatting* only. A trailing zero whose fractional part
+// is exactly "0" (`1.0`, `24.0`) is NOT flagged: stripping it would turn a
+// `double` into an `int`, which is a different value, not a reformat.
+void testTrailingSingleZeroIsFine() {
+  const duration = 1.0;
+  const timeout = 2.0;
+  final ratio = 10.0;
+  final factor = 5.0;
+  final zero = 0.0;
+  const big = 100.0;
+}
+
 class Animation {
   final double speed = 0.5;
   final double delay = 1.5;
   final double curve = 0.25;
+  final double full = 1.0;
 }
 
 double calculateOpacity() {

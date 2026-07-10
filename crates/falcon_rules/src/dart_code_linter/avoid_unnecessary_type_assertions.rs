@@ -212,6 +212,9 @@ fn analyze_statement(
         Stmt::Expr(expr_stmt) => {
             analyze_expression(&expr_stmt.expr, scope_map, diags, ctx);
         }
+        Stmt::PatternDecl(pat_decl) => {
+            analyze_expression(&pat_decl.init, scope_map, diags, ctx);
+        }
         Stmt::Assert(assert_stmt) => {
             analyze_expression(&assert_stmt.condition, scope_map, diags, ctx);
             if let Some(message) = &assert_stmt.message {
@@ -390,6 +393,9 @@ fn analyze_collection_element(
         CollectionElement::Spread { expr, .. } => {
             analyze_expression(expr, scope_map, diags, ctx);
         }
+        CollectionElement::NullAware { expr, .. } => {
+            analyze_expression(expr, scope_map, diags, ctx);
+        }
         CollectionElement::If {
             condition,
             then_elem,
@@ -426,6 +432,9 @@ fn analyze_collection_element(
                     }
                 }
                 Some(ForInit::ForIn { iterable, .. }) => {
+                    analyze_expression(iterable, scope_map, diags, ctx);
+                }
+                Some(ForInit::PatternForIn { iterable, .. }) => {
                     analyze_expression(iterable, scope_map, diags, ctx);
                 }
                 Some(ForInit::Exprs(es)) => {

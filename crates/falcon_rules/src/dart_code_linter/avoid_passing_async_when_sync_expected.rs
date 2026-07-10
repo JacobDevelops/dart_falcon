@@ -196,6 +196,7 @@ impl AvoidPassingAsyncWhenSyncExpected {
     fn visit_collection_element(elem: &CollectionElement, f: &mut impl FnMut(&Expr)) {
         match elem {
             CollectionElement::Expr(expr) => Self::visit_exprs(expr, f),
+            CollectionElement::NullAware { expr, .. } => Self::visit_exprs(expr, f),
             CollectionElement::Spread { expr, .. } => Self::visit_exprs(expr, f),
             CollectionElement::If {
                 condition,
@@ -233,6 +234,9 @@ impl AvoidPassingAsyncWhenSyncExpected {
                         }
                     }
                     Some(ForInit::ForIn { iterable, .. }) => {
+                        Self::visit_exprs(iterable, f);
+                    }
+                    Some(ForInit::PatternForIn { iterable, .. }) => {
                         Self::visit_exprs(iterable, f);
                     }
                     Some(ForInit::Exprs(es)) => {

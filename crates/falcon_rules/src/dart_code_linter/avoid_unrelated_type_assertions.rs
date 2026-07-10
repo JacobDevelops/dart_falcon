@@ -251,6 +251,7 @@ impl AvoidUnrelatedTypeAssertions {
                             CollectionElement::Spread { expr, .. } => self.visit_exprs(expr, f),
                             _ => {}
                         },
+                        CollectionElement::NullAware { expr, .. } => self.visit_exprs(expr, f),
                     }
                 }
             }
@@ -304,6 +305,7 @@ impl AvoidUnrelatedTypeAssertions {
                             CollectionElement::Spread { expr, .. } => self.visit_exprs(expr, f),
                             _ => {}
                         },
+                        CollectionElement::NullAware { expr, .. } => self.visit_exprs(expr, f),
                     }
                 }
             }

@@ -1,3 +1,9 @@
+/// A final top-level variable is not flagged (only const/final skips).
+final RegExp kPattern = RegExp(r'[a-z]+');
+
+/// A final top-level list initialised from a call is still final, so allowed.
+final List<int> kComputed = List<int>.generate(3, (i) => i);
+
 /// Const top-level variable
 const List<String> kItems = <String>[];
 

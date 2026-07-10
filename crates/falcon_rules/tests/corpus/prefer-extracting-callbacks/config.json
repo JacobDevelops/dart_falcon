@@ -1,0 +1,12 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "prefer-extracting-callbacks": {
+          "level": "warn",
+          "options": { "allowed_line_count": 1 }
+        }
+      }
+    }
+  }
+}

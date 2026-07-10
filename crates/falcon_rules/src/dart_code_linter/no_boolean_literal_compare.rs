@@ -18,6 +18,32 @@ impl Rule for NoBooleanLiteralCompare {
     }
 }
 
+/// An expression whose result is *provably* a boolean without type resolution:
+/// a literal, a negation, an `is`/`is!` check, or a comparison/logical binary.
+/// Identifiers, member accesses and calls are excluded — their nullability is
+/// unknowable, and `x == true` is the correct null-safe form for a `bool?`.
+fn is_known_bool(expr: &Expr) -> bool {
+    match expr {
+        Expr::BoolLit { .. } => true,
+        Expr::Unary {
+            op: UnaryOp::Bang, ..
+        } => true,
+        Expr::Is { .. } => true,
+        Expr::Binary { op, .. } => matches!(
+            op,
+            BinaryOp::EqEq
+                | BinaryOp::NotEq
+                | BinaryOp::Lt
+                | BinaryOp::Gt
+                | BinaryOp::LtEq
+                | BinaryOp::GtEq
+                | BinaryOp::And
+                | BinaryOp::Or
+        ),
+        _ => false,
+    }
+}
+
 fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match decl {
         TopLevelDecl::Function(f) => {
@@ -159,7 +185,20 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             if matches!(op, BinaryOp::EqEq | BinaryOp::NotEq) {
                 let left_bool = matches!(left.as_ref(), Expr::BoolLit { .. });
                 let right_bool = matches!(right.as_ref(), Expr::BoolLit { .. });
-                if left_bool || right_bool {
+                // Flag only when the *other* operand is a provably boolean
+                // expression. Without type resolution, an identifier or member
+                // access compared to a literal (`x == true`) is unknowable: it
+                // is the null-safe idiom for a `bool?`, which dcl exempts because
+                // it checks the operand's non-nullable-bool static type. See the
+                // meta note demoting this rule from the recommended preset.
+                let other = if left_bool {
+                    Some(right.as_ref())
+                } else if right_bool {
+                    Some(left.as_ref())
+                } else {
+                    None
+                };
+                if other.is_some_and(is_known_bool) {
                     diags.push(Diagnostic::new(
                         "no-boolean-literal-compare",
                         Severity::Warning,

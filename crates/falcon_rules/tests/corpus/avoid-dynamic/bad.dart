@@ -28,6 +28,11 @@ class TestClass {
   }
 }
 
-Map<String, dynamic> mapWithDynamic = {}; /* expect: avoid-dynamic */
-
+// `dynamic` as a type argument of a non-Map generic is still flagged, and a
+// `dynamic` nested one level below `Map` (inside `List`) is NOT exempt: only a
+// direct `Map<_, dynamic>` argument is.
 List<dynamic> listOfDynamic = []; /* expect: avoid-dynamic */
+
+Route<dynamic>? routeField; /* expect: avoid-dynamic */
+
+Map<String, List<dynamic>> nested = {}; /* expect: avoid-dynamic */

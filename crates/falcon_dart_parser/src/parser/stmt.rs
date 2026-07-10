@@ -165,6 +165,35 @@ impl<'src> Parser<'src> {
             return (None, cond, update);
         }
 
+        // Dart 3 pattern for-in: `for (final (a, b) in xs)`. The keyword must be
+        // directly followed by a `(`/`[`/`{` opening a destructuring pattern, and
+        // the pattern by `in`.
+        if self.at_any(&[TokenKind::Final, TokenKind::Var])
+            && matches!(
+                self.peek(1).kind,
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
+            )
+        {
+            let saved_pat = self.pos;
+            let saved_errs = self.errors.len();
+            self.advance(); // final / var
+            let pattern = self.parse_binding_pattern();
+            if self.eat(TokenKind::In).is_some() {
+                let iterable = self.parse_expr();
+                self.expect(TokenKind::RParen);
+                return (
+                    Some(ForInit::PatternForIn {
+                        pattern: Box::new(pattern),
+                        iterable: Box::new(iterable),
+                    }),
+                    None,
+                    Vec::new(),
+                );
+            }
+            self.pos = saved_pat;
+            self.errors.truncate(saved_errs);
+        }
+
         let saved = self.pos;
 
         // var / final / const → definitely a decl
@@ -618,6 +647,21 @@ impl<'src> Parser<'src> {
             annotations.extend(self.parse_annotations());
         }
 
+        // Dart 3 pattern-variable declaration: `(var|final) <pattern> = expr;`
+        // (e.g. `final (a, b) = row;`). Only when the keyword is directly
+        // followed by a `(`/`[`/`{` that opens a destructuring pattern — and the
+        // pattern is followed by `=` (otherwise it is a record-typed var decl
+        // such as `final (int, String) rec = ..`).
+        if self.at_any(&[TokenKind::Final, TokenKind::Var])
+            && matches!(
+                self.peek(1).kind,
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
+            )
+            && let Some(stmt) = self.try_parse_pattern_declaration(start)
+        {
+            return stmt;
+        }
+
         // late / final / var → definitely a var decl
         if self.at(TokenKind::Late) || self.at_any(&[TokenKind::Final, TokenKind::Var]) {
             return self.parse_local_var_decl(start);
@@ -789,6 +833,31 @@ impl<'src> Parser<'src> {
             declarators,
             span: self.span_from(start),
         })
+    }
+
+    /// Speculatively parse a Dart 3 pattern-variable declaration
+    /// `(var|final) <pattern> = expr ;`. Returns `None` (restoring position and
+    /// errors) when what follows the keyword is not a destructuring pattern
+    /// followed by `=` — e.g. a record-typed variable declaration.
+    fn try_parse_pattern_declaration(&mut self, start: usize) -> Option<Stmt> {
+        let saved = self.pos;
+        let saved_errs = self.errors.len();
+        let is_final = self.at(TokenKind::Final);
+        self.advance(); // final / var
+        let pattern = self.parse_binding_pattern();
+        if self.eat(TokenKind::Eq).is_some() {
+            let init = self.parse_expr();
+            self.eat(TokenKind::Semicolon);
+            return Some(Stmt::PatternDecl(PatternDeclaration {
+                is_final,
+                pattern,
+                init,
+                span: self.span_from(start),
+            }));
+        }
+        self.pos = saved;
+        self.errors.truncate(saved_errs);
+        None
     }
 
     fn parse_local_var_or_func_after_annotations(&mut self, start: usize) -> Stmt {

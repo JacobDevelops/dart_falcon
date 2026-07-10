@@ -84,11 +84,17 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
 fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match member {
         ClassMember::Method(m) => {
+            // dcl's number-of-parameters metric skips `copyWith` methods that
+            // return their own class — the canonical wide-parameter builder.
+            if m.name.name == "copyWith" {
+                return;
+            }
             check_function_params(&m.params, &m.span, diags, ctx);
         }
-        ClassMember::Constructor(c) => {
-            check_function_params(&c.params, &c.span, diags, ctx);
-        }
+        // Constructors are `ConstructorDeclaration` nodes, which the dcl metric
+        // does not support, so wide named-parameter constructors (the dominant
+        // Flutter/DI pattern) are not counted. Operators are method
+        // declarations but always have fixed, tiny arity.
         ClassMember::Operator(op) => {
             check_function_params(&op.params, &op.span, diags, ctx);
         }

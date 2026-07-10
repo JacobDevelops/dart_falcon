@@ -36,3 +36,28 @@ int? findIndex(List<int> items, int target) {
     return null;
   }
 }
+
+// Good: only the OUTER `?` counts — a nullable type argument does not.
+Future<String?> asyncName() async {
+  return 'hello';
+}
+
+Future<bool?> asyncValid() async {
+  return true;
+}
+
+// Good: returns we cannot prove non-null are not flagged.
+String? fromVariable(String value) {
+  return value;
+}
+
+String? fromCall() {
+  return compute();
+}
+
+String? withNullBranch(bool flag) {
+  if (flag) {
+    return 'x';
+  }
+  return null;
+}

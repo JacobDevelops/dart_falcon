@@ -1,28 +1,24 @@
-// Bad: single-character identifiers (except i, j, k, n in loops)
+// Bad: too-short variable declarations, accessor names and enum constants.
+
 void example() {
   var a = compute(); /* expect: prefer-correct-identifier-length */
-  String s = getText(); /* expect: prefer-correct-identifier-length */
-  int x = 42; /* expect: prefer-correct-identifier-length */
-  List<String> l = []; /* expect: prefer-correct-identifier-length */
+  final xy = a; /* expect: prefer-correct-identifier-length */
+  print(xy);
 }
 
 class Processor {
-  String p = ''; /* expect: prefer-correct-identifier-length */
   int m = 0; /* expect: prefer-correct-identifier-length */
 
-  void process(String d) { /* expect: prefer-correct-identifier-length */
-    final r = transform(d); /* expect: prefer-correct-identifier-length */
-    print(r);
+  String get n => ''; /* expect: prefer-correct-identifier-length */
+
+  set v(String value) {} /* expect: prefer-correct-identifier-length */
+}
+
+// A C-style for-loop counter is a variable declaration, so it is checked.
+void loop(List<int> items) {
+  for (var i = 0; i < items.length; i++) { /* expect: prefer-correct-identifier-length */
+    print(items[i]);
   }
 }
 
-void badLoop(List<int> items) {
-  for (int x = 0; x < items.length; x++) { /* expect: prefer-correct-identifier-length */
-    final v = items[x]; /* expect: prefer-correct-identifier-length */
-    print(v);
-  }
-}
-
-String f(int q) { /* expect: prefer-correct-identifier-length */ /* expect: prefer-correct-identifier-length */
-  return 'Result: $q';
-}
+enum Size { s, m, l } /* expect: prefer-correct-identifier-length */ /* expect: prefer-correct-identifier-length */ /* expect: prefer-correct-identifier-length */

@@ -1,0 +1,12 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "prefer-correct-identifier-length": {
+          "level": "warn",
+          "options": { "exceptions": ["id"] }
+        }
+      }
+    }
+  }
+}

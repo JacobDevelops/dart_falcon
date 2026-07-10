@@ -211,6 +211,7 @@ fn scan_collection_elem(
     match elem {
         CollectionElement::Expr(e) => scan_expr(e, diags, ctx),
         CollectionElement::Spread { expr, .. } => scan_expr(expr, diags, ctx),
+        CollectionElement::NullAware { expr, .. } => scan_expr(expr, diags, ctx),
         CollectionElement::If {
             condition,
             then_elem,
@@ -247,6 +248,9 @@ fn scan_collection_elem(
                     }
                 }
                 Some(ForInit::ForIn { iterable, .. }) => {
+                    scan_expr(iterable, diags, ctx);
+                }
+                Some(ForInit::PatternForIn { iterable, .. }) => {
                     scan_expr(iterable, diags, ctx);
                 }
                 Some(ForInit::Exprs(es)) => {

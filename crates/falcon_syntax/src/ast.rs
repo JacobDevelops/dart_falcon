@@ -585,6 +585,10 @@ pub enum Stmt {
     Break(BreakStmt),
     Continue(ContinueStmt),
     LocalVar(LocalVarDecl),
+    /// Dart 3 pattern-variable declaration statement: `final (a, b) = expr;`,
+    /// `var (x, :y) = expr;`, `final [a, b] = expr;`. Binds the identifiers in
+    /// `pattern` (modeled as [`Pattern::Variable`]) to the destructured `init`.
+    PatternDecl(PatternDeclaration),
     LocalFunc(LocalFuncDecl),
     Assert(AssertStmt),
     Yield(YieldStmt),
@@ -607,6 +611,7 @@ impl Stmt {
             Stmt::Break(x) => &x.span,
             Stmt::Continue(x) => &x.span,
             Stmt::LocalVar(x) => &x.span,
+            Stmt::PatternDecl(x) => &x.span,
             Stmt::LocalFunc(x) => &x.span,
             Stmt::Assert(x) => &x.span,
             Stmt::Yield(x) => &x.span,
@@ -647,6 +652,13 @@ pub enum ForInit {
         is_final: bool,
         var_type: Option<DartType>,
         name: Identifier,
+        iterable: Box<Expr>,
+    },
+    /// Dart 3 pattern for-in loop variable: `for (final (i, s) in xs)`. The
+    /// identifiers in `pattern` (modeled as [`Pattern::Variable`]) are the loop
+    /// bindings.
+    PatternForIn {
+        pattern: Box<Pattern>,
         iterable: Box<Expr>,
     },
     Exprs(Vec<Expr>),
@@ -738,6 +750,16 @@ pub struct LocalVarDecl {
     pub is_late: bool,
     pub var_type: Option<DartType>,
     pub declarators: Vec<VarDeclarator>,
+    pub span: Span,
+}
+
+/// Dart 3 pattern-variable declaration: `(var|final) <pattern> = <init>`.
+#[derive(Debug, Clone)]
+pub struct PatternDeclaration {
+    /// `final` keyword present (otherwise `var`).
+    pub is_final: bool,
+    pub pattern: Pattern,
+    pub init: Expr,
     pub span: Span,
 }
 
@@ -1066,6 +1088,13 @@ pub enum CascadeOp {
 #[derive(Debug, Clone)]
 pub enum CollectionElement {
     Expr(Expr),
+    /// Dart 3.0 null-aware element `?expr` in a list or set literal: the element
+    /// is omitted when `expr` evaluates to null. Preserves the inner `expr` so
+    /// rules analyze it exactly like a plain element.
+    NullAware {
+        expr: Expr,
+        span: Span,
+    },
     Spread {
         expr: Expr,
         is_null_aware: bool,
@@ -1102,6 +1131,10 @@ pub enum CollectionElement {
 pub struct MapEntry {
     pub key: Expr,
     pub value: Expr,
+    /// Dart 3.0 null-aware key `?k: v` — the entry is omitted when the key is null.
+    pub key_null_aware: bool,
+    /// Dart 3.0 null-aware value `k: ?v` — the entry is omitted when the value is null.
+    pub value_null_aware: bool,
     pub span: Span,
 }
 
@@ -1214,6 +1247,7 @@ fn push_for_init_exprs<'a>(init: &'a Option<ForInit>, out: &mut Vec<&'a Expr>) {
             }
         }
         Some(ForInit::ForIn { iterable, .. }) => out.push(iterable),
+        Some(ForInit::PatternForIn { iterable, .. }) => out.push(iterable),
         Some(ForInit::Exprs(exprs)) => out.extend(exprs.iter()),
         None => {}
     }

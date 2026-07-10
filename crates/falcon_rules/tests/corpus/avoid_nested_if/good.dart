@@ -1,53 +1,42 @@
 class NestedIfExamples {
-  void example1(bool a, bool b, bool c) {
-    /// Combined condition instead of nesting
-    if (a && b) {
-      print('both true');
+  // A single level of nesting is allowed (default max_nesting_level is 2).
+  void singleNesting(bool a, bool b) {
+    if (a) {
+      if (b) {
+        print('both true');
+      }
     }
   }
 
-  void example2(bool a, bool b, bool c) {
-    /// Using combined conditions
+  // Combined conditions avoid nesting entirely.
+  void combined(bool a, bool b, bool c) {
     if (a && b && c) {
       print('all true');
     }
   }
 
-  void example3(bool a, bool b) {
-    /// Guard clause with early return
+  // Guard clauses with early returns keep the body flat.
+  void guards(bool a, bool b) {
     if (!a) {
       return;
     }
-
     doSomething();
-
     if (!b) {
       return;
     }
-
     print('both conditions met');
   }
 
-  void example4(bool condition) {
-    if (condition && true) {
-      print('combined condition');
+  // An if/else-if chain is a sibling chain, not nesting: each then-branch
+  // holds no further `if`.
+  void elseIfChain(int code) {
+    if (code == 1) {
+      print('one');
+    } else if (code == 2) {
+      print('two');
+    } else {
+      print('other');
     }
-  }
-
-  void example5(bool a, bool b, bool c) {
-    if (!a) {
-      return;
-    }
-
-    if (!b) {
-      return;
-    }
-
-    if (!c) {
-      return;
-    }
-
-    print('all checks passed');
   }
 
   void doSomething() {}

@@ -34,7 +34,13 @@ fn diag(ctx: &AnalyzeContext, span: &Span) -> Diagnostic {
 fn check_expr(diags: &mut Vec<Diagnostic>, expr: &Expr, ctx: &AnalyzeContext) {
     match expr {
         Expr::NullAssert { operand, span } => {
-            diags.push(diag(ctx, span));
+            // dart_code_linter exempts the null-assertion on a map index
+            // (`map[key]!`), since `Map`'s index operator returns a nullable
+            // value. Without type resolution we conservatively exempt any
+            // index-expression operand (`x[y]!`).
+            if !matches!(operand.as_ref(), Expr::Index { .. }) {
+                diags.push(diag(ctx, span));
+            }
             check_expr(diags, operand, ctx);
         }
         Expr::Unary { operand, .. } | Expr::PostfixIncDec { operand, .. } => {
@@ -147,6 +153,7 @@ fn check_collection_elem(
 ) {
     match elem {
         CollectionElement::Expr(e) => check_expr(diags, e, ctx),
+        CollectionElement::NullAware { expr, .. } => check_expr(diags, expr, ctx),
         CollectionElement::Spread { expr, .. } => check_expr(diags, expr, ctx),
         CollectionElement::If {
             condition,
@@ -184,6 +191,9 @@ fn check_collection_elem(
                     }
                 }
                 Some(ForInit::ForIn { iterable, .. }) => {
+                    check_expr(diags, iterable, ctx);
+                }
+                Some(ForInit::PatternForIn { iterable, .. }) => {
                     check_expr(diags, iterable, ctx);
                 }
                 Some(ForInit::Exprs(es)) => {
@@ -262,6 +272,7 @@ fn check_stmt(diags: &mut Vec<Diagnostic>, stmt: &Stmt, ctx: &AnalyzeContext) {
                     }
                 }
                 Some(ForInit::ForIn { iterable, .. }) => check_expr(diags, iterable, ctx),
+                Some(ForInit::PatternForIn { iterable, .. }) => check_expr(diags, iterable, ctx),
                 Some(ForInit::Exprs(exprs)) => {
                     for e in exprs {
                         check_expr(diags, e, ctx);

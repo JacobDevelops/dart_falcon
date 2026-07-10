@@ -2,26 +2,46 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
+use crate::member_order::{category_rank, check_sequence, read_string_list};
+
 pub struct ClassMembersOrdering;
+
+const NAME: &str = "class_members_ordering";
 
 impl Rule for ClassMembersOrdering {
     fn name(&self) -> &'static str {
-        "class_members_ordering"
+        NAME
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        // A configured `order` option (a list of DCL category tokens) drives the
+        // check; otherwise the built-in default order is used.
+        let order = read_string_list(ctx, NAME, "order");
         for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Class(c) => check_members(&c.members, &mut diags, ctx),
-                TopLevelDecl::Mixin(m) => check_members(&m.members, &mut diags, ctx),
-                TopLevelDecl::MixinClass(mc) => check_members(&mc.members, &mut diags, ctx),
-                _ => {}
+            let members = match decl {
+                TopLevelDecl::Class(c) => &c.members,
+                TopLevelDecl::Mixin(m) => &m.members,
+                TopLevelDecl::MixinClass(mc) => &mc.members,
+                _ => continue,
+            };
+            match &order {
+                Some(seq) => check_sequence(
+                    members,
+                    &mut diags,
+                    ctx,
+                    NAME,
+                    |m| category_rank(m, seq),
+                    ORDER_MESSAGE,
+                ),
+                None => check_members(members, &mut diags, ctx),
             }
         }
         diags
     }
 }
+
+const ORDER_MESSAGE: &str = "Class member is out of the configured order";
 
 // Category ordering (lower = earlier in class):
 // 0: static const field

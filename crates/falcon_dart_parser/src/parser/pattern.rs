@@ -14,6 +14,17 @@ impl<'src> Parser<'src> {
         self.parse_logical_or_pattern()
     }
 
+    /// Parse the irrefutable pattern of a pattern-variable declaration or pattern
+    /// for-in header. In this context a bare identifier is a binding
+    /// ([`Pattern::Variable`]) rather than a constant reference.
+    pub(super) fn parse_binding_pattern(&mut self) -> Pattern {
+        let prev = self.pattern_binding;
+        self.pattern_binding = true;
+        let pat = self.parse_pattern();
+        self.pattern_binding = prev;
+        pat
+    }
+
     fn parse_logical_or_pattern(&mut self) -> Pattern {
         let start = self.cur().offset;
         let mut left = self.parse_logical_and_pattern();
@@ -268,13 +279,11 @@ impl<'src> Parser<'src> {
             });
         }
 
-        // Peek: if it looks like a record (has named fields or multiple positional), parse as record
-        // Otherwise it's a parenthesised pattern
-        let saved = self.pos;
-
-        // Try named field first: `name: pattern`
-        if (self.is_ident_like() || self.at(TokenKind::Ident))
-            && self.peek(1).kind == TokenKind::Colon
+        // A leading `:name` shorthand or `name:` named field means this is a
+        // record pattern (never a parenthesised single pattern).
+        if self.at(TokenKind::Colon)
+            || ((self.is_ident_like() || self.at(TokenKind::Ident))
+                && self.peek(1).kind == TokenKind::Colon)
         {
             return self.parse_record_pattern_body(start);
         }
@@ -284,29 +293,13 @@ impl<'src> Parser<'src> {
 
         if self.at(TokenKind::Comma) {
             // More elements → record pattern
-            let _ = saved;
             let mut fields = vec![RecordPatternField {
                 name: None,
                 pattern: first,
                 span: self.span_from(start),
             }];
             while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
-                let fs = self.cur().offset;
-                let name = if (self.is_ident_like() || self.at(TokenKind::Ident))
-                    && self.peek(1).kind == TokenKind::Colon
-                {
-                    let n = self.expect_ident();
-                    self.advance(); // :
-                    Some(n)
-                } else {
-                    None
-                };
-                let pattern = self.parse_pattern();
-                fields.push(RecordPatternField {
-                    name,
-                    pattern,
-                    span: self.span_from(fs),
-                });
+                fields.push(self.parse_record_field());
             }
             self.eat(TokenKind::Comma);
             self.expect(TokenKind::RParen);
@@ -327,22 +320,7 @@ impl<'src> Parser<'src> {
     fn parse_record_pattern_body(&mut self, start: usize) -> Pattern {
         let mut fields = Vec::new();
         while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
-            let fs = self.cur().offset;
-            let name = if (self.is_ident_like() || self.at(TokenKind::Ident))
-                && self.peek(1).kind == TokenKind::Colon
-            {
-                let n = self.expect_ident();
-                self.advance(); // :
-                Some(n)
-            } else {
-                None
-            };
-            let pattern = self.parse_pattern();
-            fields.push(RecordPatternField {
-                name,
-                pattern,
-                span: self.span_from(fs),
-            });
+            fields.push(self.parse_record_field());
             if self.eat(TokenKind::Comma).is_none() {
                 break;
             }
@@ -352,6 +330,42 @@ impl<'src> Parser<'src> {
             fields,
             span: self.span_from(start),
         })
+    }
+
+    /// Parse one record-pattern field: `:name` shorthand (a variable binding
+    /// whose getter name is the bound name), `name: pattern`, or a positional
+    /// `pattern`.
+    fn parse_record_field(&mut self) -> RecordPatternField {
+        let fs = self.cur().offset;
+        if self.at(TokenKind::Colon) {
+            self.advance(); // :
+            // `:name` (also `:var name` / `:final name`) always binds a variable.
+            let prev = self.pattern_binding;
+            self.pattern_binding = true;
+            let pattern = self.parse_pattern();
+            self.pattern_binding = prev;
+            let name = binding_pattern_name(&pattern);
+            return RecordPatternField {
+                name,
+                pattern,
+                span: self.span_from(fs),
+            };
+        }
+        let name = if (self.is_ident_like() || self.at(TokenKind::Ident))
+            && self.peek(1).kind == TokenKind::Colon
+        {
+            let n = self.expect_ident();
+            self.advance(); // :
+            Some(n)
+        } else {
+            None
+        };
+        let pattern = self.parse_pattern();
+        RecordPatternField {
+            name,
+            pattern,
+            span: self.span_from(fs),
+        }
     }
 
     fn parse_list_pattern(&mut self, start: usize) -> Pattern {
@@ -518,18 +532,42 @@ impl<'src> Parser<'src> {
             };
         }
 
-        // Just a type by itself — treat as const pattern with type name
+        // Just a type by itself — treat as const pattern with type name. In a
+        // binding context (`var (a, b) = ..`) a bare single identifier is a
+        // variable binding, not a constant reference.
         match ty {
             DartType::Named(ref nt) => {
-                let name = nt.segments.clone();
-                Pattern::Const(ConstPattern {
-                    name,
-                    span: self.span_from(start),
-                })
+                if self.pattern_binding
+                    && nt.segments.len() == 1
+                    && nt.type_args.is_empty()
+                    && !nt.is_nullable
+                {
+                    let name = nt.segments[0].clone();
+                    Pattern::Variable {
+                        type_: None,
+                        name,
+                        span: self.span_from(start),
+                    }
+                } else {
+                    Pattern::Const(ConstPattern {
+                        name: nt.segments.clone(),
+                        span: self.span_from(start),
+                    })
+                }
             }
             _ => Pattern::Error {
                 span: self.span_from(start),
             },
         }
+    }
+}
+
+/// The bound name of a `:name`-shorthand record field, taken from the inner
+/// variable/wildcard pattern.
+fn binding_pattern_name(pattern: &Pattern) -> Option<Identifier> {
+    match pattern {
+        Pattern::Variable { name, .. } => Some(name.clone()),
+        Pattern::Wildcard { .. } => None,
+        _ => None,
     }
 }

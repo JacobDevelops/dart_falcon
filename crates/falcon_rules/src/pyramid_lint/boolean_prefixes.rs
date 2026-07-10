@@ -19,20 +19,19 @@ impl Rule for BooleanPrefixes {
     }
 }
 
-/// Built-in accepted prefixes. A user-provided `prefixes` option EXTENDS this
-/// list (pyramid_lint convention) rather than replacing it.
-const BUILTIN_PREFIXES: &[&str] = &["is", "has", "can", "should", "was"];
+/// pyramid_lint's default valid prefixes. A user-provided `valid_prefixes`
+/// option EXTENDS this list rather than replacing it.
+const DEFAULT_PREFIXES: &[&str] = &[
+    "is", "are", "was", "were", "has", "have", "had", "can", "should", "will", "do", "does", "did",
+];
 
-const MESSAGE: &str =
-    "Boolean variables should have a prefix like 'is', 'has', 'can', 'should', or 'was'.";
+const MESSAGE: &str = "Boolean should be named with a valid prefix.";
 
-/// Resolve the accepted prefix list: built-ins plus any from the `prefixes`
-/// option. Malformed/missing option → built-ins only.
 fn resolve_prefixes(ctx: &AnalyzeContext) -> Vec<String> {
-    let mut prefixes: Vec<String> = BUILTIN_PREFIXES.iter().map(|s| s.to_string()).collect();
+    let mut prefixes: Vec<String> = DEFAULT_PREFIXES.iter().map(|s| s.to_string()).collect();
     if let Some(list) = crate::meta::meta_for("boolean_prefixes")
         .and_then(|m| ctx.config.rule_options(m.group, "boolean_prefixes"))
-        .and_then(|o| o.get("prefixes"))
+        .and_then(|o| o.get("valid_prefixes"))
         .and_then(|v| v.as_array())
     {
         for p in list.iter().filter_map(|v| v.as_str()) {
@@ -59,52 +58,48 @@ fn is_bool_type(ty: Option<&DartType>) -> bool {
     matches!(ty, Some(DartType::Named(nt)) if nt.segments.len() == 1 && nt.segments[0].name == "bool")
 }
 
-/// `@override` members inherit their name from the supertype, so the author
-/// cannot rename them to satisfy the prefix rule.
 fn is_override(annotations: &[Annotation]) -> bool {
     annotations
         .iter()
         .any(|a| a.name.last().is_some_and(|id| id.name == "override"))
 }
 
+/// pyramid_lint strips a single leading underscore and then checks whether the
+/// name simply *starts with* a valid prefix (no camelCase boundary is required,
+/// mirroring `validPrefixes.any(name.startsWith)`).
 fn has_valid_boolean_prefix(name: &str, prefixes: &[String]) -> bool {
-    // Private members carry a leading underscore that is not part of the
-    // conceptual name (`_isEnabled` still "starts with" `is`), so strip it
-    // before matching — otherwise every private boolean is a false positive.
-    let name = name.trim_start_matches('_');
-    prefixes.iter().any(|prefix| {
-        name.strip_prefix(prefix.as_str())
-            .and_then(|rest| rest.chars().next())
-            .is_some_and(|c| c.is_uppercase())
-    })
+    let name = name.strip_prefix('_').unwrap_or(name);
+    prefixes
+        .iter()
+        .any(|prefix| name.starts_with(prefix.as_str()))
 }
 
-/// Flag a declared name when its type is `bool` and the name lacks an accepted prefix.
-fn check_named(
-    ty: Option<&DartType>,
+fn check_name(
     name: &Identifier,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
     prefixes: &[String],
 ) {
-    if is_bool_type(ty) && !has_valid_boolean_prefix(&name.name, prefixes) {
+    if !has_valid_boolean_prefix(&name.name, prefixes) {
         flag(&name.span, diags, ctx);
     }
 }
 
-fn check_params(
-    params: &FormalParamList,
+/// A variable/field is only inspected when its initializer is a boolean *literal*
+/// (`= true` / `= false`). pyramid_lint hooks `BooleanLiteral` nodes whose parent
+/// is a `VariableDeclaration`, so an uninitialized `bool` field or one assigned a
+/// non-literal expression (`= !kDebugMode`) is out of scope, and the declared
+/// type is irrelevant.
+fn check_declarators(
+    declarators: &[VarDeclarator],
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
     prefixes: &[String],
 ) {
-    for param in params
-        .positional
-        .iter()
-        .chain(&params.optional_positional)
-        .chain(&params.named)
-    {
-        check_named(param.param_type.as_ref(), &param.name, diags, ctx, prefixes);
+    for d in declarators {
+        if matches!(&d.initializer, Some(Expr::BoolLit { .. })) {
+            check_name(&d.name, diags, ctx, prefixes);
+        }
     }
 }
 
@@ -116,7 +111,10 @@ fn scan_top(
 ) {
     match decl {
         TopLevelDecl::Function(f) => {
-            check_params(&f.params, diags, ctx, prefixes);
+            // A top-level function/getter whose return type is `bool`.
+            if !f.is_setter && is_bool_type(f.return_type.as_ref()) {
+                check_name(&f.name, diags, ctx, prefixes);
+            }
             if let Some(body) = &f.body {
                 scan_body(body, diags, ctx, prefixes);
             }
@@ -133,11 +131,15 @@ fn scan_top(
             .members
             .iter()
             .for_each(|m| scan_member(m, diags, ctx, prefixes)),
-        TopLevelDecl::Variable(v) => {
-            for d in &v.declarators {
-                check_named(v.var_type.as_ref(), &d.name, diags, ctx, prefixes);
-            }
-        }
+        TopLevelDecl::Enum(e) => e
+            .members
+            .iter()
+            .for_each(|m| scan_member(m, diags, ctx, prefixes)),
+        TopLevelDecl::Extension(ext) => ext
+            .members
+            .iter()
+            .for_each(|m| scan_member(m, diags, ctx, prefixes)),
+        TopLevelDecl::Variable(v) => check_declarators(&v.declarators, diags, ctx, prefixes),
         _ => {}
     }
 }
@@ -149,37 +151,31 @@ fn scan_member(
     prefixes: &[String],
 ) {
     match member {
-        ClassMember::Field(f) => {
-            if !is_override(&f.annotations) {
-                for d in &f.declarators {
-                    check_named(f.field_type.as_ref(), &d.name, diags, ctx, prefixes);
-                }
-            }
-        }
+        ClassMember::Field(f) => check_declarators(&f.declarators, diags, ctx, prefixes),
         ClassMember::Method(m) => {
-            if !is_override(&m.annotations) {
-                check_named(m.return_type.as_ref(), &m.name, diags, ctx, prefixes);
-                check_params(&m.params, diags, ctx, prefixes);
+            if !is_override(&m.annotations) && is_bool_type(m.return_type.as_ref()) {
+                check_name(&m.name, diags, ctx, prefixes);
             }
             if let Some(body) = &m.body {
                 scan_body(body, diags, ctx, prefixes);
             }
         }
-        ClassMember::Constructor(c) => {
-            check_params(&c.params, diags, ctx, prefixes);
-            if let Some(body) = &c.body {
-                scan_body(body, diags, ctx, prefixes);
-            }
-        }
         ClassMember::Getter(g) => {
+            if !is_override(&g.annotations) && is_bool_type(g.return_type.as_ref()) {
+                check_name(&g.name, diags, ctx, prefixes);
+            }
             if let Some(body) = &g.body {
                 scan_body(body, diags, ctx, prefixes);
             }
         }
-        ClassMember::Setter(s) => {
-            if !is_override(&s.annotations) {
-                check_named(s.param_type.as_ref(), &s.param, diags, ctx, prefixes);
+        // Setters and constructors are out of scope; their bodies can still
+        // declare boolean-literal locals.
+        ClassMember::Constructor(c) => {
+            if let Some(body) = &c.body {
+                scan_body(body, diags, ctx, prefixes);
             }
+        }
+        ClassMember::Setter(s) => {
             if let Some(body) = &s.body {
                 scan_body(body, diags, ctx, prefixes);
             }
@@ -212,11 +208,7 @@ fn scan_stmts(
 
 fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, prefixes: &[String]) {
     match stmt {
-        Stmt::LocalVar(lv) => {
-            for d in &lv.declarators {
-                check_named(lv.var_type.as_ref(), &d.name, diags, ctx, prefixes);
-            }
-        }
+        Stmt::LocalVar(lv) => check_declarators(&lv.declarators, diags, ctx, prefixes),
         Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx, prefixes),
         Stmt::If(i) => {
             scan_stmt(&i.then_branch, diags, ctx, prefixes);
@@ -236,10 +228,7 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, pre
                 scan_stmts(&fin.stmts, diags, ctx, prefixes);
             }
         }
-        Stmt::LocalFunc(lf) => {
-            check_params(&lf.params, diags, ctx, prefixes);
-            scan_body(&lf.body, diags, ctx, prefixes);
-        }
+        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx, prefixes),
         _ => {}
     }
 }

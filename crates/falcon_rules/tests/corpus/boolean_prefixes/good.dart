@@ -1,61 +1,39 @@
-class BooleanPrefixes {
-  /// Boolean with is prefix
+// pyramid_lint only inspects variable/field declarations initialised with a
+// boolean *literal*, and bool-returning methods/getters/functions. Parameters,
+// uninitialised fields, and non-literal initialisers are all out of scope.
+
+class Flags {
   bool isActive = true;
+  bool hasPermission = false;
+  bool canEdit = true;
+  bool shouldRefresh = false;
+  bool _isDisposed = false; // leading underscore stripped -> isDisposed
 
-  /// Boolean with is prefix
-  bool isValid = false;
+  // Uninitialised bool fields have no boolean literal, so they are not checked.
+  final bool active;
+  late bool loading;
 
-  /// Boolean with is prefix
-  bool isLoading = false;
+  // A non-literal initialiser (`!kDebugMode`) is out of scope.
+  bool enabled = !kDebugMode;
 
-  /// Boolean with has prefix
-  bool hasPermission = true;
+  Flags(this.active);
 
-  /// Boolean with can prefix
-  bool canEdit = false;
-
-  /// Boolean with should prefix
-  bool shouldRefresh = true;
-
-  /// Boolean with was prefix
-  bool wasSuccessful = true;
-
-  /// Method parameter with is prefix
-  void checkStatus(bool isReady) {
-    print(isReady);
+  // Parameters are never checked, even with a boolean-literal default.
+  void configure(bool ready, {bool fatal = false}) {
+    print(ready);
+    print(fatal);
+    bool isDone = true; // local with a valid prefix
+    print(isDone);
   }
 
-  /// Method return with is prefix
-  bool isStatusValid() {
-    return true;
-  }
-
-  /// Local variable with is prefix
-  void example() {
-    bool isComplete = false;
-    print(isComplete);
-  }
-
-  /// Late variable with has prefix
-  late bool hasInitialized;
-
-  /// Field with can prefix
-  bool canUpdate = false;
-
-  /// Private boolean: leading underscore is stripped before prefix matching
-  bool _isDisposed = false;
-
-  /// Private boolean with has prefix
-  bool _hasStarted = false;
+  bool get isEmpty => !isActive;
+  bool hasValue() => isActive;
 }
 
-/// @override members inherit their name from the supertype and are exempt.
-class Subclass extends BooleanPrefixes {
-  @override
-  bool active = false;
+// An @override method inherits its name from the supertype and is exempt.
+class Sub extends Flags {
+  Sub() : super(false);
 
   @override
-  bool getStatus() {
-    return false;
-  }
+  bool validate() => true;
 }

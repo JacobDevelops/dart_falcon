@@ -34,7 +34,8 @@ class Widget {
 }
 
 Map<String, dynamic> parseResponse(Map<String, dynamic>? data) {
-  final nested = data!['key']!; /* expect: avoid-non-null-assertion *//* expect: avoid-non-null-assertion */
+  // The outer index `!` (`[...]!`) is exempt; only `data!` is flagged.
+  final nested = data!['key']; /* expect: avoid-non-null-assertion */
   return nested;
 }
 

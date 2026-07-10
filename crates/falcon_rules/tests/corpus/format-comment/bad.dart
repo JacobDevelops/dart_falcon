@@ -1,41 +1,12 @@
-// Test cases for format-comment rule
-// Violations: line comments starting with lowercase letter
+// Header regular comments are ignored (only_doc_comments); the doc comments
+// below are the real fixtures.
 
-class Example {
-  int value = 0;
+/// lowercase start makes this an invalid sentence. /* expect: format-comment */
+void badLower() {}
 
-  void method() {
-    // this should be uppercase /* expect: format-comment */
-    value = 1;
+/// Missing terminal punctuation /* expect: format-comment */
+void badNoPunct() {}
 
-    // another lowercase comment /* expect: format-comment */
-    value = 2;
-
-    // Correct comment — no violation
-    value = 3;
-
-    // do something bad /* expect: format-comment */
-    print(value);
-  }
-}
-
-void topLevel() {
-  // calculate the result /* expect: format-comment */
-  final x = 1 + 2;
-
-  // Result is ready
-  print(x);
-}
-
-void moreComments() {
-  // incorrect start /* expect: format-comment */
-  final a = 1;
-
-  // also bad /* expect: format-comment */
-  final b = 2;
-}
-
-/// doc comments are checked too (port fix) /* expect: format-comment */
-void documented() {
-  print('doc');
-}
+/// A leading sentence that wraps but the whole block never /* expect: format-comment */
+/// terminates with any punctuation
+void badWrapped() {}

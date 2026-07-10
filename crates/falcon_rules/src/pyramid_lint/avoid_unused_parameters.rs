@@ -214,6 +214,7 @@ fn collect_used_stmt(stmt: &Stmt, used: &mut HashSet<String>) {
                     }
                 }
                 Some(ForInit::ForIn { iterable, .. }) => collect_used_expr(iterable, used),
+                Some(ForInit::PatternForIn { iterable, .. }) => collect_used_expr(iterable, used),
                 Some(ForInit::Exprs(es)) => es.iter().for_each(|e| collect_used_expr(e, used)),
                 None => {}
             }
@@ -358,6 +359,7 @@ fn collect_used_args(args: &ArgList, used: &mut HashSet<String>) {
 fn collect_used_collection_element(el: &CollectionElement, used: &mut HashSet<String>) {
     match el {
         CollectionElement::Expr(e) => collect_used_expr(e, used),
+        CollectionElement::NullAware { expr, .. } => collect_used_expr(expr, used),
         CollectionElement::Spread { expr, .. } => collect_used_expr(expr, used),
         CollectionElement::If {
             condition,
@@ -397,6 +399,9 @@ fn collect_used_collection_element(el: &CollectionElement, used: &mut HashSet<St
                     }
                 }
                 Some(ForInit::ForIn { iterable, .. }) => {
+                    collect_used_expr(iterable, used);
+                }
+                Some(ForInit::PatternForIn { iterable, .. }) => {
                     collect_used_expr(iterable, used);
                 }
                 Some(ForInit::Exprs(es)) => {

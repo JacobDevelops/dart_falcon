@@ -18,36 +18,71 @@ impl Rule for NoEqualArguments {
     }
 }
 
-fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let mut seen: Vec<(&str, &Span)> = Vec::new();
-
-    for arg in &args.positional {
-        let src = expr_src(arg, ctx.source);
-        let span = arg.span();
-        // Check if this arg matches any previous arg
-        if seen.iter().any(|(prev, _)| *prev == src) {
-            diags.push(Diagnostic::new(
-                "no-equal-arguments",
-                Severity::Warning,
-                "Avoid passing the same argument to multiple parameters",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
-            ));
-        }
-        seen.push((src, span));
+/// A literal argument, per dcl semantics, is compared by identity only, so two
+/// distinct literals never count as "equal". This mirrors dart_code_linter's
+/// `_bothLiterals` short-circuit (`argument == arg`): passing `Size(48, 48)` or
+/// `copyWith(isSaving: false, isSaved: false)` is intentional, never a bug.
+/// Matches the analyzer's `Literal` hierarchy: scalar literals, collection
+/// literals (`TypedLiteral`), and a prefix expression whose operand is a literal
+/// (e.g. `-1`).
+fn is_literal(expr: &Expr) -> bool {
+    match expr {
+        Expr::IntLit { .. }
+        | Expr::DoubleLit { .. }
+        | Expr::StringLit { .. }
+        | Expr::BoolLit { .. }
+        | Expr::NullLit { .. }
+        | Expr::List { .. }
+        | Expr::Map { .. }
+        | Expr::Set { .. } => true,
+        Expr::Unary { operand, .. } => is_literal(operand),
+        _ => false,
     }
+}
 
-    for named in &args.named {
-        let src = expr_src(&named.value, ctx.source);
-        let span = &named.span;
-        if seen.iter().any(|(prev, _)| *prev == src) {
+/// Report the *last* occurrence of each duplicated argument, matching dcl's
+/// `lastAppearance` behaviour. Reporting on the last (not first) occurrence is
+/// what lets hand-written `// ignore: no-equal-arguments` comments — which
+/// developers place on the trailing duplicate — line up and suppress the hit.
+fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+    // Positional args match other positional args by full source text; named
+    // args match other named args by their *value* expression text (the label
+    // is ignored). dcl never matches a positional against a named argument.
+    // Literal-valued arguments are excluded entirely (compared by identity).
+    let positional: Vec<(&str, &Span)> = args
+        .positional
+        .iter()
+        .filter(|a| !is_literal(a))
+        .map(|a| (expr_src(a, ctx.source), a.span()))
+        .collect();
+    let named: Vec<(&str, &Span)> = args
+        .named
+        .iter()
+        .filter(|n| !is_literal(&n.value))
+        .map(|n| (expr_src(&n.value, ctx.source), &n.span))
+        .collect();
+
+    for group in [&positional, &named] {
+        report_duplicates(group, diags, ctx);
+    }
+}
+
+fn report_duplicates(entries: &[(&str, &Span)], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+    for (i, (src, _)) in entries.iter().enumerate() {
+        // Index of the last entry equal to this one.
+        let last = entries
+            .iter()
+            .rposition(|(other, _)| other == src)
+            .unwrap_or(i);
+        // Only the *earlier* duplicates trigger a report, and the report lands
+        // on the last occurrence. Emit once per group by acting on the first
+        // member only.
+        if last != i && entries[..i].iter().all(|(other, _)| other != src) {
+            let span = entries[last].1;
             diags.push(Diagnostic::new(
                 "no-equal-arguments",
                 Severity::Warning,
-                "Avoid passing the same argument to multiple parameters",
+                "The argument has already been passed",
                 ctx.file_path.to_string_lossy().into_owned(),
                 DiagSpan {
                     start: span.start,
@@ -55,7 +90,6 @@ fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext)
                 },
             ));
         }
-        seen.push((src, named.value.span()));
     }
 }
 
