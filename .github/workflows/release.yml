@@ -1,0 +1,167 @@
+name: Release
+
+# Tag a version (vX.Y.Z) → build the four platform binaries → publish a GitHub
+# Release with the tarballs → commit the SRI-hash manifest (nix/binaries.json)
+# back to main so the flake can fetch prebuilt binaries. workflow_dispatch takes
+# an existing tag for manual re-runs.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)release, e.g. v0.1.0"
+        required: true
+
+jobs:
+  build-linux:
+    name: Build Linux (static musl)
+    runs-on: ubuntu-latest
+    env:
+      INPUT_TAG: ${{ github.event.inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+      # zig is the cross-linker: aarch64 musl links cleanly on the x86_64 runner.
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.13.0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-$GITHUB_REF_NAME}"; VERSION="${VERSION#v}"
+          nix_system() {
+            case "$1" in
+              x86_64-unknown-linux-musl) echo x86_64-linux ;;
+              aarch64-unknown-linux-musl) echo aarch64-linux ;;
+            esac
+          }
+          mkdir -p dist
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            cargo zigbuild --release --locked -p dart_falcon --target "$target"
+            rm -rf stage && mkdir -p stage
+            install -m755 "target/$target/release/falcon" stage/falcon
+            tar -C stage -czf "dist/falcon-${VERSION}-$(nix_system "$target").tar.gz" falcon
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarballs-linux
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build-darwin:
+    name: Build macOS
+    runs-on: macos-latest
+    env:
+      INPUT_TAG: ${{ github.event.inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-$GITHUB_REF_NAME}"; VERSION="${VERSION#v}"
+          nix_system() {
+            case "$1" in
+              aarch64-apple-darwin) echo aarch64-darwin ;;
+              x86_64-apple-darwin) echo x86_64-darwin ;;
+            esac
+          }
+          mkdir -p dist
+          # Apple's native toolchain cross-builds the intel target on arm runners.
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked -p dart_falcon --target "$target"
+            rm -rf stage && mkdir -p stage
+            install -m755 "target/$target/release/falcon" stage/falcon
+            tar -C stage -czf "dist/falcon-${VERSION}-$(nix_system "$target").tar.gz" falcon
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarballs-darwin
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-linux, build-darwin]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tarballs-*
+          merge-multiple: true
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*.tar.gz
+          fail_on_unmatched_files: true
+
+  manifest:
+    name: Commit binary manifest
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Full checkout of main: the manifest lands on the branch, not the tag.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tarballs-*
+          merge-multiple: true
+          path: dist
+      - name: Write manifest and commit to main
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-$GITHUB_REF_NAME}"; VERSION="${VERSION#v}"
+          # SRI hash: "sha256-" + base64 of the raw sha256 digest.
+          sri() { printf 'sha256-%s' "$(openssl dgst -sha256 -binary "$1" | base64)"; }
+          # Keys pre-sorted; jq preserves order and emits a trailing newline.
+          jq -n \
+            --arg version "$VERSION" \
+            --arg aarch64_darwin "$(sri "dist/falcon-${VERSION}-aarch64-darwin.tar.gz")" \
+            --arg aarch64_linux "$(sri "dist/falcon-${VERSION}-aarch64-linux.tar.gz")" \
+            --arg x86_64_darwin "$(sri "dist/falcon-${VERSION}-x86_64-darwin.tar.gz")" \
+            --arg x86_64_linux "$(sri "dist/falcon-${VERSION}-x86_64-linux.tar.gz")" \
+            '{
+              version: $version,
+              systems: {
+                "aarch64-darwin": $aarch64_darwin,
+                "aarch64-linux": $aarch64_linux,
+                "x86_64-darwin": $x86_64_darwin,
+                "x86_64-linux": $x86_64_linux
+              }
+            }' > nix/binaries.json
+          git add nix/binaries.json
+          if git diff --cached --quiet; then
+            echo "manifest unchanged; nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: binary manifest for v${VERSION} [skip ci]"
+          # main may have moved since checkout — rebase and retry the push.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push failed (attempt $attempt); rebasing onto main"
+            git pull --rebase origin main
+          done
+          echo "failed to push manifest after retries" >&2
+          exit 1

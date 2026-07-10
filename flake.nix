@@ -25,8 +25,20 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
+        "x86_64-darwin"
         "aarch64-darwin"
       ];
+
+      # Prebuilt-binary manifest, maintained by CI (.github/workflows/release.yml):
+      # each release commits nix/binaries.json mapping every system to the SRI
+      # hash of its release tarball. Absent until the first release — the flake
+      # must (and does) eval without it, so `falcon-bin`/`default = prebuilt` only
+      # appear once a release has populated the file.
+      manifest =
+        if builtins.pathExists ./nix/binaries.json then
+          builtins.fromJSON (builtins.readFile ./nix/binaries.json)
+        else
+          null;
 
       outputsFor =
         system:
@@ -82,6 +94,35 @@
             }
           );
 
+          # Prebuilt binary for this system, when the CI manifest covers it.
+          # It's a fixed-output fetchurl of the published release tarball, so it
+          # compiles nothing and is immune to `inputs.nixpkgs.follows` overrides
+          # (the hash pins the exact bytes). Lazy: never forced when hasBin is
+          # false, so a null manifest can't break eval.
+          hasBin = manifest != null && manifest.systems ? ${system};
+          falcon-bin = pkgs.stdenvNoCC.mkDerivation {
+            pname = "falcon-bin";
+            version = manifest.version;
+            src = pkgs.fetchurl {
+              url = "https://github.com/JacobDevelops/dart_falcon/releases/download/v${manifest.version}/falcon-${manifest.version}-${system}.tar.gz";
+              hash = manifest.systems.${system};
+            };
+            # Tarball holds a single top-level `falcon` file (not a directory),
+            # so pin sourceRoot instead of letting unpackPhase guess.
+            sourceRoot = ".";
+            dontConfigure = true;
+            dontBuild = true;
+            # Static musl (linux) / self-contained (darwin) binary: keep patchelf
+            # and strip away from it.
+            dontStrip = true;
+            installPhase = ''
+              runHook preInstall
+              install -Dm755 falcon $out/bin/falcon
+              runHook postInstall
+            '';
+            meta.mainProgram = "falcon";
+          };
+
           # nix-fmt check sees ONLY .nix files — editing Rust or docs never
           # re-runs it.
           nixSrc = lib.fileset.toSource {
@@ -90,10 +131,14 @@
           };
         in
         {
+          # falcon: always available, built from source. falcon-bin: prebuilt,
+          # only when the manifest covers this system. default prefers the
+          # prebuilt binary (no compile) and falls back to source.
           packages = {
             inherit falcon;
-            default = falcon;
-          };
+            default = if hasBin then falcon-bin else falcon;
+          }
+          // lib.optionalAttrs hasBin { inherit falcon-bin; };
 
           checks = {
             build = falcon;
