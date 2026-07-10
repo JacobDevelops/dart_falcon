@@ -1,14 +1,18 @@
 {
-  "rules": {
-    "use-design-system-item": {
-      "enabled": true,
-      "options": {
-        "items": [
-          { "class_name": "Container", "use_instead": "AppContainer" },
-          { "class_name": "Text", "use_instead": "AppText" },
-          { "class_name": "ElevatedButton", "use_instead": "AppButton" },
-          { "class_name": "Scaffold", "use_instead": "AppScaffold" }
-        ]
+  "linter": {
+    "rules": {
+      "style": {
+        "use-design-system-item": {
+          "level": "warn",
+          "options": {
+            "items": [
+              { "class_name": "Container", "use_instead": "AppContainer" },
+              { "class_name": "Text", "use_instead": "AppText" },
+              { "class_name": "ElevatedButton", "use_instead": "AppButton" },
+              { "class_name": "Scaffold", "use_instead": "AppScaffold" }
+            ]
+          }
+        }
       }
     }
   }

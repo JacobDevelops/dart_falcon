@@ -24,14 +24,18 @@ impl Rule for UseDesignSystemItem {
     }
 }
 
-/// Read `rules["use-design-system-item"].options["items"]` as `(class_name, use_instead)` pairs.
+/// Read the rule's `options["items"]` as `(class_name, use_instead)` pairs.
 /// Any missing or malformed config yields an empty list (the rule then does nothing).
 fn parse_config_items(ctx: &AnalyzeContext) -> Vec<(String, Option<String>)> {
+    // Look up options under the rule's own group so a misplaced config entry is
+    // ignored, staying consistent with severity resolution.
+    let Some(group) = crate::meta::meta_for("use-design-system-item").map(|m| m.group) else {
+        return Vec::new();
+    };
     let Some(items_array) = ctx
         .config
-        .rules
-        .get("use-design-system-item")
-        .and_then(|rc| rc.options.get("items"))
+        .rule_options(group, "use-design-system-item")
+        .and_then(|opts| opts.get("items"))
         .and_then(|v| v.as_array())
     else {
         return Vec::new();

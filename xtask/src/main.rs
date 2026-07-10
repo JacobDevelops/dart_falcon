@@ -201,7 +201,12 @@ fn codegen(args: &[String]) {
         module, name, struct_name
     );
     println!(
-        "  3. implement the rule, fill in fixtures, then run `cargo xtask validate-rules --rule {}`",
+        "  3. add a `RuleMeta {{ name: \"{}\", group, domains, recommended }}` entry to \
+         RULE_METADATA (crates/falcon_rules/src/meta.rs)",
+        rule_id
+    );
+    println!(
+        "  4. implement the rule, fill in fixtures, then run `cargo xtask validate-rules --rule {}`",
         rule_id
     );
 }

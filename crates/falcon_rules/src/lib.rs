@@ -7,21 +7,94 @@
 //! Complexity tiers (assigned in M0.5): SIMPLE / MEDIUM / COMPLEX.
 
 pub mod dart_code_linter;
+pub mod meta;
 pub mod pyramid_lint;
 
-use falcon_analyze::Rule;
-use falcon_config::FalconConfig;
+use std::collections::HashMap;
 
-/// Return the rules the config does not explicitly disable.
+use falcon_analyze::Rule;
+use falcon_config::{FalconConfig, ResolvedSeverity};
+use falcon_diagnostics::{Diagnostic, Severity};
+
+use crate::meta::meta_for;
+
+/// The enabled rule set plus each enabled rule's resolved severity.
+pub struct ResolvedRules {
+    pub rules: Vec<Box<dyn Rule>>,
+    /// Rule name → resolved severity, for rewriting diagnostics post-analysis.
+    pub severities: HashMap<&'static str, Severity>,
+}
+
+/// Resolve the enabled rule set and each rule's severity from `config`.
 ///
-/// Rules absent from `config.rules` default to enabled (Config-as-Contract:
-/// the shipped falcon.json lists every rule explicitly). Shared by the CLI
-/// pipeline and the LSP server so both filter identically.
+/// Enablement follows the biome-style resolution in
+/// [`falcon_config::LinterConfig::resolve_rule`], driven by each rule's static
+/// [`meta`] entry (group, domains, recommended). Shared by the CLI pipeline
+/// and the LSP server so both behave identically. Warns about config entries
+/// that name no registered rule or sit under the wrong group.
+pub fn resolve_rules(config: &FalconConfig) -> ResolvedRules {
+    warn_unknown_config(config);
+
+    let mut rules = Vec::new();
+    let mut severities = HashMap::new();
+    for rule in all_rules() {
+        let name = rule.name();
+        // Every registered rule has a metadata entry (enforced by tests).
+        let Some(meta) = meta_for(name) else {
+            eprintln!("warning: rule `{name}` has no metadata entry; skipping");
+            continue;
+        };
+        if let Some(sev) =
+            config.resolve_rule(meta.group, meta.name, meta.recommended, meta.domains)
+        {
+            severities.insert(name, to_severity(sev));
+            rules.push(rule);
+        }
+    }
+    ResolvedRules { rules, severities }
+}
+
+/// Rewrite each diagnostic's severity to its resolved value. Diagnostics whose
+/// rule is absent from `severities` are left unchanged.
+pub fn apply_severities(diags: &mut [Diagnostic], severities: &HashMap<&'static str, Severity>) {
+    for diag in diags.iter_mut() {
+        if let Some(&severity) = severities.get(diag.rule) {
+            diag.severity = severity;
+        }
+    }
+}
+
+/// Thin wrapper returning only the enabled rule set (severities discarded).
 pub fn enabled_rules(config: &FalconConfig) -> Vec<Box<dyn Rule>> {
-    all_rules()
-        .into_iter()
-        .filter(|rule| config.rules.get(rule.name()).is_none_or(|rc| rc.enabled))
-        .collect()
+    resolve_rules(config).rules
+}
+
+fn to_severity(sev: ResolvedSeverity) -> Severity {
+    match sev {
+        ResolvedSeverity::Info => Severity::Info,
+        ResolvedSeverity::Warn => Severity::Warning,
+        ResolvedSeverity::Error => Severity::Error,
+    }
+}
+
+/// Warn about configured rule entries that match no registered rule, or that
+/// are placed under a group the rule does not belong to.
+fn warn_unknown_config(config: &FalconConfig) {
+    for (group, rules) in &config.linter.rules.groups {
+        for name in rules.keys() {
+            match meta_for(name) {
+                None => eprintln!(
+                    "warning: falcon.json configures unknown rule `{name}` (under group `{group}`)"
+                ),
+                Some(meta) if meta.group != group.as_str() => eprintln!(
+                    "warning: falcon.json configures rule `{name}` under group `{group}`, \
+                     but it belongs to `{}`",
+                    meta.group
+                ),
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Return all implemented lint rules.

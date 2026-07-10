@@ -62,7 +62,7 @@ fn config_reload_reuses_cached_asts() {
 
     fs::write(
         dir.path().join("falcon.json"),
-        r#"{ "rules": { "avoid-dynamic": { "enabled": false } } }"#,
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#,
     )
     .unwrap();
     let results = state.reload_config();

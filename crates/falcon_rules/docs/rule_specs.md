@@ -3157,27 +3157,22 @@ Each item is an object with:
 - `class_name` (string, required): The disallowed constructor type name.
 - `use_instead` (string, optional): The design-system replacement to suggest.
 
-Example `falcon.json`:
+Example `falcon.json` (the rule lives in the `style` group):
 ```json
 {
-  "rules": {
-    "use-design-system-item": {
-      "enabled": true,
-      "options": {
-        "items": [
-          {
-            "class_name": "MaterialButton",
-            "use_instead": "DsButton"
-          },
-          {
-            "class_name": "ElevatedButton",
-            "use_instead": "DsElevatedButton"
-          },
-          {
-            "class_name": "Text",
-            "use_instead": null
+  "linter": {
+    "rules": {
+      "style": {
+        "use-design-system-item": {
+          "level": "warn",
+          "options": {
+            "items": [
+              { "class_name": "MaterialButton", "use_instead": "DsButton" },
+              { "class_name": "ElevatedButton", "use_instead": "DsElevatedButton" },
+              { "class_name": "Text", "use_instead": null }
+            ]
           }
-        ]
+        }
       }
     }
   }
@@ -3263,32 +3258,32 @@ The following rules have identical semantics and share a single implementation, 
 
 ## Configuration Schema (falcon.json)
 
+Rules are grouped by category under `linter.rules.<group>`. Each value is a
+level string (`"off"`, `"on"`, `"info"`, `"warn"`, `"error"`) or an object
+`{ "level": ..., "options": { ... } }`. See [docs/configuration.md](../../../docs/configuration.md)
+for the full schema (files, domains, recommended preset, legacy migration).
+
 ```json
 {
-  "rules": {
-    "avoid-dynamic": { "enabled": true, "severity": "error" },
-    "no-empty-block": { "enabled": true, "severity": "warning" },
-    "no-magic-number": {
-      "enabled": true,
-      "severity": "warning",
-      "allowlist": [0, 1, 2, -1]
-    },
-    "member-ordering": {
-      "enabled": true,
-      "severity": "warning",
-      "order": ["const", "static_fields", "fields", "constructor", "static_methods", "methods"]
-    },
-    "max-lines-for-file": { "enabled": true, "threshold": 500 },
-    "max-lines-for-function": { "enabled": true, "threshold": 100 },
-    "max-parameters-for-function": { "enabled": true, "threshold": 5 },
-    "max-switch-cases": { "enabled": true, "threshold": 10 },
-    "prefer-correct-identifier-length": {
-      "enabled": true,
-      "allowlist": ["i", "j", "k", "x", "y", "z"]
+  "linter": {
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        "avoid-dynamic": "error",
+        "no-empty-block": "warn"
+      },
+      "style": {
+        "no-magic-number": { "level": "warn", "options": { "allowlist": [0, 1, 2, -1] } },
+        "member-ordering": { "level": "warn", "options": { "order": ["const", "fields", "constructor", "methods"] } },
+        "prefer-correct-identifier-length": { "level": "warn", "options": { "allowlist": ["i", "j", "k"] } }
+      }
     }
   }
 }
 ```
+
+> Note: threshold-based options (e.g. `max_lines_for_file`) are hardcoded in the
+> current implementation; the option keys above illustrate the schema shape.
 
 ---
 

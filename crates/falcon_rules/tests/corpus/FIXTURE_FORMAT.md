@@ -36,19 +36,28 @@ the in-process harness loads it with `falcon_config::load_config`):
 
 ```json
 {
-  "rules": {
-    "use-design-system-item": {
-      "enabled": true,
-      "options": {
-        "items": [{ "class_name": "Container", "use_instead": "AppContainer" }]
+  "linter": {
+    "rules": {
+      "style": {
+        "use-design-system-item": {
+          "level": "warn",
+          "options": {
+            "items": [{ "class_name": "Container", "use_instead": "AppContainer" }]
+          }
+        }
       }
     }
   }
 }
 ```
 
+Rules live under `linter.rules.<group>` (group is the rule's category —
+`complexity`, `correctness`, `performance`, `style`, or `suspicious`). A rule
+value is either a level string (`"off"`, `"on"`, `"info"`, `"warn"`, `"error"`)
+or an object `{ "level": ..., "options": { ... } }`.
+
 Without a `config.json`, fixtures are validated with the default config (every rule
-enabled, no options).
+enabled at its default severity, no options).
 
 ## Annotation Format
 
