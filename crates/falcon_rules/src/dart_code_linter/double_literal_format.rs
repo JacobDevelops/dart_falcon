@@ -18,19 +18,43 @@ impl Rule for DoubleLiteralFormat {
     }
 }
 
+/// Redundant leading zero: `05.0` / `00.5`. dcl: `startsWith('0') && lexeme[1] != '.'`.
+fn detect_leading_zero(lexeme: &str) -> bool {
+    lexeme.starts_with('0') && lexeme.as_bytes().get(1) != Some(&b'.')
+}
+
+/// Redundant trailing zero in the mantissa: `1.50` → `1.5`, `0.50` → `0.5`,
+/// `1.00` → `1.0`. dcl deliberately does NOT flag `1.0` / `24.0` (fractional
+/// part is exactly `"0"`), because stripping that zero would turn a `double`
+/// into an `int`. This is the crux of the port fix: no int-ification.
+fn detect_trailing_zero(lexeme: &str) -> bool {
+    let mantissa = lexeme.split('e').next().unwrap_or(lexeme);
+    mantissa.contains('.') && mantissa.ends_with('0') && mantissa.rsplit('.').next() != Some("0")
+}
+
 fn check_double(value: &str, span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    // Missing leading zero: .5 should be 0.5
-    // Unnecessary trailing zero: 1.0 should be 1 (only when integer part is non-zero)
-    let bad = value.starts_with('.') || (value.ends_with(".0") && !value.starts_with("0."));
-    if bad {
-        diags.push(Diagnostic::new(
-            "double-literal-format",
-            Severity::Warning,
-            "Use proper double literal format: add leading zero (.5 → 0.5) and avoid unnecessary trailing zero (1.0 → 1)",
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan { start: span.start, end: span.end },
-        ));
-    }
+    // Mirrors dart_code_linter's three formatting checks, in priority order.
+    // Only literal *formatting* is checked; `24.0` → `24` (int-ification) is
+    // explicitly out of scope.
+    let message = if detect_leading_zero(value) {
+        "Double literal shouldn't have redundant leading '0'."
+    } else if value.starts_with('.') {
+        "Double literal shouldn't begin with '.'."
+    } else if detect_trailing_zero(value) {
+        "Double literal shouldn't have a trailing '0'."
+    } else {
+        return;
+    };
+    diags.push(Diagnostic::new(
+        "double-literal-format",
+        Severity::Warning,
+        message,
+        ctx.file_path.to_string_lossy().into_owned(),
+        DiagSpan {
+            start: span.start,
+            end: span.end,
+        },
+    ));
 }
 
 fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {

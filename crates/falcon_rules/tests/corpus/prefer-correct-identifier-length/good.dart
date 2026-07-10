@@ -1,54 +1,37 @@
-// Good: descriptive identifier names
+// Good: identifiers meet the minimum length (3), plus dcl's scope exemptions.
+// dcl only checks variable declarations, getter/setter names and enum
+// constants — never parameters, catch clauses, for-each variables, or plain
+// method/function names.
+
 void example() {
   var count = compute();
-  String text = getText();
-  int value = 42;
-  List<String> items = [];
+  final result = count + 1;
+  print(result);
 }
 
 class Processor {
   String path = '';
-  int maxRetries = 0;
+  int id = 0; // `id` is in the exceptions list
+  int _id = 0; // leading underscore stripped -> `id` -> exempt
 
-  void process(String data) {
-    final result = transform(data);
-    print(result);
+  // Method name (`at`) and parameters (`i`, `j`) are out of scope.
+  int at(int i, int j) => i + j;
+
+  // Getter name is >= 3 characters.
+  String get label => path;
+}
+
+// Parameters, catch clauses and for-each variables are never checked, so short
+// names here are fine.
+void shortLived(int a, int b) {
+  try {
+    print(a + b);
+  } catch (e) {
+    print(e);
+  }
+  for (final x in [1, 2, 3]) {
+    print(x);
   }
 }
 
-// OK: loop variables i, j, k, n are allowed
-void goodLoop(List<int> items) {
-  for (int i = 0; i < items.length; i++) {
-    final value = items[i];
-    print(value);
-  }
-}
-
-void nestedLoops(List<List<int>> matrix) {
-  for (int i = 0; i < matrix.length; i++) {
-    for (int j = 0; j < matrix[i].length; j++) {
-      print(matrix[i][j]);
-    }
-  }
-}
-
-void kLoop(List<String> items) {
-  for (int k = 0; k < items.length; k++) {
-    print(items[k]);
-  }
-}
-
-void nLoop(int n) {
-  for (int i = 0; i < n; i++) {
-    print(i);
-  }
-}
-
-String formatData(int queryId) {
-  return 'Query: $queryId';
-}
-
-// OK: conventions like _ for unused
-void unused(_) {
-  print('Ignored');
-}
+enum Color { red, green, blue }

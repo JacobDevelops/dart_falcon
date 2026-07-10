@@ -20,188 +20,121 @@ impl Rule for UnnecessaryNullableReturnType {
 
 fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match decl {
-        TopLevelDecl::Function(f) => {
-            if let Some(return_type) = &f.return_type
-                && is_nullable_type(return_type)
-                && let Some(body) = &f.body
-                && !body_can_return_null(body)
-            {
-                flag_return_type(return_type, diags, ctx);
-            }
-        }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
+        TopLevelDecl::Function(f) => check(f.return_type.as_ref(), f.body.as_ref(), diags, ctx),
+        TopLevelDecl::Class(c) => c.members.iter().for_each(|m| scan_member(m, diags, ctx)),
+        TopLevelDecl::Mixin(m) => m.members.iter().for_each(|m| scan_member(m, diags, ctx)),
+        TopLevelDecl::MixinClass(mc) => mc.members.iter().for_each(|m| scan_member(m, diags, ctx)),
         _ => {}
     }
 }
 
 fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match member {
-        ClassMember::Method(m) => {
-            if let Some(return_type) = &m.return_type
-                && is_nullable_type(return_type)
-                && let Some(body) = &m.body
-                && !body_can_return_null(body)
-            {
-                flag_return_type(return_type, diags, ctx);
-            }
-        }
-        ClassMember::Getter(g) => {
-            if let Some(body) = &g.body
-                && !body_can_return_null(body)
-            {
-                // Getter return type must be inferred from the return value or body expression
-                // For now, we'll skip getters since they don't have explicit return types
-            }
-        }
-        _ => {}
+    if let ClassMember::Method(m) = member {
+        check(m.return_type.as_ref(), m.body.as_ref(), diags, ctx);
     }
 }
 
-/// Check if a type is nullable (ends with `?` or has a nullable type argument)
-fn is_nullable_type(ty: &DartType) -> bool {
+fn check(
+    return_type: Option<&DartType>,
+    body: Option<&FunctionBody>,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
+    if let Some(return_type) = return_type
+        && is_outer_nullable(return_type)
+        && let Some(body) = body
+        && all_returns_provably_non_null(body)
+    {
+        flag_return_type(return_type, diags, ctx);
+    }
+}
+
+/// pyramid_lint keys off `returnType.question` — only the *outer* `?` matters.
+/// `Future<T?>` or `List<int?>` are not themselves nullable and are ignored.
+fn is_outer_nullable(ty: &DartType) -> bool {
     match ty {
-        DartType::Named(nt) => {
-            // Check if the type itself is nullable
-            if nt.is_nullable {
-                return true;
-            }
-            // Check if any type argument is nullable
-            for arg in &nt.type_args {
-                if is_nullable_type(arg) {
-                    return true;
-                }
-            }
-            false
-        }
+        DartType::Named(nt) => nt.is_nullable,
         DartType::Function(ft) => ft.is_nullable,
         DartType::Record(rt) => rt.is_nullable,
         _ => false,
     }
 }
 
-/// Check if a function body can return null
-fn body_can_return_null(body: &FunctionBody) -> bool {
+/// True only when the body has at least one return and *every* returned value is
+/// a provably non-null literal or constructor invocation. Without type
+/// resolution this is the conservative analogue of pyramid_lint's
+/// `type.isNullable` check: any return we cannot prove non-null (a variable,
+/// call, `await`, bare `return;`, …) suppresses the report.
+fn all_returns_provably_non_null(body: &FunctionBody) -> bool {
     match body {
-        FunctionBody::Block(b) => stmts_can_return_null(&b.stmts),
-        FunctionBody::Arrow(e, _) => expr_is_null(e),
+        FunctionBody::Block(b) => {
+            let mut count = 0usize;
+            let mut all_non_null = true;
+            scan_returns(&b.stmts, &mut count, &mut all_non_null);
+            count > 0 && all_non_null
+        }
+        FunctionBody::Arrow(e, _) => is_provably_non_null(e),
         FunctionBody::Native(_, _) => false,
     }
 }
 
-/// Check if a list of statements can return null
-fn stmts_can_return_null(stmts: &[Stmt]) -> bool {
+fn scan_returns(stmts: &[Stmt], count: &mut usize, all_non_null: &mut bool) {
     for stmt in stmts {
-        match stmt {
-            Stmt::Return(ret) => {
-                if let Some(v) = &ret.value {
-                    if expr_is_null(v) {
-                        return true;
-                    }
-                } else {
-                    // Explicit `return;` without value is implicitly null
-                    return true;
-                }
-            }
-            Stmt::Block(b) => {
-                if stmts_can_return_null(&b.stmts) {
-                    return true;
-                }
-            }
-            Stmt::If(i) => {
-                if stmts_can_return_null_from_if(i) {
-                    return true;
-                }
-            }
-            Stmt::TryCatch(tc) => {
-                if stmts_can_return_null(&tc.body.stmts) {
-                    return true;
-                }
-                for catch in &tc.catches {
-                    if stmts_can_return_null(&catch.body.stmts) {
-                        return true;
-                    }
-                }
-                if let Some(fin) = &tc.finally
-                    && stmts_can_return_null(&fin.stmts)
-                {
-                    return true;
-                }
-            }
-            Stmt::While(w) => {
-                if stmts_can_return_null_from_stmt(&w.body) {
-                    return true;
-                }
-            }
-            Stmt::DoWhile(d) => {
-                if stmts_can_return_null_from_stmt(&d.body) {
-                    return true;
-                }
-            }
-            Stmt::For(f) => {
-                if stmts_can_return_null_from_stmt(&f.body) {
-                    return true;
-                }
-            }
-            Stmt::Switch(s) if switch_can_return_null(s) => {
-                return true;
-            }
-            _ => {}
-        }
+        scan_returns_stmt(stmt, count, all_non_null);
     }
-    false
 }
 
-fn stmts_can_return_null_from_stmt(stmt: &Stmt) -> bool {
+fn scan_returns_stmt(stmt: &Stmt, count: &mut usize, all_non_null: &mut bool) {
     match stmt {
-        Stmt::Block(b) => stmts_can_return_null(&b.stmts),
         Stmt::Return(ret) => {
-            if let Some(v) = &ret.value {
-                expr_is_null(v)
-            } else {
-                true
+            *count += 1;
+            match &ret.value {
+                Some(v) if is_provably_non_null(v) => {}
+                _ => *all_non_null = false,
             }
         }
-        Stmt::If(i) => stmts_can_return_null_from_if(i),
-        _ => false,
-    }
-}
-
-fn stmts_can_return_null_from_if(i: &IfStmt) -> bool {
-    if stmts_can_return_null_from_stmt(&i.then_branch) {
-        return true;
-    }
-    if let Some(else_branch) = &i.else_branch {
-        stmts_can_return_null_from_stmt(else_branch)
-    } else {
-        false
-    }
-}
-
-fn switch_can_return_null(s: &SwitchStmt) -> bool {
-    for case in &s.cases {
-        if stmts_can_return_null(&case.body) {
-            return true;
+        Stmt::Block(b) => scan_returns(&b.stmts, count, all_non_null),
+        Stmt::If(i) => {
+            scan_returns_stmt(&i.then_branch, count, all_non_null);
+            if let Some(eb) = &i.else_branch {
+                scan_returns_stmt(eb, count, all_non_null);
+            }
         }
+        Stmt::While(w) => scan_returns_stmt(&w.body, count, all_non_null),
+        Stmt::DoWhile(d) => scan_returns_stmt(&d.body, count, all_non_null),
+        Stmt::For(f) => scan_returns_stmt(&f.body, count, all_non_null),
+        Stmt::TryCatch(tc) => {
+            scan_returns(&tc.body.stmts, count, all_non_null);
+            for catch in &tc.catches {
+                scan_returns(&catch.body.stmts, count, all_non_null);
+            }
+            if let Some(fin) = &tc.finally {
+                scan_returns(&fin.stmts, count, all_non_null);
+            }
+        }
+        Stmt::Switch(s) => {
+            for case in &s.cases {
+                scan_returns(&case.body, count, all_non_null);
+            }
+        }
+        _ => {}
     }
-    false
 }
 
-fn expr_is_null(expr: &Expr) -> bool {
-    matches!(expr, Expr::NullLit { .. })
+/// Expressions whose value is provably non-null without type resolution.
+fn is_provably_non_null(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::IntLit { .. }
+            | Expr::DoubleLit { .. }
+            | Expr::BoolLit { .. }
+            | Expr::StringLit(_)
+            | Expr::List { .. }
+            | Expr::Map { .. }
+            | Expr::Set { .. }
+            | Expr::Record { .. }
+            | Expr::New { .. }
+    )
 }
 
 fn flag_return_type(ty: &DartType, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {

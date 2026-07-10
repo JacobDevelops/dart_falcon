@@ -137,7 +137,7 @@ Option names use `snake_case` inside the `options` object.
 |------|--------|---------|---------|
 | `max_lines_for_file` | `max_lines` | `200` | Flag files with more than this many lines. The message states the actual configured threshold. |
 | `max_lines_for_function` | `max_lines` | `100` | Flag functions/methods longer than this many lines. |
-| `max_parameters_for_function` | `max_parameters` | `5` | Flag functions/methods with more than this many parameters. |
+| `max_parameters_for_function` | `max_parameters` | `5` | Flag functions/methods with more than this many parameters. Constructors are not counted (matching dart_code_linter's number-of-parameters metric), and `copyWith` methods are exempt. |
 | `max_switch_cases` | `max_cases` | `10` | Flag switch statements with more than this many non-default cases. |
 | `cyclomatic_complexity` | `max_complexity` | `20` | Flag functions whose cyclomatic complexity (1 + decision points: `if`, ternary, `&&`, `\|\|`, `??`, loops, `catch`, non-default `case`, pattern `when` guards) exceeds this value. |
 | `maximum_nesting_level` | `max_nesting` | `5` | Flag functions whose deepest nesting of control-flow blocks (`if`/`for`/`while`/`do`/`switch`/`try`) exceeds this value. |
@@ -146,9 +146,10 @@ Option names use `snake_case` inside the `options` object.
 
 | Rule (group) | Option | Default | Meaning |
 |--------------|--------|---------|---------|
-| `prefer-correct-identifier-length` (`style`) | `min_length` | `2` | Flag identifiers with fewer than this many characters. |
-| | `exceptions` | `["i","j","k","n","_"]` | Names always allowed regardless of length. User entries **extend** the built-in list. |
-| `boolean_prefixes` (`style`) | `prefixes` | `["is","has","can","should","was"]` | Accepted boolean-name prefixes. User entries **extend** the built-ins. Private booleans (`_isReady`) are matched with the leading underscore stripped, and `@override` members are exempt. |
+| `prefer-correct-identifier-length` (`style`) | `min_length` | `3` | Flag identifiers shorter than this. Matches dart_code_linter's default. Scope is limited to variable/field declarations, getter/setter names and enum constants — parameters, catch clauses, for-each variables and plain function/method names are never checked. A single leading underscore is stripped before the length and exception checks. |
+| | `max_length` | `300` | Flag identifiers longer than this. |
+| | `exceptions` | `[]` | Names always allowed regardless of length (there is no built-in list). |
+| `boolean_prefixes` (`style`) | `valid_prefixes` | `["is","are","was","were","has","have","had","can","should","will","do","does","did"]` | Accepted boolean-name prefixes (dart-pyramid-lint defaults). User entries **extend** the defaults. Only variable/field declarations with a boolean-*literal* initializer, and bool-returning methods/getters/functions, are checked; parameters and uninitialized fields are not. Names are matched with a single leading underscore stripped, and `@override` methods are exempt. |
 
 ### `prefer-moving-to-variable` (`complexity`)
 
@@ -158,13 +159,38 @@ Option names use `snake_case` inside the `options` object.
 
 ### `format-comment` (`style`)
 
-Checks that a comment's first alphabetical character is uppercase. Both `//` line
-comments and `///` doc comments are checked.
+Checks that comments read like sentences (start upper-case, end with `.`/`!`/`?`/`:`).
+Consecutive comment lines are treated as one block: a multi-line block is joined
+and split into sentences, so a sentence that wraps across lines is judged as a
+whole and continuation lines are never flagged on their own. Both `//` line
+comments and `///` doc comments are checked unless `only_doc_comments` is set.
 
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `only_doc_comments` | `false` | When `true`, only `///` doc comments are checked. |
 | `ignored_patterns` | `[]` | List of regular expressions; a comment matching any of them is skipped. Invalid patterns are ignored. |
+
+### `no-magic-number` (`style`)
+
+Flags numeric literals that are not extracted to a named constant. Literals are
+exempt when they are in the allow-list, inside a variable/field initializer, a
+collection literal, a const map or const constructor, a `DateTime` constructor,
+or used directly as an index.
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `allowed` | `[-1, 0, 1]` | Numeric values that are never considered magic. |
+
+### `prefer-extracting-callbacks` (`complexity`, `flutter`)
+
+Flags block-body function-expression callbacks passed as arguments to widget
+constructors inside a `Widget`/`State` subclass. Arrow (`=>`) callbacks, empty
+blocks and Flutter builders (first parameter `BuildContext`) are never flagged.
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `allowed_line_count` | _none_ | When set, only callbacks spanning more than this many lines are flagged; unset flags every qualifying callback. |
+| `ignored_named_arguments` | `[]` | Named-argument labels whose callbacks are ignored. |
 
 ### `member-ordering` (`style`)
 

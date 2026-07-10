@@ -7,6 +7,7 @@
 //! Complexity tiers (assigned in M0.5): SIMPLE / MEDIUM / COMPLEX.
 
 pub mod dart_code_linter;
+pub mod member_order;
 pub mod meta;
 pub mod project;
 pub mod pyramid_lint;

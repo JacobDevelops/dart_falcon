@@ -1,8 +1,4 @@
-// Bad: return type is nullable but function never returns null
-
-Future<String?> getName() async { /* expect: unnecessary_nullable_return_type */
-  return 'hello';
-}
+// Bad: an outer-nullable return type whose every return is a non-null literal.
 
 String? getStatus() { /* expect: unnecessary_nullable_return_type */
   return 'active';
@@ -12,10 +8,14 @@ int? getNumber() { /* expect: unnecessary_nullable_return_type */
   return 42;
 }
 
+// The outer `?` (after `List<...>`) counts; the returned list is non-null.
 List<String?>? getItems() { /* expect: unnecessary_nullable_return_type */
   return ['a', 'b', 'c'];
 }
 
-Future<bool?> isValid() async { /* expect: unnecessary_nullable_return_type */
-  return true;
+bool? isValid() { /* expect: unnecessary_nullable_return_type */
+  if (DateTime.now().isUtc) {
+    return true;
+  }
+  return false;
 }

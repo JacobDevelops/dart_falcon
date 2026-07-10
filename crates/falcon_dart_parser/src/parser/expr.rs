@@ -1191,6 +1191,9 @@ impl<'src> Parser<'src> {
         let is_map = match self.cur().kind {
             TokenKind::DotDotDot | TokenKind::DotDotDotQmark => false,
             _ => {
+                // A null-aware key/element leads with `?`; skip it so `{?k: v}`
+                // (map) is told apart from `{?x}` (set).
+                let _ = self.eat(TokenKind::Qmark);
                 let _ = self.parse_expr();
                 self.at(TokenKind::Colon)
             }
@@ -1295,12 +1298,17 @@ impl<'src> Parser<'src> {
                 }
             }
             _ => {
+                // Dart 3.0 null-aware key `?k: v` and/or value `k: ?v`.
+                let key_null_aware = self.eat(TokenKind::Qmark).is_some();
                 let key = self.parse_expr();
                 self.expect(TokenKind::Colon);
+                let value_null_aware = self.eat(TokenKind::Qmark).is_some();
                 let value = self.parse_expr();
                 MapElement::Entry(MapEntry {
                     key,
                     value,
+                    key_null_aware,
+                    value_null_aware,
                     span: self.span_from(start),
                 })
             }
@@ -1310,6 +1318,15 @@ impl<'src> Parser<'src> {
     fn parse_collection_element(&mut self) -> CollectionElement {
         let start = self.cur().offset;
         match self.cur().kind {
+            // Dart 3.0 null-aware element `?expr`
+            TokenKind::Qmark => {
+                self.advance();
+                let expr = self.parse_expr();
+                CollectionElement::NullAware {
+                    expr,
+                    span: self.span_from(start),
+                }
+            }
             TokenKind::DotDotDot | TokenKind::DotDotDotQmark => {
                 let is_null_aware = self.cur().kind == TokenKind::DotDotDotQmark;
                 self.advance();
@@ -1417,7 +1434,7 @@ impl<'src> Parser<'src> {
             let _ = self
                 .eat(TokenKind::Var)
                 .or_else(|| self.eat(TokenKind::Final));
-            let pattern = Some(Box::new(self.parse_pattern()));
+            let pattern = Some(Box::new(self.parse_binding_pattern()));
             self.eat(TokenKind::In);
             let iterable = self.parse_expr();
             self.expect(TokenKind::RParen);

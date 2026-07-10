@@ -12,8 +12,19 @@ void testRectFromPoints() {
 }
 
 void testStringOperations() {
-  final result = str.replaceAll("a", "a"); /* expect: no-equal-arguments */
   final check = areEqual(value, value); /* expect: no-equal-arguments */
+}
+
+// dcl reports on the LAST occurrence of the duplicate, so a hand-written
+// `// ignore` on the trailing argument lines up. The annotation therefore
+// belongs on the final `padding` argument, not the first.
+void testLastOccurrenceLocation() {
+  const value = EdgeInsets.fromLTRB(
+    padding,
+    other,
+    padding,
+    padding, /* expect: no-equal-arguments */
+  );
 }
 
 class Math {

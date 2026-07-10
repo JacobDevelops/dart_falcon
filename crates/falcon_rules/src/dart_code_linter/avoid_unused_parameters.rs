@@ -409,6 +409,9 @@ impl Rule for AvoidUnusedParameters {
                 CollectionElement::Spread { expr, .. } => {
                     collect_from_expr(expr, names);
                 }
+                CollectionElement::NullAware { expr, .. } => {
+                    collect_from_expr(expr, names);
+                }
                 CollectionElement::If {
                     condition,
                     then_elem,
@@ -445,6 +448,9 @@ impl Rule for AvoidUnusedParameters {
                             }
                         }
                         Some(ForInit::ForIn { iterable, .. }) => {
+                            collect_from_expr(iterable, names);
+                        }
+                        Some(ForInit::PatternForIn { iterable, .. }) => {
                             collect_from_expr(iterable, names);
                         }
                         Some(ForInit::Exprs(es)) => {
@@ -510,6 +516,9 @@ impl Rule for AvoidUnusedParameters {
                             }
                         }
                         Some(ForInit::ForIn { iterable, .. }) => {
+                            collect_from_expr(iterable, names);
+                        }
+                        Some(ForInit::PatternForIn { iterable, .. }) => {
                             collect_from_expr(iterable, names);
                         }
                         Some(ForInit::Exprs(es)) => {

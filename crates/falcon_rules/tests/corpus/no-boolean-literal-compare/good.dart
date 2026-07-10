@@ -76,3 +76,13 @@ class FeatureFlag {
     }
   }
 }
+
+// `x == true` / `x != false` on an identifier, member access or call is exempt:
+// nullability is unknowable without type resolution, and this is the correct
+// null-safe idiom for a `bool?`.
+void nullableIdiom(bool? maybe, Widget foo) {
+  if (maybe == true) {}
+  if (maybe != false) {}
+  if (foo.isEnabled == true) {}
+  if (checkStatus() == false) {}
+}

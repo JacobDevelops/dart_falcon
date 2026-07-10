@@ -161,6 +161,7 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                     }
                 }
                 Some(ForInit::ForIn { iterable, .. }) => scan_expr(iterable, diags, ctx),
+                Some(ForInit::PatternForIn { iterable, .. }) => scan_expr(iterable, diags, ctx),
                 Some(ForInit::Exprs(es)) => es.iter().for_each(|e| scan_expr(e, diags, ctx)),
                 None => {}
             }
@@ -302,6 +303,7 @@ fn scan_collection_element(
 ) {
     match el {
         CollectionElement::Expr(e) => scan_expr(e, diags, ctx),
+        CollectionElement::NullAware { expr, .. } => scan_expr(expr, diags, ctx),
         CollectionElement::Spread { expr, .. } => scan_expr(expr, diags, ctx),
         CollectionElement::If {
             then_elem,
@@ -335,6 +337,9 @@ fn scan_collection_element(
                     }
                 }
                 Some(ForInit::ForIn { iterable, .. }) => {
+                    scan_expr(iterable, diags, ctx);
+                }
+                Some(ForInit::PatternForIn { iterable, .. }) => {
                     scan_expr(iterable, diags, ctx);
                 }
                 Some(ForInit::Exprs(es)) => {

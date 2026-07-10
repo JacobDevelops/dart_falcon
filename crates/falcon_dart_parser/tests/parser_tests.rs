@@ -2107,3 +2107,161 @@ fn first_local_var_init(prog: &Program) -> Option<&Expr> {
     }
     None
 }
+
+// ── Dart 3 statement-form pattern destructuring ───────────────────────────────
+
+#[test]
+fn test_pattern_decl_record_final() {
+    // `final (a, b) = expr;` — the jfit construct (recovery_trend_chart.dart).
+    let src = "void f(row) { final (color, valueOf) = row; use(color, valueOf); }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let Stmt::PatternDecl(decl) = &first_fn_body_stmts(&prog)[0] else {
+        panic!(
+            "expected PatternDecl, got {:#?}",
+            first_fn_body_stmts(&prog)[0]
+        );
+    };
+    assert!(decl.is_final);
+    let Pattern::Record(rec) = &decl.pattern else {
+        panic!("expected record pattern, got {:#?}", decl.pattern);
+    };
+    assert_eq!(rec.fields.len(), 2);
+    // Bindings are Variable patterns, not Const references.
+    for (field, name) in rec.fields.iter().zip(["color", "valueOf"]) {
+        let Pattern::Variable { name: id, .. } = &field.pattern else {
+            panic!("expected variable binding, got {:#?}", field.pattern);
+        };
+        assert_eq!(id.name, name);
+    }
+    // The initializer is preserved as an Ident expr.
+    assert!(matches!(&decl.init, Expr::Ident(id) if id.name == "row"));
+}
+
+#[test]
+fn test_pattern_decl_var_named_shorthand() {
+    // `var (x, :y) = ..;` — positional + `:name` shorthand field.
+    let src = "void f(p) { var (x, :y) = p; }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let Stmt::PatternDecl(decl) = &first_fn_body_stmts(&prog)[0] else {
+        panic!("expected PatternDecl");
+    };
+    assert!(!decl.is_final);
+    let Pattern::Record(rec) = &decl.pattern else {
+        panic!("expected record pattern");
+    };
+    assert_eq!(rec.fields.len(), 2);
+    assert!(rec.fields[0].name.is_none());
+    assert_eq!(
+        rec.fields[1].name.as_ref().map(|n| n.name.as_str()),
+        Some("y")
+    );
+    assert!(matches!(&rec.fields[1].pattern, Pattern::Variable { name, .. } if name.name == "y"));
+}
+
+#[test]
+fn test_pattern_decl_switch_initializer() {
+    // `final (label, color) = switch (status) { ... };` (scheduling_shared_widgets.dart).
+    let src = "void f(status) { final (label, color) = switch (status) { _ => (1, 2) }; }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let Stmt::PatternDecl(decl) = &first_fn_body_stmts(&prog)[0] else {
+        panic!("expected PatternDecl");
+    };
+    assert!(matches!(&decl.pattern, Pattern::Record(r) if r.fields.len() == 2));
+    assert!(matches!(&decl.init, Expr::Switch { .. }));
+}
+
+#[test]
+fn test_pattern_decl_does_not_shadow_record_typed_var() {
+    // `final (int, String) rec = ..;` is a record-TYPED var decl, not a pattern.
+    let src = "void f() { final (int, String) rec = (1, 'a'); }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert!(
+        matches!(&first_fn_body_stmts(&prog)[0], Stmt::LocalVar(_)),
+        "expected LocalVar, got {:#?}",
+        first_fn_body_stmts(&prog)[0]
+    );
+}
+
+#[test]
+fn test_for_statement_pattern_destructuring() {
+    // `for (final (index, slot) in slots.indexed) { .. }` (recovery_trend_chart.dart).
+    let src = "void f(slots) { for (final (index, slot) in slots.indexed) { use(index, slot); } }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let Stmt::For(for_stmt) = &first_fn_body_stmts(&prog)[0] else {
+        panic!("expected For, got {:#?}", first_fn_body_stmts(&prog)[0]);
+    };
+    let Some(ForInit::PatternForIn { pattern, iterable }) = &for_stmt.init else {
+        panic!("expected PatternForIn, got {:#?}", for_stmt.init);
+    };
+    let Pattern::Record(rec) = &**pattern else {
+        panic!("expected record pattern");
+    };
+    assert_eq!(rec.fields.len(), 2);
+    assert!(
+        matches!(&rec.fields[0].pattern, Pattern::Variable { name, .. } if name.name == "index")
+    );
+    // The iterable `slots.indexed` is preserved as a Field access.
+    assert!(matches!(&**iterable, Expr::Field { .. }));
+}
+
+// ── Dart 3.0 null-aware collection elements ───────────────────────────────────
+
+#[test]
+fn test_null_aware_list_element() {
+    // `[?weightLabel, ...]` (logged_exercise_card.dart).
+    let src = "f(weightLabel) => <String>[?weightLabel, 'reps'];";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let Expr::List { elements, .. } = first_fn_arrow_or_block_expr(&prog) else {
+        panic!("expected list");
+    };
+    assert_eq!(elements.len(), 2);
+    let CollectionElement::NullAware { expr, .. } = &elements[0] else {
+        panic!("expected null-aware element, got {:#?}", elements[0]);
+    };
+    assert!(matches!(expr, Expr::Ident(id) if id.name == "weightLabel"));
+    assert!(matches!(&elements[1], CollectionElement::Expr(_)));
+}
+
+#[test]
+fn test_null_aware_set_element() {
+    // `{?activeType}` (exercise_picker_page.dart) — a set, not a map.
+    let src = "f(activeType) => {?activeType};";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let Expr::Set { elements, .. } = first_fn_arrow_or_block_expr(&prog) else {
+        panic!(
+            "expected set, got {:#?}",
+            first_fn_arrow_or_block_expr(&prog)
+        );
+    };
+    assert_eq!(elements.len(), 1);
+    assert!(matches!(
+        &elements[0],
+        CollectionElement::NullAware { expr, .. } if matches!(expr, Expr::Ident(id) if id.name == "activeType")
+    ));
+}
+
+#[test]
+fn test_null_aware_map_key_and_value() {
+    // `{?k: v}` and `{?k: ?v}` — null-aware key and/or value on a map entry.
+    let src = "f(k, v) => {?k: v, a: ?v};";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let Expr::Map { entries, .. } = first_fn_arrow_or_block_expr(&prog) else {
+        panic!(
+            "expected map, got {:#?}",
+            first_fn_arrow_or_block_expr(&prog)
+        );
+    };
+    assert_eq!(entries.len(), 2);
+    assert!(entries[0].key_null_aware);
+    assert!(!entries[0].value_null_aware);
+    assert!(!entries[1].key_null_aware);
+    assert!(entries[1].value_null_aware);
+}

@@ -1,53 +1,31 @@
-// Test cases for no-magic-number rule
-// Flags numeric literals not in allowlist [0, 1, 2, -1]
-// Phase 1: Simple allowlist check. Config: allowlist in falcon.json.
+// Test cases for no-magic-number. Each literal sits in a non-exempt position
+// (default allow-list is [-1, 0, 1]).
 
-void testMagicTimeout() {
-  final timeout = 30; /* expect: no-magic-number */
-  sleep(timeout);
-}
-
-void testMagicThreshold() {
+// A literal in a condition is flagged.
+void threshold(int count) {
   if (count > 100) { /* expect: no-magic-number */
-    print("over threshold");
+    print(count);
   }
 }
 
-void testMagicPadding() {
-  final padding = EdgeInsets.all(16); /* expect: no-magic-number */
-}
-
-void testMultipleMagicNumbers() {
-  final width = 800; /* expect: no-magic-number */
-  final height = 600; /* expect: no-magic-number */
-  final maxRetries = 5; /* expect: no-magic-number */
-}
-
-class Config {
-  static final defaultPort = 8080; /* expect: no-magic-number */
-  static final timeout = 3000; /* expect: no-magic-number */
-  static final maxConnections = 50; /* expect: no-magic-number */
-}
-
-void testMagicInOperations() {
-  final result = value * 100; /* expect: no-magic-number */
-  final scaled = base + 20; /* expect: no-magic-number */
-  final divided = total / 3; /* expect: no-magic-number */
-}
-
-void testMagicInLoop() {
-  for (int i = 0; i < 10; i++) { /* expect: no-magic-number */
+// A for-loop condition literal is flagged (the initializer is a var decl).
+void loop() {
+  for (var i = 0; i < 10; i++) { /* expect: no-magic-number */
     print(i);
   }
 }
 
-void testMagicInRange() {
-  final list = List.generate(25, (i) => i); /* expect: no-magic-number */
+// A non-const constructor argument is flagged.
+Widget build() {
+  return SizedBox(height: 12); /* expect: no-magic-number */
 }
 
-void testAllowedNumbers() {
-  final zero = 0;
-  final one = 1;
-  final two = 2;
-  final negOne = -1;
+// A non-const map's value is flagged.
+Map<String, int> config() {
+  return {'timeout': 5000}; /* expect: no-magic-number */
+}
+
+// Arithmetic on a magic number in an expression statement is flagged.
+void compute(int value) {
+  print(value * 100); /* expect: no-magic-number */
 }

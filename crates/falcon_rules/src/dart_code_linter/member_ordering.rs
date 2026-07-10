@@ -2,17 +2,21 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
+use crate::member_order::{category_rank, check_sequence, read_string_list};
+
 pub struct MemberOrdering;
+
+const NAME: &str = "member-ordering";
 
 impl Rule for MemberOrdering {
     fn name(&self) -> &'static str {
-        "member-ordering"
+        NAME
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        let order = read_string_list(ctx, "order");
-        let widgets_order = read_string_list(ctx, "widgets_order");
+        let order = read_string_list(ctx, NAME, "order");
+        let widgets_order = read_string_list(ctx, NAME, "widgets_order");
 
         for decl in &program.declarations {
             match decl {
@@ -42,20 +46,6 @@ impl Rule for MemberOrdering {
     }
 }
 
-/// Read a `member-ordering` option as a list of lowercase category tokens.
-fn read_string_list(ctx: &AnalyzeContext, key: &str) -> Option<Vec<String>> {
-    crate::meta::meta_for("member-ordering")
-        .and_then(|m| ctx.config.rule_options(m.group, "member-ordering"))
-        .and_then(|o| o.get(key))
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| s.to_string())
-                .collect()
-        })
-}
-
 fn check_class(
     members: &[ClassMember],
     extends: Option<&DartType>,
@@ -74,6 +64,7 @@ fn check_class(
             members,
             diags,
             ctx,
+            NAME,
             |m| widget_rank(m, seq),
             widgets_message(),
         );
@@ -82,6 +73,7 @@ fn check_class(
             members,
             diags,
             ctx,
+            NAME,
             |m| category_rank(m, seq),
             order_message(),
         );
@@ -93,105 +85,6 @@ fn check_class(
 /// True when the class extends `State` / `State<T>` (Flutter widget state).
 fn extends_state(extends: Option<&DartType>) -> bool {
     matches!(extends, Some(DartType::Named(nt)) if nt.segments.last().is_some_and(|id| id.name == "State"))
-}
-
-/// Generic ordering check: each member is assigned a rank; a member whose rank
-/// is lower than the highest rank seen so far is out of order. Members with no
-/// rank (not covered by the configured categories) are skipped.
-fn check_sequence(
-    members: &[ClassMember],
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    rank_of: impl Fn(&ClassMember) -> Option<usize>,
-    message: &str,
-) {
-    let mut max_seen: Option<usize> = None;
-    for member in members {
-        let Some(rank) = rank_of(member) else {
-            continue;
-        };
-        match max_seen {
-            Some(prev) if rank < prev => {
-                let span = member.span();
-                diags.push(Diagnostic::new(
-                    "member-ordering",
-                    Severity::Warning,
-                    message,
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
-                ));
-            }
-            _ => max_seen = Some(rank),
-        }
-    }
-}
-
-fn member_name(member: &ClassMember) -> Option<&str> {
-    match member {
-        ClassMember::Field(f) => f.declarators.first().map(|d| d.name.name.as_str()),
-        ClassMember::Method(m) => Some(m.name.name.as_str()),
-        ClassMember::Getter(g) => Some(g.name.name.as_str()),
-        ClassMember::Setter(s) => Some(s.name.name.as_str()),
-        ClassMember::Constructor(c) => c.constructor_name.as_ref().map(|n| n.name.as_str()),
-        _ => None,
-    }
-}
-
-fn is_private(member: &ClassMember) -> bool {
-    member_name(member).is_some_and(|n| n.starts_with('_'))
-}
-
-/// All DCL category tokens a member qualifies for (most specific first). The
-/// member's rank is the earliest of these that appears in the user's `order`.
-fn member_tokens(member: &ClassMember) -> Vec<&'static str> {
-    match member {
-        ClassMember::Field(f) => {
-            let mut t = Vec::new();
-            if f.is_static {
-                t.push("static-fields");
-            }
-            if is_private(member) {
-                t.push("private-fields");
-            } else {
-                t.push("public-fields");
-            }
-            t.push("fields");
-            t
-        }
-        ClassMember::Constructor(c) => {
-            let mut t = Vec::new();
-            if c.constructor_name.is_some() {
-                t.push("named-constructors");
-            }
-            t.push("constructors");
-            t
-        }
-        ClassMember::Method(m) => {
-            let mut t = Vec::new();
-            if m.is_static {
-                t.push("static-methods");
-            }
-            if is_private(member) {
-                t.push("private-methods");
-            } else {
-                t.push("public-methods");
-            }
-            t.push("methods");
-            t
-        }
-        ClassMember::Getter(_) => vec!["getters", "methods"],
-        ClassMember::Setter(_) => vec!["setters", "methods"],
-        ClassMember::Operator(_) => vec!["methods"],
-        ClassMember::Error(_) => Vec::new(),
-    }
-}
-
-fn category_rank(member: &ClassMember, order: &[String]) -> Option<usize> {
-    let tokens = member_tokens(member);
-    order.iter().position(|cat| tokens.iter().any(|t| t == cat))
 }
 
 /// Lifecycle token for a State member, for `widgets_order`. `overridden-methods`

@@ -1,19 +1,51 @@
-// Good: using ternary/conditional expressions
+// Good: cases dart_code_linter's prefer-conditional-expressions does not flag.
+
 String getStatus(bool isActive) {
   return isActive ? 'active' : 'inactive';
 }
 
-int getValue(bool hasValue) {
-  return hasValue ? 42 : 0;
-}
-
-class Validator {
-  bool isValid(String input) {
-    return input.isNotEmpty;
+// Branches are calls, not a single assignment or return.
+void printMessage(bool success) {
+  if (success) {
+    print('Success!');
+  } else {
+    print('Failed!');
   }
 }
 
-// OK: complex logic in if/else (more than simple return)
+// else-if chains are skipped.
+String classify(int code) {
+  if (code == 0) {
+    return 'zero';
+  } else if (code == 1) {
+    return 'one';
+  } else {
+    return 'many';
+  }
+}
+
+// Assignments target different variables.
+void assignDifferent(bool flag) {
+  String x = '';
+  String y = '';
+  if (flag) {
+    x = 'a';
+  } else {
+    y = 'b';
+  }
+  print('$x$y');
+}
+
+// Assignment target is not a simple identifier.
+void assignIndex(bool flag, Map<String, int> m) {
+  if (flag) {
+    m['a'] = 1;
+  } else {
+    m['b'] = 2;
+  }
+}
+
+// Multiple statements per branch.
 void processData(bool flag) {
   if (flag) {
     print('Processing...');
@@ -22,13 +54,4 @@ void processData(bool flag) {
   } else {
     cleanup();
   }
-}
-
-// OK: if with additional statements
-String getMessage(bool success) {
-  if (success) {
-    log('Success');
-    return 'Done!';
-  }
-  return 'Failed!';
 }

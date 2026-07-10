@@ -41,3 +41,16 @@ void testWithUnion(Object? nullable) {
     print(nullable);
   }
 }
+
+// dcl exempts `dynamic` used directly as a `Map` type argument (the JSON escape
+// hatch) — both in a `Map<...>` annotation and in a `<...>{}` map literal.
+Map<String, dynamic> jsonField = {};
+
+Map<String, dynamic> parseJson(Map<String, dynamic> json) {
+  final literal = <String, dynamic>{'k': 1};
+  return literal;
+}
+
+class Serializable {
+  Map<String, dynamic> toJson() => <String, dynamic>{};
+}

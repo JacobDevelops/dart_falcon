@@ -6,14 +6,13 @@ use falcon_syntax::ast::*;
 
 pub struct PreferCorrectIdentifierLength;
 
-/// Built-in names always allowed regardless of length. User-provided
-/// `exceptions` extend (not replace) this list.
-const BUILTIN_EXCEPTIONS: &[&str] = &["i", "j", "k", "n", "_"];
-
-/// Resolved options for one analysis pass.
+/// Resolved options for one analysis pass. dcl defaults: min 3, max 300, no
+/// exceptions. There is deliberately no built-in exception list — dcl has none,
+/// and the scope below never reaches short-lived names like loop or lambda
+/// parameters where single letters are idiomatic.
 struct IdentCfg {
-    /// Names strictly shorter than this are flagged (default 2 → single chars).
     min_length: usize,
+    max_length: usize,
     exceptions: HashSet<String>,
 }
 
@@ -27,21 +26,28 @@ fn ident_cfg(ctx: &AnalyzeContext) -> IdentCfg {
         .and_then(|o| o.get("min_length"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
-        .unwrap_or(2);
+        .unwrap_or(3);
 
-    let mut exceptions: HashSet<String> =
-        BUILTIN_EXCEPTIONS.iter().map(|s| s.to_string()).collect();
-    if let Some(list) = opts
+    let max_length = opts
+        .and_then(|o| o.get("max_length"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .unwrap_or(300);
+
+    let exceptions: HashSet<String> = opts
         .and_then(|o| o.get("exceptions"))
         .and_then(|v| v.as_array())
-    {
-        for name in list.iter().filter_map(|v| v.as_str()) {
-            exceptions.insert(name.to_string());
-        }
-    }
+        .map(|list| {
+            list.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
 
     IdentCfg {
         min_length,
+        max_length,
         exceptions,
     }
 }
@@ -56,18 +62,30 @@ impl Rule for PreferCorrectIdentifierLength {
         let cfg = ident_cfg(ctx);
         for decl in &program.declarations {
             match decl {
+                // dcl checks *variable declarations*, so a function's own name
+                // and parameters are out of scope; only its local variables are.
                 TopLevelDecl::Function(func) => {
-                    check_ident(&func.name, &mut diags, ctx, &cfg);
-                    check_params(&func.params, &mut diags, ctx, &cfg);
                     if let Some(body) = &func.body {
                         check_body(body, &mut diags, ctx, &cfg);
+                    }
+                }
+                TopLevelDecl::Variable(var) => {
+                    for decl in &var.declarators {
+                        check_ident(&decl.name, &mut diags, ctx, &cfg);
                     }
                 }
                 TopLevelDecl::Class(class) => check_members(&class.members, &mut diags, ctx, &cfg),
                 TopLevelDecl::Mixin(mixin) => check_members(&mixin.members, &mut diags, ctx, &cfg),
                 TopLevelDecl::MixinClass(mc) => check_members(&mc.members, &mut diags, ctx, &cfg),
-                TopLevelDecl::Enum(e) => check_members(&e.members, &mut diags, ctx, &cfg),
                 TopLevelDecl::Extension(ext) => check_members(&ext.members, &mut diags, ctx, &cfg),
+                TopLevelDecl::Enum(e) => {
+                    // Enum constants are checked as declarations…
+                    for variant in &e.variants {
+                        check_ident(&variant.name, &mut diags, ctx, &cfg);
+                    }
+                    // …and any getters/setters/fields the enum declares.
+                    check_members(&e.members, &mut diags, ctx, &cfg);
+                }
                 _ => {}
             }
         }
@@ -75,8 +93,16 @@ impl Rule for PreferCorrectIdentifierLength {
     }
 }
 
-fn is_short(name: &str, cfg: &IdentCfg) -> bool {
-    name.chars().count() < cfg.min_length && !cfg.exceptions.contains(name)
+/// dcl strips a single leading underscore before both the exception check and
+/// the length check, so `_id` matches the `id` exception and `_ab` is judged as
+/// the two-character `ab`.
+fn is_invalid(name: &str, cfg: &IdentCfg) -> bool {
+    let stripped = name.strip_prefix('_').unwrap_or(name);
+    if cfg.exceptions.contains(stripped) {
+        return false;
+    }
+    let len = stripped.chars().count();
+    len < cfg.min_length || len > cfg.max_length
 }
 
 fn check_ident(
@@ -85,26 +111,8 @@ fn check_ident(
     ctx: &AnalyzeContext,
     cfg: &IdentCfg,
 ) {
-    if is_short(&ident.name, cfg) {
-        diags.push(make_diag(ctx, &ident.span, &ident.name));
-    }
-}
-
-fn check_params(
-    params: &FormalParamList,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    cfg: &IdentCfg,
-) {
-    for param in params
-        .positional
-        .iter()
-        .chain(params.optional_positional.iter())
-        .chain(params.named.iter())
-    {
-        if is_short(&param.name.name, cfg) {
-            diags.push(make_diag(ctx, &param.name.span, &param.name.name));
-        }
+    if is_invalid(&ident.name, cfg) {
+        diags.push(make_diag(ctx, &ident.span, &ident.name, cfg));
     }
 }
 
@@ -116,24 +124,14 @@ fn check_members(
 ) {
     for member in members {
         match member {
+            // Fields are variable declarations.
             ClassMember::Field(field) => {
                 for decl in &field.declarators {
                     check_ident(&decl.name, diags, ctx, cfg);
                 }
             }
-            ClassMember::Method(method) => {
-                check_ident(&method.name, diags, ctx, cfg);
-                check_params(&method.params, diags, ctx, cfg);
-                if let Some(body) = &method.body {
-                    check_body(body, diags, ctx, cfg);
-                }
-            }
-            ClassMember::Constructor(ctor) => {
-                check_params(&ctor.params, diags, ctx, cfg);
-                if let Some(body) = &ctor.body {
-                    check_body(body, diags, ctx, cfg);
-                }
-            }
+            // Only getters and setters have their *name* checked (dcl only
+            // inspects accessor declarations, not plain methods).
             ClassMember::Getter(getter) => {
                 check_ident(&getter.name, diags, ctx, cfg);
                 if let Some(body) = &getter.body {
@@ -143,6 +141,18 @@ fn check_members(
             ClassMember::Setter(setter) => {
                 check_ident(&setter.name, diags, ctx, cfg);
                 if let Some(body) = &setter.body {
+                    check_body(body, diags, ctx, cfg);
+                }
+            }
+            // Methods and constructors: names and parameters are out of scope,
+            // but their bodies still declare checkable local variables.
+            ClassMember::Method(method) => {
+                if let Some(body) = &method.body {
+                    check_body(body, diags, ctx, cfg);
+                }
+            }
+            ClassMember::Constructor(ctor) => {
+                if let Some(body) = &ctor.body {
                     check_body(body, diags, ctx, cfg);
                 }
             }
@@ -184,22 +194,21 @@ fn check_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cf
             }
         }
         Stmt::For(for_stmt) => {
-            match &for_stmt.init {
-                Some(ForInit::VarDecl(local)) => {
-                    for decl in &local.declarators {
-                        check_ident(&decl.name, diags, ctx, cfg);
-                    }
+            // C-style `for (var i = 0; …)` declares a variable, so its counter
+            // is checked. A for-*each* loop variable is a `DeclaredIdentifier`,
+            // not a `VariableDeclaration`, and dcl does not check it.
+            if let Some(ForInit::VarDecl(local)) = &for_stmt.init {
+                for decl in &local.declarators {
+                    check_ident(&decl.name, diags, ctx, cfg);
                 }
-                Some(ForInit::ForIn { name, .. }) => {
-                    check_ident(name, diags, ctx, cfg);
-                }
-                _ => {}
             }
             check_stmt(&for_stmt.body, diags, ctx, cfg);
         }
         Stmt::While(s) => check_stmt(&s.body, diags, ctx, cfg),
         Stmt::DoWhile(s) => check_stmt(&s.body, diags, ctx, cfg),
         Stmt::TryCatch(s) => {
+            // A catch clause parameter (`catch (e)`) is not a variable
+            // declaration, so only the block bodies are traversed.
             check_stmts(&s.body.stmts, diags, ctx, cfg);
             for catch in &s.catches {
                 check_stmts(&catch.body.stmts, diags, ctx, cfg);
@@ -209,22 +218,31 @@ fn check_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cf
             }
         }
         Stmt::LocalFunc(local_func) => {
-            check_ident(&local_func.name, diags, ctx, cfg);
-            check_params(&local_func.params, diags, ctx, cfg);
+            // The local function's name and parameters are out of scope; only
+            // its body's variable declarations matter.
             check_body(&local_func.body, diags, ctx, cfg);
         }
         _ => {}
     }
 }
 
-fn make_diag(ctx: &AnalyzeContext, span: &Span, name: &str) -> Diagnostic {
+fn make_diag(ctx: &AnalyzeContext, span: &Span, name: &str, cfg: &IdentCfg) -> Diagnostic {
+    let len = name.strip_prefix('_').unwrap_or(name).chars().count();
+    let message = if len > cfg.max_length {
+        format!(
+            "The {name} identifier is {len} characters long. It's recommended to decrease it to {} chars long.",
+            cfg.max_length
+        )
+    } else {
+        format!(
+            "The {name} identifier is {len} characters long. It's recommended to increase it up to {} chars long.",
+            cfg.min_length
+        )
+    };
     Diagnostic::new(
         "prefer-correct-identifier-length",
         Severity::Warning,
-        format!(
-            "Identifier '{}' is too short — use a more descriptive name",
-            name
-        ),
+        message,
         ctx.file_path.to_string_lossy().into_owned(),
         DiagSpan {
             start: span.start,

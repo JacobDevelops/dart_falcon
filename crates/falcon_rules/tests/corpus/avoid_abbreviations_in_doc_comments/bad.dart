@@ -1,22 +1,16 @@
-/// The impl of the auth service /* expect: avoid_abbreviations_in_doc_comments */
+/// Validates tokens, e.g. JWT and opaque tokens. /* expect: avoid_abbreviations_in_doc_comments */
 class AuthService {
-  /// Helper func to validate tokens /* expect: avoid_abbreviations_in_doc_comments */
+  /// Rate limiting, i.e. throttling requests. /* expect: avoid_abbreviations_in_doc_comments */
   bool validateToken(String token) => token.isNotEmpty;
 
-  /// Stores config data in the repo /* expect: avoid_abbreviations_in_doc_comments */
+  /// Handles sessions, cookies, etc. /* expect: avoid_abbreviations_in_doc_comments */
   late Map<String, dynamic> config;
 
-  /// Check param values e.g. email validation /* expect: avoid_abbreviations_in_doc_comments */
+  /// See Smith et al. for the derivation. /* expect: avoid_abbreviations_in_doc_comments */
   void checkParams(String param) {
     print(param);
   }
 
-  /// Initialize util vars and i.e. defaults /* expect: avoid_abbreviations_in_doc_comments */
+  /// Two on one line e.g. this and i.e. that. /* expect: avoid_abbreviations_in_doc_comments */ /* expect: avoid_abbreviations_in_doc_comments */
   void init() {}
-
-  /// Process arg and cfg settings etc. /* expect: avoid_abbreviations_in_doc_comments */
-  void process(String arg) {}
-
-  /// Handle var initialization and setup /* expect: avoid_abbreviations_in_doc_comments */
-  void setup() {}
 }

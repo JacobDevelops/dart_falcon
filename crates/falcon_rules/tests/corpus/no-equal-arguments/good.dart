@@ -85,3 +85,14 @@ void testComparing(String a, String b) {
 void mergeCollections(List<int> list1, List<int> list2) {
   list1.addAll(list2);
 }
+
+// Literal arguments are compared by identity in dcl, so two equal literals are
+// never flagged — passing the same literal to different parameters is routine
+// and intentional, not a copy-paste bug.
+void testEqualLiterals() {
+  const box = Size(48, 48);
+  final state = current.copyWith(isSaving: false, isSaved: false);
+  showModal(useSafeArea: true, showDragHandle: true);
+  final edges = EdgeInsets.fromLTRB(0, 0, 0, 0);
+  final negative = clamp(-1, -1);
+}

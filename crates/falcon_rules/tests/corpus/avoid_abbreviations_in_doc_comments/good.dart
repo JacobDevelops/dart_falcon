@@ -1,22 +1,22 @@
-/// The implementation of the authentication service
+/// The implementation of the authentication service.
 class AuthService {
-  /// Helper function to validate tokens
+  /// Helper function to validate tokens.
   bool validateToken(String token) => token.isNotEmpty;
 
-  /// Stores configuration data in the repository
+  /// Stores configuration data in the repository.
   late Map<String, dynamic> config;
 
-  /// Check parameter values, for example email validation
+  /// Check parameter values, for example email validation.
   void checkParams(String param) {
     print(param);
   }
 
-  /// Initialize utility variables and that is defaults
+  /// Initialize utility variables and, that is, defaults.
   void init() {}
 
-  /// Process argument and configuration settings et cetera
+  // A regular (non-doc) comment is out of scope, e.g. this is fine.
   void process(String arg) {}
 
-  /// Handle variable initialization and setup
+  /// Case-sensitive: E.g. and I.e. at sentence start are not flagged.
   void setup() {}
 }

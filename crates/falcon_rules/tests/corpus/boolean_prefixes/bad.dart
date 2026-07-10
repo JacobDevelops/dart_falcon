@@ -1,35 +1,24 @@
-class BooleanPrefixes {
-  /// Missing boolean prefix for active
+// Violations: boolean-literal declarations and bool-returning members whose
+// names lack a valid prefix.
+
+class Flags {
   bool active = true; /* expect: boolean_prefixes */
-
-  /// Missing boolean prefix for valid
-  bool valid; /* expect: boolean_prefixes */
-
-  /// Missing boolean prefix for loading
   bool loading = false; /* expect: boolean_prefixes */
+  bool _enabled = true; /* expect: boolean_prefixes */
 
-  /// Missing boolean prefix for enabled
-  bool enabled = true; /* expect: boolean_prefixes */
-
-  /// Missing boolean prefix for visible
-  bool visible = false; /* expect: boolean_prefixes */
-
-  /// Missing boolean prefix in method parameter
-  void checkStatus(bool ready) { /* expect: boolean_prefixes */
-    print(ready);
-  }
-
-  /// Missing boolean prefix in method return
+  // A non-override method returning bool without a valid prefix.
   bool getStatus() { /* expect: boolean_prefixes */
     return true;
   }
 
-  /// Missing boolean prefix for local variable
+  // A getter returning bool without a valid prefix.
+  bool get empty => !active; /* expect: boolean_prefixes */
+
   void example() {
     bool complete = false; /* expect: boolean_prefixes */
     print(complete);
   }
-
-  /// Missing boolean prefix in late variable
-  late bool initialized; /* expect: boolean_prefixes */
 }
+
+// A top-level function returning bool without a valid prefix.
+bool validate() => true; /* expect: boolean_prefixes */

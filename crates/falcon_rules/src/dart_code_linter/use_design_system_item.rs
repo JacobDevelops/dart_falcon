@@ -277,6 +277,7 @@ fn scan_expr(
                 match elem {
                     CollectionElement::Expr(e) => scan_expr(e, diags, ctx, items),
                     CollectionElement::Spread { expr: e, .. } => scan_expr(e, diags, ctx, items),
+                    CollectionElement::NullAware { expr: e, .. } => scan_expr(e, diags, ctx, items),
                     CollectionElement::If {
                         then_elem,
                         else_elem,
@@ -317,6 +318,9 @@ fn scan_expr(
                             Some(ForInit::ForIn { iterable, .. }) => {
                                 scan_expr(iterable, diags, ctx, items);
                             }
+                            Some(ForInit::PatternForIn { iterable, .. }) => {
+                                scan_expr(iterable, diags, ctx, items);
+                            }
                             Some(ForInit::Exprs(es)) => {
                                 for e in es {
                                     scan_expr(e, diags, ctx, items);
@@ -353,6 +357,7 @@ fn scan_expr(
                 match elem {
                     CollectionElement::Expr(e) => scan_expr(e, diags, ctx, items),
                     CollectionElement::Spread { expr: e, .. } => scan_expr(e, diags, ctx, items),
+                    CollectionElement::NullAware { expr: e, .. } => scan_expr(e, diags, ctx, items),
                     CollectionElement::If {
                         then_elem,
                         else_elem,
@@ -391,6 +396,9 @@ fn scan_expr(
                                 }
                             }
                             Some(ForInit::ForIn { iterable, .. }) => {
+                                scan_expr(iterable, diags, ctx, items);
+                            }
+                            Some(ForInit::PatternForIn { iterable, .. }) => {
                                 scan_expr(iterable, diags, ctx, items);
                             }
                             Some(ForInit::Exprs(es)) => {

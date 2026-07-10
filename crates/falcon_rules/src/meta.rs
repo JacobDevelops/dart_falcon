@@ -120,11 +120,18 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         recommended: true,
         project: false,
     },
+    // Not in the recommended preset: faithfully reproducing dart_code_linter
+    // requires type information. dcl only flags a boolean-literal comparison
+    // when the other operand's static type is non-nullable `bool`; `x == true`
+    // is the correct null-safe idiom for a `bool?` and must not be flagged.
+    // Without type resolution falcon only flags provably-boolean operands
+    // (literals, negations, `is` checks, comparison/logical expressions), so the
+    // rule is opt-in rather than on by default.
     RuleMeta {
         name: "no-boolean-literal-compare",
         group: "complexity",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         project: false,
     },
     RuleMeta {

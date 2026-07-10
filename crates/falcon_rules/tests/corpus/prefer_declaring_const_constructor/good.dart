@@ -59,3 +59,28 @@ class Pair {
     return Pair(value, value);
   }
 }
+
+// Good: extends a non-Object superclass whose constructor const-ness is unknown.
+class Base {
+  final int a;
+  const Base(this.a);
+}
+
+class Derived extends Base {
+  final int b;
+  Derived(this.b) : super(0);
+}
+
+// Good: applies a mixin (mixin const-ness unknown).
+mixin Logger {}
+
+class Service with Logger {
+  final int id;
+  Service(this.id);
+}
+
+// Good: a final field with a non-const initializer.
+class Clock {
+  final DateTime stamp = DateTime.now();
+  Clock();
+}

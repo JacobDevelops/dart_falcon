@@ -1,4 +1,4 @@
-// Bad: simple if/else that could be ternary
+// Bad: a single assignment or single return in each branch.
 String getStatus(bool isActive) {
   if (isActive) { /* expect: prefer-conditional-expressions */
     return 'active';
@@ -21,14 +21,6 @@ class Validator {
     } else {
       return false;
     }
-  }
-}
-
-void printMessage(bool success) {
-  if (success) { /* expect: prefer-conditional-expressions */
-    print('Success!');
-  } else {
-    print('Failed!');
   }
 }
 

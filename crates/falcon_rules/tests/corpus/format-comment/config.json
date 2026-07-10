@@ -1,0 +1,12 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "format-comment": {
+          "level": "warn",
+          "options": { "only_doc_comments": true }
+        }
+      }
+    }
+  }
+}

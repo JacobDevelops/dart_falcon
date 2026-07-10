@@ -1,46 +1,37 @@
 class NestedIfExamples {
-  void example1(bool a, bool b, bool c) {
-    /// Two levels of nesting
-    if (a) {
-      if (b) { /* expect: avoid_nested_if */
-        print('both true');
-      }
-    }
-  }
-
-  void example2(bool a, bool b, bool c) {
-    /// Three levels of nesting
-    if (a) {
+  // A vertical chain: the outer then-branch contains two further `if`
+  // statements (b and c), so the outermost `if` is flagged.
+  void chain(bool a, bool b, bool c) {
+    if (a) { /* expect: avoid_nested_if */
       if (b) {
-        if (c) { /* expect: avoid_nested_if */
+        if (c) {
           print('all true');
         }
       }
     }
   }
 
-  void example3(bool a, bool b) {
-    if (a) {
-      doSomething();
-      if (b) { /* expect: avoid_nested_if */
-        print('nested after statement');
+  // Two sibling `if` statements inside the then-branch also reach the
+  // nesting threshold of two.
+  void siblings(bool a, bool b, bool c) {
+    if (a) { /* expect: avoid_nested_if */
+      if (b) {
+        print('b');
+      }
+      if (c) {
+        print('c');
       }
     }
   }
 
-  void example4(bool condition) {
-    if (condition) {
-      if (true) { /* expect: avoid_nested_if */
-        print('nested');
-      }
-    }
-  }
-
-  void example5(bool x, bool y, bool z) {
-    if (x) {
-      if (y) {
-        if (z) { /* expect: avoid_nested_if */
-          print('deeply nested');
+  // Nested `if` statements reached through an intervening loop still count.
+  void throughLoop(bool a, bool b, List<int> xs) {
+    if (a) { /* expect: avoid_nested_if */
+      for (final x in xs) {
+        if (b) {
+          if (x > 0) {
+            print(x);
+          }
         }
       }
     }

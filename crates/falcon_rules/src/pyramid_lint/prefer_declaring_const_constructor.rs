@@ -33,62 +33,112 @@ fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     ));
 }
 
-fn all_fields_const_or_final(class_decl: &ClassDecl) -> bool {
+/// Conservatively decide whether an initializer expression evaluates to a
+/// constant. Without element resolution we accept only literals and explicit
+/// `const` constructor invocations (mirrors pyramid_lint accepting literals /
+/// `inConstantContext`, minus the cases we cannot prove).
+fn is_const_evaluable(expr: &Expr) -> bool {
+    match expr {
+        Expr::BoolLit { .. }
+        | Expr::IntLit { .. }
+        | Expr::DoubleLit { .. }
+        | Expr::StringLit(_)
+        | Expr::NullLit { .. } => true,
+        Expr::New { is_const, .. } => *is_const,
+        _ => false,
+    }
+}
+
+/// True when a type names bare `Object` (an implicit-or-explicit `Object`
+/// superclass has a const constructor, so it does not block const-ness).
+fn is_object_named(ty: &DartType) -> bool {
+    match ty {
+        DartType::Named(named) => named
+            .segments
+            .last()
+            .map(|s| s.name == "Object")
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn all_fields_final(class_decl: &ClassDecl) -> bool {
+    class_decl
+        .members
+        .iter()
+        .all(|member| !matches!(member, ClassMember::Field(f) if !f.is_final && !f.is_const))
+}
+
+/// Every field-declaration initializer must itself be const-evaluable, else the
+/// class cannot be const even with all-final fields.
+fn field_initializers_const(class_decl: &ClassDecl) -> bool {
     for member in &class_decl.members {
-        if let ClassMember::Field(field) = member
-            && !field.is_final
-            && !field.is_const
-        {
-            return false;
+        if let ClassMember::Field(field) = member {
+            for d in &field.declarators {
+                if let Some(init) = &d.initializer
+                    && !is_const_evaluable(init)
+                {
+                    return false;
+                }
+            }
         }
     }
     true
 }
 
-fn constructor_body_is_const_safe(constructor: &ConstructorDecl) -> bool {
-    // Check if body has no non-const operations
-    // Empty body or only initializers is safe
-    if constructor.body.is_none() {
-        return true;
+fn constructor_is_const_candidate(ctor: &ConstructorDecl) -> bool {
+    if ctor.is_const || ctor.is_factory || ctor.is_external {
+        return false;
     }
 
-    if let Some(FunctionBody::Block(block)) = &constructor.body {
-        // If body has any actual statements (beyond initializers), it's not purely const-safe
-        // For now, we allow empty blocks or blocks with only simple statements
-        // The safest check: if there's a non-empty block, it's not const-safe
-        return block.stmts.is_empty();
+    for init in &ctor.initializers {
+        match init {
+            // We cannot verify that the target super/redirecting constructor is
+            // itself const, so treat these as blocking.
+            ConstructorInitializer::SuperCall { .. } | ConstructorInitializer::ThisCall { .. } => {
+                return false;
+            }
+            ConstructorInitializer::FieldInit { value, .. } => {
+                if !is_const_evaluable(value) {
+                    return false;
+                }
+            }
+            // Asserts are permitted in const constructors.
+            ConstructorInitializer::Assert { .. } => {}
+        }
     }
 
-    false
+    // A const constructor cannot have a (non-empty) body.
+    match &ctor.body {
+        None => true,
+        Some(FunctionBody::Block(block)) => block.stmts.is_empty(),
+        Some(_) => false,
+    }
 }
 
 fn check_class(class_decl: &ClassDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    // Only check if all fields are final or const
-    if !all_fields_const_or_final(class_decl) {
+    // Skip subclasses of a non-Object superclass (unknown super const-ness) and
+    // classes applying mixins (unknown mixin const-ness).
+    if let Some(ext) = &class_decl.extends
+        && !is_object_named(ext)
+    {
+        return;
+    }
+    if !class_decl.with_clause.is_empty() {
+        return;
+    }
+    if !all_fields_final(class_decl) {
+        return;
+    }
+    if !field_initializers_const(class_decl) {
         return;
     }
 
     for member in &class_decl.members {
-        if let ClassMember::Constructor(constructor) = member {
-            // Skip if already const
-            if constructor.is_const {
-                continue;
-            }
-
-            // Skip factory constructors
-            if constructor.is_factory {
-                continue;
-            }
-
-            // Skip external constructors
-            if constructor.is_external {
-                continue;
-            }
-
-            // Check if body is safe for const
-            if constructor_body_is_const_safe(constructor) {
-                flag(&constructor.span, diags, ctx);
-            }
+        if let ClassMember::Constructor(ctor) = member
+            && constructor_is_const_candidate(ctor)
+        {
+            flag(&ctor.span, diags, ctx);
         }
     }
 }

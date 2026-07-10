@@ -1,78 +1,42 @@
-// Good: extracting complex callbacks to named functions
-class DataProcessor {
-  String _formatItem(Map<String, dynamic> item) {
-    final id = item['id'] as String;
-    final name = item['name'] as String;
-    final active = item['active'] as bool;
-    if (active) {
-      return '$id: $name';
-    }
-    return '';
-  }
+import 'package:flutter/material.dart';
 
-  List<String> processItems(List<Map<String, dynamic>> items) {
-    return items.map(_formatItem).toList();
-  }
-
-  bool _isValidNumber(int n) {
-    final isEven = n % 2 == 0;
-    final isPositive = n > 0;
-    final isSmall = n < 100;
-    return isEven && isPositive && isSmall;
-  }
-
-  void filterAndPrint(List<int> numbers) {
-    numbers.where(_isValidNumber).forEach(print);
+// Non-widget class: callbacks are never flagged (dcl only visits Widget/State).
+class NotAWidget {
+  void run(List<int> items) {
+    items.forEach((item) {
+      final doubled = item * 2;
+      print(doubled);
+    });
   }
 }
 
-// OK: simple inline callbacks (one-liners or arrow functions)
-class Simple {
-  List<int> doubleValues(List<int> nums) {
-    return nums.map((n) => n * 2).toList();
-  }
+class MyWidget extends StatelessWidget {
+  const MyWidget({super.key});
 
-  void printIfEven(List<int> nums) {
-    nums.where((n) => n % 2 == 0).forEach(print);
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Arrow callback: not a block body, never flagged.
+        ElevatedButton(
+          onPressed: () => doSomething(),
+          child: const Text('go'),
+        ),
+        // Single-line block callback: within allowed_line_count, not flagged.
+        ElevatedButton(
+          onPressed: () { doSomething(); },
+          child: const Text('short'),
+        ),
+        // Builder callback (first parameter is BuildContext) is excluded.
+        Builder(
+          builder: (BuildContext context) {
+            final theme = Theme.of(context);
+            return Text('$theme');
+          },
+        ),
+      ],
+    );
   }
 }
 
-// Good: extracted callback method for validation
-class Validator {
-  void _logProcessing(String item) {
-    final trimmed = item.trim();
-    final lowercased = trimmed.toLowerCase();
-    if (lowercased.isNotEmpty) {
-      print(lowercased);
-    }
-  }
-
-  void processWithValidation(List<String> items) {
-    items.forEach(_logProcessing);
-  }
-}
-
-// Good: single-statement callbacks are fine
-class Calculator {
-  List<int> transform(List<int> values) {
-    return values.map((n) => n * 2 + 1).toList();
-  }
-
-  void process(List<String> data) {
-    data.forEach(print);
-  }
-}
-
-// Good: extracting filter logic
-class Filter {
-  bool _isSignificant(int num) {
-    final doubled = num * 2;
-    final squared = doubled * doubled;
-    final final_val = squared + num;
-    return final_val > 100;
-  }
-
-  List<int> filterNumbers(List<int> nums) {
-    return nums.where(_isSignificant).toList();
-  }
-}
+void doSomething() {}

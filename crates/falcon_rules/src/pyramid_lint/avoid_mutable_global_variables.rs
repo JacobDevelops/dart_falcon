@@ -14,23 +14,19 @@ impl Rule for AvoidMutableGlobalVariables {
 
         for decl in &program.declarations {
             if let TopLevelDecl::Variable(var_decl) = decl {
-                // Check if variable is mutable (not const)
-                // Pyramid_lint is stricter: final and non-final mutable globals are flagged
-                // unless they are const
-                if !var_decl.is_const {
-                    // Flag each declarator in a mutable global variable
-                    for declarator in &var_decl.declarators {
-                        diags.push(Diagnostic::new(
-                            "avoid_mutable_global_variables",
-                            Severity::Warning,
-                            "Avoid mutable global variables. Use const instead.",
-                            ctx.file_path.to_string_lossy().into_owned(),
-                            DiagSpan {
-                                start: declarator.span.start,
-                                end: declarator.span.end,
-                            },
-                        ));
-                    }
+                // pyramid_lint only flags top-level variables that are neither
+                // `const` nor `final` (`isConstOrFinal` skips the declaration).
+                if !var_decl.is_const && !var_decl.is_final {
+                    diags.push(Diagnostic::new(
+                        "avoid_mutable_global_variables",
+                        Severity::Warning,
+                        "Avoid mutable global variables. Use const or final instead.",
+                        ctx.file_path.to_string_lossy().into_owned(),
+                        DiagSpan {
+                            start: var_decl.span.start,
+                            end: var_decl.span.end,
+                        },
+                    ));
                 }
             }
         }

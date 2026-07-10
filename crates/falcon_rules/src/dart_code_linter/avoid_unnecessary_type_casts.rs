@@ -225,6 +225,7 @@ impl AvoidUnnecessaryTypeCasts {
                             CollectionElement::Spread { expr, .. } => self.visit_exprs(expr, f),
                             _ => {}
                         },
+                        CollectionElement::NullAware { expr, .. } => self.visit_exprs(expr, f),
                     }
                 }
             }
@@ -278,6 +279,7 @@ impl AvoidUnnecessaryTypeCasts {
                             CollectionElement::Spread { expr, .. } => self.visit_exprs(expr, f),
                             _ => {}
                         },
+                        CollectionElement::NullAware { expr, .. } => self.visit_exprs(expr, f),
                     }
                 }
             }

@@ -17,70 +17,33 @@ impl Rule for AvoidAbbreviationsInDocComments {
 }
 
 fn scan_source(source: &str, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let lines: Vec<&str> = source.lines().collect();
-
-    // Abbreviations to flag (derived from corpus bad.dart)
-    let abbreviations = [
-        "impl", "func", "config", "repo", "param", "util", "var", "arg", "cfg", "e.g.", "i.e.",
-        "etc.",
-    ];
+    // pyramid_lint's default abbreviation set. Matching is a case-sensitive
+    // substring `contains`, reporting the first occurrence of each abbreviation
+    // in a doc-comment line (mirrors `commentText.contains(abbreviation)` /
+    // `indexOf` in avoid_abbreviations_in_doc_comments.dart).
+    let abbreviations = ["e.g.", "i.e.", "etc.", "et al."];
 
     let mut byte_offset = 0;
-    for line in lines {
+    for line in source.lines() {
         if line.trim_start().starts_with("///") {
-            let trimmed = line.trim_start();
-            let doc_text = &trimmed[3..];
-
-            // Check for abbreviations in the doc comment text
             for &abbr in &abbreviations {
-                if contains_word(doc_text, abbr) {
-                    // Emit diagnostic at the start of this line
+                if let Some(index) = line.find(abbr) {
+                    let start = byte_offset + index;
                     diags.push(Diagnostic::new(
                         "avoid_abbreviations_in_doc_comments",
                         Severity::Warning,
                         format!("Avoid abbreviation '{}' in doc comments", abbr),
                         ctx.file_path.to_string_lossy().into_owned(),
                         DiagSpan {
-                            start: byte_offset,
-                            end: byte_offset + line.len(),
+                            start,
+                            end: start + abbr.len(),
                         },
                     ));
-                    break; // Only one diagnostic per line
                 }
             }
         }
 
-        // Move byte_offset to the next line
-        byte_offset += line.len() + 1; // +1 for newline character
+        // Move byte_offset to the next line (+1 for the newline character).
+        byte_offset += line.len() + 1;
     }
-}
-
-// Check if a word (abbreviation) appears as a whole word in text
-fn contains_word(text: &str, word: &str) -> bool {
-    let lower_text = text.to_lowercase();
-    let lower_word = word.to_lowercase();
-    let word_bytes = lower_word.as_bytes();
-    let text_bytes = lower_text.as_bytes();
-
-    if word_bytes.len() > text_bytes.len() {
-        return false;
-    }
-
-    for i in 0..=text_bytes.len().saturating_sub(word_bytes.len()) {
-        if &text_bytes[i..i + word_bytes.len()] == word_bytes {
-            // Check boundaries
-            let before_ok = i == 0 || !is_word_char(text_bytes[i - 1]);
-            let after_ok = i + word_bytes.len() >= text_bytes.len()
-                || !is_word_char(text_bytes[i + word_bytes.len()]);
-
-            if before_ok && after_ok {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn is_word_char(b: u8) -> bool {
-    b.is_ascii_lowercase() || b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'
 }

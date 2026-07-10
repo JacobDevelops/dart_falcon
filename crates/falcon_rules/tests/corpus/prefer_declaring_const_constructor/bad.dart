@@ -39,3 +39,11 @@ class Duration {
 
   Duration(this.seconds, this.milliseconds); /* expect: prefer_declaring_const_constructor */
 }
+
+// Bad: final fields with const-evaluable literal initializers are eligible.
+class Flags {
+  final bool enabled = true;
+  final int count = 0;
+
+  Flags(); /* expect: prefer_declaring_const_constructor */
+}

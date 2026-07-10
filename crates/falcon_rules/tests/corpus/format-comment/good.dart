@@ -1,55 +1,23 @@
-// Test cases for format-comment rule
-// No violations: all comments start with uppercase or are empty/non-letter
+// Fixtures for the format-comment rule, configured with only_doc_comments:true.
+// Regular // comments (like this header) are NOT checked, so lowercase and
+// unterminated regular comments never fire here.
 
-class Example {
-  int value = 0;
+/// A correctly formatted single-line doc comment.
+void single() {}
 
-  void method() {
-    // This is correctly formatted
-    value = 1;
+// this regular comment is lowercase and unterminated but is skipped entirely
+// because only_doc_comments is enabled.
+void regularIgnored() {}
 
-    // Another well-formed comment
-    value = 2;
+/// This is a long description that wraps across two source
+/// lines and still ends with proper terminal punctuation.
+void wrapped() {}
 
-    // TODO: fix this later
-    value = 3;
+/// {@template my.macro}
+/// Body text goes here.
+/// {@endtemplate}
+void macro() {}
 
-    // NOTE: special handling required
-    print(value);
-  }
-}
-
-void topLevel() {
-  // Calculate the result
-  final x = 1 + 2;
-
-  // Print and return
-  print(x);
-}
-
-// Empty comment line is fine
-//
-void anotherFunction() {
-  print("ok");
-}
-
-// Comments starting with non-letter are OK
-void withSpecialChars() {
-  // 123 numeric start
-  int count = 0;
-
-  // @override-like patterns
-  count++;
-
-  // _underscore patterns
-  count--;
-}
-
-// Uppercase variety
-void uppercase() {
-  // A comment
-  var x = 1;
-
-  // Z comment
-  var y = 2;
-}
+/// A block whose first sentence ends early. And a second wrapped
+/// sentence that also terminates cleanly.
+void twoSentences() {}

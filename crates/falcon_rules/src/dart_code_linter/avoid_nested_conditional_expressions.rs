@@ -11,11 +11,9 @@ impl Rule for AvoidNestedConditionalExpressions {
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-
         for decl in &program.declarations {
             visit_top_level_decl(decl, &mut diags, ctx);
         }
-
         diags
     }
 }
@@ -206,102 +204,85 @@ fn visit_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
     }
 }
 
+/// Visit an expression, flagging every conditional expression that is nested
+/// inside another conditional expression. `cond_ancestor` is true when some
+/// enclosing expression is already a conditional — mirroring dart_code_linter's
+/// nesting-level assignment with the default `acceptable-level` of 1 (any
+/// conditional at nesting level >= 2 is reported).
 fn visit_expr(
     expr: &Expr,
-    inside_nested: bool,
+    cond_ancestor: bool,
     diagnostics: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    if !inside_nested
-        && is_nested_conditional(expr)
-        && let Expr::Conditional {
+    match expr {
+        Expr::Conditional {
             span,
             condition,
             then_expr,
             else_expr,
-        } = expr
-    {
-        diagnostics.push(Diagnostic::new(
-            "avoid-nested-conditional-expressions",
-            Severity::Warning,
-            "Avoid nested conditional expressions",
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-        visit_expr(condition, true, diagnostics, ctx);
-        visit_expr(then_expr, true, diagnostics, ctx);
-        visit_expr(else_expr, true, diagnostics, ctx);
-        return;
-    }
-
-    match expr {
-        Expr::Unary { operand, .. } => {
-            visit_expr(operand, inside_nested, diagnostics, ctx);
+        } => {
+            if cond_ancestor {
+                diagnostics.push(Diagnostic::new(
+                    "avoid-nested-conditional-expressions",
+                    Severity::Warning,
+                    "Avoid nested conditional expressions",
+                    ctx.file_path.to_string_lossy().into_owned(),
+                    DiagSpan {
+                        start: span.start,
+                        end: span.end,
+                    },
+                ));
+            }
+            // Everything under this conditional now has a conditional ancestor.
+            visit_expr(condition, true, diagnostics, ctx);
+            visit_expr(then_expr, true, diagnostics, ctx);
+            visit_expr(else_expr, true, diagnostics, ctx);
         }
-        Expr::PostfixIncDec { operand, .. } => {
-            visit_expr(operand, inside_nested, diagnostics, ctx);
-        }
+        Expr::Unary { operand, .. } => visit_expr(operand, cond_ancestor, diagnostics, ctx),
+        Expr::PostfixIncDec { operand, .. } => visit_expr(operand, cond_ancestor, diagnostics, ctx),
         Expr::Binary { left, right, .. } => {
-            visit_expr(left, inside_nested, diagnostics, ctx);
-            visit_expr(right, inside_nested, diagnostics, ctx);
+            visit_expr(left, cond_ancestor, diagnostics, ctx);
+            visit_expr(right, cond_ancestor, diagnostics, ctx);
         }
         Expr::Assign { target, value, .. } => {
-            visit_expr(target, inside_nested, diagnostics, ctx);
-            visit_expr(value, inside_nested, diagnostics, ctx);
+            visit_expr(target, cond_ancestor, diagnostics, ctx);
+            visit_expr(value, cond_ancestor, diagnostics, ctx);
         }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            visit_expr(condition, inside_nested, diagnostics, ctx);
-            visit_expr(then_expr, inside_nested, diagnostics, ctx);
-            visit_expr(else_expr, inside_nested, diagnostics, ctx);
-        }
-        Expr::Is { expr, .. } => {
-            visit_expr(expr, inside_nested, diagnostics, ctx);
-        }
-        Expr::As { expr, .. } => {
-            visit_expr(expr, inside_nested, diagnostics, ctx);
-        }
-        Expr::Field { object, .. } => {
-            visit_expr(object, inside_nested, diagnostics, ctx);
-        }
+        Expr::Is { expr, .. } => visit_expr(expr, cond_ancestor, diagnostics, ctx),
+        Expr::As { expr, .. } => visit_expr(expr, cond_ancestor, diagnostics, ctx),
+        Expr::Field { object, .. } => visit_expr(object, cond_ancestor, diagnostics, ctx),
         Expr::Index { object, index, .. } => {
-            visit_expr(object, inside_nested, diagnostics, ctx);
-            visit_expr(index, inside_nested, diagnostics, ctx);
+            visit_expr(object, cond_ancestor, diagnostics, ctx);
+            visit_expr(index, cond_ancestor, diagnostics, ctx);
         }
         Expr::Call { callee, args, .. } => {
-            visit_expr(callee, inside_nested, diagnostics, ctx);
+            visit_expr(callee, cond_ancestor, diagnostics, ctx);
             for arg in &args.positional {
-                visit_expr(arg, inside_nested, diagnostics, ctx);
+                visit_expr(arg, cond_ancestor, diagnostics, ctx);
             }
             for named_arg in &args.named {
-                visit_expr(&named_arg.value, inside_nested, diagnostics, ctx);
+                visit_expr(&named_arg.value, cond_ancestor, diagnostics, ctx);
             }
         }
         Expr::Cascade {
             object, sections, ..
         } => {
-            visit_expr(object, inside_nested, diagnostics, ctx);
+            visit_expr(object, cond_ancestor, diagnostics, ctx);
             for section in sections {
                 match &section.op {
-                    CascadeOp::Index(idx, _) => visit_expr(idx, inside_nested, diagnostics, ctx),
+                    CascadeOp::Index(idx, _) => visit_expr(idx, cond_ancestor, diagnostics, ctx),
                     CascadeOp::Call(_, _, args) => {
                         for a in &args.positional {
-                            visit_expr(a, inside_nested, diagnostics, ctx);
+                            visit_expr(a, cond_ancestor, diagnostics, ctx);
                         }
                         for na in &args.named {
-                            visit_expr(&na.value, inside_nested, diagnostics, ctx);
+                            visit_expr(&na.value, cond_ancestor, diagnostics, ctx);
                         }
                     }
                     CascadeOp::Assign(tgt, _, val) => {
-                        visit_expr(tgt, inside_nested, diagnostics, ctx);
-                        visit_expr(val, inside_nested, diagnostics, ctx);
+                        visit_expr(tgt, cond_ancestor, diagnostics, ctx);
+                        visit_expr(val, cond_ancestor, diagnostics, ctx);
                     }
                     CascadeOp::Field(_, _) => {}
                 }
@@ -309,73 +290,66 @@ fn visit_expr(
         }
         Expr::List { elements, .. } => {
             for elem in elements {
-                visit_collection_element(elem, inside_nested, diagnostics, ctx);
+                visit_collection_element(elem, cond_ancestor, diagnostics, ctx);
             }
         }
         Expr::Map {
             entries, elements, ..
         } => {
             for entry in entries {
-                visit_expr(&entry.key, inside_nested, diagnostics, ctx);
-                visit_expr(&entry.value, inside_nested, diagnostics, ctx);
+                visit_expr(&entry.key, cond_ancestor, diagnostics, ctx);
+                visit_expr(&entry.value, cond_ancestor, diagnostics, ctx);
             }
             for e in map_element_exprs(elements) {
-                visit_expr(e, inside_nested, diagnostics, ctx);
+                visit_expr(e, cond_ancestor, diagnostics, ctx);
             }
         }
         Expr::Set { elements, .. } => {
             for elem in elements {
-                visit_collection_element(elem, inside_nested, diagnostics, ctx);
+                visit_collection_element(elem, cond_ancestor, diagnostics, ctx);
             }
         }
         Expr::Record { fields, .. } => {
             for field in fields {
-                visit_expr(&field.value, inside_nested, diagnostics, ctx);
+                visit_expr(&field.value, cond_ancestor, diagnostics, ctx);
             }
         }
         Expr::New { args, .. } => {
             for arg in &args.positional {
-                visit_expr(arg, inside_nested, diagnostics, ctx);
+                visit_expr(arg, cond_ancestor, diagnostics, ctx);
             }
             for named_arg in &args.named {
-                visit_expr(&named_arg.value, inside_nested, diagnostics, ctx);
+                visit_expr(&named_arg.value, cond_ancestor, diagnostics, ctx);
             }
         }
-        Expr::Await { expr, .. } => {
-            visit_expr(expr, inside_nested, diagnostics, ctx);
-        }
-        Expr::Throw { expr, .. } => {
-            visit_expr(expr, inside_nested, diagnostics, ctx);
-        }
+        Expr::Await { expr, .. } => visit_expr(expr, cond_ancestor, diagnostics, ctx),
+        Expr::Throw { expr, .. } => visit_expr(expr, cond_ancestor, diagnostics, ctx),
         Expr::Switch { subject, arms, .. } => {
-            visit_expr(subject, inside_nested, diagnostics, ctx);
+            visit_expr(subject, cond_ancestor, diagnostics, ctx);
             for arm in arms {
                 if let Some(guard) = &arm.guard {
-                    visit_expr(guard, inside_nested, diagnostics, ctx);
+                    visit_expr(guard, cond_ancestor, diagnostics, ctx);
                 }
-                visit_expr(&arm.body, inside_nested, diagnostics, ctx);
+                visit_expr(&arm.body, cond_ancestor, diagnostics, ctx);
             }
         }
-        Expr::NullAssert { operand, .. } => {
-            visit_expr(operand, inside_nested, diagnostics, ctx);
-        }
+        Expr::NullAssert { operand, .. } => visit_expr(operand, cond_ancestor, diagnostics, ctx),
         _ => {}
     }
 }
 
 fn visit_collection_element(
     elem: &CollectionElement,
-    inside_nested: bool,
+    cond_ancestor: bool,
     diagnostics: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
     match elem {
-        CollectionElement::Expr(e) => {
-            visit_expr(e, inside_nested, diagnostics, ctx);
+        CollectionElement::Expr(e) => visit_expr(e, cond_ancestor, diagnostics, ctx),
+        CollectionElement::NullAware { expr, .. } => {
+            visit_expr(expr, cond_ancestor, diagnostics, ctx)
         }
-        CollectionElement::Spread { expr, .. } => {
-            visit_expr(expr, inside_nested, diagnostics, ctx);
-        }
+        CollectionElement::Spread { expr, .. } => visit_expr(expr, cond_ancestor, diagnostics, ctx),
         CollectionElement::If {
             condition,
             then_elem,
@@ -383,18 +357,18 @@ fn visit_collection_element(
             ..
         } => {
             if let IfCondition::Expr(cond) = condition {
-                visit_expr(cond, inside_nested, diagnostics, ctx);
+                visit_expr(cond, cond_ancestor, diagnostics, ctx);
             }
-            visit_collection_element(then_elem, inside_nested, diagnostics, ctx);
+            visit_collection_element(then_elem, cond_ancestor, diagnostics, ctx);
             if let Some(ee) = else_elem {
-                visit_collection_element(ee, inside_nested, diagnostics, ctx);
+                visit_collection_element(ee, cond_ancestor, diagnostics, ctx);
             }
         }
         CollectionElement::For {
             iterable, element, ..
         } => {
-            visit_expr(iterable, inside_nested, diagnostics, ctx);
-            visit_collection_element(element, inside_nested, diagnostics, ctx);
+            visit_expr(iterable, cond_ancestor, diagnostics, ctx);
+            visit_collection_element(element, cond_ancestor, diagnostics, ctx);
         }
         CollectionElement::CFor {
             init,
@@ -407,234 +381,30 @@ fn visit_collection_element(
                 Some(ForInit::VarDecl(d)) => {
                     for decl in &d.declarators {
                         if let Some(e) = &decl.initializer {
-                            visit_expr(e, inside_nested, diagnostics, ctx);
+                            visit_expr(e, cond_ancestor, diagnostics, ctx);
                         }
                     }
                 }
                 Some(ForInit::ForIn { iterable, .. }) => {
-                    visit_expr(iterable, inside_nested, diagnostics, ctx);
+                    visit_expr(iterable, cond_ancestor, diagnostics, ctx);
+                }
+                Some(ForInit::PatternForIn { iterable, .. }) => {
+                    visit_expr(iterable, cond_ancestor, diagnostics, ctx);
                 }
                 Some(ForInit::Exprs(es)) => {
                     for e in es {
-                        visit_expr(e, inside_nested, diagnostics, ctx);
+                        visit_expr(e, cond_ancestor, diagnostics, ctx);
                     }
                 }
                 None => {}
             }
             if let Some(c) = condition {
-                visit_expr(c, inside_nested, diagnostics, ctx);
+                visit_expr(c, cond_ancestor, diagnostics, ctx);
             }
             for u in updates {
-                visit_expr(u, inside_nested, diagnostics, ctx);
+                visit_expr(u, cond_ancestor, diagnostics, ctx);
             }
-            visit_collection_element(element, inside_nested, diagnostics, ctx);
-        }
-    }
-}
-
-fn is_nested_conditional(expr: &Expr) -> bool {
-    if let Expr::Conditional {
-        condition,
-        then_expr,
-        else_expr,
-        ..
-    } = expr
-    {
-        contains_conditional(condition)
-            || contains_conditional(then_expr)
-            || contains_conditional(else_expr)
-    } else {
-        false
-    }
-}
-
-fn contains_conditional(expr: &Expr) -> bool {
-    match expr {
-        Expr::Conditional { .. } => true,
-        Expr::Unary { operand, .. } => contains_conditional(operand),
-        Expr::PostfixIncDec { operand, .. } => contains_conditional(operand),
-        Expr::Binary { left, right, .. } => {
-            contains_conditional(left) || contains_conditional(right)
-        }
-        Expr::Assign { target, value, .. } => {
-            contains_conditional(target) || contains_conditional(value)
-        }
-        Expr::Is { expr, .. } => contains_conditional(expr),
-        Expr::As { expr, .. } => contains_conditional(expr),
-        Expr::Field { object, .. } => contains_conditional(object),
-        Expr::Index { object, index, .. } => {
-            contains_conditional(object) || contains_conditional(index)
-        }
-        Expr::Call { callee, args, .. } => {
-            if contains_conditional(callee) {
-                return true;
-            }
-            for arg in &args.positional {
-                if contains_conditional(arg) {
-                    return true;
-                }
-            }
-            for named_arg in &args.named {
-                if contains_conditional(&named_arg.value) {
-                    return true;
-                }
-            }
-            false
-        }
-        Expr::Cascade {
-            object, sections, ..
-        } => {
-            if contains_conditional(object) {
-                return true;
-            }
-            for section in sections {
-                match &section.op {
-                    CascadeOp::Index(idx, _) => {
-                        if contains_conditional(idx) {
-                            return true;
-                        }
-                    }
-                    CascadeOp::Call(_, _, args) => {
-                        if args.positional.iter().any(contains_conditional) {
-                            return true;
-                        }
-                        if args.named.iter().any(|na| contains_conditional(&na.value)) {
-                            return true;
-                        }
-                    }
-                    CascadeOp::Assign(tgt, _, val) => {
-                        if contains_conditional(tgt) || contains_conditional(val) {
-                            return true;
-                        }
-                    }
-                    CascadeOp::Field(_, _) => {}
-                }
-            }
-            false
-        }
-        Expr::List { elements, .. } => {
-            for elem in elements {
-                if contains_conditional_in_elem(elem) {
-                    return true;
-                }
-            }
-            false
-        }
-        Expr::Map {
-            entries, elements, ..
-        } => {
-            for entry in entries {
-                if contains_conditional(&entry.key) || contains_conditional(&entry.value) {
-                    return true;
-                }
-            }
-            for e in map_element_exprs(elements) {
-                if contains_conditional(e) {
-                    return true;
-                }
-            }
-            false
-        }
-        Expr::Set { elements, .. } => {
-            for elem in elements {
-                if contains_conditional_in_elem(elem) {
-                    return true;
-                }
-            }
-            false
-        }
-        Expr::Record { fields, .. } => {
-            for field in fields {
-                if contains_conditional(&field.value) {
-                    return true;
-                }
-            }
-            false
-        }
-        Expr::New { args, .. } => {
-            for arg in &args.positional {
-                if contains_conditional(arg) {
-                    return true;
-                }
-            }
-            for named_arg in &args.named {
-                if contains_conditional(&named_arg.value) {
-                    return true;
-                }
-            }
-            false
-        }
-        Expr::Await { expr, .. } => contains_conditional(expr),
-        Expr::Throw { expr, .. } => contains_conditional(expr),
-        Expr::Switch { subject, arms, .. } => {
-            if contains_conditional(subject) {
-                return true;
-            }
-            for arm in arms {
-                if let Some(guard) = &arm.guard
-                    && contains_conditional(guard)
-                {
-                    return true;
-                }
-                if contains_conditional(&arm.body) {
-                    return true;
-                }
-            }
-            false
-        }
-        Expr::NullAssert { operand, .. } => contains_conditional(operand),
-        _ => false,
-    }
-}
-
-fn contains_conditional_in_elem(elem: &CollectionElement) -> bool {
-    match elem {
-        CollectionElement::Expr(e) => contains_conditional(e),
-        CollectionElement::Spread { expr, .. } => contains_conditional(expr),
-        CollectionElement::If {
-            condition,
-            then_elem,
-            else_elem,
-            ..
-        } => {
-            if let IfCondition::Expr(cond) = condition
-                && contains_conditional(cond)
-            {
-                return true;
-            }
-            if contains_conditional_in_elem(then_elem) {
-                return true;
-            }
-            if let Some(ee) = else_elem
-                && contains_conditional_in_elem(ee)
-            {
-                return true;
-            }
-            false
-        }
-        CollectionElement::For {
-            iterable, element, ..
-        } => contains_conditional(iterable) || contains_conditional_in_elem(element),
-        CollectionElement::CFor {
-            init,
-            condition,
-            updates,
-            element,
-            ..
-        } => {
-            let init_has = match init {
-                Some(ForInit::VarDecl(d)) => d
-                    .declarators
-                    .iter()
-                    .any(|decl| decl.initializer.as_ref().is_some_and(contains_conditional)),
-                Some(ForInit::ForIn { iterable, .. }) => contains_conditional(iterable),
-                Some(ForInit::Exprs(es)) => es.iter().any(contains_conditional),
-                None => false,
-            };
-            init_has
-                || condition.as_ref().is_some_and(contains_conditional)
-                || updates.iter().any(contains_conditional)
-                || contains_conditional_in_elem(element)
+            visit_collection_element(element, cond_ancestor, diagnostics, ctx);
         }
     }
 }
