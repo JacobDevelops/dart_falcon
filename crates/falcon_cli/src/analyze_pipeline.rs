@@ -5,9 +5,10 @@ use tracing::{info, warn};
 
 use clap::ValueEnum;
 use falcon_analyze::{RuleRegistry, analyze_parallel, analyze_sequential};
-use falcon_config::{FalconConfig, load_config, load_or_default};
-use falcon_diagnostics::{Diagnostic, Severity};
-use falcon_rules::enabled_rules;
+use falcon_config::{load_config, load_or_default};
+use falcon_diagnostics::Diagnostic;
+use falcon_rules::{ResolvedRules, apply_severities, resolve_rules};
+use glob::Pattern;
 
 use crate::file_walker::walk_files;
 use crate::output;
@@ -63,30 +64,36 @@ pub struct CheckOutput {
     pub exit_code: i32,
 }
 
-/// Register every rule that the config does not explicitly disable
-/// (enablement semantics live in `falcon_rules::enabled_rules`).
-fn build_registry(config: &FalconConfig) -> RuleRegistry {
+/// Build a registry from the resolved rule set (enablement semantics live in
+/// `falcon_rules::resolve_rules`).
+fn build_registry(resolved: ResolvedRules) -> RuleRegistry {
     let mut registry = RuleRegistry::new();
-    for rule in enabled_rules(config) {
+    for rule in resolved.rules {
         registry.register(rule);
     }
     registry
 }
 
-/// Apply `config.severity_override` entries to collected diagnostics.
-/// Unknown severity names are warned about and skipped.
-fn apply_severity_overrides(diagnostics: &mut [Diagnostic], config: &FalconConfig) {
-    if config.severity_override.is_empty() {
+/// Keep only files matching at least one positive include glob. A non-empty
+/// `includes` list restricts the walked set; an empty one means "no filtering".
+fn apply_includes(files: &mut Vec<(PathBuf, String)>, includes: &[String]) {
+    if includes.is_empty() {
         return;
     }
-    for diag in diagnostics.iter_mut() {
-        if let Some(name) = config.severity_override.get(diag.rule) {
-            match name.parse::<Severity>() {
-                Ok(severity) => diag.severity = severity,
-                Err(e) => warn!(rule = diag.rule, "invalid severity override: {}", e),
+    let compiled: Vec<Pattern> = includes
+        .iter()
+        .filter_map(|p| match Pattern::new(p) {
+            Ok(pat) => Some(pat),
+            Err(_) => {
+                warn!("invalid include pattern: {}", p);
+                None
             }
-        }
-    }
+        })
+        .collect();
+    files.retain(|(path, _)| {
+        let s = path.to_string_lossy();
+        compiled.iter().any(|p| p.matches(&s))
+    });
 }
 
 /// Run analysis and collect results without printing diagnostics.
@@ -106,10 +113,11 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     };
 
     // Config exclude patterns and CLI --exclude patterns are unioned.
-    let mut exclude_patterns = config.exclude_patterns.clone();
+    let mut exclude_patterns = config.files.exclude_patterns();
     exclude_patterns.extend(options.exclude_patterns.iter().cloned());
 
-    let files = walk_files(&options.paths, &exclude_patterns);
+    let mut files = walk_files(&options.paths, &exclude_patterns);
+    apply_includes(&mut files, &config.files.include_patterns());
     if files.is_empty() {
         return Ok(CheckOutput {
             diagnostics: vec![],
@@ -118,7 +126,9 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
         });
     }
 
-    let registry = build_registry(&config);
+    let resolved = resolve_rules(&config);
+    let severities = resolved.severities.clone();
+    let registry = build_registry(resolved);
     info!(
         file_count = files.len(),
         rule_count = registry.rules().len(),
@@ -130,7 +140,7 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
         analyze_sequential(&registry, &files, &config)
     };
 
-    apply_severity_overrides(&mut diagnostics, &config);
+    apply_severities(&mut diagnostics, &severities);
 
     // Parallel analysis collects in nondeterministic file order; sort so
     // output (and max_errors truncation) is stable across runs and modes.

@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::parse;
-use falcon_diagnostics::Diagnostic;
-use falcon_rules::enabled_rules;
+use falcon_diagnostics::{Diagnostic, Severity};
+use falcon_rules::{apply_severities, resolve_rules};
 use falcon_syntax::Program;
 use tracing::{debug, warn};
 
@@ -37,6 +37,8 @@ pub struct LspState {
     config: FalconConfig,
     config_path: Option<PathBuf>,
     rules: Vec<Box<dyn Rule>>,
+    /// Resolved severity per enabled rule, applied to diagnostics before publish.
+    severities: HashMap<&'static str, Severity>,
 }
 
 impl LspState {
@@ -45,12 +47,13 @@ impl LspState {
     /// `$HOME/.falcon.json` → defaults).
     pub fn new(config_path: Option<PathBuf>) -> Self {
         let config = load_from(config_path.as_deref());
-        let rules = enabled_rules(&config);
+        let resolved = resolve_rules(&config);
         Self {
             documents: HashMap::new(),
             config,
             config_path,
-            rules,
+            rules: resolved.rules,
+            severities: resolved.severities,
         }
     }
 
@@ -138,6 +141,7 @@ impl LspState {
             .iter()
             .flat_map(|rule| rule.analyze(&doc.program, &ctx))
             .collect();
+        apply_severities(&mut diagnostics, &self.severities);
         diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start).then(a.rule.cmp(b.rule)));
         doc.analyze_count += 1;
         doc.last_diagnostics = diagnostics.clone();
@@ -150,7 +154,9 @@ impl LspState {
     /// for the caller to publish.
     pub fn reload_config(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
         self.config = load_from(self.config_path.as_deref());
-        self.rules = enabled_rules(&self.config);
+        let resolved = resolve_rules(&self.config);
+        self.rules = resolved.rules;
+        self.severities = resolved.severities;
         debug!(rule_count = self.rules.len(), "config reloaded");
         self.open_uris()
             .into_iter()

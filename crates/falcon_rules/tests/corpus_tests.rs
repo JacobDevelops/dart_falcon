@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_config::{FalconConfig, RuleConfig};
+use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
 use falcon_rules::all_rules;
 use falcon_rules::dart_code_linter::use_design_system_item::UseDesignSystemItem;
@@ -224,23 +224,23 @@ Widget build(BuildContext context) {
     );
 
     // With a configured item it flags the disallowed construction and names the replacement.
-    let mut options = HashMap::new();
-    options.insert(
-        "items".to_string(),
-        serde_json::json!([{ "class_name": "Container", "use_instead": "AppContainer" }]),
-    );
-    let mut rules_cfg = HashMap::new();
-    rules_cfg.insert(
-        "use-design-system-item".to_string(),
-        RuleConfig {
-            enabled: true,
-            options,
-        },
-    );
-    let configured = FalconConfig {
-        rules: rules_cfg,
-        ..Default::default()
-    };
+    let configured: FalconConfig = serde_json::from_value(serde_json::json!({
+        "linter": {
+            "rules": {
+                "style": {
+                    "use-design-system-item": {
+                        "level": "warn",
+                        "options": {
+                            "items": [
+                                { "class_name": "Container", "use_instead": "AppContainer" }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }))
+    .expect("valid config");
     let ctx = AnalyzeContext {
         file_path: Path::new("t.dart"),
         source: src,

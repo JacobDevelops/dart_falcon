@@ -181,7 +181,7 @@ fn test_collect_check_default_config_rule_fires() {
     );
 }
 
-/// Disabling a rule in falcon.json suppresses its diagnostics.
+/// Setting a rule to "off" in its group suppresses its diagnostics.
 #[test]
 fn test_config_disables_rule() {
     let temp = tempdir().unwrap();
@@ -189,25 +189,25 @@ fn test_config_disables_rule() {
     let config = temp.path().join("falcon.json");
     fs::write(
         &config,
-        r#"{ "rules": { "avoid-dynamic": { "enabled": false } } }"#,
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#,
     )
     .unwrap();
     let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
     assert!(
         out.diagnostics.iter().all(|d| d.rule != "avoid-dynamic"),
-        "avoid-dynamic must not fire when disabled in config"
+        "avoid-dynamic must not fire when set to off in config"
     );
 }
 
-/// severity_override changes the reported severity for a rule.
+/// A per-rule level changes the reported severity for a rule.
 #[test]
-fn test_config_severity_override_applied() {
+fn test_config_rule_level_severity_applied() {
     let temp = tempdir().unwrap();
     fs::write(temp.path().join("a.dart"), DYNAMIC_SRC).unwrap();
     let config = temp.path().join("falcon.json");
     fs::write(
         &config,
-        r#"{ "severity_override": { "avoid-dynamic": "info" } }"#,
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "info" } } } }"#,
     )
     .unwrap();
     let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
@@ -219,17 +219,77 @@ fn test_config_severity_override_applied() {
     assert_eq!(diag.severity, falcon_diagnostics::Severity::Info);
 }
 
-/// exclude_patterns from falcon.json are honored (not just CLI --exclude).
+/// files.includes negations from falcon.json are honored (not just CLI --exclude).
 #[test]
-fn test_config_exclude_patterns_respected() {
+fn test_config_exclude_via_includes_negation() {
     let temp = tempdir().unwrap();
     let gen_dir = temp.path().join("gen");
     fs::create_dir(&gen_dir).unwrap();
     fs::write(gen_dir.join("a.dart"), DYNAMIC_SRC).unwrap();
     let config = temp.path().join("falcon.json");
-    fs::write(&config, r#"{ "exclude_patterns": ["**/gen/**"] }"#).unwrap();
+    fs::write(
+        &config,
+        r#"{ "files": { "includes": ["**", "!**/gen/**"] } }"#,
+    )
+    .unwrap();
     let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
     assert_eq!(out.total_files, 0, "gen/ files must be excluded via config");
+}
+
+/// A domain set to "none" disables that domain's rules while leaving others on.
+#[test]
+fn test_config_domain_none_disables_flutter_only() {
+    const FLUTTER_SRC: &str = "import 'package:flutter/material.dart';\n\
+class S extends StatelessWidget {\n\
+  Widget _card() {\n\
+    dynamic x = 1;\n\
+    print(x);\n\
+    return Card(child: Text('hi'));\n\
+  }\n\
+}\n";
+    let temp = tempdir().unwrap();
+    fs::write(temp.path().join("a.dart"), FLUTTER_SRC).unwrap();
+
+    // Baseline: both a flutter rule and a non-flutter rule fire.
+    let base = collect_check(&options_for(temp.path(), None)).unwrap();
+    assert!(
+        base.diagnostics
+            .iter()
+            .any(|d| d.rule == "avoid-returning-widgets")
+    );
+    assert!(base.diagnostics.iter().any(|d| d.rule == "avoid-dynamic"));
+
+    let config = temp.path().join("falcon.json");
+    fs::write(
+        &config,
+        r#"{ "linter": { "domains": { "flutter": "none" } } }"#,
+    )
+    .unwrap();
+    let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
+    assert!(
+        out.diagnostics
+            .iter()
+            .all(|d| d.rule != "avoid-returning-widgets"),
+        "flutter rule must be gated off by domains.flutter=none"
+    );
+    assert!(
+        out.diagnostics.iter().any(|d| d.rule == "avoid-dynamic"),
+        "non-flutter rule must remain enabled"
+    );
+}
+
+/// linter.enabled=false disables the entire registry: zero diagnostics.
+#[test]
+fn test_config_linter_disabled_yields_no_diagnostics() {
+    let temp = tempdir().unwrap();
+    fs::write(temp.path().join("a.dart"), DYNAMIC_SRC).unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(&config, r#"{ "linter": { "enabled": false } }"#).unwrap();
+    let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
+    assert!(
+        out.diagnostics.is_empty(),
+        "no rule should run when linter disabled"
+    );
 }
 
 /// max_errors from falcon.json truncates diagnostics; CLI flag wins over config.

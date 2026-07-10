@@ -350,13 +350,34 @@ fn unsupported_request_returns_method_not_found() {
 /// M5.2: rules disabled in falcon.json never fire in LSP mode.
 #[test]
 fn config_disabled_rule_not_published() {
-    let config = r#"{ "rules": { "avoid-dynamic": { "enabled": false } } }"#;
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#;
     let mut client = TestClient::start(Duration::ZERO, Some(config));
     client.open(DOC_URI, VIOLATING_SRC, 1);
     let params = client.recv_publish();
     assert!(
         !has_rule(&params, "avoid-dynamic"),
         "disabled rule fired: {params:?}"
+    );
+    client.shutdown();
+}
+
+/// A configured rule level flows through to published diagnostic severity.
+#[test]
+fn config_rule_level_sets_published_severity() {
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "info" } } } }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
+    client.open(DOC_URI, VIOLATING_SRC, 1);
+    let params = client.recv_publish();
+    let diag = params
+        .diagnostics
+        .iter()
+        .find(|d| {
+            matches!(&d.code, Some(lsp_types::NumberOrString::String(code)) if code == "avoid-dynamic")
+        })
+        .expect("avoid-dynamic must be published");
+    assert_eq!(
+        diag.severity,
+        Some(lsp_types::DiagnosticSeverity::INFORMATION)
     );
     client.shutdown();
 }
@@ -372,7 +393,7 @@ fn watched_files_change_reloads_config() {
     // Disable the rule on disk, then tell the server the file changed.
     fs::write(
         client.config_path(),
-        r#"{ "rules": { "avoid-dynamic": { "enabled": false } } }"#,
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#,
     )
     .unwrap();
     let config_uri = format!("file://{}", client.config_path().display());
