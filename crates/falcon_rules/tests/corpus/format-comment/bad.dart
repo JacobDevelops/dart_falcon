@@ -34,3 +34,8 @@ void moreComments() {
   // also bad /* expect: format-comment */
   final b = 2;
 }
+
+/// doc comments are checked too (port fix) /* expect: format-comment */
+void documented() {
+  print('doc');
+}

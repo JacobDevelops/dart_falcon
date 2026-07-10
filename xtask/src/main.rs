@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -421,6 +421,92 @@ fn validate_file(
     }
 }
 
+/// Validate a project (cross-file) rule's multi-file fixture directory
+/// (`corpus/<rule>/project/`) as ONE falcon invocation over the whole directory.
+/// Expectations are matched by (file name, line), since project diagnostics can
+/// land in any of the fixture's files. Returns (expected, matched, failures).
+fn validate_project_dir(
+    project_dir: &Path,
+    rule_name: &str,
+    falcon_bin: &str,
+    config: Option<&Path>,
+) -> (usize, usize, Vec<String>) {
+    // Map each fixture file's basename → its source (for offset→line lookup).
+    let mut sources: HashMap<String, String> = HashMap::new();
+    let mut dart_files: Vec<PathBuf> = fs::read_dir(project_dir)
+        .unwrap_or_else(|_| panic!("cannot read {}", project_dir.display()))
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("dart"))
+        .collect();
+    dart_files.sort();
+
+    let mut expectations: Vec<(String, usize)> = Vec::new();
+    for file in &dart_files {
+        let source = match fs::read_to_string(file) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let base = file
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        for exp in parse_expectations(&source) {
+            if exp.rule == rule_name {
+                expectations.push((base.clone(), exp.line));
+            }
+        }
+        sources.insert(base, source);
+    }
+
+    let diags = run_falcon(falcon_bin, project_dir, config).unwrap_or_default();
+    let mut diag_keys: Vec<(String, usize)> = diags
+        .iter()
+        .filter(|d| d.rule == rule_name)
+        .map(|d| {
+            let base = Path::new(&d.file_path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let line = sources
+                .get(&base)
+                .map(|s| byte_offset_to_line(s, d.span.start))
+                .unwrap_or(0);
+            (base, line)
+        })
+        .collect();
+
+    let expected = expectations.len();
+    let mut matched = 0usize;
+    let mut failures = Vec::new();
+    for exp in &expectations {
+        if let Some(pos) = diag_keys.iter().position(|k| k == exp) {
+            diag_keys.remove(pos);
+            matched += 1;
+        } else {
+            failures.push(format!(
+                "MISS  {}/{}:{} — rule `{}` expected but not emitted",
+                project_dir.display(),
+                exp.0,
+                exp.1,
+                rule_name
+            ));
+        }
+    }
+    for key in diag_keys {
+        failures.push(format!(
+            "EXTRA {}/{}:{} — rule `{}` fired unexpectedly",
+            project_dir.display(),
+            key.0,
+            key.1,
+            rule_name
+        ));
+    }
+    (expected, matched, failures)
+}
+
 fn validate_rules(args: &[String]) {
     let workspace = workspace_root();
     let default_corpus = workspace.join("crates/falcon_rules/tests/corpus");
@@ -556,6 +642,27 @@ fn validate_rules(args: &[String]) {
                     fp.rule,
                     fp.message
                 );
+                all_failures.push(msg.clone());
+                if !json_output {
+                    eprintln!("{msg}");
+                }
+            }
+        }
+
+        // Project (cross-file) rules keep their fixtures in a `project/`
+        // subdirectory, run as one invocation over the whole directory.
+        let project_dir = rule_dir.join("project");
+        if project_dir.is_dir() {
+            let (expected, matched, failures) = validate_project_dir(
+                &project_dir,
+                &rule_name,
+                &falcon_bin,
+                rule_config.as_deref(),
+            );
+            total_files += 1;
+            total_expected += expected;
+            total_matched += matched;
+            for msg in failures {
                 all_failures.push(msg.clone());
                 if !json_output {
                     eprintln!("{msg}");

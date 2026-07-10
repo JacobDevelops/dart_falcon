@@ -101,12 +101,14 @@ fn test_run_check_with_config_path_nonexistent_returns_error() {
 #[test]
 fn test_run_check_parallel_flag_clean_returns_zero() {
     let temp = tempdir().unwrap();
+    // a.dart is the entrypoint and references b.dart's Foo, so the cross-file
+    // rules (unused-files / unused-code) stay quiet alongside the per-file rules.
     fs::write(
         temp.path().join("a.dart"),
-        "void main() {\n  print('ok');\n}\n",
+        "import 'b.dart';\nvoid main() {\n  print(Foo());\n}\n",
     )
     .unwrap();
-    fs::write(temp.path().join("b.dart"), "class Foo {}").unwrap();
+    fs::write(temp.path().join("b.dart"), "class Foo {}\n").unwrap();
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
@@ -278,17 +280,22 @@ class S extends StatelessWidget {\n\
     );
 }
 
-/// linter.enabled=false disables the entire registry: zero diagnostics.
+/// linter.enabled=false disables every file rule. Project rules are a separate
+/// feature, so silencing everything requires disabling `project` too.
 #[test]
-fn test_config_linter_disabled_yields_no_diagnostics() {
+fn test_config_both_features_disabled_yields_no_diagnostics() {
     let temp = tempdir().unwrap();
     fs::write(temp.path().join("a.dart"), DYNAMIC_SRC).unwrap();
     let config = temp.path().join("falcon.json");
-    fs::write(&config, r#"{ "linter": { "enabled": false } }"#).unwrap();
+    fs::write(
+        &config,
+        r#"{ "linter": { "enabled": false }, "project": { "enabled": false } }"#,
+    )
+    .unwrap();
     let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
     assert!(
         out.diagnostics.is_empty(),
-        "no rule should run when linter disabled"
+        "no rule should run when both linter and project are disabled"
     );
 }
 
@@ -334,5 +341,78 @@ fn test_parallel_sequential_output_identical() {
     assert_eq!(
         seq.diagnostics.iter().map(key).collect::<Vec<_>>(),
         par.diagnostics.iter().map(key).collect::<Vec<_>>()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Inline suppression: `// ignore:` / `// ignore_for_file:` honored end to end.
+// ---------------------------------------------------------------------------
+
+/// A same-line `// ignore:` suppresses that occurrence; a second unignored
+/// occurrence still fires. An `// ignore_for_file:` clears the whole file.
+#[test]
+fn test_inline_suppression_end_to_end() {
+    let temp = tempdir().unwrap();
+    // Line 0 is suppressed inline; line 1 is not.
+    fs::write(
+        temp.path().join("a.dart"),
+        "dynamic a = 1; // ignore: avoid-dynamic\ndynamic b = 2;\n",
+    )
+    .unwrap();
+    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+    let dynamic_hits = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.rule == "avoid-dynamic")
+        .count();
+    assert_eq!(dynamic_hits, 1, "only the unignored occurrence should fire");
+
+    // ignore_for_file clears every occurrence in the file.
+    fs::write(
+        temp.path().join("a.dart"),
+        "// ignore_for_file: avoid-dynamic\ndynamic a = 1;\ndynamic b = 2;\n",
+    )
+    .unwrap();
+    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+    assert!(
+        out.diagnostics.iter().all(|d| d.rule != "avoid-dynamic"),
+        "ignore_for_file must suppress every avoid-dynamic in the file"
+    );
+}
+
+/// An override turning a firing rule off under `gen/**` suppresses it only for
+/// matching files — other paths still report it.
+#[test]
+fn test_override_disables_rule_for_matching_path_only() {
+    let temp = tempdir().unwrap();
+    let gen_dir = temp.path().join("gen");
+    fs::create_dir(&gen_dir).unwrap();
+    fs::write(gen_dir.join("drop.dart"), DYNAMIC_SRC).unwrap();
+    fs::write(temp.path().join("keep.dart"), DYNAMIC_SRC).unwrap();
+
+    let config = temp.path().join("falcon.json");
+    fs::write(
+        &config,
+        r#"{
+            "overrides": [ {
+                "includes": ["**/gen/**"],
+                "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } }
+            } ]
+        }"#,
+    )
+    .unwrap();
+
+    let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
+    assert!(
+        out.diagnostics
+            .iter()
+            .any(|d| d.rule == "avoid-dynamic" && d.file_path.ends_with("keep.dart")),
+        "avoid-dynamic must still fire outside the override path"
+    );
+    assert!(
+        out.diagnostics
+            .iter()
+            .all(|d| !(d.rule == "avoid-dynamic" && d.file_path.contains("gen"))),
+        "avoid-dynamic must be suppressed under gen/ by the override"
     );
 }

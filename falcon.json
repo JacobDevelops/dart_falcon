@@ -5,10 +5,103 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
-    },
-    "domains": {
-      "flutter": "recommended"
+      "recommended": false,
+      "complexity": {
+        "avoid-nested-conditional-expressions": "warn",
+        "avoid-redundant-async": "warn",
+        "avoid-unnecessary-type-assertions": "warn",
+        "avoid-unnecessary-type-casts": "warn",
+        "avoid_inverted_boolean_expressions": "warn",
+        "avoid_nested_if": "warn",
+        "cyclomatic_complexity": "warn",
+        "max_lines_for_file": "warn",
+        "max_lines_for_function": "warn",
+        "max_parameters_for_function": "warn",
+        "max_switch_cases": "warn",
+        "maximum_nesting_level": "warn",
+        "no-boolean-literal-compare": "warn",
+        "prefer-conditional-expressions": "warn",
+        "prefer-extracting-callbacks": "warn",
+        "prefer-immediate-return": "warn",
+        "prefer-moving-to-variable": "warn",
+        "prefer_iterable_any": "warn",
+        "prefer_iterable_every": "warn"
+      },
+      "correctness": {
+        "avoid-global-state": "warn",
+        "avoid-returning-widgets": "warn",
+        "avoid-unused-parameters": "warn",
+        "avoid_mutable_global_variables": "warn",
+        "avoid_unused_parameters": "warn",
+        "correct_order_for_super_dispose": "warn",
+        "proper_controller_dispose": "warn",
+        "proper_expanded_and_flexible": "warn",
+        "proper_from_environment": "warn",
+        "proper_super_init_state": "warn",
+        "unnecessary_flutter_imports": "warn",
+        "unnecessary_nullable_return_type": "warn",
+        "use_once_constructors_once_provider": "warn"
+      },
+      "performance": {
+        "prefer-const-border-radius": "warn",
+        "prefer-correct-edge-insets-constructor": "warn",
+        "prefer_declaring_const_constructor": "warn"
+      },
+      "style": {
+        "avoid-late-keyword": "warn",
+        "avoid-non-null-assertion": "warn",
+        "avoid-top-level-member-access": "warn",
+        "avoid_abbreviations_in_doc_comments": "warn",
+        "avoid_positional_fields_in_records": "warn",
+        "avoid_redundant_pattern_field_names": "warn",
+        "avoid_single_child_column_or_row": "warn",
+        "binary-expression-operand-order": "warn",
+        "boolean_prefixes": "warn",
+        "class_members_ordering": "warn",
+        "double-literal-format": "warn",
+        "format-comment": "warn",
+        "member-ordering": "warn",
+        "newline-before-return": "warn",
+        "no-magic-number": "warn",
+        "no-object-declaration": "warn",
+        "no_magic_number": "warn",
+        "prefer-async-await": "warn",
+        "prefer-correct-identifier-length": "warn",
+        "prefer-correct-type-name": "warn",
+        "prefer-first": "warn",
+        "prefer-iterable-of": "warn",
+        "prefer-last": "warn",
+        "prefer-trailing-comma": "warn",
+        "prefer_async_callback": "warn",
+        "prefer_dedicated_media_query_methods": "warn",
+        "prefer_underscore_for_unused_callback_parameters": "warn",
+        "use-design-system-item": "warn",
+        "use_spacer_as_expanded_child": "warn"
+      },
+      "suspicious": {
+        "avoid-dynamic": "warn",
+        "avoid-ignoring-return-values": "warn",
+        "avoid-passing-async-when-sync-expected": "warn",
+        "avoid-throw-in-catch-block": "warn",
+        "avoid-unrelated-type-assertions": "warn",
+        "avoid_empty_blocks": "warn",
+        "no-empty-block": "warn",
+        "no-equal-arguments": "warn",
+        "no-equal-then-else": "warn",
+        "no_duplicate_case_values": "warn",
+        "no_empty_block": "warn",
+        "no_self_comparisons": "warn"
+      }
+    }
+  },
+  "project": {
+    "enabled": true,
+    "rules": {
+      "correctness": {
+        "unnecessary-nullable": "warn",
+        "unused-code": "warn",
+        "unused-files": "warn"
+      }
     }
   },
   "max_errors": null

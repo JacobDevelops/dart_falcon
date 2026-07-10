@@ -299,13 +299,53 @@ fn scan_expr(
                             scan_expr(e, diags, ctx, items);
                         }
                     }
+                    CollectionElement::CFor {
+                        init,
+                        condition,
+                        updates,
+                        element,
+                        ..
+                    } => {
+                        match init {
+                            Some(ForInit::VarDecl(d)) => {
+                                for decl in &d.declarators {
+                                    if let Some(e) = &decl.initializer {
+                                        scan_expr(e, diags, ctx, items);
+                                    }
+                                }
+                            }
+                            Some(ForInit::ForIn { iterable, .. }) => {
+                                scan_expr(iterable, diags, ctx, items);
+                            }
+                            Some(ForInit::Exprs(es)) => {
+                                for e in es {
+                                    scan_expr(e, diags, ctx, items);
+                                }
+                            }
+                            None => {}
+                        }
+                        if let Some(c) = condition {
+                            scan_expr(c, diags, ctx, items);
+                        }
+                        for u in updates {
+                            scan_expr(u, diags, ctx, items);
+                        }
+                        if let CollectionElement::Expr(e) = &**element {
+                            scan_expr(e, diags, ctx, items);
+                        }
+                    }
                 }
             }
         }
-        Expr::Map { entries, .. } => {
+        Expr::Map {
+            entries, elements, ..
+        } => {
             for entry in entries {
                 scan_expr(&entry.key, diags, ctx, items);
                 scan_expr(&entry.value, diags, ctx, items);
+            }
+            for e in map_element_exprs(elements) {
+                scan_expr(e, diags, ctx, items);
             }
         }
         Expr::Set { elements, .. } => {
@@ -331,6 +371,41 @@ fn scan_expr(
                         iterable, element, ..
                     } => {
                         scan_expr(iterable, diags, ctx, items);
+                        if let CollectionElement::Expr(e) = &**element {
+                            scan_expr(e, diags, ctx, items);
+                        }
+                    }
+                    CollectionElement::CFor {
+                        init,
+                        condition,
+                        updates,
+                        element,
+                        ..
+                    } => {
+                        match init {
+                            Some(ForInit::VarDecl(d)) => {
+                                for decl in &d.declarators {
+                                    if let Some(e) = &decl.initializer {
+                                        scan_expr(e, diags, ctx, items);
+                                    }
+                                }
+                            }
+                            Some(ForInit::ForIn { iterable, .. }) => {
+                                scan_expr(iterable, diags, ctx, items);
+                            }
+                            Some(ForInit::Exprs(es)) => {
+                                for e in es {
+                                    scan_expr(e, diags, ctx, items);
+                                }
+                            }
+                            None => {}
+                        }
+                        if let Some(c) = condition {
+                            scan_expr(c, diags, ctx, items);
+                        }
+                        for u in updates {
+                            scan_expr(u, diags, ctx, items);
+                        }
                         if let CollectionElement::Expr(e) = &**element {
                             scan_expr(e, diags, ctx, items);
                         }

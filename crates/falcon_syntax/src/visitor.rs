@@ -557,10 +557,15 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
                 walk_collection_element(v, elem);
             }
         }
-        Expr::Map { entries, .. } => {
+        Expr::Map {
+            entries, elements, ..
+        } => {
             for entry in entries {
                 v.visit_expr(&entry.key);
                 v.visit_expr(&entry.value);
+            }
+            for element in elements {
+                walk_map_element(v, element);
             }
         }
         Expr::Record { fields, .. } => {
@@ -730,10 +735,112 @@ fn walk_collection_element<V: Visitor>(v: &mut V, elem: &CollectionElement) {
             }
         }
         CollectionElement::For {
-            iterable, element, ..
+            pattern,
+            iterable,
+            element,
+            ..
         } => {
+            if let Some(p) = pattern {
+                v.visit_pattern(p);
+            }
             v.visit_expr(iterable);
             walk_collection_element(v, element);
+        }
+        CollectionElement::CFor {
+            init,
+            condition,
+            updates,
+            element,
+            ..
+        } => {
+            walk_for_init(v, init);
+            if let Some(cond) = condition {
+                v.visit_expr(cond);
+            }
+            for e in updates {
+                v.visit_expr(e);
+            }
+            walk_collection_element(v, element);
+        }
+    }
+}
+
+fn walk_for_init<V: Visitor>(v: &mut V, init: &Option<ForInit>) {
+    let Some(init) = init else { return };
+    match init {
+        ForInit::VarDecl(d) => v.visit_stmt(&Stmt::LocalVar(d.clone())),
+        ForInit::ForIn {
+            var_type,
+            name,
+            iterable,
+            ..
+        } => {
+            if let Some(t) = var_type {
+                v.visit_dart_type(t);
+            }
+            v.visit_identifier(name);
+            v.visit_expr(iterable);
+        }
+        ForInit::Exprs(exprs) => {
+            for e in exprs {
+                v.visit_expr(e);
+            }
+        }
+    }
+}
+
+fn walk_map_element<V: Visitor>(v: &mut V, element: &MapElement) {
+    match element {
+        MapElement::Entry(entry) => {
+            v.visit_expr(&entry.key);
+            v.visit_expr(&entry.value);
+        }
+        MapElement::Spread { expr, .. } => v.visit_expr(expr),
+        MapElement::If {
+            condition,
+            then_entry,
+            else_entry,
+            ..
+        } => {
+            match condition {
+                IfCondition::Expr(e) => v.visit_expr(e),
+                IfCondition::Case(e, p) => {
+                    v.visit_expr(e);
+                    v.visit_pattern(p);
+                }
+            }
+            walk_map_element(v, then_entry);
+            if let Some(else_e) = else_entry {
+                walk_map_element(v, else_e);
+            }
+        }
+        MapElement::For {
+            pattern,
+            iterable,
+            entry,
+            ..
+        } => {
+            if let Some(p) = pattern {
+                v.visit_pattern(p);
+            }
+            v.visit_expr(iterable);
+            walk_map_element(v, entry);
+        }
+        MapElement::CFor {
+            init,
+            condition,
+            updates,
+            entry,
+            ..
+        } => {
+            walk_for_init(v, init);
+            if let Some(cond) = condition {
+                v.visit_expr(cond);
+            }
+            for e in updates {
+                v.visit_expr(e);
+            }
+            walk_map_element(v, entry);
         }
     }
 }

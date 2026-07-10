@@ -3,7 +3,7 @@ members = [".", "crates/*", "xtask"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Jacob Sanderson"]
 license = "MIT"
@@ -28,6 +28,9 @@ tempfile = "3"
 
 # String similarity
 strsim = "0.10"
+
+# Regex (format-comment rule: ignored_patterns option)
+regex = "1"
 
 # Tracing & observability
 tracing = "0.1"

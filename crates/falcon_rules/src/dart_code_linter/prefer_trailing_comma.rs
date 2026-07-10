@@ -18,45 +18,113 @@ impl Rule for PreferTrailingComma {
     }
 }
 
-fn is_multiline(source: &str, span: &Span) -> bool {
-    let end = span.end.min(source.len());
-    source[span.start..end].contains('\n')
+fn line_of(source: &str, offset: usize) -> usize {
+    let c = offset.min(source.len());
+    source[..c].bytes().filter(|&b| b == b'\n').count()
 }
 
-fn has_trailing_comma(source: &str, args_span: &Span) -> bool {
-    // args_span covers `(arg1, arg2)` inclusive
-    // closing `)` is at args_span.end - 1; scan backwards past whitespace
-    let bytes = source.as_bytes();
-    let close = args_span
-        .end
-        .saturating_sub(1)
-        .min(source.len().saturating_sub(1));
-    let mut i = close;
-    // Walk backwards past whitespace
-    while i > args_span.start {
-        i -= 1;
-        match bytes[i] {
-            b' ' | b'\t' | b'\r' | b'\n' => continue,
-            b',' => return true,
-            _ => return false,
+/// A trailing comma is required exactly when the argument list is already split
+/// across lines — i.e. the last significant character before the closing
+/// delimiter is on an earlier line than the delimiter and is not itself a comma.
+///
+/// This mirrors the Dart 3.x tall-style formatter, which adds a trailing comma
+/// when it breaks a list one element per line (closing bracket on its own line)
+/// and omits it when the final argument hugs the bracket (single trailing
+/// closure, block-like argument, method chain, single-line list). Scanning the
+/// source directly avoids depending on how the parser bounds argument spans.
+///
+/// The scan skips comments and string contents so that a trailing line comment
+/// after the final comma (`foo(\n  a, // note\n)`) is not mistaken for the last
+/// significant token — the comma before it still counts. It also locates the
+/// real closing `)` by paren-depth matching rather than trusting `args_span.end`,
+/// which the parser over-extends past the bracket into trailing trivia (e.g. the
+/// newline + indentation before the next `.method` in a chain).
+/// Returns the offset of the real closing `)` when a trailing comma is required,
+/// or `None` otherwise.
+fn needs_trailing_comma(source: &str, args_span: &Span) -> Option<usize> {
+    let b = source.as_bytes();
+    let end = args_span.end.min(source.len());
+    // Advance to the opening `(` of the argument list.
+    let mut i = args_span.start;
+    while i < end && b[i] != b'(' {
+        i += 1;
+    }
+    if i >= end {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut last_sig: Option<usize> = None;
+    let mut close: Option<usize> = None;
+    while i < end {
+        let c = b[i];
+        match c {
+            b'\'' | b'"' => {
+                last_sig = Some(i);
+                let quote = c;
+                i += 1;
+                while i < end {
+                    match b[i] {
+                        b'\\' => i += 2,
+                        q if q == quote => {
+                            last_sig = Some(i);
+                            i += 1;
+                            break;
+                        }
+                        _ => i += 1,
+                    }
+                }
+            }
+            b'/' if i + 1 < end && b[i + 1] == b'/' => {
+                while i < end && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < end && b[i + 1] == b'*' => {
+                i += 2;
+                while i + 1 < end && !(b[i] == b'*' && b[i + 1] == b'/') {
+                    i += 1;
+                }
+                i += 2;
+            }
+            b'(' => {
+                depth += 1;
+                last_sig = Some(i);
+                i += 1;
+            }
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(i);
+                    break;
+                }
+                last_sig = Some(i);
+                i += 1;
+            }
+            _ => {
+                if !c.is_ascii_whitespace() {
+                    last_sig = Some(i);
+                }
+                i += 1;
+            }
         }
     }
-    false
+    match (last_sig, close) {
+        (Some(j), Some(close)) if b[j] != b',' && line_of(source, j) < line_of(source, close) => {
+            Some(close)
+        }
+        _ => None,
+    }
 }
 
 fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let has_args = !args.positional.is_empty() || !args.named.is_empty();
-    if !has_args {
+    if args.positional.is_empty() && args.named.is_empty() {
         return;
     }
-    if !is_multiline(ctx.source, &args.span) {
+    let Some(close) = needs_trailing_comma(ctx.source, &args.span) else {
         return;
-    }
-    if has_trailing_comma(ctx.source, &args.span) {
-        return;
-    }
-    // Diagnostic points to closing `)` — the last char of args.span
-    let diag_pos = args.span.end.saturating_sub(1);
+    };
+    // Diagnostic points to the real closing `)`.
+    let diag_pos = close;
     diags.push(Diagnostic::new(
         "prefer-trailing-comma",
         Severity::Warning,
@@ -64,7 +132,7 @@ fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext)
         ctx.file_path.to_string_lossy().into_owned(),
         DiagSpan {
             start: diag_pos,
-            end: args.span.end,
+            end: diag_pos + 1,
         },
     ));
 }

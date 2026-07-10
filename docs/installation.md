@@ -16,9 +16,7 @@ binary** fetched from GitHub Releases — no Rust toolchain, no compilation.
 
 ```nix
 {
-  inputs.falcon.url = "github:JacobDevelops/dart_falcon"; # once public
-  # While the repo is private, use SSH instead:
-  # inputs.falcon.url = "git+ssh://git@github.com/JacobDevelops/dart_falcon";
+  inputs.falcon.url = "github:JacobDevelops/dart_falcon";
 }
 ```
 
@@ -52,19 +50,10 @@ nix run github:JacobDevelops/dart_falcon
 When no release has been published yet, `default` transparently falls back to the
 source build.
 
-## Private-repo caveat (temporary)
+## Authentication
 
-While `JacobDevelops/dart_falcon` is private, fetching release **assets** requires
-authentication that Nix does not provide out of the box. Until the repo is public,
-private consumers should either:
-
-- use the source package `packages.<system>.falcon` (clones over your existing
-  git/SSH auth), or
-- add a GitHub PAT to `~/.netrc` (or `netrc-file` in `nix.conf`) with
-  `access-tokens`/machine `github.com` so `fetchurl` can authenticate against the
-  release asset.
-
-Once the repository is public this Just Works with no auth.
+`JacobDevelops/dart_falcon` is public, so fetching the flake and release assets
+needs no authentication or tokens.
 
 ## How releases work
 

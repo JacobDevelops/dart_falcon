@@ -336,10 +336,15 @@ fn analyze_expression(
                 analyze_collection_element(elem, scope_map, diags, ctx);
             }
         }
-        Expr::Map { entries, .. } => {
+        Expr::Map {
+            entries, elements, ..
+        } => {
             for entry in entries {
                 analyze_expression(&entry.key, scope_map, diags, ctx);
                 analyze_expression(&entry.value, scope_map, diags, ctx);
+            }
+            for e in map_element_exprs(elements) {
+                analyze_expression(e, scope_map, diags, ctx);
             }
         }
         Expr::Set { elements, .. } => {
@@ -403,6 +408,39 @@ fn analyze_collection_element(
             iterable, element, ..
         } => {
             analyze_expression(iterable, scope_map, diags, ctx);
+            analyze_collection_element(element, scope_map, diags, ctx);
+        }
+        CollectionElement::CFor {
+            init,
+            condition,
+            updates,
+            element,
+            ..
+        } => {
+            match init {
+                Some(ForInit::VarDecl(d)) => {
+                    for decl in &d.declarators {
+                        if let Some(e) = &decl.initializer {
+                            analyze_expression(e, scope_map, diags, ctx);
+                        }
+                    }
+                }
+                Some(ForInit::ForIn { iterable, .. }) => {
+                    analyze_expression(iterable, scope_map, diags, ctx);
+                }
+                Some(ForInit::Exprs(es)) => {
+                    for e in es {
+                        analyze_expression(e, scope_map, diags, ctx);
+                    }
+                }
+                None => {}
+            }
+            if let Some(c) = condition {
+                analyze_expression(c, scope_map, diags, ctx);
+            }
+            for u in updates {
+                analyze_expression(u, scope_map, diags, ctx);
+            }
             analyze_collection_element(element, scope_map, diags, ctx);
         }
     }

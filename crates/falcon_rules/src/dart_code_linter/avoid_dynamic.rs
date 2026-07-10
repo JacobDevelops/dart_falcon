@@ -428,7 +428,10 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
             }
         }
         Expr::Map {
-            type_args, entries, ..
+            type_args,
+            entries,
+            elements,
+            ..
         } => {
             for type_arg in type_args {
                 check_dart_type(type_arg, diagnostics, ctx);
@@ -436,6 +439,9 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
             for entry in entries {
                 visit_expr(&entry.key, diagnostics, ctx);
                 visit_expr(&entry.value, diagnostics, ctx);
+            }
+            for e in map_element_exprs(elements) {
+                visit_expr(e, diagnostics, ctx);
             }
         }
         Expr::Set {
@@ -525,6 +531,39 @@ fn visit_collection_element(
                 check_dart_type(vtype, diagnostics, ctx);
             }
             visit_expr(iterable, diagnostics, ctx);
+            visit_collection_element(element, diagnostics, ctx);
+        }
+        CollectionElement::CFor {
+            init,
+            condition,
+            updates,
+            element,
+            ..
+        } => {
+            match init {
+                Some(ForInit::VarDecl(d)) => {
+                    for decl in &d.declarators {
+                        if let Some(e) = &decl.initializer {
+                            visit_expr(e, diagnostics, ctx);
+                        }
+                    }
+                }
+                Some(ForInit::ForIn { iterable, .. }) => {
+                    visit_expr(iterable, diagnostics, ctx);
+                }
+                Some(ForInit::Exprs(es)) => {
+                    for e in es {
+                        visit_expr(e, diagnostics, ctx);
+                    }
+                }
+                None => {}
+            }
+            if let Some(c) = condition {
+                visit_expr(c, diagnostics, ctx);
+            }
+            for u in updates {
+                visit_expr(u, diagnostics, ctx);
+            }
             visit_collection_element(element, diagnostics, ctx);
         }
     }

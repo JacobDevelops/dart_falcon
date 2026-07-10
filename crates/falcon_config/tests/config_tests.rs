@@ -1,5 +1,5 @@
 use falcon_config::{
-    ConfigError, DomainValue, FalconConfig, ResolvedSeverity, RuleConfiguration,
+    ConfigError, DomainValue, FalconConfig, Override, ResolvedSeverity, RuleConfiguration,
     RulePlainConfiguration, find_config, load_config, load_or_default,
 };
 use std::fs;
@@ -475,4 +475,294 @@ fn test_load_or_default_with_file() {
 
     fs::remove_file(&config_path).expect("cleanup config");
     let _ = fs::remove_dir(&dir);
+}
+
+// ── overrides (biome-style per-path re-configuration) ───────────────────────
+
+fn override_from(value: serde_json::Value) -> Override {
+    serde_json::from_value(value).expect("valid override")
+}
+
+#[test]
+fn test_overrides_serde_round_trip() {
+    let cfg = from_json(serde_json::json!({
+        "linter": { "rules": { "recommended": true } },
+        "overrides": [
+            {
+                "includes": ["test/**", "!test/fixtures/**"],
+                "linter": { "rules": { "complexity": { "max_lines_for_function": "off" } } }
+            }
+        ]
+    }));
+    assert_eq!(cfg.overrides.len(), 1);
+    assert_eq!(
+        cfg.overrides[0].includes,
+        vec!["test/**".to_string(), "!test/fixtures/**".to_string()]
+    );
+
+    // Round-trip through serialization preserves the overrides.
+    let json = serde_json::to_value(&cfg).expect("serialize");
+    let back: FalconConfig = serde_json::from_value(json).expect("reparse");
+    assert_eq!(back.overrides.len(), 1);
+    assert_eq!(back.overrides[0].includes, cfg.overrides[0].includes);
+}
+
+#[test]
+fn test_default_config_has_no_overrides() {
+    assert!(FalconConfig::default().overrides.is_empty());
+}
+
+#[test]
+fn test_override_matches_positive_and_negation() {
+    let ov = override_from(serde_json::json!({
+        "includes": ["test/**", "!test/fixtures/**"]
+    }));
+    assert!(ov.matches("test/foo.dart"));
+    assert!(ov.matches("test/sub/foo.dart"));
+    assert!(
+        !ov.matches("test/fixtures/bar.dart"),
+        "negation must exclude"
+    );
+    assert!(!ov.matches("lib/foo.dart"), "non-matching path excluded");
+}
+
+#[test]
+fn test_resolve_rule_for_base_on_override_off() {
+    let cfg = from_json(serde_json::json!({
+        "linter": { "rules": { "recommended": true } },
+        "overrides": [ {
+            "includes": ["test/**"],
+            "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } }
+        } ]
+    }));
+    // Sanity: base resolution is on.
+    assert_eq!(
+        cfg.resolve_rule("suspicious", "avoid-dynamic", true, &[]),
+        Some(ResolvedSeverity::Warn)
+    );
+    // The override turns it off only for matching paths.
+    assert_eq!(
+        cfg.resolve_rule_for("test/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        None
+    );
+    assert_eq!(
+        cfg.resolve_rule_for("lib/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        Some(ResolvedSeverity::Warn)
+    );
+}
+
+#[test]
+fn test_resolve_rule_for_base_off_override_on_with_severity() {
+    let cfg = from_json(serde_json::json!({
+        "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } },
+        "overrides": [ {
+            "includes": ["test/**"],
+            "linter": { "rules": { "suspicious": { "avoid-dynamic": "error" } } }
+        } ]
+    }));
+    assert_eq!(
+        cfg.resolve_rule_for("test/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        Some(ResolvedSeverity::Error)
+    );
+    assert_eq!(
+        cfg.resolve_rule_for("lib/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        None
+    );
+    // Registration must include a rule an override re-enables.
+    assert!(cfg.is_rule_enabled_anywhere("suspicious", "avoid-dynamic", true, &[]));
+}
+
+#[test]
+fn test_resolve_rule_for_later_override_wins() {
+    let cfg = from_json(serde_json::json!({
+        "linter": { "rules": { "recommended": true } },
+        "overrides": [
+            { "includes": ["test/**"],
+              "linter": { "rules": { "suspicious": { "avoid-dynamic": "error" } } } },
+            { "includes": ["test/**"],
+              "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }
+        ]
+    }));
+    assert_eq!(
+        cfg.resolve_rule_for("test/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        None,
+        "later override wins"
+    );
+}
+
+#[test]
+fn test_override_enabled_false_disables_all_rules_for_path() {
+    let cfg = from_json(serde_json::json!({
+        "linter": { "rules": { "recommended": true } },
+        "overrides": [ { "includes": ["gen/**"], "linter": { "enabled": false } } ]
+    }));
+    assert_eq!(
+        cfg.resolve_rule_for("gen/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        None
+    );
+    assert_eq!(
+        cfg.resolve_rule_for("lib/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        Some(ResolvedSeverity::Warn)
+    );
+}
+
+#[test]
+fn test_globally_disabled_linter_not_resurrected_by_override() {
+    let cfg = from_json(serde_json::json!({
+        "linter": {
+            "enabled": false,
+            "rules": { "recommended": true }
+        },
+        "overrides": [ {
+            "includes": ["test/**"],
+            "linter": { "rules": { "suspicious": { "avoid-dynamic": "error" } } }
+        } ]
+    }));
+    assert_eq!(
+        cfg.resolve_rule_for("test/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        None
+    );
+    assert!(!cfg.is_rule_enabled_anywhere("suspicious", "avoid-dynamic", true, &[]));
+}
+
+// ── project (cross-file) rules ──────────────────────────────────────────────
+
+#[test]
+fn test_project_default_enabled_and_recommended() {
+    let cfg = FalconConfig::default();
+    assert!(cfg.project.enabled);
+    // Recommended project rule → Warn by default.
+    assert_eq!(
+        cfg.project
+            .resolve_rule("correctness", "unused-files", true),
+        Some(ResolvedSeverity::Warn)
+    );
+    // Non-recommended project rule (e.g. unnecessary-nullable) → off by default.
+    assert_eq!(
+        cfg.project
+            .resolve_rule("correctness", "unnecessary-nullable", false),
+        None
+    );
+}
+
+#[test]
+fn test_project_explicit_levels_and_disabled_switch() {
+    let cfg = from_json(serde_json::json!({
+        "project": { "rules": { "correctness": {
+            "unused-files": "error",
+            "unnecessary-nullable": "warn"
+        } } }
+    }));
+    assert_eq!(
+        cfg.resolve_project_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        Some(ResolvedSeverity::Error)
+    );
+    // Explicit entry beats the recommended=false gate.
+    assert_eq!(
+        cfg.resolve_project_rule_for("lib/a.dart", "correctness", "unnecessary-nullable", false),
+        Some(ResolvedSeverity::Warn)
+    );
+
+    // project.enabled=false kills every project rule.
+    let off = from_json(serde_json::json!({
+        "project": { "enabled": false, "rules": { "correctness": { "unused-files": "error" } } }
+    }));
+    assert_eq!(
+        off.resolve_project_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        None
+    );
+    assert!(!off.is_project_rule_enabled_anywhere("correctness", "unused-files", true));
+}
+
+#[test]
+fn test_project_overrides_patch_per_path() {
+    let cfg = from_json(serde_json::json!({
+        "overrides": [ {
+            "includes": ["test/**"],
+            "project": { "rules": { "correctness": { "unused-files": "off" } } }
+        } ]
+    }));
+    // Base (recommended) resolution is on...
+    assert_eq!(
+        cfg.resolve_project_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        Some(ResolvedSeverity::Warn)
+    );
+    // ...but the override turns it off for matching paths.
+    assert_eq!(
+        cfg.resolve_project_rule_for("test/a.dart", "correctness", "unused-files", true),
+        None
+    );
+
+    // Base off, override re-enables → registration must include it.
+    let reenable = from_json(serde_json::json!({
+        "project": { "rules": { "correctness": { "unused-files": "off" } } },
+        "overrides": [ {
+            "includes": ["test/**"],
+            "project": { "rules": { "correctness": { "unused-files": "error" } } }
+        } ]
+    }));
+    assert_eq!(
+        reenable.resolve_project_rule_for("test/a.dart", "correctness", "unused-files", true),
+        Some(ResolvedSeverity::Error)
+    );
+    assert!(reenable.is_project_rule_enabled_anywhere("correctness", "unused-files", true));
+
+    // An override's project.enabled=false disables all project rules for the path.
+    let disabled = from_json(serde_json::json!({
+        "overrides": [ { "includes": ["gen/**"], "project": { "enabled": false } } ]
+    }));
+    assert_eq!(
+        disabled.resolve_project_rule_for("gen/a.dart", "correctness", "unused-files", true),
+        None
+    );
+    assert_eq!(
+        disabled.resolve_project_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        Some(ResolvedSeverity::Warn)
+    );
+}
+
+#[test]
+fn test_options_in_project_override_rejected_at_load() {
+    let path = temp_file_path("project_override_options.json");
+    fs::write(
+        &path,
+        r#"{
+            "overrides": [ {
+                "includes": ["test/**"],
+                "project": { "rules": { "correctness": {
+                    "unused-files": { "level": "warn", "options": { "k": 1 } }
+                } } }
+            } ]
+        }"#,
+    )
+    .expect("write config");
+    let err = load_config(&path).expect_err("options in project override must be rejected");
+    assert!(
+        format!("{err}").contains("options in overrides"),
+        "unexpected error: {err}"
+    );
+    cleanup(&path);
+}
+
+#[test]
+fn test_options_in_override_rejected_at_load() {
+    let path = temp_file_path("override_options.json");
+    fs::write(
+        &path,
+        r#"{
+            "overrides": [ {
+                "includes": ["test/**"],
+                "linter": { "rules": { "complexity": {
+                    "max_lines_for_file": { "level": "warn", "options": { "max_lines": 10 } }
+                } } }
+            } ]
+        }"#,
+    )
+    .expect("write config");
+    let err = load_config(&path).expect_err("options in override must be rejected");
+    assert!(
+        format!("{err}").contains("options in overrides"),
+        "unexpected error: {err}"
+    );
+    cleanup(&path);
 }

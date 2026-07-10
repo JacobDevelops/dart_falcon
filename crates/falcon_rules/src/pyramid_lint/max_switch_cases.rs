@@ -30,13 +30,24 @@ fn count_non_default_cases(switch_stmt: &SwitchStmt) -> usize {
     count
 }
 
+/// Read the `max_cases` option (default 10). Malformed/missing → default.
+fn max_cases_option(ctx: &AnalyzeContext) -> usize {
+    crate::meta::meta_for("max_switch_cases")
+        .and_then(|m| ctx.config.rule_options(m.group, "max_switch_cases"))
+        .and_then(|o| o.get("max_cases"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .unwrap_or(10)
+}
+
 fn check_switch_cases(switch_stmt: &SwitchStmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     let case_count = count_non_default_cases(switch_stmt);
-    if case_count > 10 {
+    let threshold = max_cases_option(ctx);
+    if case_count > threshold {
         diags.push(Diagnostic::new(
             "max_switch_cases",
             Severity::Warning,
-            "Switch statement has too many cases (max 10).",
+            format!("Switch statement has too many cases (max {threshold})."),
             ctx.file_path.to_string_lossy().into_owned(),
             DiagSpan {
                 start: switch_stmt.span.start,

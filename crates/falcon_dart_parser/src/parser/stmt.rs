@@ -154,7 +154,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parses `init ; cond ; update )` or `pattern in expr )` — leaves `)` consumed.
-    fn parse_for_clauses(&mut self) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
+    pub(super) fn parse_for_clauses(&mut self) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
         // Empty for (;;)
         if self.at(TokenKind::Semicolon) {
             self.advance();
@@ -648,7 +648,10 @@ impl<'src> Parser<'src> {
         // or a plain parenthesized/record expression. Speculatively parse a type and
         // only commit when it is followed by `name =`/`;`/`,` (or a function body);
         // otherwise restore both position and any errors the speculation emitted.
-        if self.is_type_start() {
+        // `await`/`yield` lead an expression statement in async bodies; although
+        // both are contextually ident-like, they are never type names, so keep
+        // them out of the speculative typed-declaration path.
+        if self.is_type_start() && !self.at_any(&[TokenKind::Await, TokenKind::Yield]) {
             let saved = self.pos;
             let saved_errs = self.errors.len();
             let ty = self.parse_type();

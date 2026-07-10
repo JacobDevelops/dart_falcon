@@ -5,5 +5,6 @@ edition.workspace = true
 description = "falcon.json configuration schema and loader"
 
 [dependencies]
+glob.workspace = true
 serde.workspace = true
 serde_json.workspace = true

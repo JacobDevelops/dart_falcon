@@ -175,6 +175,39 @@ fn scan_collection_elem(
             scan_expr(iterable, diags, ctx);
             scan_collection_elem(element, diags, ctx);
         }
+        CollectionElement::CFor {
+            init,
+            condition,
+            updates,
+            element,
+            ..
+        } => {
+            match init {
+                Some(ForInit::VarDecl(d)) => {
+                    for decl in &d.declarators {
+                        if let Some(e) = &decl.initializer {
+                            scan_expr(e, diags, ctx);
+                        }
+                    }
+                }
+                Some(ForInit::ForIn { iterable, .. }) => {
+                    scan_expr(iterable, diags, ctx);
+                }
+                Some(ForInit::Exprs(es)) => {
+                    for e in es {
+                        scan_expr(e, diags, ctx);
+                    }
+                }
+                None => {}
+            }
+            if let Some(c) = condition {
+                scan_expr(c, diags, ctx);
+            }
+            for u in updates {
+                scan_expr(u, diags, ctx);
+            }
+            scan_collection_elem(element, diags, ctx);
+        }
     }
 }
 
@@ -246,6 +279,39 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                         iterable, element, ..
                     } => {
                         scan_expr(iterable, diags, ctx);
+                        scan_collection_elem(element, diags, ctx);
+                    }
+                    CollectionElement::CFor {
+                        init,
+                        condition,
+                        updates,
+                        element,
+                        ..
+                    } => {
+                        match init {
+                            Some(ForInit::VarDecl(d)) => {
+                                for decl in &d.declarators {
+                                    if let Some(e) = &decl.initializer {
+                                        scan_expr(e, diags, ctx);
+                                    }
+                                }
+                            }
+                            Some(ForInit::ForIn { iterable, .. }) => {
+                                scan_expr(iterable, diags, ctx);
+                            }
+                            Some(ForInit::Exprs(es)) => {
+                                for e in es {
+                                    scan_expr(e, diags, ctx);
+                                }
+                            }
+                            None => {}
+                        }
+                        if let Some(c) = condition {
+                            scan_expr(c, diags, ctx);
+                        }
+                        for u in updates {
+                            scan_expr(u, diags, ctx);
+                        }
                         scan_collection_elem(element, diags, ctx);
                     }
                 }

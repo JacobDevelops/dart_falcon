@@ -45,3 +45,34 @@ void handler(BuildContext _context, String _message) {
 void skipParams(String _name, int _count) {
   print('Skipped');
 }
+
+// Good: `@override` methods must keep the supertype's parameter list, so an
+// unused parameter there is not the author's to remove.
+class MyView {
+  @override
+  Widget build(BuildContext context) => const Text('x');
+}
+
+// Good: `noSuchMethod` receives an `Invocation` it is free to ignore.
+class Proxy {
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+// Good: `this.` / `super.` initializing formals bind straight to a field or the
+// super-constructor — the parameter is its own use, never flag them.
+class Point {
+  final int x;
+  final int y;
+  Point(this.x, this.y);
+}
+
+class ColoredPoint extends Point {
+  final int color;
+  ColoredPoint(super.x, super.y, this.color) : super();
+}
+
+// Good: a parameter used only inside a map comprehension's iterable counts as
+// used (the walker descends into `Expr::Map.elements`).
+Map<String, int> lengths(List<String> words) {
+  return {for (final w in words) w: w.length};
+}

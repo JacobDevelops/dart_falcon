@@ -41,4 +41,21 @@ class BooleanPrefixes {
 
   /// Field with can prefix
   bool canUpdate = false;
+
+  /// Private boolean: leading underscore is stripped before prefix matching
+  bool _isDisposed = false;
+
+  /// Private boolean with has prefix
+  bool _hasStarted = false;
+}
+
+/// @override members inherit their name from the supertype and are exempt.
+class Subclass extends BooleanPrefixes {
+  @override
+  bool active = false;
+
+  @override
+  bool getStatus() {
+    return false;
+  }
 }
