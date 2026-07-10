@@ -1,69 +1,118 @@
-//! Inline diagnostic suppression via `// ignore:` / `// ignore_for_file:`
-//! comments, mirroring the Dart analyzer's syntax so existing comments carry
-//! over unchanged.
+//! Inline diagnostic suppression via `// falcon-ignore <path>: <reason>` /
+//! `// falcon-ignore-all <path>: <reason>` comments, modelled on Biome's
+//! `// biome-ignore lint/<group>/<rule>: <explanation>` shape.
+//!
+//! `<path>` is `lint/<group>/<rule>` for file rules and `project/<group>/<rule>`
+//! for project (cross-file) rules. A reason is **required**; one rule per
+//! comment; consecutive suppression-only comment lines stack and all apply to
+//! the next line of code (Biome semantics). Falcon does **not** read Dart's own
+//! `// ignore:` / `// ignore_for_file:` comments — those belong to the analyzer.
 //!
 //! Comments are read from a real lex pass (not a naive line scan), so a
 //! suppression phrase sitting inside a string literal is never mistaken for a
-//! real ignore comment — the lexer tokenizes it as part of the `StringLit`.
+//! real directive — the lexer tokenizes it as part of the `StringLit`.
+//!
+//! A malformed comment (missing reason, bad path, unknown rule, or a rule under
+//! the wrong group/section) does **not** suppress; instead it surfaces a
+//! [`MALFORMED_SUPPRESSION`] diagnostic so the mistake is visible. That rule is
+//! internal — it is deliberately absent from `meta.rs`/`falcon.json`, and
+//! `apply_severities` leaves diagnostics whose rule has no metadata untouched.
 
 use std::collections::{HashMap, HashSet};
 
 use falcon_dart_parser::lexer::Lexer;
-use falcon_syntax::token::TokenKind;
+use falcon_diagnostics::{Diagnostic, Severity, Span};
+use falcon_syntax::token::{Token, TokenKind};
+
+/// Rule name carried by the diagnostics emitted for malformed suppression
+/// comments. Internal: not registered in `meta.rs`, not configurable, and never
+/// itself suppressible.
+pub const MALFORMED_SUPPRESSION: &str = "malformed-suppression";
+
+/// Maps a rule name to its `(group, is_project)` metadata, used to validate a
+/// suppression path. Supplied by callers because `falcon_analyze` does not
+/// depend on `falcon_rules` (which owns the rule table).
+pub type RuleLookup = fn(&str) -> Option<(&'static str, bool)>;
 
 /// Parsed suppression directives for a single source file.
 pub struct FileSuppressions {
-    /// Rules suppressed everywhere in the file (`// ignore_for_file:`).
-    for_file: HashSet<String>,
-    /// Rules suppressed on a specific 0-based line (`// ignore:`).
+    /// Rule names suppressed everywhere in the file (`falcon-ignore-all`).
+    all_file: HashSet<String>,
+    /// Rule names suppressed on a specific 0-based line (`falcon-ignore`).
     by_line: HashMap<u32, HashSet<String>>,
     /// Byte offset of the start of each 0-based line, for offset→line lookup.
     line_starts: Vec<usize>,
+    /// `malformed-suppression` diagnostics collected while parsing.
+    diagnostics: Vec<Diagnostic>,
 }
 
 impl FileSuppressions {
-    /// Lex `source` once and collect every ignore directive it contains.
-    pub fn from_source(source: &str) -> Self {
-        let line_starts = compute_line_starts(source);
-        let mut for_file: HashSet<String> = HashSet::new();
-        let mut by_line: HashMap<u32, HashSet<String>> = HashMap::new();
+    /// Lex `source` once and collect every `falcon-ignore` directive it
+    /// contains, validating each path against `lookup`. `file_path` is used only
+    /// to stamp the malformed-suppression diagnostics.
+    pub fn parse(source: &str, file_path: &str, lookup: RuleLookup) -> Self {
+        let mut me = Self {
+            all_file: HashSet::new(),
+            by_line: HashMap::new(),
+            line_starts: compute_line_starts(source),
+            diagnostics: Vec::new(),
+        };
 
-        // Line of the most recent non-trivia token; lets us tell a trailing
-        // `// ignore:` (code precedes it on the same line → suppress that line)
-        // from a standalone one (nothing before it → suppress the next line).
+        // Fast path: the lexer pass only earns its keep on files that actually
+        // mention the directive. A match inside a string literal merely triggers
+        // the pass, which then correctly ignores it — so this stays correct.
+        if !source.contains("falcon-ignore") {
+            return me;
+        }
+
+        // Line of the most recent non-trivia token; distinguishes a trailing
+        // `// falcon-ignore` (code precedes it → same line) from a standalone
+        // one (nothing before it → applies to the next code line).
         let mut last_code_line: Option<u32> = None;
+        // Standalone directives awaiting the next code line (Biome stacking).
+        let mut pending: Vec<String> = Vec::new();
 
         for token in Lexer::new(source).tokenize() {
+            let line = line_for_offset(&me.line_starts, token.offset);
+
             if token.is_trivia() {
-                // Only `//`-style comments carry ignore directives; block
-                // comments (`/* */`) are excluded, matching the analyzer.
-                if matches!(token.kind, TokenKind::LineComment | TokenKind::DocComment) {
-                    let text = token.text(source);
-                    let line = line_for_offset(&line_starts, token.offset);
-                    if let Some(directive) = parse_ignore_comment(text) {
-                        match directive {
-                            Directive::ForFile(rules) => for_file.extend(rules),
-                            Directive::Line(rules) => {
-                                let target = if last_code_line == Some(line) {
-                                    line
-                                } else {
-                                    line + 1
-                                };
-                                by_line.entry(target).or_default().extend(rules);
+                // Only `//`-style line comments carry directives; block comments
+                // (`/* */`) do not.
+                if matches!(token.kind, TokenKind::LineComment | TokenKind::DocComment)
+                    && let Some((keyword, rest)) = classify(token.text(source))
+                {
+                    match validate(keyword, rest, lookup) {
+                        Ok(rule) => {
+                            if keyword == KW_ALL {
+                                me.all_file.insert(rule);
+                            } else if last_code_line == Some(line) {
+                                // Trailing comment: suppress its own line.
+                                me.by_line.entry(line).or_default().insert(rule);
+                            } else {
+                                // Standalone: defer to the next code line.
+                                pending.push(rule);
                             }
                         }
+                        Err(message) => me
+                            .diagnostics
+                            .push(malformed_diag(&token, source, file_path, message)),
                     }
                 }
                 continue;
             }
-            last_code_line = Some(line_for_offset(&line_starts, token.offset));
+
+            // First code token on a new line flushes any stacked standalone
+            // directives onto this line.
+            if last_code_line != Some(line) {
+                if !pending.is_empty() {
+                    let entry = me.by_line.entry(line).or_default();
+                    entry.extend(pending.drain(..));
+                }
+                last_code_line = Some(line);
+            }
         }
 
-        Self {
-            for_file,
-            by_line,
-            line_starts,
-        }
+        me
     }
 
     /// The 0-based line a byte offset falls on (used for a diagnostic's span
@@ -74,47 +123,111 @@ impl FileSuppressions {
 
     /// Whether `rule` is suppressed on the given 0-based `line`.
     pub fn is_suppressed(&self, rule: &str, line: u32) -> bool {
-        self.for_file.contains(rule)
+        self.all_file.contains(rule)
             || self
                 .by_line
                 .get(&line)
                 .is_some_and(|rules| rules.contains(rule))
     }
 
-    /// True when the file carries no directives at all (skip filtering).
+    /// True when the file carries no *valid* directives (skip the filter pass).
+    /// Malformed-suppression diagnostics are reported separately and do not
+    /// count here.
     pub fn is_empty(&self) -> bool {
-        self.for_file.is_empty() && self.by_line.is_empty()
+        self.all_file.is_empty() && self.by_line.is_empty()
+    }
+
+    /// Diagnostics for malformed suppression comments found while parsing.
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    /// Consume the parse result, yielding its malformed-suppression diagnostics.
+    pub fn into_diagnostics(self) -> Vec<Diagnostic> {
+        self.diagnostics
     }
 }
 
-enum Directive {
-    ForFile(Vec<String>),
-    Line(Vec<String>),
-}
+const KW_ALL: &str = "falcon-ignore-all";
+const KW_LINE: &str = "falcon-ignore";
 
-/// Parse a `//`-comment's text into an ignore directive, if it is one.
-///
-/// Accepts `//`+ then optional spaces then `ignore:` / `ignore_for_file:` then
-/// a comma-separated rule list — matching what the Dart analyzer recognizes,
-/// including the no-space `//ignore:` form.
-fn parse_ignore_comment(text: &str) -> Option<Directive> {
+/// Recognize a `falcon-ignore` / `falcon-ignore-all` line comment, returning the
+/// matched keyword and the `<path>: <reason>` remainder. The `-all` form is
+/// tested first since it is a prefix superset of the line form.
+fn classify(text: &str) -> Option<(&'static str, &str)> {
     let body = text.trim_start_matches('/').trim_start();
-    if let Some(rest) = body.strip_prefix("ignore_for_file:") {
-        Some(Directive::ForFile(parse_rule_list(rest)))
+    if let Some(rest) = strip_keyword(body, KW_ALL) {
+        Some((KW_ALL, rest))
     } else {
-        body.strip_prefix("ignore:")
-            .map(|rest| Directive::Line(parse_rule_list(rest)))
+        strip_keyword(body, KW_LINE).map(|rest| (KW_LINE, rest))
     }
 }
 
-/// Split a comma-separated rule list, trimming whitespace and dropping empties.
-/// Names are kept verbatim and matched exactly against registered rule names.
-fn parse_rule_list(rest: &str) -> Vec<String> {
-    rest.split(',')
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_owned)
-        .collect()
+/// Strip `keyword` from the front of `body` only when it stands as a whole word
+/// (followed by whitespace or end of comment), returning the trimmed remainder.
+fn strip_keyword<'a>(body: &'a str, keyword: &str) -> Option<&'a str> {
+    let rest = body.strip_prefix(keyword)?;
+    if rest.is_empty() || rest.starts_with(char::is_whitespace) {
+        Some(rest.trim_start())
+    } else {
+        None
+    }
+}
+
+/// Validate a directive's `<path>: <reason>` remainder. Returns the bare rule
+/// name to suppress on success, or a human-readable message describing why the
+/// comment is malformed (and therefore does not suppress).
+fn validate(keyword: &str, rest: &str, lookup: RuleLookup) -> Result<String, String> {
+    let (path, reason) = match rest.split_once(':') {
+        Some((p, r)) => (p.trim(), r.trim()),
+        None => (rest.trim(), ""),
+    };
+
+    if reason.is_empty() {
+        let shown = if path.is_empty() {
+            "lint/<group>/<rule>"
+        } else {
+            path
+        };
+        return Err(format!(
+            "{keyword} requires a reason: // {keyword} {shown}: <why>"
+        ));
+    }
+
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.len() != 3 || !matches!(parts[0], "lint" | "project") {
+        return Err(format!(
+            "malformed {keyword} path '{path}'; expected lint/<group>/<rule> or project/<group>/<rule>"
+        ));
+    }
+    let (section, group, rule) = (parts[0], parts[1], parts[2]);
+
+    match lookup(rule) {
+        None => Err(format!("unknown rule '{rule}' in {keyword} path '{path}'")),
+        Some((correct_group, is_project)) => {
+            let correct_section = if is_project { "project" } else { "lint" };
+            if group != correct_group || section != correct_section {
+                Err(format!(
+                    "suppression path is {correct_section}/{correct_group}/{rule}"
+                ))
+            } else {
+                Ok(rule.to_string())
+            }
+        }
+    }
+}
+
+/// Build a `malformed-suppression` warning anchored to the offending comment.
+fn malformed_diag(token: &Token, source: &str, file_path: &str, message: String) -> Diagnostic {
+    let start = token.offset;
+    let end = start + token.text(source).len();
+    Diagnostic::new(
+        MALFORMED_SUPPRESSION,
+        Severity::Warning,
+        message,
+        file_path,
+        Span { start, end },
+    )
 }
 
 fn compute_line_starts(source: &str) -> Vec<usize> {
@@ -138,46 +251,54 @@ fn line_for_offset(line_starts: &[usize], offset: usize) -> u32 {
 mod tests {
     use super::*;
 
-    fn rules_on(source: &str, line: u32) -> Vec<String> {
-        let s = FileSuppressions::from_source(source);
-        let mut got: Vec<String> = s
-            .by_line
-            .get(&line)
-            .map(|set| set.iter().cloned().collect())
-            .unwrap_or_default();
-        got.sort();
-        got
+    /// Test lookup mirroring a slice of the real rule table: a file rule and a
+    /// project rule, enough to exercise group/section validation.
+    fn lookup(name: &str) -> Option<(&'static str, bool)> {
+        match name {
+            "avoid-dynamic" => Some(("suspicious", false)),
+            "no-equal-arguments" => Some(("suspicious", false)),
+            "unused-files" => Some(("correctness", true)),
+            _ => None,
+        }
+    }
+
+    fn parse(source: &str) -> FileSuppressions {
+        FileSuppressions::parse(source, "test.dart", lookup)
+    }
+
+    fn diag_rules(s: &FileSuppressions) -> Vec<&str> {
+        s.diagnostics().iter().map(|d| d.rule).collect()
     }
 
     #[test]
     fn same_line_suppression() {
-        // `dynamic x;  // ignore: avoid-dynamic` — code precedes the comment,
-        // so it suppresses this same line (line 0).
-        let s = FileSuppressions::from_source("dynamic x; // ignore: avoid-dynamic\n");
+        let s = parse("dynamic x; // falcon-ignore lint/suspicious/avoid-dynamic: legacy\n");
         assert!(s.is_suppressed("avoid-dynamic", 0));
         assert!(!s.is_suppressed("avoid-dynamic", 1));
+        assert!(s.diagnostics().is_empty());
     }
 
     #[test]
     fn next_line_suppression() {
-        // Comment alone on line 0 → suppresses line 1.
-        let s = FileSuppressions::from_source("// ignore: avoid-dynamic\ndynamic x;\n");
+        let s = parse("// falcon-ignore lint/suspicious/avoid-dynamic: legacy\ndynamic x;\n");
         assert!(s.is_suppressed("avoid-dynamic", 1));
         assert!(!s.is_suppressed("avoid-dynamic", 0));
     }
 
     #[test]
-    fn multiple_rules() {
-        assert_eq!(
-            rules_on("// ignore: rule-a, rule-b , rule-c\n", 1),
-            vec!["rule-a", "rule-b", "rule-c"]
-        );
+    fn stacked_standalone_comments_apply_to_next_code_line() {
+        let src = "// falcon-ignore lint/suspicious/avoid-dynamic: a\n\
+                   // falcon-ignore lint/suspicious/no-equal-arguments: b\n\
+                   dynamic x = f(1, 1);\n";
+        let s = parse(src);
+        assert!(s.is_suppressed("avoid-dynamic", 2));
+        assert!(s.is_suppressed("no-equal-arguments", 2));
     }
 
     #[test]
-    fn ignore_for_file_applies_anywhere() {
-        let s = FileSuppressions::from_source(
-            "// ignore_for_file: avoid-dynamic\nvoid f() {}\ndynamic y;\n",
+    fn all_file_applies_anywhere() {
+        let s = parse(
+            "void f() {}\n// falcon-ignore-all lint/suspicious/avoid-dynamic: sweep\ndynamic y;\n",
         );
         assert!(s.is_suppressed("avoid-dynamic", 0));
         assert!(s.is_suppressed("avoid-dynamic", 2));
@@ -185,55 +306,108 @@ mod tests {
     }
 
     #[test]
-    fn unknown_rule_names_are_harmless() {
-        let s = FileSuppressions::from_source("// ignore: not-a-real-rule\ndynamic x;\n");
-        assert!(s.is_suppressed("not-a-real-rule", 1));
-        assert!(!s.is_suppressed("avoid-dynamic", 1));
+    fn project_rule_path() {
+        let s = parse("// falcon-ignore-all project/correctness/unused-files: generated\n");
+        assert!(s.is_suppressed("unused-files", 0));
+        assert!(s.diagnostics().is_empty());
     }
 
     #[test]
-    fn no_space_ignore_is_accepted() {
-        let s = FileSuppressions::from_source("//ignore: avoid-dynamic\ndynamic x;\n");
-        assert!(s.is_suppressed("avoid-dynamic", 1));
+    fn missing_reason_reports_and_does_not_suppress() {
+        let s = parse("dynamic x; // falcon-ignore lint/suspicious/avoid-dynamic\n");
+        assert!(!s.is_suppressed("avoid-dynamic", 0));
+        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION]);
+        assert!(s.diagnostics()[0].message.contains("requires a reason"));
+    }
+
+    #[test]
+    fn empty_reason_reports() {
+        let s = parse("dynamic x; // falcon-ignore lint/suspicious/avoid-dynamic:   \n");
+        assert!(!s.is_suppressed("avoid-dynamic", 0));
+        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION]);
+    }
+
+    #[test]
+    fn wrong_group_reports_correct_path() {
+        let s = parse("// falcon-ignore lint/style/avoid-dynamic: x\ndynamic y;\n");
+        assert!(!s.is_suppressed("avoid-dynamic", 1));
+        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION]);
+        assert!(
+            s.diagnostics()[0]
+                .message
+                .contains("suppression path is lint/suspicious/avoid-dynamic")
+        );
+    }
+
+    #[test]
+    fn wrong_section_reports_correct_path() {
+        // Project rule referenced under `lint/` instead of `project/`.
+        let s = parse("// falcon-ignore-all lint/correctness/unused-files: x\n");
+        assert!(!s.is_suppressed("unused-files", 0));
+        assert!(
+            s.diagnostics()[0]
+                .message
+                .contains("suppression path is project/correctness/unused-files")
+        );
+    }
+
+    #[test]
+    fn unknown_rule_reports() {
+        let s = parse("// falcon-ignore lint/suspicious/not-a-rule: x\ndynamic y;\n");
+        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION]);
+        assert!(
+            s.diagnostics()[0]
+                .message
+                .contains("unknown rule 'not-a-rule'")
+        );
+    }
+
+    #[test]
+    fn malformed_path_reports() {
+        let s = parse("// falcon-ignore avoid-dynamic: x\ndynamic y;\n");
+        assert_eq!(diag_rules(&s), vec![MALFORMED_SUPPRESSION]);
+        assert!(s.diagnostics()[0].message.contains("malformed"));
+    }
+
+    #[test]
+    fn dart_ignore_is_not_read() {
+        // Falcon no longer honors Dart's own `// ignore:` comments.
+        let s = parse("dynamic x; // ignore: avoid-dynamic\n");
+        assert!(s.is_empty());
+        assert!(!s.is_suppressed("avoid-dynamic", 0));
+        assert!(s.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn suppression_inside_string_literal_does_not_count() {
+        let src = "var s = '// falcon-ignore lint/suspicious/avoid-dynamic: x';\ndynamic x;\n";
+        let s = parse(src);
+        assert!(s.is_empty());
+        assert!(!s.is_suppressed("avoid-dynamic", 1));
+        assert!(s.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn block_comment_directive_does_not_count() {
+        let s = parse("/* falcon-ignore lint/suspicious/avoid-dynamic: x */\ndynamic x;\n");
+        assert!(s.is_empty());
+        assert!(s.diagnostics().is_empty());
     }
 
     #[test]
     fn comment_after_code_targets_its_own_line() {
-        let src = "void f() {}\ndynamic x = 1; // ignore: avoid-dynamic\n";
-        let s = FileSuppressions::from_source(src);
+        let src = "void f() {}\ndynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic: y\n";
+        let s = parse(src);
         assert!(s.is_suppressed("avoid-dynamic", 1));
         assert!(!s.is_suppressed("avoid-dynamic", 2));
     }
 
     #[test]
-    fn suppression_inside_string_literal_does_not_count() {
-        // The `// ignore:` sits inside a string, so the lexer never sees it as
-        // a comment and it must not suppress anything.
-        let src = "var s = '// ignore: avoid-dynamic';\ndynamic x;\n";
-        let s = FileSuppressions::from_source(src);
-        assert!(s.is_empty(), "string-literal ignore must not register");
-        assert!(!s.is_suppressed("avoid-dynamic", 1));
-    }
-
-    #[test]
-    fn doc_comment_triple_slash_is_accepted() {
-        // The analyzer's `//+` allows extra slashes; `/// ignore:` still counts.
-        let s = FileSuppressions::from_source("/// ignore: avoid-dynamic\ndynamic x;\n");
-        assert!(s.is_suppressed("avoid-dynamic", 1));
-    }
-
-    #[test]
-    fn block_comment_ignore_does_not_count() {
-        let s = FileSuppressions::from_source("/* ignore: avoid-dynamic */\ndynamic x;\n");
-        assert!(s.is_empty());
-    }
-
-    #[test]
     fn line_for_offset_maps_offsets() {
         let src = "aa\nbbb\nc";
-        let s = FileSuppressions::from_source(src);
-        assert_eq!(s.line_for_offset(0), 0); // 'a'
-        assert_eq!(s.line_for_offset(3), 1); // 'b'
-        assert_eq!(s.line_for_offset(7), 2); // 'c'
+        let s = parse(src);
+        assert_eq!(s.line_for_offset(0), 0);
+        assert_eq!(s.line_for_offset(3), 1);
+        assert_eq!(s.line_for_offset(7), 2);
     }
 }

@@ -330,7 +330,11 @@ fn split_sentences(text: &str) -> Vec<&str> {
 }
 
 fn is_ignore_comment(text: &str) -> bool {
-    text.starts_with("ignore:") || text.starts_with("ignore_for_file:")
+    // Dart analyzer directives plus falcon's own `falcon-ignore` / `falcon-ignore-all`
+    // suppressions: none of these are prose, so the rule leaves them alone.
+    text.starts_with("ignore:")
+        || text.starts_with("ignore_for_file:")
+        || text.starts_with("falcon-ignore")
 }
 
 fn is_macros(text: &str) -> bool {

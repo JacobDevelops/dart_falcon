@@ -345,18 +345,18 @@ fn test_parallel_sequential_output_identical() {
 }
 
 // ---------------------------------------------------------------------------
-// Inline suppression: `// ignore:` / `// ignore_for_file:` honored end to end.
+// Inline suppression: `// falcon-ignore` / `// falcon-ignore-all` end to end.
 // ---------------------------------------------------------------------------
 
-/// A same-line `// ignore:` suppresses that occurrence; a second unignored
-/// occurrence still fires. An `// ignore_for_file:` clears the whole file.
+/// A same-line `// falcon-ignore` suppresses that occurrence; a second
+/// unsuppressed occurrence still fires. `// falcon-ignore-all` clears the file.
 #[test]
 fn test_inline_suppression_end_to_end() {
     let temp = tempdir().unwrap();
     // Line 0 is suppressed inline; line 1 is not.
     fs::write(
         temp.path().join("a.dart"),
-        "dynamic a = 1; // ignore: avoid-dynamic\ndynamic b = 2;\n",
+        "dynamic a = 1; // falcon-ignore lint/suspicious/avoid-dynamic: legacy\ndynamic b = 2;\n",
     )
     .unwrap();
     let out = collect_check(&options_for(temp.path(), None)).unwrap();
@@ -365,18 +365,50 @@ fn test_inline_suppression_end_to_end() {
         .iter()
         .filter(|d| d.rule == "avoid-dynamic")
         .count();
-    assert_eq!(dynamic_hits, 1, "only the unignored occurrence should fire");
+    assert_eq!(
+        dynamic_hits, 1,
+        "only the unsuppressed occurrence should fire"
+    );
 
-    // ignore_for_file clears every occurrence in the file.
+    // falcon-ignore-all clears every occurrence in the file.
     fs::write(
         temp.path().join("a.dart"),
-        "// ignore_for_file: avoid-dynamic\ndynamic a = 1;\ndynamic b = 2;\n",
+        "// falcon-ignore-all lint/suspicious/avoid-dynamic: legacy\ndynamic a = 1;\ndynamic b = 2;\n",
     )
     .unwrap();
     let out = collect_check(&options_for(temp.path(), None)).unwrap();
     assert!(
         out.diagnostics.iter().all(|d| d.rule != "avoid-dynamic"),
-        "ignore_for_file must suppress every avoid-dynamic in the file"
+        "falcon-ignore-all must suppress every avoid-dynamic in the file"
+    );
+}
+
+/// A `// falcon-ignore` with no reason does not suppress and surfaces a
+/// `malformed-suppression` warning; an old Dart `// ignore:` is inert.
+#[test]
+fn test_malformed_suppression_reported() {
+    let temp = tempdir().unwrap();
+    fs::write(
+        temp.path().join("a.dart"),
+        "dynamic a = 1; // falcon-ignore lint/suspicious/avoid-dynamic\n\
+         dynamic b = 2; // ignore: avoid-dynamic\n",
+    )
+    .unwrap();
+    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+    // Both occurrences still fire (no-reason comment and the inert Dart comment).
+    assert_eq!(
+        out.diagnostics
+            .iter()
+            .filter(|d| d.rule == "avoid-dynamic")
+            .count(),
+        2,
+        "neither a reasonless falcon-ignore nor a Dart // ignore: suppresses"
+    );
+    assert!(
+        out.diagnostics
+            .iter()
+            .any(|d| d.rule == "malformed-suppression"),
+        "the reasonless falcon-ignore must report malformed-suppression"
     );
 }
 

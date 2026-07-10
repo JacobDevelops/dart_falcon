@@ -1,16 +1,41 @@
-use crate::{AnalyzeContext, FileSuppressions, Rule};
+use crate::{AnalyzeContext, FileSuppressions, Rule, RuleLookup};
 use falcon_diagnostics::Diagnostic;
 use tracing::{debug, debug_span};
 
+/// Default rule lookup for a registry built without one: knows no rules, so
+/// every suppression path validates as "unknown rule". Real callers install a
+/// lookup backed by `falcon_rules` metadata via [`RuleRegistry::with_lookup`].
+fn no_lookup(_name: &str) -> Option<(&'static str, bool)> {
+    None
+}
+
 /// Registry of enabled lint rules.
-#[derive(Default)]
 pub struct RuleRegistry {
     rules: Vec<Box<dyn Rule>>,
+    lookup: RuleLookup,
+}
+
+impl Default for RuleRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RuleRegistry {
     pub fn new() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: Vec::new(),
+            lookup: no_lookup,
+        }
+    }
+
+    /// Build a registry whose suppression paths are validated against `lookup`
+    /// (supplied from `falcon_rules` metadata at the call site).
+    pub fn with_lookup(lookup: RuleLookup) -> Self {
+        Self {
+            rules: Vec::new(),
+            lookup,
+        }
     }
 
     pub fn register(&mut self, rule: Box<dyn Rule>) {
@@ -39,22 +64,21 @@ impl RuleRegistry {
             })
             .collect();
 
-        // Honor inline `// ignore:` / `// ignore_for_file:` suppressions. Parse
-        // them lazily: clean files pay nothing, and files without directives
-        // skip the per-diagnostic filter entirely.
-        if diagnostics.is_empty() {
-            return diagnostics;
-        }
-        let suppressions = FileSuppressions::from_source(ctx.source);
-        if suppressions.is_empty() {
-            return diagnostics;
-        }
-        diagnostics
-            .into_iter()
-            .filter(|diag| {
+        // Honor inline `// falcon-ignore` / `// falcon-ignore-all` suppressions.
+        // Parse always (even with no rule diagnostics) so malformed comments are
+        // surfaced; a fast path inside `parse` keeps clean files cheap.
+        let mut diagnostics = diagnostics;
+        let suppressions =
+            FileSuppressions::parse(ctx.source, &ctx.file_path.to_string_lossy(), self.lookup);
+        if !suppressions.is_empty() {
+            diagnostics.retain(|diag| {
                 let line = suppressions.line_for_offset(diag.span.start);
                 !suppressions.is_suppressed(diag.rule, line)
-            })
-            .collect()
+            });
+        }
+        // Malformed-suppression diagnostics are appended after filtering so they
+        // cannot suppress themselves.
+        diagnostics.extend(suppressions.into_diagnostics());
+        diagnostics
     }
 }

@@ -655,7 +655,7 @@ dart_code_linter: **literal** arguments are compared by identity and so never
 match each other (two `10`s, two `true`s are never flagged), positional args
 match other positional args by source text, and named args match other named
 args by their *value* expression text. The diagnostic is reported on the **last**
-occurrence of the duplicate (so a hand-placed `// ignore` on the trailing
+occurrence of the duplicate (so a hand-placed `// falcon-ignore` on the trailing
 argument lines up).
 
 ### Configuration
@@ -3405,7 +3405,8 @@ Flags a function/method whose deepest nesting of control-flow blocks exceeds
 These three rules run in the CLI project pass over every analyzed file at once
 (see `falcon_analyze::ProjectRule`); they are **CLI-only** — the single-file LSP
 model never evaluates them. They share the metadata table and config schema with
-per-file rules and honor `// ignore:` suppressions and `overrides` normally.
+per-file rules and honor `// falcon-ignore project/<group>/<rule>: <reason>`
+suppressions and `overrides` normally.
 
 Package resolution: `package:<name>/...` URIs resolve against the `name:` in the
 nearest `pubspec.yaml` (mapped to that package's `lib/`); when no pubspec is

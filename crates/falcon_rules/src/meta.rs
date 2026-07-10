@@ -612,3 +612,10 @@ pub const RULE_METADATA: &[RuleMeta] = &[
 pub fn meta_for(name: &str) -> Option<&'static RuleMeta> {
     RULE_METADATA.iter().find(|m| m.name == name)
 }
+
+/// Suppression-path validation hook: maps a rule name to its `(group,
+/// is_project)` so `falcon_analyze` can check `// falcon-ignore` paths without
+/// depending on this crate. Matches [`falcon_analyze::RuleLookup`].
+pub fn suppression_lookup(name: &str) -> Option<(&'static str, bool)> {
+    meta_for(name).map(|m| (m.group, m.project))
+}
