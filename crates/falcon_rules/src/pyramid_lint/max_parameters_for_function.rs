@@ -22,6 +22,19 @@ fn count_parameters(params: &FormalParamList) -> usize {
     params.positional.len() + params.optional_positional.len() + params.named.len()
 }
 
+/// Read the `max_parameters` option (default 5). Malformed/missing → default.
+fn max_parameters_option(ctx: &AnalyzeContext) -> usize {
+    crate::meta::meta_for("max_parameters_for_function")
+        .and_then(|m| {
+            ctx.config
+                .rule_options(m.group, "max_parameters_for_function")
+        })
+        .and_then(|o| o.get("max_parameters"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .unwrap_or(5)
+}
+
 fn check_function_params(
     params: &FormalParamList,
     span: &Span,
@@ -29,11 +42,12 @@ fn check_function_params(
     ctx: &AnalyzeContext,
 ) {
     let total = count_parameters(params);
-    if total > 5 {
+    let threshold = max_parameters_option(ctx);
+    if total > threshold {
         diags.push(Diagnostic::new(
             "max_parameters_for_function",
             Severity::Warning,
-            "Function has too many parameters (max 5).",
+            format!("Function has too many parameters (max {threshold})."),
             ctx.file_path.to_string_lossy().into_owned(),
             DiagSpan {
                 start: span.start,

@@ -3,11 +3,18 @@
 use std::path::PathBuf;
 use tracing::{info, warn};
 
+use std::collections::HashMap;
+
 use clap::ValueEnum;
-use falcon_analyze::{RuleRegistry, analyze_parallel, analyze_sequential};
-use falcon_config::{load_config, load_or_default};
+use falcon_analyze::{
+    FileSuppressions, ProjectFile, ProjectRuleRegistry, RuleRegistry, analyze_parallel_collecting,
+    analyze_sequential_collecting,
+};
+use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_diagnostics::Diagnostic;
-use falcon_rules::{ResolvedRules, apply_severities, resolve_rules};
+use falcon_rules::{
+    ResolvedProjectRules, ResolvedRules, apply_severities, resolve_project_rules, resolve_rules,
+};
 use glob::Pattern;
 
 use crate::file_walker::walk_files;
@@ -74,6 +81,57 @@ fn build_registry(resolved: ResolvedRules) -> RuleRegistry {
     registry
 }
 
+/// Build a project-rule registry from the resolved project rule set.
+fn build_project_registry(resolved: ResolvedProjectRules) -> ProjectRuleRegistry {
+    let mut registry = ProjectRuleRegistry::new();
+    for rule in resolved.rules {
+        registry.register(rule);
+    }
+    registry
+}
+
+/// Honor inline `// ignore:` / `// ignore_for_file:` suppressions for
+/// project-rule diagnostics, mirroring the per-file pass. Suppressions are read
+/// from the diagnostic's own file (matched by path) and parsed lazily.
+fn suppress_project_diags(diags: &mut Vec<Diagnostic>, files: &[ProjectFile]) {
+    if diags.is_empty() {
+        return;
+    }
+    let sources: HashMap<String, &str> = files
+        .iter()
+        .map(|f| (f.path.to_string_lossy().into_owned(), f.source.as_str()))
+        .collect();
+    let mut cache: HashMap<String, FileSuppressions> = HashMap::new();
+    diags.retain(|diag| {
+        let Some(src) = sources.get(&diag.file_path) else {
+            return true;
+        };
+        let sup = cache
+            .entry(diag.file_path.clone())
+            .or_insert_with(|| FileSuppressions::from_source(src));
+        if sup.is_empty() {
+            return true;
+        }
+        let line = sup.line_for_offset(diag.span.start);
+        !sup.is_suppressed(diag.rule, line)
+    });
+}
+
+/// Run the project (cross-file) pass and fold its diagnostics into `diagnostics`,
+/// applying inline suppressions and the same path-aware severity resolution as
+/// the per-file pass.
+fn run_project_pass(
+    registry: &ProjectRuleRegistry,
+    project_files: &[ProjectFile],
+    config: &FalconConfig,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut project_diags = registry.run_all(project_files, config);
+    suppress_project_diags(&mut project_diags, project_files);
+    apply_severities(&mut project_diags, config);
+    diagnostics.extend(project_diags);
+}
+
 /// Keep only files matching at least one positive include glob. A non-empty
 /// `includes` list restricts the walked set; an empty one means "no filtering".
 fn apply_includes(files: &mut Vec<(PathBuf, String)>, includes: &[String]) {
@@ -127,20 +185,28 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     }
 
     let resolved = resolve_rules(&config);
-    let severities = resolved.severities.clone();
     let registry = build_registry(resolved);
+    // Project (cross-file) rules run a second pass over the retained programs;
+    // only collect programs when at least one is enabled (they are memory-heavy).
+    let project_registry = build_project_registry(resolve_project_rules(&config));
+    let collect_programs = !project_registry.is_empty();
     info!(
         file_count = files.len(),
         rule_count = registry.rules().len(),
+        project_rule_count = project_registry.rules().len(),
         "starting check"
     );
-    let mut diagnostics = if options.parallel {
-        analyze_parallel(&registry, &files, &config)
+    let (mut diagnostics, project_files) = if options.parallel {
+        analyze_parallel_collecting(&registry, &files, &config, collect_programs)
     } else {
-        analyze_sequential(&registry, &files, &config)
+        analyze_sequential_collecting(&registry, &files, &config, collect_programs)
     };
 
-    apply_severities(&mut diagnostics, &severities);
+    apply_severities(&mut diagnostics, &config);
+
+    if collect_programs {
+        run_project_pass(&project_registry, &project_files, &config, &mut diagnostics);
+    }
 
     // Parallel analysis collects in nondeterministic file order; sort so
     // output (and max_errors truncation) is stable across runs and modes.

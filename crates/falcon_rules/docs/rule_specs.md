@@ -3308,4 +3308,136 @@ for the full schema (files, domains, recommended preset, legacy migration).
 
 ---
 
+## First-Adopter Gap-Fill (pyramid_lint rules used by jfit)
+
+Eight pyramid_lint rules the first real adopter (jfit) relied on but that were
+never ported. All are `recommended: true` and emit `Severity::Warning`.
+
+### avoid_single_child_column_or_row (style, [flutter])
+
+Flags a `Column`, `Row`, or `Flex` construction whose `children:` argument is a
+list literal with exactly one plain-expression element — the child should be used
+directly. Handles both `Column(...)` (call) and `const Column(...)` / `new`
+(construction) forms. A defensive guard requires the construction's source span
+to close with `)`, so a partially-parsed node (Dart 3 pattern collection elements
+can truncate a collection) does not produce a false positive.
+
+### prefer_async_callback (style, [flutter])
+
+Flags the type annotation `Future<void> Function()` (no parameters), which is more
+clearly written as `AsyncCallback` (flutter foundation). Walks every `DartType`
+position (fields, parameters, return types, typedefs, locals).
+
+### avoid_redundant_pattern_field_names (style)
+
+Flags object/record pattern fields written as `name: name` (e.g.
+`case Point(x: x)`), which should use the Dart 3 shorthand `:x`. The colon
+shorthand `:x` and typed/nested sub-patterns (`x: final x`, `x: Foo(...)`) are
+excluded via a source-level check, because `Point(x: x)` and `Point(:x)` parse to
+structurally identical `ObjectPatternField`s and can only be told apart by source.
+
+### proper_controller_dispose (correctness, [flutter])
+
+In a `State` subclass (a class whose `extends` type name ends with `State`),
+flags controller fields the class constructs itself (a field whose initializer,
+or an in-class assignment, builds a `*Controller`) that are never `.dispose()`-d
+in the class's `dispose()` method. Disposal is detected through both direct calls
+(`x.dispose()`, `x?.dispose()`, `this.x.dispose()`) and cascades
+(`x..removeListener(..)..dispose()`). Controllers sourced from `widget.` are
+treated as owned by the parent widget and skipped. If there is no `dispose()`
+method at all, every owned controller is flagged.
+
+### proper_expanded_and_flexible (correctness, [flutter])
+
+Flags an `Expanded`/`Flexible` construction passed as the `child:` argument of a
+non-Flex widget (positively-visible illegal parent context). Conservative:
+ambiguous cases (variables, returns, `children:` lists) are not flagged.
+
+### proper_from_environment (correctness)
+
+Flags `String.fromEnvironment` / `int.fromEnvironment` / `bool.fromEnvironment`
+invocations that are not in a const context. Without `const`, these always return
+the default value at runtime. Const contexts (const variable initializers, const
+collections, const constructions, annotation arguments) are exempt.
+
+### proper_super_init_state (correctness, [flutter])
+
+In a `State` subclass's `initState()`, requires `super.initState()` to be the
+first statement (the mirror of `correct_order_for_super_dispose`). Flags when it
+is present but not first (at the call) or absent entirely (at the method name).
+
+### no_self_comparisons (suspicious)
+
+Flags a binary comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`) whose two operands
+are the same source text after whitespace is stripped (e.g. `x == x`,
+`a[0] == a[0]`).
+
+### cyclomatic_complexity (complexity)
+
+Flags a function/method whose cyclomatic complexity exceeds `max_complexity`
+(option, default 20). Complexity is `1` plus one per decision point in the body
+tree: `if`, ternary, `&&`, `||`, `??`, `for`, `while`, `do`, each `catch`, each
+non-default `case`/switch-expression arm, and each pattern `when` guard.
+
+### maximum_nesting_level (complexity)
+
+Flags a function/method whose deepest nesting of control-flow blocks exceeds
+`max_nesting` (option, default 5). Depth increases when entering the body of an
+`if`/`for`/`while`/`do`/`switch`/`try`; plain blocks do not add a level.
+
+## Project-level (cross-file) rules
+
+These three rules run in the CLI project pass over every analyzed file at once
+(see `falcon_analyze::ProjectRule`); they are **CLI-only** — the single-file LSP
+model never evaluates them. They share the metadata table and config schema with
+per-file rules and honor `// ignore:` suppressions and `overrides` normally.
+
+Package resolution: `package:<name>/...` URIs resolve against the `name:` in the
+nearest `pubspec.yaml` (mapped to that package's `lib/`); when no pubspec is
+found, resolution falls back to `lib/...` path-suffix matching and every analyzed
+file is treated as in scope.
+
+### unused-files (correctness, recommended)
+
+Port of dart_code_linter's `check-unused-files`. Flags a `lib/` file that is
+never referenced by any `import`/`export`/`part` directive of any other analyzed
+file, provided it (a) declares no top-level `main` function and (b) is not a
+`part of` another file. The diagnostic spans the start of the file. Relative and
+same-package `package:` URIs are resolved to concrete files; cross-package or
+unresolved URIs match tolerantly by path suffix.
+
+### unused-code (correctness, recommended)
+
+Port of dart_code_linter's `check-unused-code`. Flags a public top-level
+declaration in a `lib/` file — class, enum, mixin, mixin class, extension type,
+typedef, top-level function, or top-level variable — whose name is never
+referenced outside its declaring file. Usage is detected by a lexer identifier
+scan across **all** files (including `test/`), so type references, `case`
+patterns, member access, and `show`/`hide` combinators all count, and string and
+comment contents never do. Low-false-positive exemptions: the name `main`; any
+annotated declaration (annotations often imply framework use); any declaration in
+a file that is re-`export`ed by another file (the export surfaces its whole API);
+names starting with `_` (already private); and **extensions** (invoked through
+member names, not the extension name — flagging on the unreferenced extension
+name would be unsound without member-usage tracking). Files that fail to parse
+are skipped for declaration extraction (error recovery can leak spurious
+top-level nodes) but still contribute to usage detection.
+
+### unnecessary-nullable (correctness, NOT recommended)
+
+Conservative port of dart_code_linter's `check-unnecessary-nullable`; heuristic
+without type resolution, so it is off in the recommended preset. Flags a nullable
+parameter (`T?`) of a **private** top-level function or **private** method
+(`_`-prefixed) when: the name resolves to exactly one declaration project-wide
+(unambiguous); at least one call site exists and none passes a `null` literal for
+that parameter (nor omits it when it is optional and would default to null); the
+body never assigns `null` to it; and the name is never used as a bare value
+(tear-off), whose callers would be opaque. Restricting to private declarations is
+what makes the heuristic sound — every call site is visible in-project.
+Limitation: it can only see `null` literals, so a nullable value forwarded
+through a variable is not treated as passing null. Per-path exclusions are
+expressible with `overrides`. Files that fail to parse are skipped.
+
+---
+
 **End of rule_specs.md**

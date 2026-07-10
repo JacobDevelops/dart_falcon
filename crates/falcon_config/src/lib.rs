@@ -1,10 +1,13 @@
 //! falcon.json configuration schema and loader (biome 2.x-shaped).
 //!
 //! `FalconConfig` is the contract; every field and its default is documented
-//! here. Rules are grouped by category under `linter.rules`; enablement is
+//! here. File rules are grouped by category under `linter.rules`; enablement is
 //! resolved from an explicit per-rule level, the `recommended` preset, and
-//! per-domain gating (see [`LinterConfig::resolve_rule`]).
+//! per-domain gating (see [`LinterConfig::resolve_rule`]). Project-level
+//! (cross-file) rules are a separate feature under `project.rules`, resolved the
+//! same way minus domains (see [`ProjectConfig::resolve_rule`]).
 
+use glob::Pattern;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
@@ -22,8 +25,75 @@ pub struct FalconConfig {
     pub files: FilesConfig,
     /// Linter enablement, rule levels, and domain gating.
     pub linter: LinterConfig,
+    /// Project-level (cross-file) rule enablement and levels. A separate feature
+    /// from `linter`: these rules reason across the whole file set (unused files,
+    /// unused code, call-site nullability) and run only in the CLI project pass.
+    pub project: ProjectConfig,
+    /// Per-path rule re-configuration (biome `overrides`). Each entry re-patches
+    /// the base linter and/or project resolution for files its `includes` match;
+    /// later entries win over earlier ones, and all win over the base config.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<Override>,
     /// Maximum number of errors before stopping. Defaults to None (unlimited).
     pub max_errors: Option<usize>,
+}
+
+/// One `overrides` entry: a path filter plus a partial linter that re-patches
+/// the base resolution for matching files.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Override {
+    /// Glob patterns selecting the files this override applies to. Same syntax
+    /// as `files.includes`: plain entries are positive includes, `!`-prefixed
+    /// entries are exclusions. Paths are matched as walked (see
+    /// [`FilesConfig::include_patterns`] for the relative-path caveat).
+    pub includes: Vec<String>,
+    /// Partial linter (file-rule) configuration applied to matching files. Only
+    /// rule levels (and an optional `enabled` master switch) are honored;
+    /// `options` inside an override are rejected at load time (see `load_config`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linter: Option<OverrideRules>,
+    /// Partial project (cross-file) rule configuration applied to matching files.
+    /// Same shape and semantics as `linter`, resolved against `project.rules`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<OverrideRules>,
+}
+
+/// The partial rule block permitted inside an override: a master switch and
+/// per-group rule levels. Shared by the override's `linter` and `project`
+/// sections. Domains are intentionally omitted — overrides are rule-level only.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OverrideRules {
+    /// When `Some(false)`, every rule is disabled for matching files (unless a
+    /// later override re-enables one). `None` leaves the base enablement intact.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Rule levels grouped by category (same shape as `linter.rules`).
+    pub rules: Rules,
+}
+
+impl Override {
+    /// Whether this override applies to `path` (walked-path form, matching the
+    /// diagnostic's `file_path`). A file matches when it is not excluded by any
+    /// `!`-pattern and either matches a positive pattern or none are given.
+    pub fn matches(&self, path: &str) -> bool {
+        let mut positives = Vec::new();
+        let mut negatives = Vec::new();
+        for pat in &self.includes {
+            if let Some(neg) = pat.strip_prefix('!') {
+                if let Ok(p) = Pattern::new(neg) {
+                    negatives.push(p);
+                }
+            } else if let Ok(p) = Pattern::new(pat) {
+                positives.push(p);
+            }
+        }
+        if negatives.iter().any(|p| p.matches(path)) {
+            return false;
+        }
+        positives.is_empty() || positives.iter().any(|p| p.matches(path))
+    }
 }
 
 /// `files.includes`: a mixed list of positive include globs and `!`-prefixed
@@ -85,6 +155,64 @@ impl Default for LinterConfig {
             rules: Rules::default(),
             domains: BTreeMap::new(),
         }
+    }
+}
+
+/// `project`: master switch and rule levels for project-level (cross-file) rules.
+///
+/// A separate top-level feature from `linter`. Resolution mirrors the linter's
+/// per-rule/recommended logic but has **no domain gating** — project rules are
+/// not domain-scoped. When `enabled` is false, every project rule resolves off.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProjectConfig {
+    /// Master switch. When false, every project rule resolves to disabled.
+    pub enabled: bool,
+    /// Rule levels grouped by category, plus the `recommended` preset.
+    pub rules: Rules,
+}
+
+impl Default for ProjectConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            rules: Rules::default(),
+        }
+    }
+}
+
+impl ProjectConfig {
+    /// Resolve a project rule's effective severity, or `None` if disabled.
+    ///
+    /// Priority (mirrors [`LinterConfig::resolve_rule`] minus domains):
+    /// 1. `enabled == false` → disabled.
+    /// 2. Explicit per-rule level under its group wins: `off` → disabled;
+    ///    `on` → Warn; `info`/`warn`/`error` → that.
+    /// 3. Otherwise enabled iff the recommended preset is active.
+    pub fn resolve_rule(
+        &self,
+        group: &str,
+        name: &str,
+        recommended: bool,
+    ) -> Option<ResolvedSeverity> {
+        if !self.enabled {
+            return None;
+        }
+        if let Some(cfg) = self.rules.groups.get(group).and_then(|g| g.get(name)) {
+            return level_to_severity(cfg.level());
+        }
+        let recommended_on = recommended && self.rules.recommended != Some(false);
+        recommended_on.then_some(ResolvedSeverity::Warn)
+    }
+}
+
+/// Map an explicit rule level to a resolved severity (`off` → disabled).
+fn level_to_severity(level: RulePlainConfiguration) -> Option<ResolvedSeverity> {
+    match level {
+        RulePlainConfiguration::Off => None,
+        RulePlainConfiguration::On | RulePlainConfiguration::Warn => Some(ResolvedSeverity::Warn),
+        RulePlainConfiguration::Info => Some(ResolvedSeverity::Info),
+        RulePlainConfiguration::Error => Some(ResolvedSeverity::Error),
     }
 }
 
@@ -247,6 +375,10 @@ impl FalconConfig {
     /// `WithOptions` form. Scoped to the rule's own group so lookup stays
     /// consistent with [`LinterConfig::resolve_rule`]: an entry placed under the
     /// wrong group is ignored here just as its level is ignored there.
+    ///
+    /// Options are **global**: overrides may re-scope a rule's level (on/off/
+    /// severity) per path but not its options (rejected at load — see
+    /// `load_config`), so this needs no path dimension.
     pub fn rule_options(&self, group: &str, rule_name: &str) -> Option<&serde_json::Value> {
         self.linter
             .rules
@@ -254,6 +386,140 @@ impl FalconConfig {
             .get(group)
             .and_then(|g| g.get(rule_name))
             .and_then(RuleConfiguration::options)
+    }
+
+    /// Resolve a rule's effective severity for a specific `path`: the base
+    /// resolution ([`Self::resolve_rule`]) patched by every override whose
+    /// `includes` match, applied in order (later wins). An override's explicit
+    /// rule entry replaces the base result — turning the rule off, or on at a
+    /// severity. `None` means the rule is disabled for this file.
+    pub fn resolve_rule_for(
+        &self,
+        path: &str,
+        group: &str,
+        name: &str,
+        recommended: bool,
+        domains: &[&str],
+    ) -> Option<ResolvedSeverity> {
+        // A globally-disabled linter cannot be resurrected by an override.
+        if !self.linter.enabled {
+            return None;
+        }
+        let mut result = self.linter.resolve_rule(group, name, recommended, domains);
+        for ov in &self.overrides {
+            if !ov.matches(path) {
+                continue;
+            }
+            let Some(linter) = &ov.linter else {
+                continue;
+            };
+            if linter.enabled == Some(false) {
+                result = None;
+                continue;
+            }
+            if let Some(cfg) = linter.rules.groups.get(group).and_then(|g| g.get(name)) {
+                result = level_to_severity(cfg.level());
+            }
+        }
+        result
+    }
+
+    /// Resolve a **project** rule's effective severity for a specific `path`: the
+    /// base project resolution ([`ProjectConfig::resolve_rule`]) patched by every
+    /// override whose `includes` match, applied in order (later wins). Mirrors
+    /// [`Self::resolve_rule_for`] but reads the override's `project` block and has
+    /// no domain dimension. `None` means the rule is disabled for this file.
+    pub fn resolve_project_rule_for(
+        &self,
+        path: &str,
+        group: &str,
+        name: &str,
+        recommended: bool,
+    ) -> Option<ResolvedSeverity> {
+        // A globally-disabled project feature cannot be resurrected by an override.
+        if !self.project.enabled {
+            return None;
+        }
+        let mut result = self.project.resolve_rule(group, name, recommended);
+        for ov in &self.overrides {
+            if !ov.matches(path) {
+                continue;
+            }
+            let Some(project) = &ov.project else {
+                continue;
+            };
+            if project.enabled == Some(false) {
+                result = None;
+                continue;
+            }
+            if let Some(cfg) = project.rules.groups.get(group).and_then(|g| g.get(name)) {
+                result = level_to_severity(cfg.level());
+            }
+        }
+        result
+    }
+
+    /// Whether a **project** rule is enabled for any path — the base project
+    /// config or any override turns it on. Drives project-rule registration,
+    /// mirroring [`Self::is_rule_enabled_anywhere`].
+    pub fn is_project_rule_enabled_anywhere(
+        &self,
+        group: &str,
+        name: &str,
+        recommended: bool,
+    ) -> bool {
+        if !self.project.enabled {
+            return false;
+        }
+        if self
+            .project
+            .resolve_rule(group, name, recommended)
+            .is_some()
+        {
+            return true;
+        }
+        self.overrides.iter().any(|ov| {
+            ov.project.as_ref().is_some_and(|p| {
+                p.enabled != Some(false)
+                    && p.rules
+                        .groups
+                        .get(group)
+                        .and_then(|g| g.get(name))
+                        .is_some_and(|c| c.level() != RulePlainConfiguration::Off)
+            })
+        })
+    }
+
+    /// Whether a rule is enabled for **any** path — the base config or any
+    /// override turns it on. Drives rule registration: a rule must be registered
+    /// (and thus run) if it could fire for some file, even when the base config
+    /// disables it and only an override re-enables it.
+    pub fn is_rule_enabled_anywhere(
+        &self,
+        group: &str,
+        name: &str,
+        recommended: bool,
+        domains: &[&str],
+    ) -> bool {
+        if !self.linter.enabled {
+            return false;
+        }
+        if self
+            .resolve_rule(group, name, recommended, domains)
+            .is_some()
+        {
+            return true;
+        }
+        self.overrides.iter().any(|ov| {
+            ov.linter.as_ref().is_some_and(|l| {
+                l.enabled != Some(false)
+                    && l.rules
+                        .groups
+                        .get(group)
+                        .and_then(|g| g.get(name))
+                        .is_some_and(|c| c.level() != RulePlainConfiguration::Off)
+            })
+        })
     }
 }
 
@@ -279,14 +545,7 @@ impl LinterConfig {
         }
 
         if let Some(cfg) = self.rules.groups.get(group).and_then(|g| g.get(name)) {
-            return match cfg.level() {
-                RulePlainConfiguration::Off => None,
-                RulePlainConfiguration::On | RulePlainConfiguration::Warn => {
-                    Some(ResolvedSeverity::Warn)
-                }
-                RulePlainConfiguration::Info => Some(ResolvedSeverity::Info),
-                RulePlainConfiguration::Error => Some(ResolvedSeverity::Error),
-            };
+            return level_to_severity(cfg.level());
         }
 
         let recommended_on = recommended && self.rules.recommended != Some(false);
@@ -349,8 +608,33 @@ pub fn load_config(path: &Path) -> Result<FalconConfig, ConfigError> {
         ));
     }
 
-    serde_json::from_value(value)
-        .map_err(|e| ConfigError(format!("failed to parse config JSON: {}", e)))
+    let config: FalconConfig = serde_json::from_value(value)
+        .map_err(|e| ConfigError(format!("failed to parse config JSON: {}", e)))?;
+
+    // Options inside an override are not yet supported: overrides re-scope a
+    // rule's level per path, but rule options remain global. Reject rather than
+    // silently half-applying them (see docs/configuration.md "Overrides"). Both
+    // the `linter` and `project` sections of an override are checked.
+    let has_options = |rules: Option<&OverrideRules>| {
+        rules.is_some_and(|r| {
+            r.rules
+                .groups
+                .values()
+                .flat_map(BTreeMap::values)
+                .any(|c| c.options().is_some())
+        })
+    };
+    for ov in &config.overrides {
+        if has_options(ov.linter.as_ref()) || has_options(ov.project.as_ref()) {
+            return Err(ConfigError(
+                "options in overrides are not yet supported; an override may re-scope a rule's \
+                 level (on/off/severity) but not its options. See docs/configuration.md"
+                    .to_string(),
+            ));
+        }
+    }
+
+    Ok(config)
 }
 
 /// Find a config file starting from `start_dir`, following this priority order:

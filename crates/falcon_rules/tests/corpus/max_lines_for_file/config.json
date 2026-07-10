@@ -1,0 +1,14 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "max_lines_for_file": {
+          "level": "warn",
+          "options": {
+            "max_lines": 60
+          }
+        }
+      }
+    }
+  }
+}

@@ -151,10 +151,15 @@ impl AvoidPassingAsyncWhenSyncExpected {
                     Self::visit_collection_element(elem, f);
                 }
             }
-            Expr::Map { entries, .. } => {
+            Expr::Map {
+                entries, elements, ..
+            } => {
                 for entry in entries {
                     Self::visit_exprs(&entry.key, f);
                     Self::visit_exprs(&entry.value, f);
+                }
+                for e in map_element_exprs(elements) {
+                    Self::visit_exprs(e, f);
                 }
             }
             Expr::Set { elements, .. } => {
@@ -210,6 +215,39 @@ impl AvoidPassingAsyncWhenSyncExpected {
                 iterable, element, ..
             } => {
                 Self::visit_exprs(iterable, f);
+                Self::visit_collection_element(element, f);
+            }
+            CollectionElement::CFor {
+                init,
+                condition,
+                updates,
+                element,
+                ..
+            } => {
+                match init {
+                    Some(ForInit::VarDecl(d)) => {
+                        for decl in &d.declarators {
+                            if let Some(e) = &decl.initializer {
+                                Self::visit_exprs(e, f);
+                            }
+                        }
+                    }
+                    Some(ForInit::ForIn { iterable, .. }) => {
+                        Self::visit_exprs(iterable, f);
+                    }
+                    Some(ForInit::Exprs(es)) => {
+                        for e in es {
+                            Self::visit_exprs(e, f);
+                        }
+                    }
+                    None => {}
+                }
+                if let Some(c) = condition {
+                    Self::visit_exprs(c, f);
+                }
+                for u in updates {
+                    Self::visit_exprs(u, f);
+                }
                 Self::visit_collection_element(element, f);
             }
         }

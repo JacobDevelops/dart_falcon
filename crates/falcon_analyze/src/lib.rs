@@ -5,12 +5,19 @@
 
 pub mod context;
 pub mod parallel;
+pub mod project;
 pub mod registry;
 pub mod rule;
+pub mod suppressions;
 pub mod visitor;
 
 pub use context::AnalyzeContext;
-pub use parallel::{analyze_parallel, analyze_sequential};
+pub use parallel::{
+    analyze_parallel, analyze_parallel_collecting, analyze_sequential,
+    analyze_sequential_collecting,
+};
+pub use project::{ProjectFile, ProjectRule, ProjectRuleRegistry};
 pub use registry::RuleRegistry;
 pub use rule::Rule;
+pub use suppressions::FileSuppressions;
 pub use visitor::RuleVisitor;

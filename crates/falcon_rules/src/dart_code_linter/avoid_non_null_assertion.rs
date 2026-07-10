@@ -101,10 +101,15 @@ fn check_expr(diags: &mut Vec<Diagnostic>, expr: &Expr, ctx: &AnalyzeContext) {
                 check_collection_elem(diags, elem, ctx);
             }
         }
-        Expr::Map { entries, .. } => {
+        Expr::Map {
+            entries, elements, ..
+        } => {
             for e in entries {
                 check_expr(diags, &e.key, ctx);
                 check_expr(diags, &e.value, ctx);
+            }
+            for e in map_element_exprs(elements) {
+                check_expr(diags, e, ctx);
             }
         }
         Expr::Record { fields, .. } => {
@@ -161,6 +166,39 @@ fn check_collection_elem(
             iterable, element, ..
         } => {
             check_expr(diags, iterable, ctx);
+            check_collection_elem(diags, element, ctx);
+        }
+        CollectionElement::CFor {
+            init,
+            condition,
+            updates,
+            element,
+            ..
+        } => {
+            match init {
+                Some(ForInit::VarDecl(d)) => {
+                    for decl in &d.declarators {
+                        if let Some(e) = &decl.initializer {
+                            check_expr(diags, e, ctx);
+                        }
+                    }
+                }
+                Some(ForInit::ForIn { iterable, .. }) => {
+                    check_expr(diags, iterable, ctx);
+                }
+                Some(ForInit::Exprs(es)) => {
+                    for e in es {
+                        check_expr(diags, e, ctx);
+                    }
+                }
+                None => {}
+            }
+            if let Some(c) = condition {
+                check_expr(diags, c, ctx);
+            }
+            for u in updates {
+                check_expr(diags, u, ctx);
+            }
             check_collection_elem(diags, element, ctx);
         }
     }

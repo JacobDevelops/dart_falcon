@@ -564,13 +564,15 @@ impl<'src> Parser<'src> {
     ) -> GetterDecl {
         self.advance(); // get
         let name = self.expect_ident();
+        // A getter body may carry an `async` marker (`get x async { ... }`).
+        let (is_async, _is_generator) = self.parse_async_marker();
         let body = self.parse_function_body();
         GetterDecl {
             annotations,
             is_static,
             is_abstract,
             is_external,
-            is_async: false,
+            is_async,
             return_type,
             name,
             body,
@@ -1036,11 +1038,14 @@ impl<'src> Parser<'src> {
                     self.advance();
                     self.expect(TokenKind::LParen);
                     let condition = self.parse_expr();
-                    let message = if self.eat(TokenKind::Comma).is_some() {
-                        Some(self.parse_expr())
-                    } else {
-                        None
-                    };
+                    let message =
+                        if self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
+                            let m = self.parse_expr();
+                            self.eat(TokenKind::Comma); // optional trailing comma
+                            Some(m)
+                        } else {
+                            None
+                        };
                     self.expect(TokenKind::RParen);
                     ConstructorInitializer::Assert {
                         condition,

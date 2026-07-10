@@ -246,13 +246,23 @@ impl AvoidUnrelatedTypeAssertions {
                             CollectionElement::Spread { expr, .. } => self.visit_exprs(expr, f),
                             _ => {}
                         },
+                        CollectionElement::CFor { element, .. } => match element.as_ref() {
+                            CollectionElement::Expr(e) => self.visit_exprs(e, f),
+                            CollectionElement::Spread { expr, .. } => self.visit_exprs(expr, f),
+                            _ => {}
+                        },
                     }
                 }
             }
-            Expr::Map { entries, .. } => {
+            Expr::Map {
+                entries, elements, ..
+            } => {
                 for entry in entries {
                     self.visit_exprs(&entry.key, f);
                     self.visit_exprs(&entry.value, f);
+                }
+                for e in map_element_exprs(elements) {
+                    self.visit_exprs(e, f);
                 }
             }
             Expr::Set { elements, .. } => {
@@ -285,6 +295,11 @@ impl AvoidUnrelatedTypeAssertions {
                             }
                         }
                         CollectionElement::For { element, .. } => match element.as_ref() {
+                            CollectionElement::Expr(e) => self.visit_exprs(e, f),
+                            CollectionElement::Spread { expr, .. } => self.visit_exprs(expr, f),
+                            _ => {}
+                        },
+                        CollectionElement::CFor { element, .. } => match element.as_ref() {
                             CollectionElement::Expr(e) => self.visit_exprs(e, f),
                             CollectionElement::Spread { expr, .. } => self.visit_exprs(expr, f),
                             _ => {}

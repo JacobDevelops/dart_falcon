@@ -256,10 +256,15 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                 scan_collection_element(e, diags, ctx);
             }
         }
-        Expr::Map { entries, .. } => {
+        Expr::Map {
+            entries, elements, ..
+        } => {
             for entry in entries {
                 scan_expr(&entry.key, diags, ctx);
                 scan_expr(&entry.value, diags, ctx);
+            }
+            for e in map_element_exprs(elements) {
+                scan_expr(e, diags, ctx);
             }
         }
         Expr::Record { fields, .. } => fields.iter().for_each(|f| scan_expr(&f.value, diags, ctx)),
@@ -312,6 +317,39 @@ fn scan_collection_element(
             iterable, element, ..
         } => {
             scan_expr(iterable, diags, ctx);
+            scan_collection_element(element, diags, ctx);
+        }
+        CollectionElement::CFor {
+            init,
+            condition,
+            updates,
+            element,
+            ..
+        } => {
+            match init {
+                Some(ForInit::VarDecl(d)) => {
+                    for decl in &d.declarators {
+                        if let Some(e) = &decl.initializer {
+                            scan_expr(e, diags, ctx);
+                        }
+                    }
+                }
+                Some(ForInit::ForIn { iterable, .. }) => {
+                    scan_expr(iterable, diags, ctx);
+                }
+                Some(ForInit::Exprs(es)) => {
+                    for e in es {
+                        scan_expr(e, diags, ctx);
+                    }
+                }
+                None => {}
+            }
+            if let Some(c) = condition {
+                scan_expr(c, diags, ctx);
+            }
+            for u in updates {
+                scan_expr(u, diags, ctx);
+            }
             scan_collection_element(element, diags, ctx);
         }
     }

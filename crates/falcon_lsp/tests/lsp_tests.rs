@@ -434,3 +434,24 @@ fn debounce_coalesces_rapid_changes() {
     client.assert_quiet(Duration::from_millis(300));
     client.shutdown();
 }
+
+/// An override that disables a rule for the document's path filters its
+/// diagnostics in LSP mode, just like the CLI.
+#[test]
+fn config_override_disables_rule_not_published() {
+    // DOC_URI resolves to `/test/a.dart`; `**/a.dart` matches that walked path.
+    let config = r#"{
+        "overrides": [ {
+            "includes": ["**/a.dart"],
+            "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } }
+        } ]
+    }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
+    client.open(DOC_URI, VIOLATING_SRC, 1);
+    let params = client.recv_publish();
+    assert!(
+        !has_rule(&params, "avoid-dynamic"),
+        "override-disabled rule fired: {params:?}"
+    );
+    client.shutdown();
+}

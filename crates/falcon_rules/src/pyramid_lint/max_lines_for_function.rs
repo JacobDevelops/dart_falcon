@@ -23,6 +23,16 @@ fn line_of(source: &str, offset: usize) -> usize {
     source[..c].bytes().filter(|&b| b == b'\n').count() + 1
 }
 
+/// Read the `max_lines` option (default 100). Malformed/missing → default.
+fn max_lines_option(ctx: &AnalyzeContext) -> usize {
+    crate::meta::meta_for("max_lines_for_function")
+        .and_then(|m| ctx.config.rule_options(m.group, "max_lines_for_function"))
+        .and_then(|o| o.get("max_lines"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .unwrap_or(100)
+}
+
 fn check_function_lines(
     span: &Span,
     has_body: bool,
@@ -36,12 +46,13 @@ fn check_function_lines(
     let start_line = line_of(ctx.source, span.start);
     let end_line = line_of(ctx.source, span.end);
     let lines = end_line - start_line + 1;
+    let threshold = max_lines_option(ctx);
 
-    if lines > 100 {
+    if lines > threshold {
         diags.push(Diagnostic::new(
             "max_lines_for_function",
             Severity::Warning,
-            "Function exceeds the maximum number of lines (100).",
+            format!("Function exceeds the maximum number of lines ({threshold})."),
             ctx.file_path.to_string_lossy().into_owned(),
             DiagSpan {
                 start: span.start,

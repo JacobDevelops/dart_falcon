@@ -8,13 +8,22 @@
 
 use std::collections::HashSet;
 
-use falcon_rules::all_rules;
 use falcon_rules::meta::{DOMAINS, GROUPS, RULE_METADATA, meta_for};
+use falcon_rules::{all_project_rules, all_rules};
+
+/// Every registered rule name — per-file rules plus project (cross-file) rules,
+/// which share the metadata table and config schema.
+fn registered_rule_names() -> Vec<&'static str> {
+    all_rules()
+        .iter()
+        .map(|r| r.name())
+        .chain(all_project_rules().iter().map(|r| r.name()))
+        .collect()
+}
 
 #[test]
 fn every_registered_rule_has_exactly_one_metadata_entry() {
-    for rule in all_rules() {
-        let name = rule.name();
+    for name in registered_rule_names() {
         let matches = RULE_METADATA.iter().filter(|m| m.name == name).count();
         assert_eq!(
             matches, 1,
@@ -25,7 +34,7 @@ fn every_registered_rule_has_exactly_one_metadata_entry() {
 
 #[test]
 fn every_metadata_entry_matches_a_registered_rule() {
-    let registered: HashSet<&str> = all_rules().iter().map(|r| r.name()).collect();
+    let registered: HashSet<&str> = registered_rule_names().into_iter().collect();
     for meta in RULE_METADATA {
         assert!(
             registered.contains(meta.name),
@@ -67,8 +76,8 @@ fn metadata_domains_are_from_the_known_set() {
 fn metadata_count_matches_registered_rule_count() {
     assert_eq!(
         RULE_METADATA.len(),
-        all_rules().len(),
-        "metadata table and all_rules() must have the same length"
+        all_rules().len() + all_project_rules().len(),
+        "metadata table must match the per-file plus project rule count"
     );
 }
 
@@ -82,6 +91,40 @@ fn metadata_names_are_unique() {
             meta.name
         );
     }
+}
+
+#[test]
+fn project_flag_matches_the_project_rule_set() {
+    let project_rule_names: HashSet<&str> = all_project_rules().iter().map(|r| r.name()).collect();
+    let file_rule_names: HashSet<&str> = all_rules().iter().map(|r| r.name()).collect();
+
+    for meta in RULE_METADATA {
+        if project_rule_names.contains(meta.name) {
+            assert!(
+                meta.project,
+                "project rule `{}` must have project=true",
+                meta.name
+            );
+        }
+        if file_rule_names.contains(meta.name) {
+            assert!(
+                !meta.project,
+                "file rule `{}` must have project=false",
+                meta.name
+            );
+        }
+    }
+
+    // Exactly the three known project rules carry the flag.
+    let flagged: HashSet<&str> = RULE_METADATA
+        .iter()
+        .filter(|m| m.project)
+        .map(|m| m.name)
+        .collect();
+    assert_eq!(
+        flagged, project_rule_names,
+        "project=true set must equal all_project_rules()"
+    );
 }
 
 #[test]

@@ -144,25 +144,110 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     }
 }
 
-fn is_known_void_function(expr: &Expr) -> bool {
+/// Method/function names that overwhelmingly denote side effects (their return
+/// value, if any, is conventionally discarded). Without type resolution falcon
+/// cannot know a call's real return type, so this static list is the best
+/// heuristic to suppress the dominant false positives seen on real code:
+/// lifecycle hooks, collection mutation, logging, stream/sink writes, disposal,
+/// and navigation. Derived from adopter-codebase sampling + dart_code_linter's
+/// known-void exemptions. (This rule is off in the recommended preset — see its
+/// metadata note — because it is inherently noisy without a type system.)
+const SIDE_EFFECT_NAMES: &[&str] = &[
+    // logging / debug
+    "print",
+    "printSync",
+    "log",
+    "info",
+    "warn",
+    "warning",
+    "debug",
+    "error",
+    "fine",
+    "severe",
+    // collection mutation
+    "add",
+    "addAll",
+    "insert",
+    "insertAll",
+    "remove",
+    "removeAt",
+    "removeLast",
+    "removeWhere",
+    "removeRange",
+    "retainWhere",
+    "clear",
+    "sort",
+    "shuffle",
+    "fillRange",
+    "setAll",
+    "setRange",
+    "forEach",
+    "putIfAbsent",
+    "update",
+    "updateAll",
+    // listeners / notifiers / streams / sinks
+    "addListener",
+    "removeListener",
+    "notifyListeners",
+    "emit",
+    "sink",
+    "write",
+    "writeln",
+    "writeAll",
+    "complete",
+    "completeError",
+    "cancel",
+    "close",
+    "flush",
+    "send",
+    "seek",
+    // widget / framework lifecycle
+    "setState",
+    "initState",
+    "dispose",
+    "didChangeDependencies",
+    "didUpdateWidget",
+    "deactivate",
+    "markNeedsBuild",
+    "addPostFrameCallback",
+    "unawaited",
+    // navigation
+    "pop",
+    "push",
+    "pushNamed",
+    "pushReplacement",
+    "popUntil",
+    "maybePop",
+    "showDialog",
+    // misc common side effects
+    "save",
+    "delete",
+    "reset",
+    "start",
+    "stop",
+    "play",
+    "pause",
+    "throwWithStackTrace",
+];
+
+fn is_side_effect_name(name: &str) -> bool {
+    SIDE_EFFECT_NAMES.contains(&name)
+}
+
+/// Base name of a call's callee, for side-effect matching. Handles both bare
+/// identifiers (`foo()`) and member calls (`x.foo()`).
+fn callee_name(expr: &Expr) -> Option<&str> {
     match expr {
-        Expr::Ident(id) => {
-            matches!(id.name.as_str(), "print" | "printSync")
-        }
-        Expr::Field { field, .. } => {
-            matches!(
-                field.name.as_str(),
-                "forEach" | "addListener" | "removeListener" | "notifyListeners"
-            )
-        }
-        _ => false,
+        Expr::Ident(id) => Some(id.name.as_str()),
+        Expr::Field { field, .. } => Some(field.name.as_str()),
+        _ => None,
     }
 }
 
 fn check_ignored_return_value(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
         Expr::Call { callee, .. } => {
-            if !is_known_void_function(callee) {
+            if !callee_name(callee).is_some_and(is_side_effect_name) {
                 diags.push(Diagnostic::new(
                     "avoid-ignoring-return-values",
                     Severity::Warning,
@@ -175,12 +260,7 @@ fn check_ignored_return_value(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &An
                 ));
             }
         }
-        Expr::Field { field, .. }
-            if !matches!(
-                field.name.as_str(),
-                "forEach" | "addListener" | "removeListener" | "notifyListeners"
-            ) =>
-        {
+        Expr::Field { field, .. } if !is_side_effect_name(field.name.as_str()) => {
             diags.push(Diagnostic::new(
                 "avoid-ignoring-return-values",
                 Severity::Warning,

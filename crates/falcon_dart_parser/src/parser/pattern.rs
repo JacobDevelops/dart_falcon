@@ -221,7 +221,8 @@ impl<'src> Parser<'src> {
             let var_type = if self.is_type_start() {
                 let saved = self.pos;
                 let ty = self.parse_type();
-                if self.is_ident_like() {
+                // `when` here introduces a case guard, not a variable name.
+                if self.is_ident_like() && !self.at(TokenKind::When) {
                     Some(ty)
                 } else {
                     self.pos = saved;

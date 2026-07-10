@@ -9,10 +9,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, FileSuppressions, Rule};
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::parse;
-use falcon_diagnostics::{Diagnostic, Severity};
+use falcon_diagnostics::Diagnostic;
 use falcon_rules::{apply_severities, resolve_rules};
 use falcon_syntax::Program;
 use tracing::{debug, warn};
@@ -37,8 +37,6 @@ pub struct LspState {
     config: FalconConfig,
     config_path: Option<PathBuf>,
     rules: Vec<Box<dyn Rule>>,
-    /// Resolved severity per enabled rule, applied to diagnostics before publish.
-    severities: HashMap<&'static str, Severity>,
 }
 
 impl LspState {
@@ -53,7 +51,6 @@ impl LspState {
             config,
             config_path,
             rules: resolved.rules,
-            severities: resolved.severities,
         }
     }
 
@@ -141,7 +138,18 @@ impl LspState {
             .iter()
             .flat_map(|rule| rule.analyze(&doc.program, &ctx))
             .collect();
-        apply_severities(&mut diagnostics, &self.severities);
+        // Honor inline `// ignore:` suppressions (the LSP drives rules directly
+        // rather than through RuleRegistry::run_all, so it filters here too).
+        if !diagnostics.is_empty() {
+            let suppressions = FileSuppressions::from_source(&doc.text);
+            if !suppressions.is_empty() {
+                diagnostics.retain(|diag| {
+                    let line = suppressions.line_for_offset(diag.span.start);
+                    !suppressions.is_suppressed(diag.rule, line)
+                });
+            }
+        }
+        apply_severities(&mut diagnostics, &self.config);
         diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start).then(a.rule.cmp(b.rule)));
         doc.analyze_count += 1;
         doc.last_diagnostics = diagnostics.clone();
@@ -156,7 +164,6 @@ impl LspState {
         self.config = load_from(self.config_path.as_deref());
         let resolved = resolve_rules(&self.config);
         self.rules = resolved.rules;
-        self.severities = resolved.severities;
         debug!(rule_count = self.rules.len(), "config reloaded");
         self.open_uris()
             .into_iter()

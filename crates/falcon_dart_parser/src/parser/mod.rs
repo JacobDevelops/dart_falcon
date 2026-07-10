@@ -43,6 +43,9 @@ pub(super) struct Parser<'src> {
     pub(super) pos: usize,
     pub(super) src: &'src str,
     pub(super) errors: Vec<ParseError>,
+    /// When set, a trailing `?` on a type is not consumed as a nullable suffix
+    /// if it actually begins a conditional expression (`x is T ? a : b`).
+    pub(super) suppress_conditional_qmark: bool,
 }
 
 impl<'src> Parser<'src> {
@@ -52,7 +55,53 @@ impl<'src> Parser<'src> {
             pos: 0,
             src,
             errors: Vec::new(),
+            suppress_conditional_qmark: false,
         }
+    }
+
+    /// Consume a trailing `?` as a nullable-type suffix, unless we are parsing an
+    /// `is`/`as` type and the `?` begins a conditional expression instead.
+    pub(super) fn eat_type_qmark(&mut self) -> bool {
+        if !self.at(TokenKind::Qmark) {
+            return false;
+        }
+        if self.suppress_conditional_qmark && self.token_starts_expr(&self.peek(1).kind) {
+            return false;
+        }
+        self.advance();
+        true
+    }
+
+    /// True when `kind` can begin an expression — used to tell a conditional `?`
+    /// apart from a nullable-type `?` after an `is`/`as` type.
+    pub(super) fn token_starts_expr(&self, kind: &TokenKind) -> bool {
+        use TokenKind::*;
+        matches!(
+            kind,
+            IntLit
+                | DoubleLit
+                | StringLit
+                | Ident
+                | This
+                | Super
+                | New
+                | Const
+                | Switch
+                | Throw
+                | Await
+                | Rethrow
+                | True
+                | False
+                | Null
+                | Bang
+                | Minus
+                | Tilde
+                | PlusPlus
+                | MinusMinus
+                | LParen
+                | LBracket
+                | LBrace
+        ) || self.is_ident_like_kind(kind)
     }
 
     // ── Cursor ────────────────────────────────────────────────────────────────

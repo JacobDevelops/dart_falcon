@@ -60,3 +60,50 @@ void functionUsingInNestedScope(String param) {
   }
   inner();
 }
+
+// Parameter used only inside a closure with a BLOCK body (regression: the
+// reference collector must descend into block-bodied closures).
+List<int> mapInClosure(int factor) {
+  return [1, 2, 3].map((x) {
+    return x * factor;
+  }).toList();
+}
+
+// Parameter used only inside a switch-case body.
+String describe(int code) {
+  switch (code) {
+    case 200:
+      return 'ok';
+    default:
+      return 'code $code';
+  }
+}
+
+// Parameter used only inside a cascade section.
+void configure(Object target, String label) {
+  target
+    ..toString()
+    ..hashCode.toString()
+    ..runtimeType.toString();
+  print(label);
+}
+
+class Overrides {
+  // @override methods keep the supertype's parameter list; an unused param here
+  // is not the author's to remove, so it is exempt.
+  @override
+  void didUpdateWidget(Object oldWidget) {
+    print('updated');
+  }
+}
+
+// All-underscore parameter names are conventional "unused" markers.
+void ignoresArgs(int __, String ___) {
+  print('ignored');
+}
+
+// Parameter used only inside a map-comprehension iterable
+// (`{ for (..) k: v }` lives in `Map.elements`, not `Map.entries`).
+Map<String, int> buildLookup(List<String> keys) {
+  return {for (final k in keys) k: k.length};
+}

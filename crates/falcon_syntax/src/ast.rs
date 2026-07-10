@@ -886,6 +886,10 @@ pub enum Expr {
         is_const: bool,
         type_args: Vec<DartType>,
         entries: Vec<MapEntry>,
+        /// Comprehension form of a map literal (`{ for (..) k: v }`). A plain map
+        /// uses `entries` and leaves this empty; a map containing any `for`/`if`/
+        /// spread element puts *all* of its elements here (with `entries` empty).
+        elements: Vec<MapElement>,
         span: Span,
     },
     Set {
@@ -1074,9 +1078,21 @@ pub enum CollectionElement {
         span: Span,
     },
     For {
-        variable: Identifier,
+        /// Simple loop variable (`for (final x in xs)`). `None` when the header
+        /// uses a Dart 3 pattern instead, in which case `pattern` is set.
+        variable: Option<Identifier>,
         var_type: Option<DartType>,
+        /// Dart 3 pattern-for header (`for (final (a, b) in xs)`).
+        pattern: Option<Box<Pattern>>,
         iterable: Expr,
+        element: Box<CollectionElement>,
+        span: Span,
+    },
+    /// C-style comprehension header (`[for (var i = 0; i < n; i++) x]`).
+    CFor {
+        init: Option<ForInit>,
+        condition: Option<Expr>,
+        updates: Vec<Expr>,
         element: Box<CollectionElement>,
         span: Span,
     },
@@ -1087,6 +1103,120 @@ pub struct MapEntry {
     pub key: Expr,
     pub value: Expr,
     pub span: Span,
+}
+
+/// An element of a comprehension-form map literal (`{ for (..) k: v }`), mirroring
+/// [`CollectionElement`] but with `k: v` [`MapEntry`] leaves instead of expressions.
+#[derive(Debug, Clone)]
+pub enum MapElement {
+    Entry(MapEntry),
+    Spread {
+        expr: Expr,
+        is_null_aware: bool,
+        span: Span,
+    },
+    If {
+        condition: IfCondition,
+        then_entry: Box<MapElement>,
+        else_entry: Option<Box<MapElement>>,
+        span: Span,
+    },
+    For {
+        variable: Option<Identifier>,
+        var_type: Option<DartType>,
+        pattern: Option<Box<Pattern>>,
+        iterable: Expr,
+        entry: Box<MapElement>,
+        span: Span,
+    },
+    /// C-style comprehension header (`{ for (var i = 0; i < n; i++) k: v }`).
+    CFor {
+        init: Option<ForInit>,
+        condition: Option<Expr>,
+        updates: Vec<Expr>,
+        entry: Box<MapElement>,
+        span: Span,
+    },
+}
+
+/// Flatten every expression reachable from a comprehension map's `elements`
+/// (`{ for (..) k: v }`, `{ if (c) k: v }`, `{ ...spread }`): entry keys and
+/// values, spread expressions, `if` conditions, and `for` iterables, recursing
+/// through nested `if`/`for` bodies.
+///
+/// Hand-rolled rule walkers that traverse `Expr::Map { entries }` should also
+/// feed each expression this yields to the same walker, so a value hidden inside
+/// a map comprehension is analyzed exactly like one in a plain entry. Walkers
+/// built on [`crate::visitor::Visitor`] already descend into `elements` and do
+/// not need this.
+pub fn map_element_exprs(elements: &[MapElement]) -> Vec<&Expr> {
+    let mut out = Vec::new();
+    for element in elements {
+        push_map_element_exprs(element, &mut out);
+    }
+    out
+}
+
+fn push_map_element_exprs<'a>(element: &'a MapElement, out: &mut Vec<&'a Expr>) {
+    match element {
+        MapElement::Entry(entry) => {
+            out.push(&entry.key);
+            out.push(&entry.value);
+        }
+        MapElement::Spread { expr, .. } => out.push(expr),
+        MapElement::If {
+            condition,
+            then_entry,
+            else_entry,
+            ..
+        } => {
+            match condition {
+                IfCondition::Expr(e) => out.push(e),
+                IfCondition::Case(e, _) => out.push(e),
+            }
+            push_map_element_exprs(then_entry, out);
+            if let Some(else_entry) = else_entry {
+                push_map_element_exprs(else_entry, out);
+            }
+        }
+        MapElement::For {
+            iterable, entry, ..
+        } => {
+            out.push(iterable);
+            push_map_element_exprs(entry, out);
+        }
+        MapElement::CFor {
+            init,
+            condition,
+            updates,
+            entry,
+            ..
+        } => {
+            push_for_init_exprs(init, out);
+            if let Some(cond) = condition {
+                out.push(cond);
+            }
+            for e in updates {
+                out.push(e);
+            }
+            push_map_element_exprs(entry, out);
+        }
+    }
+}
+
+fn push_for_init_exprs<'a>(init: &'a Option<ForInit>, out: &mut Vec<&'a Expr>) {
+    match init {
+        Some(ForInit::VarDecl(d)) => {
+            for decl in &d.declarators {
+                if let Some(init) = &decl.initializer {
+                    out.push(init);
+                }
+            }
+        }
+        Some(ForInit::ForIn { iterable, .. }) => out.push(iterable),
+        Some(ForInit::Exprs(exprs)) => out.extend(exprs.iter()),
+        None => {}
+    }
 }
 
 #[derive(Debug, Clone)]

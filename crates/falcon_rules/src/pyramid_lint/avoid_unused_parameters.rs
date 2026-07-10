@@ -45,9 +45,22 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
 fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let ClassMember::Method(m) = member
         && let Some(body) = &m.body
+        // `@override` methods must keep the parameter list dictated by the
+        // supertype, and `noSuchMethod` receives an `Invocation` it may ignore —
+        // an unused parameter in either is not the author's to remove.
+        && m.name.name != "noSuchMethod"
+        && !is_override(&m.annotations)
     {
         check_function(&m.params, body, diags, ctx);
     }
+}
+
+/// An `@override` annotation forces the parameter list, so unused parameters
+/// there are dictated by the supertype rather than the author's oversight.
+fn is_override(annotations: &[Annotation]) -> bool {
+    annotations
+        .iter()
+        .any(|a| a.name.last().is_some_and(|id| id.name == "override"))
 }
 
 /// Check a function/method's parameters against its body, then descend into any
@@ -69,6 +82,11 @@ fn check_function(
     {
         let name = &param.name.name;
         if name.starts_with('_') {
+            continue;
+        }
+        // `this.x` / `super.x` initializing formals bind straight to a field or
+        // the super-constructor — the parameter *is* its use, so never flag them.
+        if param.is_field || param.is_super {
             continue;
         }
         if matches!(param.param_type, Some(DartType::Dynamic { .. })) {
@@ -293,10 +311,18 @@ fn collect_used_expr(expr: &Expr, used: &mut HashSet<String>) {
                 collect_used_collection_element(e, used);
             }
         }
-        Expr::Map { entries, .. } => {
+        Expr::Map {
+            entries, elements, ..
+        } => {
             for entry in entries {
                 collect_used_expr(&entry.key, used);
                 collect_used_expr(&entry.value, used);
+            }
+            // Comprehension maps (`{ for (..) k: v }`) leave `entries` empty and
+            // put everything in `elements`; walk them so a param used only there
+            // is counted as used.
+            for e in map_element_exprs(elements) {
+                collect_used_expr(e, used);
             }
         }
         Expr::Record { fields, .. } => fields
@@ -334,10 +360,16 @@ fn collect_used_collection_element(el: &CollectionElement, used: &mut HashSet<St
         CollectionElement::Expr(e) => collect_used_expr(e, used),
         CollectionElement::Spread { expr, .. } => collect_used_expr(expr, used),
         CollectionElement::If {
+            condition,
             then_elem,
             else_elem,
             ..
         } => {
+            // The condition references params too (`[if (isGrouped) ...]`); a
+            // param used only there must count as used.
+            if let IfCondition::Expr(cond) = condition {
+                collect_used_expr(cond, used);
+            }
             collect_used_collection_element(then_elem, used);
             if let Some(ee) = else_elem {
                 collect_used_collection_element(ee, used);
@@ -347,6 +379,39 @@ fn collect_used_collection_element(el: &CollectionElement, used: &mut HashSet<St
             iterable, element, ..
         } => {
             collect_used_expr(iterable, used);
+            collect_used_collection_element(element, used);
+        }
+        CollectionElement::CFor {
+            init,
+            condition,
+            updates,
+            element,
+            ..
+        } => {
+            match init {
+                Some(ForInit::VarDecl(d)) => {
+                    for decl in &d.declarators {
+                        if let Some(e) = &decl.initializer {
+                            collect_used_expr(e, used);
+                        }
+                    }
+                }
+                Some(ForInit::ForIn { iterable, .. }) => {
+                    collect_used_expr(iterable, used);
+                }
+                Some(ForInit::Exprs(es)) => {
+                    for e in es {
+                        collect_used_expr(e, used);
+                    }
+                }
+                None => {}
+            }
+            if let Some(c) = condition {
+                collect_used_expr(c, used);
+            }
+            for u in updates {
+                collect_used_expr(u, used);
+            }
             collect_used_collection_element(element, used);
         }
     }

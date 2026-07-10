@@ -47,6 +47,19 @@ fn only_changed_file_is_reanalyzed() {
     assert_eq!(counts(&state, URI_B), (1, 1), "other file untouched");
 }
 
+/// An inline `// ignore:` comment suppresses the diagnostic through the LSP
+/// analyze path, just as it does in the CLI pipeline.
+#[test]
+fn inline_ignore_suppresses_in_lsp() {
+    let (mut state, _dir) = state_with_config("{}");
+    let suppressed = "void f() {\n  dynamic x = 1; // ignore: avoid-dynamic\n  print(x);\n}\n";
+    let diagnostics = state.open(URI_A, suppressed.to_string(), Some(1));
+    assert!(
+        diagnostics.iter().all(|d| d.rule != "avoid-dynamic"),
+        "inline ignore must suppress avoid-dynamic in the LSP path"
+    );
+}
+
 /// Config reload re-analyzes every open document against its cached AST —
 /// rule set changes take effect with zero re-parses. This is the
 /// stale-AST-with-new-config guard from the design doc.

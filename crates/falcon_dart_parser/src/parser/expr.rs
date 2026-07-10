@@ -3,6 +3,21 @@ use falcon_syntax::token::TokenKind;
 
 use super::Parser;
 
+/// Result of parsing a collection/map comprehension `for (...)` header.
+enum ForHeader {
+    ForIn {
+        variable: Option<Identifier>,
+        var_type: Option<DartType>,
+        pattern: Option<Box<Pattern>>,
+        iterable: Expr,
+    },
+    CStyle {
+        init: Option<ForInit>,
+        condition: Option<Expr>,
+        updates: Vec<Expr>,
+    },
+}
+
 impl<'src> Parser<'src> {
     // ── Public entry ──────────────────────────────────────────────────────────
 
@@ -140,6 +155,71 @@ impl<'src> Parser<'src> {
 
     // ── Relational / type tests ───────────────────────────────────────────────
 
+    /// True when the `<` at the cursor opens a generic-invocation type-argument
+    /// list — a balanced `<...>` containing only type-ish tokens and closed
+    /// immediately before `(`, `.`, or `?.`. Distinguishes `f<T>()` from the
+    /// comparison operator in `a < b ? () => c() : null`.
+    fn is_generic_invocation(&self) -> bool {
+        use TokenKind::*;
+        debug_assert_eq!(self.cur().kind, Lt);
+        let mut depth = 0i32;
+        let mut i = self.pos;
+        while let Some(tok) = self.tokens.get(i) {
+            match &tok.kind {
+                Lt => depth += 1,
+                Gt => {
+                    depth -= 1;
+                    if depth <= 0 {
+                        return self.after_type_args_is_call(i + 1);
+                    }
+                }
+                GtGt => {
+                    depth -= 2;
+                    if depth <= 0 {
+                        return self.after_type_args_is_call(i + 1);
+                    }
+                }
+                GtGtGt => {
+                    depth -= 3;
+                    if depth <= 0 {
+                        return self.after_type_args_is_call(i + 1);
+                    }
+                }
+                // Tokens that legitimately appear inside a type-argument list
+                // (named/qualified types, records, function types, nullability).
+                Dot | Comma | Qmark | Void | LParen | RParen | LBracket | RBracket | LBrace
+                | RBrace => {}
+                k if self.is_ident_like_kind(k) => {}
+                // Anything else (operators, literals, `=>`, `:`, `;`, …) means
+                // this `<` is a comparison, not type arguments.
+                _ => return false,
+            }
+            i += 1;
+            if i - self.pos > 512 {
+                return false;
+            }
+        }
+        false
+    }
+
+    fn after_type_args_is_call(&self, idx: usize) -> bool {
+        matches!(
+            self.tokens.get(idx).map(|t| &t.kind),
+            Some(TokenKind::LParen | TokenKind::Dot | TokenKind::QmarkDot)
+        )
+    }
+
+    /// Parse the type after `is`/`as`, leaving a `?` that begins a conditional
+    /// (`x is T ? a : b`) for the enclosing ternary rather than eating it as a
+    /// nullable-type suffix.
+    fn parse_type_after_is_as(&mut self) -> DartType {
+        let prev = self.suppress_conditional_qmark;
+        self.suppress_conditional_qmark = true;
+        let ty = self.parse_type();
+        self.suppress_conditional_qmark = prev;
+        ty
+    }
+
     fn parse_relational(&mut self) -> Expr {
         let start = self.cur().offset;
         let lhs = self.parse_bitwise_or();
@@ -187,7 +267,7 @@ impl<'src> Parser<'src> {
             TokenKind::Is => {
                 self.advance();
                 let negated = self.eat(TokenKind::Bang).is_some();
-                let dart_type = self.parse_type();
+                let dart_type = self.parse_type_after_is_as();
                 Expr::Is {
                     expr: Box::new(lhs),
                     dart_type,
@@ -197,7 +277,7 @@ impl<'src> Parser<'src> {
             }
             TokenKind::As => {
                 self.advance();
-                let dart_type = self.parse_type();
+                let dart_type = self.parse_type_after_is_as();
                 Expr::As {
                     expr: Box::new(lhs),
                     dart_type,
@@ -473,6 +553,12 @@ impl<'src> Parser<'src> {
                 }
                 // Generic call  <T>(args)
                 TokenKind::Lt => {
+                    // Only a balanced `<...>` closed and immediately followed by
+                    // `(`, `.`, or `?.` is a generic invocation; otherwise `<` is
+                    // a comparison operator (`a < b ? () => c() : null`).
+                    if !self.is_generic_invocation() {
+                        break;
+                    }
                     // Speculative: try to parse type args; restore errors on rollback
                     // to avoid spurious "expected type" errors in relational expressions.
                     let saved = self.pos;
@@ -691,10 +777,15 @@ impl<'src> Parser<'src> {
             // Parenthesised / record / function expression
             TokenKind::LParen => {
                 if self.looks_like_function_expr() {
-                    self.parse_function_expr(start)
+                    self.parse_function_expr_with_type_params(Vec::new(), start)
                 } else {
                     self.parse_paren_or_record(start)
                 }
+            }
+            // Generic function expression: `<T>(params) => ...` / `<T>(params) { ... }`
+            TokenKind::Lt if self.looks_like_generic_function_expr() => {
+                let type_params = self.parse_type_params();
+                self.parse_function_expr_with_type_params(type_params, start)
             }
             // Typed collection literal without const: <T>[...] or <K,V>{...}
             TokenKind::Lt => {
@@ -874,7 +965,68 @@ impl<'src> Parser<'src> {
         false
     }
 
-    fn parse_function_expr(&mut self, start: usize) -> Expr {
+    /// True when a `<` at the cursor opens the type-parameter list of a generic
+    /// function expression: a balanced `<...>` closed immediately before a `(`
+    /// whose matching `)` is followed by `=>`, `{`, `async`, or `sync`.
+    fn looks_like_generic_function_expr(&self) -> bool {
+        use TokenKind::*;
+        debug_assert_eq!(self.cur().kind, Lt);
+        // Find the `(` that immediately follows the balanced `<...>`.
+        let mut depth = 0i32;
+        let mut i = self.pos;
+        let paren_idx = loop {
+            let Some(tok) = self.tokens.get(i) else {
+                return false;
+            };
+            match &tok.kind {
+                Lt => depth += 1,
+                Gt => depth -= 1,
+                GtGt => depth -= 2,
+                GtGtGt => depth -= 3,
+                Ident | Dot | Comma | Qmark | Extends | Void | LParen | RParen | LBracket
+                | RBracket | LBrace | RBrace => {}
+                k if self.is_ident_like_kind(k) => {}
+                _ => return false,
+            }
+            if depth <= 0 {
+                break i + 1;
+            }
+            i += 1;
+            if i - self.pos > 512 {
+                return false;
+            }
+        };
+        if self.tokens.get(paren_idx).map(|t| &t.kind) != Some(&LParen) {
+            return false;
+        }
+        // Scan from `(` to its matching `)` and inspect the following token.
+        let mut pdepth = 0i32;
+        let mut j = paren_idx;
+        while let Some(tok) = self.tokens.get(j) {
+            match &tok.kind {
+                LParen => pdepth += 1,
+                RParen => {
+                    pdepth -= 1;
+                    if pdepth == 0 {
+                        return matches!(
+                            self.tokens.get(j + 1).map(|t| &t.kind),
+                            Some(Arrow | LBrace | Async | Sync)
+                        );
+                    }
+                }
+                Eof => return false,
+                _ => {}
+            }
+            j += 1;
+        }
+        false
+    }
+
+    fn parse_function_expr_with_type_params(
+        &mut self,
+        type_params: Vec<TypeParam>,
+        start: usize,
+    ) -> Expr {
         let params = self.parse_formal_param_list();
         let (is_async, is_generator) = self.parse_async_marker();
         let body = self.parse_function_body().unwrap_or_else(|| {
@@ -885,7 +1037,7 @@ impl<'src> Parser<'src> {
             })
         });
         Expr::FuncExpr {
-            type_params: Vec::new(),
+            type_params,
             params,
             is_async,
             is_generator,
@@ -965,44 +1117,56 @@ impl<'src> Parser<'src> {
                 is_const,
                 type_args,
                 entries: Vec::new(),
+                elements: Vec::new(),
                 span: self.span_from(start),
             };
         }
-        // Peek: if first element has a colon it's a map; otherwise set
-        let first = self.parse_expr();
-        if self.eat(TokenKind::Colon).is_some() {
-            let value = self.parse_expr();
-            let e_span = self.span_from(start);
-            let mut entries = vec![MapEntry {
-                key: first,
-                value,
-                span: e_span,
-            }];
-            while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RBrace) {
-                let k = self.parse_expr();
-                self.expect(TokenKind::Colon);
-                let v = self.parse_expr();
-                let sp = self.span_from(start);
-                entries.push(MapEntry {
-                    key: k,
-                    value: v,
-                    span: sp,
-                });
+        // Decide map vs set by looking at the first element's leaf: a `k: v` entry
+        // means a map, anything else a set. Works for plain, spread- and
+        // comprehension-led (`for`/`if`) literals alike.
+        if self.map_literal_lookahead() {
+            let mut elements = Vec::new();
+            while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+                elements.push(self.parse_map_element());
+                if self.eat(TokenKind::Comma).is_none() {
+                    break;
+                }
             }
-            self.eat(TokenKind::Comma);
             self.expect(TokenKind::RBrace);
-            Expr::Map {
-                is_const,
-                type_args,
-                entries,
-                span: self.span_from(start),
+            // Lower a plain map (no comprehension) to `entries` to keep the common
+            // shape; only comprehension maps use `elements`.
+            if elements.iter().all(|e| matches!(e, MapElement::Entry(_))) {
+                let entries = elements
+                    .into_iter()
+                    .map(|e| match e {
+                        MapElement::Entry(entry) => entry,
+                        _ => unreachable!("only entries remain"),
+                    })
+                    .collect();
+                Expr::Map {
+                    is_const,
+                    type_args,
+                    entries,
+                    elements: Vec::new(),
+                    span: self.span_from(start),
+                }
+            } else {
+                Expr::Map {
+                    is_const,
+                    type_args,
+                    entries: Vec::new(),
+                    elements,
+                    span: self.span_from(start),
+                }
             }
         } else {
-            let mut elements = vec![CollectionElement::Expr(first)];
-            while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RBrace) {
+            let mut elements = Vec::new();
+            while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
                 elements.push(self.parse_collection_element());
+                if self.eat(TokenKind::Comma).is_none() {
+                    break;
+                }
             }
-            self.eat(TokenKind::Comma);
             self.expect(TokenKind::RBrace);
             let type_arg = type_args.into_iter().next();
             Expr::Set {
@@ -1010,6 +1174,135 @@ impl<'src> Parser<'src> {
                 type_arg,
                 elements,
                 span: self.span_from(start),
+            }
+        }
+    }
+
+    /// Look ahead (without consuming) to classify a `{...}` literal as a map. The
+    /// leaf of a map element is a `k: v` entry; descend through leading `for`/`if`
+    /// comprehension headers to reach it. A spread leaf is treated as a set.
+    fn map_literal_lookahead(&mut self) -> bool {
+        let saved = self.pos;
+        let saved_errors = self.errors.len();
+        while let TokenKind::For | TokenKind::If = self.cur().kind {
+            self.advance();
+            self.skip_balanced_parens();
+        }
+        let is_map = match self.cur().kind {
+            TokenKind::DotDotDot | TokenKind::DotDotDotQmark => false,
+            _ => {
+                let _ = self.parse_expr();
+                self.at(TokenKind::Colon)
+            }
+        };
+        self.pos = saved;
+        self.errors.truncate(saved_errors);
+        is_map
+    }
+
+    /// Skip a balanced `( ... )` group starting at the current token. Used by
+    /// lookahead to step over a comprehension header without interpreting it.
+    fn skip_balanced_parens(&mut self) {
+        if !self.at(TokenKind::LParen) {
+            return;
+        }
+        let mut depth = 0usize;
+        loop {
+            match self.cur().kind {
+                TokenKind::LParen => {
+                    depth += 1;
+                    self.advance();
+                }
+                TokenKind::RParen => {
+                    self.advance();
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                TokenKind::Eof => break,
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+    }
+
+    /// Parse one element of a comprehension-form map literal (`k: v`, or a
+    /// `for`/`if`/spread wrapping such entries).
+    fn parse_map_element(&mut self) -> MapElement {
+        let start = self.cur().offset;
+        match self.cur().kind {
+            TokenKind::DotDotDot | TokenKind::DotDotDotQmark => {
+                let is_null_aware = self.cur().kind == TokenKind::DotDotDotQmark;
+                self.advance();
+                let expr = self.parse_expr();
+                MapElement::Spread {
+                    expr,
+                    is_null_aware,
+                    span: self.span_from(start),
+                }
+            }
+            TokenKind::If => {
+                self.advance();
+                let condition = self.parse_collection_if_condition();
+                let then_entry = Box::new(self.parse_map_element());
+                let else_entry = if self.eat(TokenKind::Else).is_some() {
+                    Some(Box::new(self.parse_map_element()))
+                } else {
+                    None
+                };
+                MapElement::If {
+                    condition,
+                    then_entry,
+                    else_entry,
+                    span: self.span_from(start),
+                }
+            }
+            TokenKind::For => {
+                self.advance();
+                match self.parse_collection_for_header() {
+                    ForHeader::ForIn {
+                        variable,
+                        var_type,
+                        pattern,
+                        iterable,
+                    } => {
+                        let entry = Box::new(self.parse_map_element());
+                        MapElement::For {
+                            variable,
+                            var_type,
+                            pattern,
+                            iterable,
+                            entry,
+                            span: self.span_from(start),
+                        }
+                    }
+                    ForHeader::CStyle {
+                        init,
+                        condition,
+                        updates,
+                    } => {
+                        let entry = Box::new(self.parse_map_element());
+                        MapElement::CFor {
+                            init,
+                            condition,
+                            updates,
+                            entry,
+                            span: self.span_from(start),
+                        }
+                    }
+                }
+            }
+            _ => {
+                let key = self.parse_expr();
+                self.expect(TokenKind::Colon);
+                let value = self.parse_expr();
+                MapElement::Entry(MapEntry {
+                    key,
+                    value,
+                    span: self.span_from(start),
+                })
             }
         }
     }
@@ -1029,17 +1322,7 @@ impl<'src> Parser<'src> {
             }
             TokenKind::If => {
                 self.advance(); // if
-                self.expect(TokenKind::LParen);
-                let condition = if self.at(TokenKind::Case) {
-                    // if (expr case pattern)
-                    let e = self.parse_expr();
-                    self.advance(); // case
-                    let p = self.parse_pattern();
-                    IfCondition::Case(e, Box::new(p))
-                } else {
-                    IfCondition::Expr(self.parse_expr())
-                };
-                self.expect(TokenKind::RParen);
+                let condition = self.parse_collection_if_condition();
                 let then_elem = Box::new(self.parse_collection_element());
                 let else_elem = if self.eat(TokenKind::Else).is_some() {
                     Some(Box::new(self.parse_collection_element()))
@@ -1055,41 +1338,116 @@ impl<'src> Parser<'src> {
             }
             TokenKind::For => {
                 self.advance(); // for
-                self.expect(TokenKind::LParen);
-                // Consume optional var/final/const keyword
-                let _ = self
-                    .eat(TokenKind::Var)
-                    .or_else(|| self.eat(TokenKind::Final))
-                    .or_else(|| self.eat(TokenKind::Const));
-                // Try to parse an optional type annotation before the variable name
-                let var_type = {
-                    let saved = self.pos;
-                    if self.is_type_start() && !self.at(TokenKind::LParen) {
-                        let ty = self.parse_type();
-                        if self.is_ident_like() {
-                            Some(ty)
-                        } else {
-                            self.pos = saved;
-                            None
+                match self.parse_collection_for_header() {
+                    ForHeader::ForIn {
+                        variable,
+                        var_type,
+                        pattern,
+                        iterable,
+                    } => {
+                        let element = Box::new(self.parse_collection_element());
+                        CollectionElement::For {
+                            variable,
+                            var_type,
+                            pattern,
+                            iterable,
+                            element,
+                            span: self.span_from(start),
                         }
-                    } else {
-                        None
                     }
-                };
-                let variable = self.expect_ident();
-                self.eat(TokenKind::In);
-                let iterable = self.parse_expr();
-                self.expect(TokenKind::RParen);
-                let element = Box::new(self.parse_collection_element());
-                CollectionElement::For {
-                    variable,
-                    var_type,
-                    iterable,
-                    element,
-                    span: self.span_from(start),
+                    ForHeader::CStyle {
+                        init,
+                        condition,
+                        updates,
+                    } => {
+                        let element = Box::new(self.parse_collection_element());
+                        CollectionElement::CFor {
+                            init,
+                            condition,
+                            updates,
+                            element,
+                            span: self.span_from(start),
+                        }
+                    }
                 }
             }
             _ => CollectionElement::Expr(self.parse_expr()),
+        }
+    }
+
+    /// Parse a collection/comprehension `if (...)` condition (the `if` keyword is
+    /// already consumed): `(expr)` or `(expr case pattern [when guard])`. The
+    /// `when` guard is parsed but not retained — `IfCondition` has no guard slot.
+    fn parse_collection_if_condition(&mut self) -> IfCondition {
+        self.expect(TokenKind::LParen);
+        let scrutinee = self.parse_expr();
+        let condition = if self.eat(TokenKind::Case).is_some() {
+            let pattern = self.parse_pattern();
+            if self.eat(TokenKind::When).is_some() {
+                let _ = self.parse_expr();
+            }
+            IfCondition::Case(scrutinee, Box::new(pattern))
+        } else {
+            IfCondition::Expr(scrutinee)
+        };
+        self.expect(TokenKind::RParen);
+        condition
+    }
+
+    /// Parse a collection `for (...)` header (the `for` keyword is already
+    /// consumed), returning either a for-in header (loop variable or Dart 3
+    /// destructuring pattern plus the iterable) or a C-style header
+    /// (`init ; cond ; update`). Leaves the closing `)` consumed.
+    fn parse_collection_for_header(&mut self) -> ForHeader {
+        self.expect(TokenKind::LParen);
+        // A pattern-for header is `final`/`var` (or nothing) followed by a
+        // destructuring pattern (`(a, b)`, `[a, b]`, `{..}`).
+        let is_pattern_for = {
+            let head_offset = if matches!(self.cur().kind, TokenKind::Var | TokenKind::Final) {
+                1
+            } else {
+                0
+            };
+            matches!(
+                self.peek(head_offset).kind,
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
+            )
+        };
+        if is_pattern_for {
+            let _ = self
+                .eat(TokenKind::Var)
+                .or_else(|| self.eat(TokenKind::Final));
+            let pattern = Some(Box::new(self.parse_pattern()));
+            self.eat(TokenKind::In);
+            let iterable = self.parse_expr();
+            self.expect(TokenKind::RParen);
+            return ForHeader::ForIn {
+                variable: None,
+                var_type: None,
+                pattern,
+                iterable,
+            };
+        }
+        // Reuse the statement for-clause parser, which handles both for-in and
+        // C-style headers and consumes the closing `)`.
+        let (init, condition, updates) = self.parse_for_clauses();
+        match init {
+            Some(ForInit::ForIn {
+                var_type,
+                name,
+                iterable,
+                ..
+            }) => ForHeader::ForIn {
+                variable: Some(name),
+                var_type,
+                pattern: None,
+                iterable: *iterable,
+            },
+            other => ForHeader::CStyle {
+                init: other,
+                condition,
+                updates,
+            },
         }
     }
 

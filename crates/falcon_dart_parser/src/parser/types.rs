@@ -19,7 +19,7 @@ impl<'src> Parser<'src> {
                 };
                 return self.parse_function_type(Some(ret), start);
             }
-            let nullable = self.eat(TokenKind::Qmark).is_some();
+            let nullable = self.eat_type_qmark();
             let span = self.span_from(start);
             return if nullable {
                 // void? is technically invalid Dart but we parse it gracefully
@@ -37,7 +37,7 @@ impl<'src> Parser<'src> {
         // dynamic
         if self.at(TokenKind::Dynamic) {
             self.advance();
-            let is_nullable = self.eat(TokenKind::Qmark).is_some();
+            let is_nullable = self.eat_type_qmark();
             let span = self.span_from(start);
             return if is_nullable {
                 DartType::Named(NamedType {
@@ -78,18 +78,22 @@ impl<'src> Parser<'src> {
                 Vec::new()
             };
 
-            // Could be `Function(...)` after a return type name
+            // A `?` here belongs to this named type — including when it is the
+            // (nullable) return type of a following function type, e.g.
+            // `String? Function(...)`.
+            let is_nullable = self.eat_type_qmark();
+
+            // Could be `Function(...)` after a (possibly nullable) return type.
             if self.at(TokenKind::Function) && self.peek(1).kind == TokenKind::LParen {
                 let ret = DartType::Named(NamedType {
                     segments,
                     type_args,
-                    is_nullable: false,
+                    is_nullable,
                     span: self.span_from(start),
                 });
                 return self.parse_function_type(Some(ret), start);
             }
 
-            let is_nullable = self.eat(TokenKind::Qmark).is_some();
             let span = self.span_from(start);
             return DartType::Named(NamedType {
                 segments,
@@ -116,9 +120,13 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn is_ident_like_at(&self, offset: usize) -> bool {
+        self.is_ident_like_kind(&self.peek(offset).kind)
+    }
+
+    pub(super) fn is_ident_like_kind(&self, kind: &TokenKind) -> bool {
         use TokenKind::*;
         matches!(
-            self.peek(offset).kind,
+            kind,
             Ident
                 | Abstract
                 | As
@@ -168,7 +176,7 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::LParen);
         let params = self.parse_function_type_params();
         self.expect(TokenKind::RParen);
-        let is_nullable = self.eat(TokenKind::Qmark).is_some();
+        let is_nullable = self.eat_type_qmark();
         let span = self.span_from(start);
         DartType::Function(Box::new(FunctionType {
             return_type: return_type.map(Box::new),
@@ -184,19 +192,24 @@ impl<'src> Parser<'src> {
         let mut in_named = false;
         let mut in_optional = false;
 
-        if self.at(TokenKind::LBrace) {
-            self.advance();
-            in_named = true;
-        } else if self.at(TokenKind::LBracket) {
-            self.advance();
-            in_optional = true;
-        }
-
         while !self.at(TokenKind::RParen)
             && !self.at(TokenKind::RBrace)
             && !self.at(TokenKind::RBracket)
             && !self.at(TokenKind::Eof)
         {
+            // The named `{...}` / optional-positional `[...]` section may follow
+            // leading required-positional params, so detect it inside the loop.
+            if !in_named && !in_optional {
+                if self.at(TokenKind::LBrace) {
+                    self.advance();
+                    in_named = true;
+                    continue;
+                } else if self.at(TokenKind::LBracket) {
+                    self.advance();
+                    in_optional = true;
+                    continue;
+                }
+            }
             let is_required = self.eat(TokenKind::Required).is_some();
             let _ = self
                 .eat(TokenKind::Final)
@@ -261,7 +274,7 @@ impl<'src> Parser<'src> {
             }
         }
         self.expect(TokenKind::RParen);
-        let is_nullable = self.eat(TokenKind::Qmark).is_some();
+        let is_nullable = self.eat_type_qmark();
         DartType::Record(RecordType {
             positional,
             named,
@@ -380,6 +393,9 @@ impl<'src> Parser<'src> {
         let is_required = self.eat(TokenKind::Required).is_some();
         let is_covariant = self.eat(TokenKind::Covariant).is_some();
         let is_final = self.eat(TokenKind::Final).is_some();
+        // `var` marks an untyped mutable parameter; consume it so the following
+        // identifier is read as the name rather than a type.
+        let is_var = self.eat(TokenKind::Var).is_some();
 
         // this.field or super.field
         let is_field = self.at(TokenKind::This) && self.peek(1).kind == TokenKind::Dot;
@@ -388,6 +404,9 @@ impl<'src> Parser<'src> {
         let (param_type, name) = if is_field || is_super {
             self.advance(); // this / super
             self.advance(); // .
+            (None, self.expect_ident())
+        } else if is_var {
+            // `var name` — untyped, the next token is the parameter name.
             (None, self.expect_ident())
         } else {
             // Try to distinguish `Type name` from just `name`

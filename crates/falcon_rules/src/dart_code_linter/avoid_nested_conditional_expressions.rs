@@ -312,10 +312,15 @@ fn visit_expr(
                 visit_collection_element(elem, inside_nested, diagnostics, ctx);
             }
         }
-        Expr::Map { entries, .. } => {
+        Expr::Map {
+            entries, elements, ..
+        } => {
             for entry in entries {
                 visit_expr(&entry.key, inside_nested, diagnostics, ctx);
                 visit_expr(&entry.value, inside_nested, diagnostics, ctx);
+            }
+            for e in map_element_exprs(elements) {
+                visit_expr(e, inside_nested, diagnostics, ctx);
             }
         }
         Expr::Set { elements, .. } => {
@@ -389,6 +394,39 @@ fn visit_collection_element(
             iterable, element, ..
         } => {
             visit_expr(iterable, inside_nested, diagnostics, ctx);
+            visit_collection_element(element, inside_nested, diagnostics, ctx);
+        }
+        CollectionElement::CFor {
+            init,
+            condition,
+            updates,
+            element,
+            ..
+        } => {
+            match init {
+                Some(ForInit::VarDecl(d)) => {
+                    for decl in &d.declarators {
+                        if let Some(e) = &decl.initializer {
+                            visit_expr(e, inside_nested, diagnostics, ctx);
+                        }
+                    }
+                }
+                Some(ForInit::ForIn { iterable, .. }) => {
+                    visit_expr(iterable, inside_nested, diagnostics, ctx);
+                }
+                Some(ForInit::Exprs(es)) => {
+                    for e in es {
+                        visit_expr(e, inside_nested, diagnostics, ctx);
+                    }
+                }
+                None => {}
+            }
+            if let Some(c) = condition {
+                visit_expr(c, inside_nested, diagnostics, ctx);
+            }
+            for u in updates {
+                visit_expr(u, inside_nested, diagnostics, ctx);
+            }
             visit_collection_element(element, inside_nested, diagnostics, ctx);
         }
     }
@@ -482,9 +520,16 @@ fn contains_conditional(expr: &Expr) -> bool {
             }
             false
         }
-        Expr::Map { entries, .. } => {
+        Expr::Map {
+            entries, elements, ..
+        } => {
             for entry in entries {
                 if contains_conditional(&entry.key) || contains_conditional(&entry.value) {
+                    return true;
+                }
+            }
+            for e in map_element_exprs(elements) {
+                if contains_conditional(e) {
                     return true;
                 }
             }
@@ -570,5 +615,26 @@ fn contains_conditional_in_elem(elem: &CollectionElement) -> bool {
         CollectionElement::For {
             iterable, element, ..
         } => contains_conditional(iterable) || contains_conditional_in_elem(element),
+        CollectionElement::CFor {
+            init,
+            condition,
+            updates,
+            element,
+            ..
+        } => {
+            let init_has = match init {
+                Some(ForInit::VarDecl(d)) => d
+                    .declarators
+                    .iter()
+                    .any(|decl| decl.initializer.as_ref().is_some_and(contains_conditional)),
+                Some(ForInit::ForIn { iterable, .. }) => contains_conditional(iterable),
+                Some(ForInit::Exprs(es)) => es.iter().any(contains_conditional),
+                None => false,
+            };
+            init_has
+                || condition.as_ref().is_some_and(contains_conditional)
+                || updates.iter().any(contains_conditional)
+                || contains_conditional_in_elem(element)
+        }
     }
 }

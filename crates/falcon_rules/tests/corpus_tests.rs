@@ -15,11 +15,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, ProjectFile, Rule};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
-use falcon_rules::all_rules;
 use falcon_rules::dart_code_linter::use_design_system_item::UseDesignSystemItem;
+use falcon_rules::{all_project_rules, all_rules};
 
 fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus")
@@ -132,8 +132,17 @@ fn corpus_matches_expectations() {
     let mut total_expectations = 0usize;
     let mut total_files = 0usize;
 
+    let project_rule_names: std::collections::HashSet<&str> =
+        all_project_rules().iter().map(|r| r.name()).collect();
+
     for dir in &rule_dirs {
         let rule_name = dir.file_name().unwrap().to_string_lossy().to_string();
+
+        // Project (cross-file) rules keep their multi-file fixtures in a
+        // `project/` subdirectory and are validated by the dedicated test below.
+        if project_rule_names.contains(rule_name.as_str()) {
+            continue;
+        }
 
         // Invariant: every corpus directory must correspond to a registered rule.
         let Some(rule) = by_name.get(rule_name.as_str()) else {
@@ -303,6 +312,102 @@ fn collect_dart_files_recursive_inner(dir: &Path, out: &mut Vec<PathBuf>, limit:
             out.push(path);
         }
     }
+}
+
+/// In-process validation of project (cross-file) rules against their multi-file
+/// fixtures under `corpus/<rule>/project/`. Each fixture directory is run as one
+/// unit; `/* expect: <rule> */` annotations are matched by (file, line).
+#[test]
+fn project_corpus_matches_expectations() {
+    let corpus = corpus_dir();
+    let config = FalconConfig::default();
+    let mut failures: Vec<String> = Vec::new();
+    let mut total_expectations = 0usize;
+
+    for rule in all_project_rules() {
+        let dir = corpus.join(rule.name()).join("project");
+        assert!(
+            dir.is_dir(),
+            "project rule `{}` is missing its corpus/<rule>/project/ fixture",
+            rule.name()
+        );
+
+        let files: Vec<ProjectFile> = dart_files(&dir)
+            .into_iter()
+            .map(|path| {
+                let source = fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+                let (program, errors) = parse(&source);
+                ProjectFile {
+                    path,
+                    source,
+                    program,
+                    has_parse_errors: !errors.is_empty(),
+                }
+            })
+            .collect();
+
+        // (file_path, line) expectations for this rule across all fixture files.
+        let mut expectations: Vec<(String, usize)> = Vec::new();
+        for f in &files {
+            for exp in parse_expectations(&f.source) {
+                if exp.rule == rule.name() {
+                    total_expectations += 1;
+                    expectations.push((f.path.to_string_lossy().into_owned(), exp.line));
+                }
+            }
+        }
+
+        let mut diag_keys: Vec<(String, usize)> = rule
+            .analyze_project(&files, &config)
+            .into_iter()
+            .filter(|d| d.rule == rule.name())
+            .map(|d| {
+                (
+                    d.file_path.clone(),
+                    byte_offset_to_line(
+                        files
+                            .iter()
+                            .find(|f| f.path.to_string_lossy() == d.file_path)
+                            .map(|f| f.source.as_str())
+                            .unwrap_or(""),
+                        d.span.start,
+                    ),
+                )
+            })
+            .collect();
+
+        for exp in &expectations {
+            if let Some(pos) = diag_keys.iter().position(|k| k == exp) {
+                diag_keys.remove(pos);
+            } else {
+                failures.push(format!(
+                    "MISS  {}:{} — `{}` expected but not emitted",
+                    exp.0,
+                    exp.1,
+                    rule.name()
+                ));
+            }
+        }
+        for key in diag_keys {
+            failures.push(format!(
+                "EXTRA {}:{} — `{}` fired without a matching annotation",
+                key.0,
+                key.1,
+                rule.name()
+            ));
+        }
+    }
+
+    assert!(
+        total_expectations > 0,
+        "project corpus produced no expectations — runner is not exercising fixtures"
+    );
+    assert!(
+        failures.is_empty(),
+        "project corpus validation failed:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]

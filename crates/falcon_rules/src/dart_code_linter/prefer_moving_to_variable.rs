@@ -11,11 +11,29 @@ impl Rule for PreferMovingToVariable {
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        let threshold = allowed_duplicated_chains(ctx);
         for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
+            scan_top(decl, &mut diags, ctx, threshold);
         }
         diags
     }
+}
+
+/// Read the `allowed_duplicated_chains` option (default 2). A duplicate is
+/// flagged once its 1-based occurrence index reaches this value, so the default
+/// flags the 2nd (and later) occurrences; `3` flags the 3rd and later.
+/// Malformed/missing → default. A value below 2 is clamped to 2 (the first
+/// occurrence can never be a duplicate).
+fn allowed_duplicated_chains(ctx: &AnalyzeContext) -> usize {
+    crate::meta::meta_for("prefer-moving-to-variable")
+        .and_then(|m| {
+            ctx.config
+                .rule_options(m.group, "prefer-moving-to-variable")
+        })
+        .and_then(|o| o.get("allowed_duplicated_chains"))
+        .and_then(|v| v.as_u64())
+        .map(|v| (v as usize).max(2))
+        .unwrap_or(2)
 }
 
 fn expr_src<'a>(expr: &Expr, source: &'a str) -> &'a str {
@@ -24,8 +42,13 @@ fn expr_src<'a>(expr: &Expr, source: &'a str) -> &'a str {
     &source[span.start..end]
 }
 
-fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let mut seen: Vec<(&str, &Span)> = Vec::new();
+fn check_stmts(
+    stmts: &[Stmt],
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+    threshold: usize,
+) {
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
 
     for stmt in stmts {
         if let Stmt::LocalVar(lv) = stmt {
@@ -36,7 +59,8 @@ fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext
                         continue;
                     }
                     let src = expr_src(init, ctx.source);
-                    if seen.iter().any(|(s, _)| *s == src) {
+                    let occurrence = *counts.entry(src).and_modify(|c| *c += 1).or_insert(1);
+                    if occurrence >= threshold {
                         let span = init.span();
                         diags.push(Diagnostic::new(
                             "prefer-moving-to-variable",
@@ -48,8 +72,6 @@ fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext
                                 end: span.end,
                             },
                         ));
-                    } else {
-                        seen.push((src, init.span()));
                     }
                 }
             }
@@ -69,33 +91,43 @@ fn is_trivial(expr: &Expr) -> bool {
     )
 }
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_top(
+    decl: &TopLevelDecl,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+    threshold: usize,
+) {
     match decl {
         TopLevelDecl::Function(f) => {
             if let Some(body) = &f.body {
-                scan_body(body, diags, ctx);
+                scan_body(body, diags, ctx, threshold);
             }
         }
         TopLevelDecl::Class(c) => {
             for m in &c.members {
-                scan_member(m, diags, ctx);
+                scan_member(m, diags, ctx, threshold);
             }
         }
         TopLevelDecl::Mixin(m) => {
             for mem in &m.members {
-                scan_member(mem, diags, ctx);
+                scan_member(mem, diags, ctx, threshold);
             }
         }
         TopLevelDecl::MixinClass(mc) => {
             for m in &mc.members {
-                scan_member(m, diags, ctx);
+                scan_member(m, diags, ctx, threshold);
             }
         }
         _ => {}
     }
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_member(
+    member: &ClassMember,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+    threshold: usize,
+) {
     let body = match member {
         ClassMember::Method(m) => m.body.as_ref(),
         ClassMember::Constructor(c) => c.body.as_ref(),
@@ -104,54 +136,59 @@ fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
         _ => None,
     };
     if let Some(b) = body {
-        scan_body(b, diags, ctx);
+        scan_body(b, diags, ctx, threshold);
     }
 }
 
-fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_body(
+    body: &FunctionBody,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+    threshold: usize,
+) {
     match body {
         FunctionBody::Block(b) => {
-            check_stmts(&b.stmts, diags, ctx);
-            scan_stmts(&b.stmts, diags, ctx);
+            check_stmts(&b.stmts, diags, ctx, threshold);
+            scan_stmts(&b.stmts, diags, ctx, threshold);
         }
         FunctionBody::Arrow(_, _) | FunctionBody::Native(_, _) => {}
     }
 }
 
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, threshold: usize) {
     for s in stmts {
-        scan_stmt(s, diags, ctx);
+        scan_stmt(s, diags, ctx, threshold);
     }
 }
 
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, threshold: usize) {
     match stmt {
         Stmt::Block(b) => {
-            check_stmts(&b.stmts, diags, ctx);
-            scan_stmts(&b.stmts, diags, ctx);
+            check_stmts(&b.stmts, diags, ctx, threshold);
+            scan_stmts(&b.stmts, diags, ctx, threshold);
         }
         Stmt::If(i) => {
-            scan_stmt(&i.then_branch, diags, ctx);
+            scan_stmt(&i.then_branch, diags, ctx, threshold);
             if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx);
+                scan_stmt(eb, diags, ctx, threshold);
             }
         }
-        Stmt::While(w) => scan_stmt(&w.body, diags, ctx),
-        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx),
-        Stmt::For(f) => scan_stmt(&f.body, diags, ctx),
+        Stmt::While(w) => scan_stmt(&w.body, diags, ctx, threshold),
+        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx, threshold),
+        Stmt::For(f) => scan_stmt(&f.body, diags, ctx, threshold),
         Stmt::TryCatch(tc) => {
-            check_stmts(&tc.body.stmts, diags, ctx);
-            scan_stmts(&tc.body.stmts, diags, ctx);
+            check_stmts(&tc.body.stmts, diags, ctx, threshold);
+            scan_stmts(&tc.body.stmts, diags, ctx, threshold);
             for catch in &tc.catches {
-                check_stmts(&catch.body.stmts, diags, ctx);
-                scan_stmts(&catch.body.stmts, diags, ctx);
+                check_stmts(&catch.body.stmts, diags, ctx, threshold);
+                scan_stmts(&catch.body.stmts, diags, ctx, threshold);
             }
             if let Some(fin) = &tc.finally {
-                check_stmts(&fin.stmts, diags, ctx);
-                scan_stmts(&fin.stmts, diags, ctx);
+                check_stmts(&fin.stmts, diags, ctx, threshold);
+                scan_stmts(&fin.stmts, diags, ctx, threshold);
             }
         }
-        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx),
+        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx, threshold),
         _ => {}
     }
 }

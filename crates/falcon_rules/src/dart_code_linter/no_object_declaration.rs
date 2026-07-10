@@ -286,10 +286,15 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                 }
             }
         }
-        Expr::Map { entries, .. } => {
+        Expr::Map {
+            entries, elements, ..
+        } => {
             for entry in entries {
                 scan_expr(&entry.key, diags, ctx);
                 scan_expr(&entry.value, diags, ctx);
+            }
+            for e in map_element_exprs(elements) {
+                scan_expr(e, diags, ctx);
             }
         }
         Expr::FuncExpr { body, .. } => scan_body(body, diags, ctx),
