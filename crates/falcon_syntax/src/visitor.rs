@@ -509,6 +509,7 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
         | Expr::NullLit { .. }
         | Expr::This { .. }
         | Expr::Super { .. }
+        | Expr::DotShorthand { .. }
         | Expr::Error { .. } => {}
 
         Expr::StringLit(x) => v.visit_string_lit(x),

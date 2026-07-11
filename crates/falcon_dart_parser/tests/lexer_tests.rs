@@ -48,6 +48,47 @@ fn test_double_exponent_negative() {
     assert_eq!(tokens[0].kind, TokenKind::DoubleLit);
 }
 
+// ── Digit separators (Dart 3.6) ────────────────────────────────────────────────
+
+#[test]
+fn test_int_digit_separators() {
+    let tokens = Lexer::new("1_000_000").tokenize();
+    assert_eq!(tokens[0].kind, TokenKind::IntLit);
+    assert_eq!(tokens[0].text("1_000_000"), "1_000_000");
+}
+
+#[test]
+fn test_hex_digit_separators() {
+    let tokens = Lexer::new("0xFF_EC").tokenize();
+    assert_eq!(tokens[0].kind, TokenKind::IntLit);
+    assert_eq!(tokens[0].text("0xFF_EC"), "0xFF_EC");
+}
+
+#[test]
+fn test_double_digit_separators() {
+    let src = "1_2.3_4e1_2";
+    let tokens = Lexer::new(src).tokenize();
+    assert_eq!(tokens[0].kind, TokenKind::DoubleLit);
+    assert_eq!(tokens[0].text(src), src);
+}
+
+#[test]
+fn test_trailing_underscore_is_part_of_number() {
+    // The lexer does not reject a trailing separator; it is lexed as part of
+    // the numeric token (matching current behavior).
+    let tokens = Lexer::new("1_").tokenize();
+    assert_eq!(tokens[0].kind, TokenKind::IntLit);
+    assert_eq!(tokens[0].text("1_"), "1_");
+}
+
+#[test]
+fn test_leading_underscore_is_identifier() {
+    // `_1` starts with `_`, so it is an identifier, not a number.
+    let tokens = Lexer::new("_1").tokenize();
+    assert_eq!(tokens[0].kind, TokenKind::Ident);
+    assert_eq!(tokens[0].text("_1"), "_1");
+}
+
 // ── String literals ──────────────────────────────────────────────────────────
 
 #[test]

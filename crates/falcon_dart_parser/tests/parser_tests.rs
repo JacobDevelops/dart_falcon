@@ -1288,6 +1288,122 @@ fn test_expr_switch_expression() {
     }
 }
 
+// ── Dot shorthands (Dart 3.9) ─────────────────────────────────────────────────
+
+/// Parses `main() { <src>; }` and returns the first statement's expression.
+fn first_stmt_expr(src: &str) -> Expr {
+    let wrapped = format!("main() {{ {src}; }}");
+    let (prog, errors) = parse(&wrapped);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
+        panic!("expected function")
+    };
+    let Some(FunctionBody::Block(b)) = &fun.body else {
+        panic!("expected block body")
+    };
+    let Stmt::Expr(es) = &b.stmts[0] else {
+        panic!("expected expr stmt")
+    };
+    es.expr.clone()
+}
+
+#[test]
+fn test_dot_shorthand_bare() {
+    let expr = first_stmt_expr(".red");
+    assert!(
+        matches!(&expr, Expr::DotShorthand { is_const: false, name, .. } if name.name == "red")
+    );
+}
+
+#[test]
+fn test_dot_shorthand_call() {
+    let expr = first_stmt_expr(".parse('42')");
+    let Expr::Call { callee, args, .. } = &expr else {
+        panic!("expected call, got {expr:?}")
+    };
+    assert!(matches!(callee.as_ref(), Expr::DotShorthand { name, .. } if name.name == "parse"));
+    assert_eq!(args.positional.len(), 1);
+}
+
+#[test]
+fn test_dot_shorthand_generic_call() {
+    let expr = first_stmt_expr(".parse<int>('42')");
+    let Expr::Call {
+        callee, type_args, ..
+    } = &expr
+    else {
+        panic!("expected call, got {expr:?}")
+    };
+    assert!(matches!(callee.as_ref(), Expr::DotShorthand { name, .. } if name.name == "parse"));
+    assert_eq!(type_args.len(), 1);
+}
+
+#[test]
+fn test_dot_shorthand_new_tearoff() {
+    let expr = first_stmt_expr(".new");
+    assert!(matches!(&expr, Expr::DotShorthand { name, .. } if name.name == "new"));
+}
+
+#[test]
+fn test_dot_shorthand_new_call() {
+    let expr = first_stmt_expr(".new(1, 2)");
+    let Expr::Call { callee, args, .. } = &expr else {
+        panic!("expected call, got {expr:?}")
+    };
+    assert!(matches!(callee.as_ref(), Expr::DotShorthand { name, .. } if name.name == "new"));
+    assert_eq!(args.positional.len(), 2);
+}
+
+#[test]
+fn test_dot_shorthand_const() {
+    // `const` in statement position is a variable-declaration keyword, so drive
+    // the const-expression path via a list element instead.
+    let expr = first_stmt_expr("[const .fromLtrb(4, 3, 2, 1)]");
+    let Expr::List { elements, .. } = &expr else {
+        panic!("expected list, got {expr:?}")
+    };
+    let CollectionElement::Expr(Expr::Call { callee, args, .. }) = &elements[0] else {
+        panic!("expected call element, got {:?}", elements[0])
+    };
+    let Expr::DotShorthand { is_const, name, .. } = callee.as_ref() else {
+        panic!("expected dot shorthand, got {callee:?}")
+    };
+    assert!(is_const);
+    assert_eq!(name.name, "fromLtrb");
+    assert_eq!(args.positional.len(), 4);
+}
+
+#[test]
+fn test_dot_shorthand_postfix_chain() {
+    // A shorthand head still supports trailing selectors: `.red.value`.
+    let expr = first_stmt_expr(".red.value");
+    let Expr::Field { object, field, .. } = &expr else {
+        panic!("expected field access, got {expr:?}")
+    };
+    assert_eq!(field.name, "value");
+    assert!(matches!(object.as_ref(), Expr::DotShorthand { name, .. } if name.name == "red"));
+}
+
+// ── Digit separators (Dart 3.6) ───────────────────────────────────────────────
+
+#[test]
+fn test_int_digit_separator_literal() {
+    let expr = first_stmt_expr("1_000_000");
+    assert!(matches!(&expr, Expr::IntLit { value, .. } if value == "1_000_000"));
+}
+
+#[test]
+fn test_hex_digit_separator_literal() {
+    let expr = first_stmt_expr("0xFF_EC");
+    assert!(matches!(&expr, Expr::IntLit { value, .. } if value == "0xFF_EC"));
+}
+
+#[test]
+fn test_double_digit_separator_literal() {
+    let expr = first_stmt_expr("1_2.3_4e1_2");
+    assert!(matches!(&expr, Expr::DoubleLit { value, .. } if value == "1_2.3_4e1_2"));
+}
+
 // ── Patterns ──────────────────────────────────────────────────────────────────
 
 #[test]
