@@ -94,15 +94,29 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      INPUT_TAG: ${{ github.event.inputs.tag }}
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: tarballs-*
           merge-multiple: true
           path: dist
+      # Fail fast if the release tag and Cargo.toml version disagree.
+      - name: Verify tag matches Cargo.toml
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-$GITHUB_REF_NAME}"; VERSION="${VERSION#v}"
+          CARGO_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "tag v$VERSION does not match Cargo.toml version $CARGO_VERSION" >&2
+            exit 1
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
           files: dist/*.tar.gz
           fail_on_unmatched_files: true
 

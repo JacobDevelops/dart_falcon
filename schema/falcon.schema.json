@@ -1,0 +1,717 @@
+{
+  "$id": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "overrideLinter": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rules": {
+          "additionalProperties": false,
+          "properties": {
+            "complexity": {
+              "additionalProperties": false,
+              "properties": {
+                "avoid-nested-conditional-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-redundant-async": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-type-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-type-casts": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_inverted_boolean_expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_nested_if": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "cyclomatic_complexity": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "max_lines_for_file": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "max_lines_for_function": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "max_parameters_for_function": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "max_switch_cases": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "maximum_nesting_level": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-boolean-literal-compare": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-conditional-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-extracting-callbacks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-immediate-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-moving-to-variable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_iterable_any": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_iterable_every": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "correctness": {
+              "additionalProperties": false,
+              "properties": {
+                "avoid-global-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-returning-widgets": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unused-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_mutable_global_variables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_unused_parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "correct_order_for_super_dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "proper_controller_dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "proper_expanded_and_flexible": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "proper_from_environment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "proper_super_init_state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary_flutter_imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary_nullable_return_type": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use_once_constructors_once_provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "performance": {
+              "additionalProperties": false,
+              "properties": {
+                "prefer-const-border-radius": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-edge-insets-constructor": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_declaring_const_constructor": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "recommended": {
+              "type": "boolean"
+            },
+            "style": {
+              "additionalProperties": false,
+              "properties": {
+                "avoid-late-keyword": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-non-null-assertion": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-top-level-member-access": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_abbreviations_in_doc_comments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_positional_fields_in_records": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_redundant_pattern_field_names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_single_child_column_or_row": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "binary-expression-operand-order": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "boolean_prefixes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "class_members_ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "double-literal-format": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "format-comment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "member-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-magic-number": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-object-declaration": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no_magic_number": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-async-await": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-identifier-length": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-type-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-iterable-of": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-last": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-trailing-comma": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_async_callback": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_dedicated_media_query_methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_underscore_for_unused_callback_parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-design-system-item": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use_spacer_as_expanded_child": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "suspicious": {
+              "additionalProperties": false,
+              "properties": {
+                "avoid-dynamic": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-ignoring-return-values": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-passing-async-when-sync-expected": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-throw-in-catch-block": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unrelated-type-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_empty_blocks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-empty-block": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-equal-arguments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-equal-then-else": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no_duplicate_case_values": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no_empty_block": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no_self_comparisons": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "overrideProject": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rules": {
+          "additionalProperties": false,
+          "properties": {
+            "correctness": {
+              "additionalProperties": false,
+              "properties": {
+                "unnecessary-nullable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unused-code": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unused-files": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "recommended": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ruleConfig": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "options": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ruleLevel": {
+      "enum": [
+        "off",
+        "on",
+        "info",
+        "warn",
+        "error"
+      ]
+    }
+  },
+  "description": "Configuration for the falcon Dart linter.",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "files": {
+      "additionalProperties": false,
+      "properties": {
+        "includes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "linter": {
+      "additionalProperties": false,
+      "properties": {
+        "domains": {
+          "additionalProperties": false,
+          "properties": {
+            "flutter": {
+              "enum": [
+                "all",
+                "recommended",
+                "none"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "rules": {
+          "additionalProperties": false,
+          "properties": {
+            "complexity": {
+              "additionalProperties": false,
+              "properties": {
+                "avoid-nested-conditional-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-redundant-async": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-type-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-type-casts": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_inverted_boolean_expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_nested_if": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "cyclomatic_complexity": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "max_lines_for_file": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "max_lines_for_function": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "max_parameters_for_function": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "max_switch_cases": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "maximum_nesting_level": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-boolean-literal-compare": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-conditional-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-extracting-callbacks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-immediate-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-moving-to-variable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_iterable_any": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_iterable_every": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "correctness": {
+              "additionalProperties": false,
+              "properties": {
+                "avoid-global-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-returning-widgets": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unused-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_mutable_global_variables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_unused_parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "correct_order_for_super_dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "proper_controller_dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "proper_expanded_and_flexible": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "proper_from_environment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "proper_super_init_state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary_flutter_imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary_nullable_return_type": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use_once_constructors_once_provider": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "performance": {
+              "additionalProperties": false,
+              "properties": {
+                "prefer-const-border-radius": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-edge-insets-constructor": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_declaring_const_constructor": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "recommended": {
+              "type": "boolean"
+            },
+            "style": {
+              "additionalProperties": false,
+              "properties": {
+                "avoid-late-keyword": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-non-null-assertion": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-top-level-member-access": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_abbreviations_in_doc_comments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_positional_fields_in_records": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_redundant_pattern_field_names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_single_child_column_or_row": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "binary-expression-operand-order": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "boolean_prefixes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "class_members_ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "double-literal-format": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "format-comment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "member-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "newline-before-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-magic-number": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-object-declaration": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no_magic_number": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-async-await": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-identifier-length": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-correct-type-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-iterable-of": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-last": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-trailing-comma": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_async_callback": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_dedicated_media_query_methods": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer_underscore_for_unused_callback_parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-design-system-item": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use_spacer_as_expanded_child": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "suspicious": {
+              "additionalProperties": false,
+              "properties": {
+                "avoid-dynamic": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-ignoring-return-values": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-passing-async-when-sync-expected": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-throw-in-catch-block": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unrelated-type-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid_empty_blocks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-empty-block": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-equal-arguments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-equal-then-else": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no_duplicate_case_values": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no_empty_block": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no_self_comparisons": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "max_errors": {
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "overrides": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "includes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "linter": {
+            "$ref": "#/definitions/overrideLinter"
+          },
+          "project": {
+            "$ref": "#/definitions/overrideProject"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "project": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rules": {
+          "additionalProperties": false,
+          "properties": {
+            "correctness": {
+              "additionalProperties": false,
+              "properties": {
+                "unnecessary-nullable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unused-code": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unused-files": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "recommended": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "title": "falcon.json",
+  "type": "object"
+}

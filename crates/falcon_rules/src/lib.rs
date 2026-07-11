@@ -11,6 +11,7 @@ pub mod lint;
 pub mod member_order;
 pub mod meta;
 pub mod project;
+pub mod schema;
 
 use falcon_analyze::{ProjectRule, Rule};
 use falcon_config::{FalconConfig, ResolvedSeverity, Rules};

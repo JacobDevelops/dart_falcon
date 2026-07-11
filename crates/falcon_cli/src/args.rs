@@ -48,6 +48,18 @@ pub enum Command {
         #[arg(long)]
         parallel: bool,
     },
+    /// Migrate a dart_code_linter / pyramid_lint analysis_options.yaml to falcon.json
+    Migrate {
+        /// Path to analysis_options.yaml (default: ./analysis_options.yaml)
+        #[arg(long, value_name = "PATH")]
+        input: Option<std::path::PathBuf>,
+        /// Write falcon.json instead of printing to stdout
+        #[arg(long)]
+        write: bool,
+        /// Output path when --write is set (default: ./falcon.json)
+        #[arg(long, value_name = "PATH")]
+        output: Option<std::path::PathBuf>,
+    },
     /// Start the LSP server (reads JSON-RPC 2.0 from stdin)
     Lsp,
     /// Print version information and exit

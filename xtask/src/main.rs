@@ -9,6 +9,7 @@ fn main() {
         Some("codegen") => codegen(&args[1..]),
         Some("validate-rules") => validate_rules(&args[1..]),
         Some("perf-lock") => perf_lock(&args[1..]),
+        Some("schema") => schema(&args[1..]),
         _ => {
             eprintln!("Usage: cargo xtask <task>");
             eprintln!("Available tasks:");
@@ -16,6 +17,9 @@ fn main() {
             eprintln!("  validate-rules  Validate rule implementations against golden corpus");
             eprintln!(
                 "  perf-lock       Enforce the M6 performance lock (<1000ms on jfit mobile lib)"
+            );
+            eprintln!(
+                "  schema          Generate schema/falcon.schema.json (--check to verify drift)"
             );
             eprintln!();
             eprintln!("codegen usage:");
@@ -50,6 +54,36 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+// ── Schema ──────────────────────────────────────────────────────────────────
+
+/// Generate `schema/falcon.schema.json` from the rule metadata, or with
+/// `--check` verify the committed file matches (CI drift guard).
+fn schema(args: &[String]) {
+    let check = args.iter().any(|a| a == "--check");
+    let path = Path::new("schema/falcon.schema.json");
+    let generated = falcon_rules::schema::config_schema_string();
+
+    if check {
+        let current = fs::read_to_string(path).unwrap_or_default();
+        if current == generated {
+            println!("schema up to date: {}", path.display());
+        } else {
+            eprintln!(
+                "error: {} is out of date; run `cargo xtask schema`",
+                path.display()
+            );
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create schema dir");
+    }
+    fs::write(path, &generated).expect("write schema");
+    println!("wrote {}", path.display());
 }
 
 // ── Codegen ─────────────────────────────────────────────────────────────────

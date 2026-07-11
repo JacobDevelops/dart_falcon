@@ -19,10 +19,8 @@ struct IdentCfg {
 }
 
 fn ident_cfg(ctx: &AnalyzeContext) -> IdentCfg {
-    let opts = crate::meta::meta_for("prefer-correct-identifier-length").and_then(|m| {
-        ctx.config
-            .rule_options(m.group, "prefer-correct-identifier-length")
-    });
+    let opts = crate::meta::meta_for("prefer-correct-identifier-length")
+        .and_then(|m| ctx.rule_options(m.group, "prefer-correct-identifier-length"));
 
     let min_length = opts
         .and_then(|o| o.get("min_length"))

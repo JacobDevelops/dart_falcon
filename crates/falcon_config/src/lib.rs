@@ -48,9 +48,10 @@ pub struct Override {
     /// entries are exclusions. Paths are matched as walked (see
     /// [`FilesConfig::include_patterns`] for the relative-path caveat).
     pub includes: Vec<String>,
-    /// Partial linter (file-rule) configuration applied to matching files. Only
-    /// rule levels (and an optional `enabled` master switch) are honored;
-    /// `options` inside an override are rejected at load time (see `load_config`).
+    /// Partial linter (file-rule) configuration applied to matching files. Rule
+    /// levels, per-rule `options`, and an optional `enabled` master switch are
+    /// honored. Options replace the base rule's options for matching files (see
+    /// [`FalconConfig::rule_options_for`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linter: Option<OverrideRules>,
     /// Partial project (cross-file) rule configuration applied to matching files.
@@ -371,14 +372,12 @@ impl FalconConfig {
         self.linter.resolve_rule(group, name, recommended, domains)
     }
 
-    /// Return `rule_name`'s options if it is configured under `group` with the
-    /// `WithOptions` form. Scoped to the rule's own group so lookup stays
-    /// consistent with [`LinterConfig::resolve_rule`]: an entry placed under the
-    /// wrong group is ignored here just as its level is ignored there.
-    ///
-    /// Options are **global**: overrides may re-scope a rule's level (on/off/
-    /// severity) per path but not its options (rejected at load — see
-    /// `load_config`), so this needs no path dimension.
+    /// Return `rule_name`'s base (non-path-scoped) options if it is configured
+    /// under `group` with the `WithOptions` form. Scoped to the rule's own group
+    /// so lookup stays consistent with [`LinterConfig::resolve_rule`]: an entry
+    /// placed under the wrong group is ignored here just as its level is ignored
+    /// there. Ignores overrides — see [`Self::rule_options_for`] for the
+    /// path-aware resolution rules actually use.
     pub fn rule_options(&self, group: &str, rule_name: &str) -> Option<&serde_json::Value> {
         self.linter
             .rules
@@ -386,6 +385,39 @@ impl FalconConfig {
             .get(group)
             .and_then(|g| g.get(rule_name))
             .and_then(RuleConfiguration::options)
+    }
+
+    /// Return `rule_name`'s effective options for a specific `path`: the base
+    /// options ([`Self::rule_options`]) replaced by every override whose
+    /// `includes` match `path` and that specifies options for the rule, applied
+    /// in order (later wins).
+    ///
+    /// Semantics mirror per-path level resolution ([`Self::resolve_rule_for`]):
+    /// a matching override's `options` block **replaces** the base options
+    /// wholesale — options are not deep-merged. An override that sets only a
+    /// level (no `options`) leaves the base options intact.
+    pub fn rule_options_for(
+        &self,
+        path: &str,
+        group: &str,
+        rule_name: &str,
+    ) -> Option<&serde_json::Value> {
+        let mut result = self.rule_options(group, rule_name);
+        for ov in &self.overrides {
+            if !ov.matches(path) {
+                continue;
+            }
+            if let Some(opts) = ov
+                .linter
+                .as_ref()
+                .and_then(|l| l.rules.groups.get(group))
+                .and_then(|g| g.get(rule_name))
+                .and_then(RuleConfiguration::options)
+            {
+                result = Some(opts);
+            }
+        }
+        result
     }
 
     /// Resolve a rule's effective severity for a specific `path`: the base
@@ -610,29 +642,6 @@ pub fn load_config(path: &Path) -> Result<FalconConfig, ConfigError> {
 
     let config: FalconConfig = serde_json::from_value(value)
         .map_err(|e| ConfigError(format!("failed to parse config JSON: {}", e)))?;
-
-    // Options inside an override are not yet supported: overrides re-scope a
-    // rule's level per path, but rule options remain global. Reject rather than
-    // silently half-applying them (see docs/configuration.md "Overrides"). Both
-    // the `linter` and `project` sections of an override are checked.
-    let has_options = |rules: Option<&OverrideRules>| {
-        rules.is_some_and(|r| {
-            r.rules
-                .groups
-                .values()
-                .flat_map(BTreeMap::values)
-                .any(|c| c.options().is_some())
-        })
-    };
-    for ov in &config.overrides {
-        if has_options(ov.linter.as_ref()) || has_options(ov.project.as_ref()) {
-            return Err(ConfigError(
-                "options in overrides are not yet supported; an override may re-scope a rule's \
-                 level (on/off/severity) but not its options. See docs/configuration.md"
-                    .to_string(),
-            ));
-        }
-    }
 
     Ok(config)
 }

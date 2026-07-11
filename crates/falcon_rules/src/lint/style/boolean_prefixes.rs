@@ -32,7 +32,7 @@ const MESSAGE: &str = "Boolean should be named with a valid prefix.";
 fn resolve_prefixes(ctx: &AnalyzeContext) -> Vec<String> {
     let mut prefixes: Vec<String> = DEFAULT_PREFIXES.iter().map(|s| s.to_string()).collect();
     if let Some(list) = crate::meta::meta_for("boolean_prefixes")
-        .and_then(|m| ctx.config.rule_options(m.group, "boolean_prefixes"))
+        .and_then(|m| ctx.rule_options(m.group, "boolean_prefixes"))
         .and_then(|o| o.get("valid_prefixes"))
         .and_then(|v| v.as_array())
     {

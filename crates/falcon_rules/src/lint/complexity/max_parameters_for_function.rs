@@ -27,10 +27,7 @@ fn count_parameters(params: &FormalParamList) -> usize {
 /// Read the `max_parameters` option (default 5). Malformed/missing → default.
 fn max_parameters_option(ctx: &AnalyzeContext) -> usize {
     crate::meta::meta_for("max_parameters_for_function")
-        .and_then(|m| {
-            ctx.config
-                .rule_options(m.group, "max_parameters_for_function")
-        })
+        .and_then(|m| ctx.rule_options(m.group, "max_parameters_for_function"))
         .and_then(|o| o.get("max_parameters"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
