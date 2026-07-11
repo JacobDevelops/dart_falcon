@@ -9,7 +9,7 @@ pub struct AvoidSingleChildColumnOrRow;
 
 impl Rule for AvoidSingleChildColumnOrRow {
     fn name(&self) -> &'static str {
-        "avoid_single_child_column_or_row"
+        "avoid-single-child-column-or-row"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -44,7 +44,7 @@ impl Visitor for Collector<'_> {
                     && matches!(elements[0], CollectionElement::Expr(_))
                 {
                     self.diags.push(Diagnostic::new(
-                        "avoid_single_child_column_or_row",
+                        "avoid-single-child-column-or-row",
                         Severity::Warning,
                         "Avoid a Column/Row/Flex with a single child; use the child directly.",
                         self.file.clone(),

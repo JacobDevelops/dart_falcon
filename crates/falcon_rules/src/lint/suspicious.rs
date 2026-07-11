@@ -1,7 +1,6 @@
 //! Suspicious lint rules.
 
 pub mod avoid_dynamic;
-pub mod avoid_empty_blocks;
 pub mod avoid_ignoring_return_values;
 pub mod avoid_passing_async_when_sync_expected;
 pub mod avoid_throw_in_catch_block;

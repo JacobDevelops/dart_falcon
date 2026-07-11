@@ -18,8 +18,12 @@ use serde_json::{Map, Value, json};
 /// dart_code_linter `source`, so [`build_lookups`] would otherwise drop these
 /// upstream ids; they are re-added to the pyramid lookup so `falcon migrate`
 /// still maps a `custom_lint` config that used them.
-const MERGED_PYRAMID_UPSTREAM: &[(&str, &str)] =
-    &[("avoid_unused_parameters", "avoid-unused-parameters")];
+const MERGED_PYRAMID_UPSTREAM: &[(&str, &str)] = &[
+    ("no_empty_block", "no-empty-block"),
+    ("avoid_empty_blocks", "no-empty-block"),
+    ("no_magic_number", "no-magic-number"),
+    ("avoid_unused_parameters", "avoid-unused-parameters"),
+];
 
 /// Outcome of a migration: the generated falcon.json plus a report of what was
 /// and was not mapped.

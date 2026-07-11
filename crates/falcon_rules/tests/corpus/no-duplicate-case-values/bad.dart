@@ -4,7 +4,7 @@ void processCode(int code) {
     case 1:
       print('first');
       break;
-    case 1: /* expect: no_duplicate_case_values */
+    case 1: /* expect: no-duplicate-case-values */
       print('duplicate');
       break;
     case 2:
@@ -19,7 +19,7 @@ void processStatus(String status) {
     case 'active':
       print('Active');
       break;
-    case 'active': /* expect: no_duplicate_case_values */
+    case 'active': /* expect: no-duplicate-case-values */
       print('Also active');
       break;
     case 'inactive':
@@ -34,7 +34,7 @@ void processBool(bool flag) {
     case true:
       print('True branch');
       break;
-    case true: /* expect: no_duplicate_case_values */
+    case true: /* expect: no-duplicate-case-values */
       print('Duplicate true');
       break;
     case false:
@@ -52,10 +52,10 @@ void processDouble(double value) {
     case 2.5:
       print('Two point five');
       break;
-    case 1.5: /* expect: no_duplicate_case_values */
+    case 1.5: /* expect: no-duplicate-case-values */
       print('Duplicate 1.5');
       break;
-    case 2.5: /* expect: no_duplicate_case_values */
+    case 2.5: /* expect: no-duplicate-case-values */
       print('Duplicate 2.5');
       break;
   }

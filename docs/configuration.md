@@ -170,7 +170,7 @@ Option names use `snake_case` inside the `options` object.
 | `prefer-correct-identifier-length` (`style`) | `min_length` | `3` | Flag identifiers shorter than this. Matches dart_code_linter's default. Scope is limited to variable/field declarations, getter/setter names and enum constants — parameters, catch clauses, for-each variables and plain function/method names are never checked. A single leading underscore is stripped before the length and exception checks. |
 | | `max_length` | `300` | Flag identifiers longer than this. |
 | | `exceptions` | `[]` | Names always allowed regardless of length (there is no built-in list). |
-| `boolean_prefixes` (`style`) | `valid_prefixes` | `["is","are","was","were","has","have","had","can","should","will","do","does","did"]` | Accepted boolean-name prefixes (dart-pyramid-lint defaults). User entries **extend** the defaults. Only variable/field declarations with a boolean-*literal* initializer, and bool-returning methods/getters/functions, are checked; parameters and uninitialized fields are not. Names are matched with a single leading underscore stripped, and `@override` methods are exempt. |
+| `boolean-prefixes` (`style`) | `valid_prefixes` | `["is","are","was","were","has","have","had","can","should","will","do","does","did"]` | Accepted boolean-name prefixes (dart-pyramid-lint defaults). User entries **extend** the defaults. Only variable/field declarations with a boolean-*literal* initializer, and bool-returning methods/getters/functions, are checked; parameters and uninitialized fields are not. Names are matched with a single leading underscore stripped, and `@override` methods are exempt. |
 
 ### `prefer-moving-to-variable` (`complexity`)
 
@@ -483,12 +483,18 @@ Notes:
   falcon's option schema is not guaranteed to match the upstream linter's.
 - Upstream rules with no falcon equivalent are reported as warnings on stderr and
   omitted from the output.
+- The former twin rules (`no_empty_block`/`avoid_empty_blocks`, `no_magic_number`,
+  `avoid_unused_parameters`) were unified into a single canonical rule each
+  (`no-empty-block`, `no-magic-number`, `avoid-unused-parameters`); their upstream
+  ids all still map to the surviving rule.
 
 ### Upgrading an existing falcon.json
 
 `migrate` also upgrades a `falcon.json` written for an older falcon: pass it as
-the input and any legacy `snake_case` rule ids are rewritten to their canonical
-kebab-case form, preserving levels and options. The input kind is auto-detected.
+the input and any legacy `snake_case` rule ids (and the removed twin ids) are
+rewritten to their canonical kebab-case form, preserving levels and options.
+Duplicate twin entries collapse into the surviving rule, keeping the more severe
+level. The input kind is auto-detected.
 
 ```sh
 # Rewrite legacy rule ids in place

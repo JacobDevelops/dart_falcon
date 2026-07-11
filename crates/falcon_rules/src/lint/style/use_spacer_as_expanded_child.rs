@@ -8,7 +8,7 @@ pub struct UseSpacerAsExpandedChild;
 
 impl Rule for UseSpacerAsExpandedChild {
     fn name(&self) -> &'static str {
-        "use_spacer_as_expanded_child"
+        "use-spacer-as-expanded-child"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -292,7 +292,7 @@ fn check_expanded(
     for named in &args.named {
         if named.name.name == "child" && is_empty_spacer_widget(&named.value) {
             diags.push(Diagnostic::new(
-                "use_spacer_as_expanded_child",
+                "use-spacer-as-expanded-child",
                 Severity::Warning,
                 "Use Spacer() instead of an Expanded with an empty Container or SizedBox child.",
                 ctx.file_path.to_string_lossy().into_owned(),

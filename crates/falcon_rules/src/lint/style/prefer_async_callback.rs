@@ -9,7 +9,7 @@ pub struct PreferAsyncCallback;
 
 impl Rule for PreferAsyncCallback {
     fn name(&self) -> &'static str {
-        "prefer_async_callback"
+        "prefer-async-callback"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -32,7 +32,7 @@ impl Visitor for Collector {
         if is_future_void_function(node) {
             let span = node.span();
             self.diags.push(Diagnostic::new(
-                "prefer_async_callback",
+                "prefer-async-callback",
                 Severity::Warning,
                 "Use AsyncCallback instead of Future<void> Function().",
                 self.file.clone(),

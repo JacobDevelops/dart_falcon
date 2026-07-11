@@ -9,7 +9,7 @@ pub struct PreferUnderscoreForUnusedCallbackParameters;
 
 impl Rule for PreferUnderscoreForUnusedCallbackParameters {
     fn name(&self) -> &'static str {
-        "prefer_underscore_for_unused_callback_parameters"
+        "prefer-underscore-for-unused-callback-parameters"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -613,7 +613,7 @@ fn check_closure_params_inline(
         let param_name = &param.name.name;
         if !is_underscore_name(param_name) && !used_names.contains(param_name) {
             diags.push(Diagnostic::new(
-                "prefer_underscore_for_unused_callback_parameters",
+                "prefer-underscore-for-unused-callback-parameters",
                 Severity::Warning,
                 "Unused callback parameter should be named '_'.",
                 ctx.file_path.to_string_lossy().into_owned(),
