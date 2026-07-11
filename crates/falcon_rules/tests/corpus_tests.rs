@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 use falcon_analyze::{AnalyzeContext, ProjectFile, Rule};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
-use falcon_rules::dart_code_linter::use_design_system_item::UseDesignSystemItem;
-use falcon_rules::pyramid_lint::class_members_ordering::ClassMembersOrdering;
+use falcon_rules::lint::style::class_members_ordering::ClassMembersOrdering;
+use falcon_rules::lint::style::use_design_system_item::UseDesignSystemItem;
 use falcon_rules::{all_project_rules, all_rules};
 
 fn corpus_dir() -> PathBuf {

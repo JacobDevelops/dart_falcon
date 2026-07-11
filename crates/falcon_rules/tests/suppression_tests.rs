@@ -5,7 +5,7 @@
 use falcon_analyze::{AnalyzeContext, RuleRegistry};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;
-use falcon_rules::dart_code_linter::avoid_dynamic::AvoidDynamic;
+use falcon_rules::lint::suspicious::avoid_dynamic::AvoidDynamic;
 use falcon_rules::meta::suppression_lookup;
 use std::path::Path;
 

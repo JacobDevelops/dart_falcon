@@ -20,7 +20,7 @@ fn main() {
             eprintln!();
             eprintln!("codegen usage:");
             eprintln!(
-                "  cargo xtask codegen rule --name <snake_name> --module <dart_code_linter|pyramid_lint> [--rule-id <id>]"
+                "  cargo xtask codegen rule --group <complexity|correctness|performance|style|suspicious> --name <rule-id>"
             );
             eprintln!();
             eprintln!("validate-rules flags:");
@@ -93,20 +93,31 @@ impl Rule for {struct_name} {{
     )
 }
 
+const GROUPS: [&str; 5] = [
+    "complexity",
+    "correctness",
+    "performance",
+    "style",
+    "suspicious",
+];
+
 /// Generate a rule implementation stub plus corpus fixture skeletons.
 ///
-/// `cargo xtask codegen rule --name avoid_foo --module dart_code_linter [--rule-id avoid-foo]`
+/// `cargo xtask codegen rule --group suspicious --name avoid-foo`
+///
+/// The rule id is taken from `--name` verbatim (no kebab/snake derivation); the
+/// module file is `lint/<group>/<name-with-dashes-as-underscores>.rs`.
 fn codegen(args: &[String]) {
     if args.first().map(|s| s.as_str()) != Some("rule") {
         eprintln!(
-            "Usage: cargo xtask codegen rule --name <snake_name> --module <dart_code_linter|pyramid_lint> [--rule-id <id>]"
+            "Usage: cargo xtask codegen rule --group <{}> --name <rule-id>",
+            GROUPS.join("|")
         );
         std::process::exit(1);
     }
 
     let mut name: Option<String> = None;
-    let mut module: Option<String> = None;
-    let mut rule_id: Option<String> = None;
+    let mut group: Option<String> = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -114,13 +125,9 @@ fn codegen(args: &[String]) {
                 i += 1;
                 name = args.get(i).cloned();
             }
-            "--module" => {
+            "--group" => {
                 i += 1;
-                module = args.get(i).cloned();
-            }
-            "--rule-id" => {
-                i += 1;
-                rule_id = args.get(i).cloned();
+                group = args.get(i).cloned();
             }
             other => {
                 eprintln!("error: unknown codegen flag: {}", other);
@@ -130,29 +137,27 @@ fn codegen(args: &[String]) {
         i += 1;
     }
 
-    let Some(name) = name else {
-        eprintln!("error: --name is required");
+    let Some(rule_id) = name else {
+        eprintln!("error: --name is required (the rule id, used verbatim)");
         std::process::exit(1);
     };
-    let Some(module) = module else {
-        eprintln!("error: --module is required");
+    let Some(group) = group else {
+        eprintln!("error: --group is required");
         std::process::exit(1);
     };
-    if module != "dart_code_linter" && module != "pyramid_lint" {
-        eprintln!("error: --module must be dart_code_linter or pyramid_lint");
+    if !GROUPS.contains(&group.as_str()) {
+        eprintln!("error: --group must be one of {}", GROUPS.join(", "));
         std::process::exit(1);
     }
-    // dart_code_linter rule ids are kebab-case; pyramid_lint ids are snake_case.
-    let rule_id = rule_id.unwrap_or_else(|| {
-        if module == "dart_code_linter" {
-            name.replace('_', "-")
-        } else {
-            name.clone()
-        }
-    });
+
+    // The module file name is the rule id with dashes normalized to underscores.
+    let module = rule_id.replace('-', "_");
 
     let root = workspace_root();
-    let rule_file = root.join(format!("crates/falcon_rules/src/{}/{}.rs", module, name));
+    let rule_file = root.join(format!(
+        "crates/falcon_rules/src/lint/{}/{}.rs",
+        group, module
+    ));
     let corpus_dir = root.join(format!("crates/falcon_rules/tests/corpus/{}", rule_id));
 
     if rule_file.exists() {
@@ -160,7 +165,7 @@ fn codegen(args: &[String]) {
         std::process::exit(1);
     }
 
-    let struct_name = pascal_case(&name);
+    let struct_name = pascal_case(&module);
     fs::write(&rule_file, rule_stub(&struct_name, &rule_id)).expect("write rule stub");
 
     fs::create_dir_all(&corpus_dir).expect("create corpus dir");
@@ -187,23 +192,17 @@ fn codegen(args: &[String]) {
     println!();
     println!("next steps:");
     println!(
-        "  1. add `pub mod {};` to crates/falcon_rules/src/{}{}",
-        name,
-        module,
-        if module == "pyramid_lint" {
-            "/mod.rs"
-        } else {
-            ".rs"
-        }
+        "  1. add `pub mod {};` to crates/falcon_rules/src/lint/{}.rs",
+        module, group
     );
     println!(
-        "  2. register `Box::new({}::{}::{})` in all_rules() (crates/falcon_rules/src/lib.rs)",
-        module, name, struct_name
+        "  2. register `Box::new(lint::{}::{}::{})` in all_rules() (crates/falcon_rules/src/lib.rs)",
+        group, module, struct_name
     );
     println!(
-        "  3. add a `RuleMeta {{ name: \"{}\", group, domains, recommended }}` entry to \
-         RULE_METADATA (crates/falcon_rules/src/meta.rs)",
-        rule_id
+        "  3. add a `RuleMeta {{ name: \"{}\", group: \"{}\", domains, recommended, project: false, \
+         source: RuleSource::Falcon }}` entry to RULE_METADATA (crates/falcon_rules/src/meta.rs)",
+        rule_id, group
     );
     println!(
         "  4. implement the rule, fill in fixtures, then run `cargo xtask validate-rules --rule {}`",
