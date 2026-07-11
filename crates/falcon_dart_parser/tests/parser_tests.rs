@@ -426,6 +426,48 @@ fn test_top_level_late() {
     assert!(v.is_late);
 }
 
+#[test]
+fn test_top_level_late_final_typed() {
+    // `late final` is the correct Dart modifier order (late precedes final).
+    let src = "late final int x = 1;";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+        panic!("expected var")
+    };
+    assert!(v.is_late);
+    assert!(v.is_final);
+    assert!(v.var_type.is_some());
+}
+
+#[test]
+fn test_top_level_late_final_untyped() {
+    let src = "late final x;";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
+        panic!("expected var")
+    };
+    assert!(v.is_late);
+    assert!(v.is_final);
+}
+
+#[test]
+fn test_static_late_final_field() {
+    let src = "class C { static late final int x; }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let TopLevelDecl::Class(c) = &prog.declarations[0] else {
+        panic!("expected class")
+    };
+    let ClassMember::Field(f) = &c.members[0] else {
+        panic!("expected field")
+    };
+    assert!(f.is_static);
+    assert!(f.is_late);
+    assert!(f.is_final);
+}
+
 // ── Typedef ───────────────────────────────────────────────────────────────────
 
 #[test]

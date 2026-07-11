@@ -1240,10 +1240,12 @@ impl<'src> Parser<'src> {
     ) -> Option<TopLevelDecl> {
         let is_external = self.eat(TokenKind::External).is_some();
 
-        // Modifiers for variable — `final` may already have been consumed in the outer modifier loop
+        // Modifiers for variable. Dart orders these `late` before `final`/`const`
+        // (`late final int x`), so consume `late` first. `final` may already have
+        // been consumed by the outer modifier loop.
+        let is_late = self.eat(TokenKind::Late).is_some();
         let is_final = outer_is_final || self.eat(TokenKind::Final).is_some();
         let is_const = self.eat(TokenKind::Const).is_some();
-        let is_late = self.eat(TokenKind::Late).is_some();
         let _ = self.eat(TokenKind::Var);
 
         // Return type (optional)
