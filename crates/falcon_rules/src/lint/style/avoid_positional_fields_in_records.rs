@@ -8,7 +8,7 @@ pub struct AvoidPositionalFieldsInRecords;
 
 impl Rule for AvoidPositionalFieldsInRecords {
     fn name(&self) -> &'static str {
-        "avoid_positional_fields_in_records"
+        "avoid-positional-fields-in-records"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -24,7 +24,7 @@ const MESSAGE: &str = "Avoid positional fields in records. Use named fields inst
 
 fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     diags.push(Diagnostic::new(
-        "avoid_positional_fields_in_records",
+        "avoid-positional-fields-in-records",
         Severity::Warning,
         MESSAGE,
         ctx.file_path.to_string_lossy().into_owned(),

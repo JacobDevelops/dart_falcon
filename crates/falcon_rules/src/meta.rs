@@ -356,7 +356,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "avoid_abbreviations_in_doc_comments",
+        name: "avoid-abbreviations-in-doc-comments",
         source: RuleSource::PyramidLint("avoid_abbreviations_in_doc_comments"),
         group: "style",
         domains: NONE,
@@ -364,7 +364,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "avoid_positional_fields_in_records",
+        name: "avoid-positional-fields-in-records",
         source: RuleSource::PyramidLint("avoid_positional_fields_in_records"),
         group: "style",
         domains: NONE,
@@ -380,7 +380,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "boolean_prefixes",
+        name: "boolean-prefixes",
         source: RuleSource::PyramidLint("boolean_prefixes"),
         group: "style",
         domains: NONE,
@@ -388,7 +388,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "class_members_ordering",
+        name: "class-members-ordering",
         source: RuleSource::PyramidLint("class_members_ordering"),
         group: "style",
         domains: NONE,
@@ -430,14 +430,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
     RuleMeta {
         name: "no-magic-number",
         source: RuleSource::DartCodeLinter("no-magic-number"),
-        group: "style",
-        domains: NONE,
-        recommended: true,
-        project: false,
-    },
-    RuleMeta {
-        name: "no_magic_number",
-        source: RuleSource::PyramidLint("no_magic_number"),
         group: "style",
         domains: NONE,
         recommended: true,
@@ -508,7 +500,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "prefer_dedicated_media_query_methods",
+        name: "prefer-dedicated-media-query-methods",
         source: RuleSource::PyramidLint("prefer_dedicated_media_query_methods"),
         group: "style",
         domains: FLUTTER,
@@ -516,7 +508,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "prefer_underscore_for_unused_callback_parameters",
+        name: "prefer-underscore-for-unused-callback-parameters",
         source: RuleSource::PyramidLint("prefer_underscore_for_unused_callback_parameters"),
         group: "style",
         domains: NONE,
@@ -532,7 +524,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "use_spacer_as_expanded_child",
+        name: "use-spacer-as-expanded-child",
         source: RuleSource::PyramidLint("use_spacer_as_expanded_child"),
         group: "style",
         domains: FLUTTER,
@@ -540,7 +532,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "avoid_single_child_column_or_row",
+        name: "avoid-single-child-column-or-row",
         source: RuleSource::PyramidLint("avoid_single_child_column_or_row"),
         group: "style",
         domains: FLUTTER,
@@ -548,7 +540,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "prefer_async_callback",
+        name: "prefer-async-callback",
         source: RuleSource::PyramidLint("prefer_async_callback"),
         group: "style",
         domains: FLUTTER,
@@ -556,7 +548,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "avoid_redundant_pattern_field_names",
+        name: "avoid-redundant-pattern-field-names",
         source: RuleSource::PyramidLint("avoid_redundant_pattern_field_names"),
         group: "style",
         domains: NONE,
@@ -596,7 +588,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "no_self_comparisons",
+        name: "no-self-comparisons",
         source: RuleSource::PyramidLint("no_self_comparisons"),
         group: "suspicious",
         domains: NONE,
@@ -648,14 +640,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "avoid_empty_blocks",
-        source: RuleSource::PyramidLint("avoid_empty_blocks"),
-        group: "suspicious",
-        domains: NONE,
-        recommended: true,
-        project: false,
-    },
-    RuleMeta {
         name: "no-empty-block",
         source: RuleSource::DartCodeLinter("no-empty-block"),
         group: "suspicious",
@@ -680,16 +664,8 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "no_duplicate_case_values",
+        name: "no-duplicate-case-values",
         source: RuleSource::PyramidLint("no_duplicate_case_values"),
-        group: "suspicious",
-        domains: NONE,
-        recommended: true,
-        project: false,
-    },
-    RuleMeta {
-        name: "no_empty_block",
-        source: RuleSource::PyramidLint("no_empty_block"),
         group: "suspicious",
         domains: NONE,
         recommended: true,
@@ -745,8 +721,44 @@ pub const RULE_ALIASES: &[(&str, &str)] = &[
         "prefer_declaring_const_constructor",
         "prefer-declaring-const-constructor",
     ),
+    (
+        "avoid_abbreviations_in_doc_comments",
+        "avoid-abbreviations-in-doc-comments",
+    ),
+    (
+        "avoid_positional_fields_in_records",
+        "avoid-positional-fields-in-records",
+    ),
+    ("boolean_prefixes", "boolean-prefixes"),
+    ("class_members_ordering", "class-members-ordering"),
+    (
+        "prefer_dedicated_media_query_methods",
+        "prefer-dedicated-media-query-methods",
+    ),
+    (
+        "prefer_underscore_for_unused_callback_parameters",
+        "prefer-underscore-for-unused-callback-parameters",
+    ),
+    (
+        "use_spacer_as_expanded_child",
+        "use-spacer-as-expanded-child",
+    ),
+    (
+        "avoid_single_child_column_or_row",
+        "avoid-single-child-column-or-row",
+    ),
+    ("prefer_async_callback", "prefer-async-callback"),
+    (
+        "avoid_redundant_pattern_field_names",
+        "avoid-redundant-pattern-field-names",
+    ),
+    ("no_self_comparisons", "no-self-comparisons"),
+    ("no_duplicate_case_values", "no-duplicate-case-values"),
     // ── unified twins: pyramid_lint variant → surviving canonical rule ──
     ("avoid_unused_parameters", "avoid-unused-parameters"),
+    ("no_magic_number", "no-magic-number"),
+    ("avoid_empty_blocks", "no-empty-block"),
+    ("no_empty_block", "no-empty-block"),
 ];
 
 /// Resolve a possibly-legacy rule id to its canonical id. Returns the input

@@ -8,7 +8,7 @@ use crate::member_order::{category_rank, check_sequence, read_string_list};
 
 pub struct ClassMembersOrdering;
 
-const NAME: &str = "class_members_ordering";
+const NAME: &str = "class-members-ordering";
 
 impl Rule for ClassMembersOrdering {
     fn name(&self) -> &'static str {
@@ -129,7 +129,7 @@ fn check_members(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Ana
         if min_right[i] != u8::MAX && cat > min_right[i] {
             let span = member.span();
             diags.push(Diagnostic::new(
-                "class_members_ordering",
+                "class-members-ordering",
                 Severity::Warning,
                 "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members",
                 ctx.file_path.to_string_lossy().into_owned(),
@@ -139,7 +139,7 @@ fn check_members(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Ana
         } else if i > 0 && cat < max_left[i] && i > 3 {
             let span = member.span();
             diags.push(Diagnostic::new(
-                "class_members_ordering",
+                "class-members-ordering",
                 Severity::Warning,
                 "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members",
                 ctx.file_path.to_string_lossy().into_owned(),

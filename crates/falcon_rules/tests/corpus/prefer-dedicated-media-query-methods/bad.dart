@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 class ResponsiveWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.of(context).size.width; /* expect: prefer_dedicated_media_query_methods */
+    final width = MediaQuery.of(context).size.width; /* expect: prefer-dedicated-media-query-methods */
     return SizedBox(width: width);
   }
 }
@@ -13,7 +13,7 @@ class ResponsiveWidget extends StatelessWidget {
 class HeightWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final height = MediaQuery.of(context).size.height; /* expect: prefer_dedicated_media_query_methods */
+    final height = MediaQuery.of(context).size.height; /* expect: prefer-dedicated-media-query-methods */
     return SizedBox(height: height);
   }
 }
@@ -23,7 +23,7 @@ class ContainerWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: MediaQuery.of(context).size.width, /* expect: prefer_dedicated_media_query_methods */
+      width: MediaQuery.of(context).size.width, /* expect: prefer-dedicated-media-query-methods */
       child: Text('Full width'),
     );
   }
@@ -33,7 +33,7 @@ class ContainerWidget extends StatelessWidget {
 class DynamicHeightWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final availableHeight = MediaQuery.of(context).size.height - 100; /* expect: prefer_dedicated_media_query_methods */
+    final availableHeight = MediaQuery.of(context).size.height - 100; /* expect: prefer-dedicated-media-query-methods */
     return SizedBox(height: availableHeight);
   }
 }
@@ -42,8 +42,8 @@ class DynamicHeightWidget extends StatelessWidget {
 class ResponsiveBoxWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width; /* expect: prefer_dedicated_media_query_methods */
-    final h = MediaQuery.of(context).size.height; /* expect: prefer_dedicated_media_query_methods */
+    final w = MediaQuery.of(context).size.width; /* expect: prefer-dedicated-media-query-methods */
+    final h = MediaQuery.of(context).size.height; /* expect: prefer-dedicated-media-query-methods */
     return SizedBox(width: w, height: h);
   }
 }

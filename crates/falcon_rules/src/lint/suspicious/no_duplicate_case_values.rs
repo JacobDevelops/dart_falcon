@@ -8,7 +8,7 @@ pub struct NoDuplicateCaseValues;
 
 impl Rule for NoDuplicateCaseValues {
     fn name(&self) -> &'static str {
-        "no_duplicate_case_values"
+        "no-duplicate-case-values"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -22,7 +22,7 @@ impl Rule for NoDuplicateCaseValues {
 
 fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     diags.push(Diagnostic::new(
-        "no_duplicate_case_values",
+        "no-duplicate-case-values",
         Severity::Warning,
         "Duplicate case value in switch statement.",
         ctx.file_path.to_string_lossy().into_owned(),

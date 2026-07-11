@@ -8,7 +8,7 @@ pub struct PreferDedicatedMediaQueryMethods;
 
 impl Rule for PreferDedicatedMediaQueryMethods {
     fn name(&self) -> &'static str {
-        "prefer_dedicated_media_query_methods"
+        "prefer-dedicated-media-query-methods"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -282,7 +282,7 @@ fn check_media_query_size_field(
     // Check if accessing .width or .height on MediaQuery.of(context).size
     if (field.name == "width" || field.name == "height") && is_media_query_size(object) {
         diags.push(Diagnostic::new(
-            "prefer_dedicated_media_query_methods",
+            "prefer-dedicated-media-query-methods",
             Severity::Warning,
             "Use MediaQuery.sizeOf(context) instead of MediaQuery.of(context).size.",
             ctx.file_path.to_string_lossy().into_owned(),

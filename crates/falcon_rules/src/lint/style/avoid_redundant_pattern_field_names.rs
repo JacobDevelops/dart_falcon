@@ -9,7 +9,7 @@ pub struct AvoidRedundantPatternFieldNames;
 
 impl Rule for AvoidRedundantPatternFieldNames {
     fn name(&self) -> &'static str {
-        "avoid_redundant_pattern_field_names"
+        "avoid-redundant-pattern-field-names"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -32,7 +32,7 @@ struct Collector<'s> {
 impl Collector<'_> {
     fn flag(&mut self, span: &Span) {
         self.diags.push(Diagnostic::new(
-            "avoid_redundant_pattern_field_names",
+            "avoid-redundant-pattern-field-names",
             Severity::Warning,
             "Redundant field name in pattern; use the shorthand (e.g. `:x`).",
             self.file.clone(),
