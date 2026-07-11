@@ -152,11 +152,12 @@ impl LspState {
             return Vec::new();
         };
         let file_path = uri_to_path(uri);
-        let ctx = AnalyzeContext {
-            file_path: &file_path,
-            source: &doc.text,
-            config: &self.config,
-        };
+        // Degraded: the LSP analyzes a single open buffer and has no whole-project
+        // view, so it supplies no project index. Resolver-dependent rules fall
+        // back to their conservative (no-type-facts) behavior here. A future
+        // enhancement could pass `AnalyzeContext::with_project(&ProjectIndex::from_program(..))`
+        // for single-file resolution.
+        let ctx = AnalyzeContext::new(&file_path, &doc.text, &self.config);
         let mut diagnostics: Vec<Diagnostic> = self
             .rules
             .iter()

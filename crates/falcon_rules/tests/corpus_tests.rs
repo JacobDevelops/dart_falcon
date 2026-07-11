@@ -79,6 +79,7 @@ fn run_rule(
         file_path: file,
         source,
         config,
+        project: None,
     };
     rule.analyze(&program, &ctx)
         .into_iter()
@@ -227,6 +228,7 @@ Widget build(BuildContext context) {
         file_path: Path::new("t.dart"),
         source: src,
         config: &default_cfg,
+        project: None,
     };
     assert!(
         rule.analyze(&program, &ctx).is_empty(),
@@ -255,6 +257,7 @@ Widget build(BuildContext context) {
         file_path: Path::new("t.dart"),
         source: src,
         config: &configured,
+        project: None,
     };
     let diags = rule.analyze(&program, &ctx);
     assert_eq!(
@@ -277,6 +280,7 @@ Widget build(BuildContext context) {
         file_path: Path::new("t.dart"),
         source: static_src,
         config: &configured,
+        project: None,
     };
     assert!(
         rule.analyze(&static_program, &ctx).is_empty(),
@@ -311,6 +315,7 @@ class Bar {
         file_path: Path::new("t.dart"),
         source: src,
         config: &default_cfg,
+        project: None,
     };
     let default_diags = rule.analyze(&program, &ctx);
     assert!(
@@ -345,6 +350,7 @@ class Bar {
         file_path: Path::new("t.dart"),
         source: src,
         config: &configured,
+        project: None,
     };
     let diags = rule.analyze(&program, &ctx);
     assert_eq!(
@@ -523,6 +529,7 @@ fn all_rules_run_jfit_20_files_no_panic() {
             file_path: path,
             source: &source,
             config: &config,
+            project: None,
         };
         for rule in &rules {
             let diags = rule.analyze(&program, &ctx);
@@ -562,6 +569,7 @@ class Foo {
         file_path: Path::new("test.dart"),
         source: snippet,
         config: &config,
+        project: None,
     };
 
     let rules = all_rules();
