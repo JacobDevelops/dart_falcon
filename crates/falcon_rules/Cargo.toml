@@ -2,7 +2,7 @@
 name = "falcon_rules"
 version.workspace = true
 edition.workspace = true
-description = "Ported lint rules from dart_code_linter and pyramid_lint"
+description = "Lint rules for falcon, the Dart linter"
 
 [dependencies]
 falcon_syntax = { path = "../falcon_syntax" }

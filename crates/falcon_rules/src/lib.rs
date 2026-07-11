@@ -1,16 +1,16 @@
-//! Ported lint rules from dart_code_linter and pyramid_lint.
+//! Falcon's lint rules.
 //!
-//! Rules are registered via `RuleRegistry` in `falcon_analyze`.
-//! Each rule is a zero-sized struct implementing the `Rule` trait.
-//!
-//! Phase 1 target: ~60 rules from jfit's analysis_options.yaml.
-//! Complexity tiers (assigned in M0.5): SIMPLE / MEDIUM / COMPLEX.
+//! Rules are organized biome-style by group under `lint/<group>/<rule>.rs`
+//! (complexity, correctness, performance, style, suspicious). Each rule is a
+//! zero-sized struct implementing the `Rule` trait and registered via
+//! `RuleRegistry` in `falcon_analyze`. Upstream provenance is recorded per rule
+//! by the `source` field of its `RuleMeta` entry (see `meta.rs`). Project
+//! (cross-file) rules live under `project/`.
 
-pub mod dart_code_linter;
+pub mod lint;
 pub mod member_order;
 pub mod meta;
 pub mod project;
-pub mod pyramid_lint;
 
 use falcon_analyze::{ProjectRule, Rule};
 use falcon_config::{FalconConfig, ResolvedSeverity, Rules};
@@ -198,90 +198,87 @@ fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut 
 /// Return all implemented lint rules.
 pub fn all_rules() -> Vec<Box<dyn Rule>> {
     vec![
-        // M4.5 — pyramid_lint
-        Box::new(pyramid_lint::avoid_empty_blocks::AvoidEmptyBlocks),
-        Box::new(pyramid_lint::avoid_inverted_boolean_expressions::AvoidInvertedBooleanExpressions),
-        Box::new(pyramid_lint::avoid_nested_if::AvoidNestedIf),
-        Box::new(pyramid_lint::avoid_positional_fields_in_records::AvoidPositionalFieldsInRecords),
-        Box::new(pyramid_lint::boolean_prefixes::BooleanPrefixes),
-        Box::new(pyramid_lint::correct_order_for_super_dispose::CorrectOrderForSuperDispose),
-        Box::new(pyramid_lint::max_lines_for_file::MaxLinesForFile),
-        Box::new(pyramid_lint::max_lines_for_function::MaxLinesForFunction),
-        Box::new(pyramid_lint::max_parameters_for_function::MaxParametersForFunction),
-        Box::new(pyramid_lint::max_switch_cases::MaxSwitchCases),
-        // M-config: new complexity-metric rules
-        Box::new(pyramid_lint::cyclomatic_complexity::CyclomaticComplexity),
-        Box::new(pyramid_lint::maximum_nesting_level::MaximumNestingLevel),
-        // M4.5 — dart_code_linter
-        Box::new(dart_code_linter::no_magic_number::NoMagicNumber),
-        Box::new(dart_code_linter::no_object_declaration::NoObjectDeclaration),
-        Box::new(dart_code_linter::avoid_dynamic::AvoidDynamic),
-        Box::new(dart_code_linter::avoid_throw_in_catch_block::AvoidThrowInCatchBlock),
-        Box::new(dart_code_linter::avoid_nested_conditional_expressions::AvoidNestedConditionalExpressions),
-        Box::new(dart_code_linter::avoid_non_null_assertion::AvoidNonNullAssertion),
-        Box::new(dart_code_linter::avoid_redundant_async::AvoidRedundantAsync),
-        Box::new(dart_code_linter::avoid_unused_parameters::AvoidUnusedParameters),
-        Box::new(dart_code_linter::avoid_passing_async_when_sync_expected::AvoidPassingAsyncWhenSyncExpected),
-        Box::new(dart_code_linter::avoid_unnecessary_type_assertions::AvoidUnnecessaryTypeAssertions),
-        Box::new(dart_code_linter::avoid_unnecessary_type_casts::AvoidUnnecessaryTypeCasts),
-        Box::new(dart_code_linter::avoid_unrelated_type_assertions::AvoidUnrelatedTypeAssertions),
-        Box::new(dart_code_linter::avoid_late_keyword::AvoidLateKeyword),
-        Box::new(dart_code_linter::avoid_global_state::AvoidGlobalState),
-        Box::new(dart_code_linter::prefer_async_await::PreferAsyncAwait),
-        Box::new(dart_code_linter::prefer_correct_identifier_length::PreferCorrectIdentifierLength),
-        Box::new(dart_code_linter::prefer_conditional_expressions::PreferConditionalExpressions),
-        Box::new(dart_code_linter::prefer_first::PreferFirst),
-        Box::new(dart_code_linter::prefer_immediate_return::PreferImmediateReturn),
-        Box::new(dart_code_linter::prefer_last::PreferLast),
-        Box::new(dart_code_linter::double_literal_format::DoubleLiteralFormat),
-        Box::new(dart_code_linter::format_comment::FormatComment),
-        Box::new(dart_code_linter::member_ordering::MemberOrdering),
-        Box::new(dart_code_linter::newline_before_return::NewlineBeforeReturn),
-        Box::new(dart_code_linter::no_boolean_literal_compare::NoBooleanLiteralCompare),
-        Box::new(dart_code_linter::no_empty_block::NoEmptyBlock),
-        Box::new(dart_code_linter::no_equal_arguments::NoEqualArguments),
-        Box::new(dart_code_linter::no_equal_then_else::NoEqualThenElse),
-        Box::new(dart_code_linter::prefer_moving_to_variable::PreferMovingToVariable),
-        Box::new(dart_code_linter::prefer_trailing_comma::PreferTrailingComma),
-        // M4.6 — dart_code_linter
-        Box::new(dart_code_linter::binary_expression_operand_order::BinaryExpressionOperandOrder),
-        Box::new(dart_code_linter::avoid_ignoring_return_values::AvoidIgnoringReturnValues),
-        Box::new(dart_code_linter::avoid_top_level_member_access::AvoidTopLevelMemberAccess),
-        Box::new(dart_code_linter::prefer_const_border_radius::PreferConstBorderRadius),
-        Box::new(dart_code_linter::prefer_correct_edge_insets_constructor::PreferCorrectEdgeInsetsConstructor),
-        Box::new(dart_code_linter::avoid_returning_widgets::AvoidReturningWidgets),
-        Box::new(dart_code_linter::prefer_extracting_callbacks::PreferExtractingCallbacks),
-        // Audit gap-fill — dart_code_linter rules named in plan M4.3/M4.5
-        Box::new(dart_code_linter::prefer_iterable_of::PreferIterableOf),
-        Box::new(dart_code_linter::prefer_correct_type_name::PreferCorrectTypeName),
-        Box::new(dart_code_linter::use_design_system_item::UseDesignSystemItem),
-        // M4.6 — pyramid_lint
-        Box::new(pyramid_lint::use_spacer_as_expanded_child::UseSpacerAsExpandedChild),
-        Box::new(pyramid_lint::prefer_dedicated_media_query_methods::PreferDedicatedMediaQueryMethods),
-        Box::new(pyramid_lint::prefer_iterable_any::PreferIterableAny),
-        Box::new(pyramid_lint::prefer_iterable_every::PreferIterableEvery),
-        Box::new(pyramid_lint::prefer_underscore_for_unused_callback_parameters::PreferUnderscoreForUnusedCallbackParameters),
-        Box::new(pyramid_lint::no_duplicate_case_values::NoDuplicateCaseValues),
-        Box::new(pyramid_lint::prefer_declaring_const_constructor::PreferDeclaringConstConstructor),
-        Box::new(pyramid_lint::avoid_abbreviations_in_doc_comments::AvoidAbbreviationsInDocComments),
-        Box::new(pyramid_lint::avoid_mutable_global_variables::AvoidMutableGlobalVariables),
-        Box::new(pyramid_lint::unnecessary_flutter_imports::UnnecessaryFlutterImports),
-        Box::new(pyramid_lint::class_members_ordering::ClassMembersOrdering),
-        Box::new(pyramid_lint::unnecessary_nullable_return_type::UnnecessaryNullableReturnType),
-        Box::new(pyramid_lint::use_once_constructors_once_provider::UseOnceConstructorsOnceProvider),
-        // First-adopter gap-fill — pyramid_lint rules used by jfit
-        Box::new(pyramid_lint::avoid_single_child_column_or_row::AvoidSingleChildColumnOrRow),
-        Box::new(pyramid_lint::prefer_async_callback::PreferAsyncCallback),
-        Box::new(pyramid_lint::proper_controller_dispose::ProperControllerDispose),
-        Box::new(pyramid_lint::proper_expanded_and_flexible::ProperExpandedAndFlexible),
-        Box::new(pyramid_lint::proper_from_environment::ProperFromEnvironment),
-        Box::new(pyramid_lint::proper_super_init_state::ProperSuperInitState),
-        Box::new(pyramid_lint::avoid_redundant_pattern_field_names::AvoidRedundantPatternFieldNames),
-        Box::new(pyramid_lint::no_self_comparisons::NoSelfComparisons),
-        // M4.6 — pyramid_lint aliases of shared dart_code_linter implementations
-        Box::new(pyramid_lint::no_empty_block::NoEmptyBlock),
-        Box::new(pyramid_lint::no_magic_number::NoMagicNumber),
-        Box::new(pyramid_lint::avoid_unused_parameters::AvoidUnusedParameters),
+        // ── complexity ──
+        Box::new(lint::complexity::avoid_inverted_boolean_expressions::AvoidInvertedBooleanExpressions),
+        Box::new(lint::complexity::avoid_nested_conditional_expressions::AvoidNestedConditionalExpressions),
+        Box::new(lint::complexity::avoid_nested_if::AvoidNestedIf),
+        Box::new(lint::complexity::avoid_redundant_async::AvoidRedundantAsync),
+        Box::new(lint::complexity::avoid_unnecessary_type_assertions::AvoidUnnecessaryTypeAssertions),
+        Box::new(lint::complexity::avoid_unnecessary_type_casts::AvoidUnnecessaryTypeCasts),
+        Box::new(lint::complexity::cyclomatic_complexity::CyclomaticComplexity),
+        Box::new(lint::complexity::max_lines_for_file::MaxLinesForFile),
+        Box::new(lint::complexity::max_lines_for_function::MaxLinesForFunction),
+        Box::new(lint::complexity::max_parameters_for_function::MaxParametersForFunction),
+        Box::new(lint::complexity::max_switch_cases::MaxSwitchCases),
+        Box::new(lint::complexity::maximum_nesting_level::MaximumNestingLevel),
+        Box::new(lint::complexity::no_boolean_literal_compare::NoBooleanLiteralCompare),
+        Box::new(lint::complexity::prefer_conditional_expressions::PreferConditionalExpressions),
+        Box::new(lint::complexity::prefer_extracting_callbacks::PreferExtractingCallbacks),
+        Box::new(lint::complexity::prefer_immediate_return::PreferImmediateReturn),
+        Box::new(lint::complexity::prefer_iterable_any::PreferIterableAny),
+        Box::new(lint::complexity::prefer_iterable_every::PreferIterableEvery),
+        Box::new(lint::complexity::prefer_moving_to_variable::PreferMovingToVariable),
+        // ── correctness ──
+        Box::new(lint::correctness::avoid_global_state::AvoidGlobalState),
+        Box::new(lint::correctness::avoid_mutable_global_variables::AvoidMutableGlobalVariables),
+        Box::new(lint::correctness::avoid_returning_widgets::AvoidReturningWidgets),
+        Box::new(lint::correctness::avoid_unused_parameters::AvoidUnusedParameters),
+        Box::new(lint::correctness::avoid_unused_parameters::AvoidUnusedParametersPyramid),
+        Box::new(lint::correctness::correct_order_for_super_dispose::CorrectOrderForSuperDispose),
+        Box::new(lint::correctness::proper_controller_dispose::ProperControllerDispose),
+        Box::new(lint::correctness::proper_expanded_and_flexible::ProperExpandedAndFlexible),
+        Box::new(lint::correctness::proper_from_environment::ProperFromEnvironment),
+        Box::new(lint::correctness::proper_super_init_state::ProperSuperInitState),
+        Box::new(lint::correctness::unnecessary_flutter_imports::UnnecessaryFlutterImports),
+        Box::new(lint::correctness::unnecessary_nullable_return_type::UnnecessaryNullableReturnType),
+        Box::new(lint::correctness::use_once_constructors_once_provider::UseOnceConstructorsOnceProvider),
+        // ── performance ──
+        Box::new(lint::performance::prefer_const_border_radius::PreferConstBorderRadius),
+        Box::new(lint::performance::prefer_correct_edge_insets_constructor::PreferCorrectEdgeInsetsConstructor),
+        Box::new(lint::performance::prefer_declaring_const_constructor::PreferDeclaringConstConstructor),
+        // ── style ──
+        Box::new(lint::style::avoid_abbreviations_in_doc_comments::AvoidAbbreviationsInDocComments),
+        Box::new(lint::style::avoid_late_keyword::AvoidLateKeyword),
+        Box::new(lint::style::avoid_non_null_assertion::AvoidNonNullAssertion),
+        Box::new(lint::style::avoid_positional_fields_in_records::AvoidPositionalFieldsInRecords),
+        Box::new(lint::style::avoid_redundant_pattern_field_names::AvoidRedundantPatternFieldNames),
+        Box::new(lint::style::avoid_single_child_column_or_row::AvoidSingleChildColumnOrRow),
+        Box::new(lint::style::avoid_top_level_member_access::AvoidTopLevelMemberAccess),
+        Box::new(lint::style::binary_expression_operand_order::BinaryExpressionOperandOrder),
+        Box::new(lint::style::boolean_prefixes::BooleanPrefixes),
+        Box::new(lint::style::class_members_ordering::ClassMembersOrdering),
+        Box::new(lint::style::double_literal_format::DoubleLiteralFormat),
+        Box::new(lint::style::format_comment::FormatComment),
+        Box::new(lint::style::member_ordering::MemberOrdering),
+        Box::new(lint::style::newline_before_return::NewlineBeforeReturn),
+        Box::new(lint::style::no_magic_number::NoMagicNumber),
+        Box::new(lint::style::no_magic_number::NoMagicNumberPyramid),
+        Box::new(lint::style::no_object_declaration::NoObjectDeclaration),
+        Box::new(lint::style::prefer_async_await::PreferAsyncAwait),
+        Box::new(lint::style::prefer_async_callback::PreferAsyncCallback),
+        Box::new(lint::style::prefer_correct_identifier_length::PreferCorrectIdentifierLength),
+        Box::new(lint::style::prefer_correct_type_name::PreferCorrectTypeName),
+        Box::new(lint::style::prefer_dedicated_media_query_methods::PreferDedicatedMediaQueryMethods),
+        Box::new(lint::style::prefer_first::PreferFirst),
+        Box::new(lint::style::prefer_iterable_of::PreferIterableOf),
+        Box::new(lint::style::prefer_last::PreferLast),
+        Box::new(lint::style::prefer_trailing_comma::PreferTrailingComma),
+        Box::new(lint::style::prefer_underscore_for_unused_callback_parameters::PreferUnderscoreForUnusedCallbackParameters),
+        Box::new(lint::style::use_design_system_item::UseDesignSystemItem),
+        Box::new(lint::style::use_spacer_as_expanded_child::UseSpacerAsExpandedChild),
+        // ── suspicious ──
+        Box::new(lint::suspicious::avoid_dynamic::AvoidDynamic),
+        Box::new(lint::suspicious::avoid_empty_blocks::AvoidEmptyBlocks),
+        Box::new(lint::suspicious::avoid_ignoring_return_values::AvoidIgnoringReturnValues),
+        Box::new(lint::suspicious::avoid_passing_async_when_sync_expected::AvoidPassingAsyncWhenSyncExpected),
+        Box::new(lint::suspicious::avoid_throw_in_catch_block::AvoidThrowInCatchBlock),
+        Box::new(lint::suspicious::avoid_unrelated_type_assertions::AvoidUnrelatedTypeAssertions),
+        Box::new(lint::suspicious::no_duplicate_case_values::NoDuplicateCaseValues),
+        Box::new(lint::suspicious::no_empty_block::NoEmptyBlock),
+        Box::new(lint::suspicious::no_empty_block::NoEmptyBlockPyramid),
+        Box::new(lint::suspicious::no_equal_arguments::NoEqualArguments),
+        Box::new(lint::suspicious::no_equal_then_else::NoEqualThenElse),
+        Box::new(lint::suspicious::no_self_comparisons::NoSelfComparisons),
     ]
 }
 

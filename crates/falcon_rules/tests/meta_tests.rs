@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 
-use falcon_rules::meta::{DOMAINS, GROUPS, RULE_METADATA, meta_for};
+use falcon_rules::meta::{DOMAINS, GROUPS, RULE_METADATA, RuleSource, meta_for};
 use falcon_rules::{all_project_rules, all_rules};
 
 /// Every registered rule name — per-file rules plus project (cross-file) rules,
@@ -125,6 +125,20 @@ fn project_flag_matches_the_project_rule_set() {
         flagged, project_rule_names,
         "project=true set must equal all_project_rules()"
     );
+}
+
+#[test]
+fn every_rule_has_a_source_with_a_non_empty_upstream_id() {
+    for meta in RULE_METADATA {
+        match meta.source {
+            RuleSource::DartCodeLinter(id) | RuleSource::PyramidLint(id) => assert!(
+                !id.is_empty(),
+                "rule `{}` has a ported source with an empty upstream id",
+                meta.name
+            ),
+            RuleSource::Falcon => {}
+        }
+    }
 }
 
 #[test]

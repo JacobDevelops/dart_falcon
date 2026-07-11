@@ -94,18 +94,21 @@ fn test_walk_nonexistent_path_returns_empty() {
     assert_eq!(results.len(), 0);
 }
 
-/// Integration test: walk jfit mobile lib and verify 445 .dart files are found.
-/// Skipped automatically if jfit corpus is not present on this machine.
+/// Integration test: walk jfit mobile lib and verify the walker finds the Dart files.
+/// Skipped automatically if the jfit corpus is not present on this machine.
 #[test]
-fn test_walk_jfit_mobile_lib_445_dart_files() {
+fn test_walk_jfit_mobile_lib_dart_files() {
     let jfit_lib = PathBuf::from("/home/jacob/Documents/Developer/jfit/apps/mobile/lib");
     if !jfit_lib.exists() {
+        eprintln!("jfit corpus not found at {}; skipping", jfit_lib.display());
         return;
     }
     let results = walk_files(&[jfit_lib], &[]);
-    assert_eq!(
-        results.len(),
-        445,
-        "expected 445 dart files in jfit mobile lib"
+    // Floor, not an exact count: the external corpus grows over time, so assert a
+    // lower bound that still guards against walker regressions (missing files).
+    assert!(
+        results.len() >= 445,
+        "expected at least 445 dart files in jfit mobile lib, found {}",
+        results.len()
     );
 }
