@@ -114,10 +114,14 @@ jobs:
       contents: write
     steps:
       # Full checkout of main: the manifest lands on the branch, not the tag.
+      # The push uses a deploy key (MANIFEST_DEPLOY_KEY): deploy keys are a
+      # bypass actor on the main ruleset, which GITHUB_TOKEN cannot satisfy
+      # (org-owned repo; the Actions app can't be added as a bypass actor).
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
+          ssh-key: ${{ secrets.MANIFEST_DEPLOY_KEY }}
       - uses: actions/download-artifact@v4
         with:
           pattern: tarballs-*
