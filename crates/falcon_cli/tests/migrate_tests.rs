@@ -203,8 +203,8 @@ fn official_lints_rules_list_maps_to_falcon_ids() {
 linter:
   rules:
     - avoid_print
-    - prefer_for_elements_to_map_fromIterable
-    - unnecessary_const: false
+    - prefer_iterable_whereType
+    - unnecessary_new: false
 ";
     let (value, unrecognized, count) = parse(yaml);
     assert!(unrecognized.is_empty(), "unexpected: {unrecognized:?}");
@@ -214,11 +214,11 @@ linter:
         Value::String("warn".into())
     );
     assert_eq!(
-        value["linter"]["rules"]["complexity"]["prefer-for-elements-to-map-from-iterable"],
+        value["linter"]["rules"]["style"]["prefer-iterable-where-type"],
         Value::String("warn".into())
     );
     assert_eq!(
-        value["linter"]["rules"]["complexity"]["unnecessary-const"],
+        value["linter"]["rules"]["style"]["unnecessary-new"],
         Value::String("off".into())
     );
 }
@@ -231,7 +231,7 @@ fn official_lints_rules_map_form_maps_to_falcon_ids() {
 linter:
   rules:
     avoid_print: true
-    empty_catches: false
+    prefer_is_empty: false
 ";
     let (value, unrecognized, count) = parse(yaml);
     assert!(unrecognized.is_empty(), "unexpected: {unrecognized:?}");
@@ -241,7 +241,7 @@ linter:
         Value::String("warn".into())
     );
     assert_eq!(
-        value["linter"]["rules"]["suspicious"]["empty-catches"],
+        value["linter"]["rules"]["style"]["prefer-is-empty"],
         Value::String("off".into())
     );
 }
