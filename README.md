@@ -6,10 +6,16 @@
 parses Dart itself — no Dart SDK, no `analyzer` package, no analysis server — so a
 whole project lints in a single pass with no warm-up.
 
-falcon ships **79 lint rules**: 76 across five groups (`complexity`,
+falcon ships **148 lint rules**: 145 across five groups (`complexity`,
 `correctness`, `performance`, `style`, `suspicious`) plus 3 cross-file **project**
 rules (`unused-files`, `unused-code`, `unnecessary-nullable`) that reason about the
-whole module graph rather than one file at a time.
+whole module graph rather than one file at a time. The set now covers the official
+`package:lints` / `package:flutter_lints` recommended rules, and the `flutter`
+domain is complete for the rules those presets can express without full type
+resolution. Three resolver-backed rules — `no-boolean-literal-compare`,
+`avoid-ignoring-return-values`, and the `unnecessary-nullable` project rule — sit
+on a minimal type-resolution layer and are now reliable enough to be **on by
+default**.
 
 Configuration is a single biome-shaped `falcon.json`: grouped rules, per-rule
 severities and options, per-path overrides, a `flutter` domain, and a separate

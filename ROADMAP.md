@@ -9,25 +9,37 @@ Most of the original near-term batch has shipped — `falcon migrate`, a publish
 `falcon.json` JSON schema, per-path rule options in `overrides`, project rules in
 the LSP, and release-automation polish (tag/`Cargo.toml` version guard, flake
 version derived from `Cargo.toml`). A maintained CHANGELOG is deferred to the 1.0
-release. Next up is the Toward 1.0 work below.
+release. The Toward 1.0 work below has now shipped as well.
 
 ## Toward 1.0
 
-- **Rule id normalization + twin-rule unification.** Ids are a kebab/snake mix
-  inherited from the upstream linters, with some duplicated rules (e.g.
-  `no-empty-block` / `no_empty_block`). Normalize and unify — breaking, so targeted
-  at 1.0, shipped alongside `falcon migrate` so existing configs can be rewritten.
-- **Flutter domain buildout.** Treat domains as rule presets: implement the missing
-  core Dart rules currently covered only by `flutter analyze`, and have the
-  `flutter` domain include every Flutter-relevant rule.
-- **Type-resolution-dependent rules.** `no-boolean-literal-compare`,
-  `avoid-ignoring-return-values`, and `unnecessary-nullable` are conservative and
-  off-by-default without a type resolver. A resolver would let them run reliably.
-- **Dart language tracking.** Keep pace with new syntax beyond Dart 3.4 (null-aware
-  elements etc. already done); track the language as it evolves.
+All four Toward-1.0 items have shipped:
 
-## Exploratory
+- **Rule id normalization + twin-rule unification.** Every rule id is now
+  canonical kebab-case, and the duplicated twin rules (`no_empty_block` /
+  `avoid_empty_blocks`, `no_magic_number`, `avoid_unused_parameters`) collapsed
+  into one canonical rule each. Legacy `snake_case` and twin ids still resolve as
+  deprecated aliases, and `falcon migrate` rewrites existing configs (and
+  `falcon.json` files) to the canonical ids.
+- **Flutter domain buildout.** The official `package:lints` / `package:flutter_lints`
+  recommended rules (the class-A set) are implemented, bringing the rule count to
+  148. The `flutter` domain is complete for every Flutter-relevant rule those
+  presets can express without full type resolution.
+- **Type-resolution layer.** A minimal type-resolution layer now backs
+  `no-boolean-literal-compare`, `avoid-ignoring-return-values`, and the
+  `unnecessary-nullable` project rule. Local type inference and a cross-file
+  return-type index removed the false positives that had kept them opt-in, so all
+  three are recommended and on by default.
+- **Dart language tracking.** The parser now tracks the language through Dart 3.9,
+  including dot-shorthand expressions and digit separators.
 
+## Exploratory / post-1.0
+
+- **Remaining type-resolution-blocked rules.** Roughly 22 official
+  `package:lints` / `package:flutter_lints` rules still require deeper type
+  resolution than the current minimal layer provides (full type hierarchies,
+  inference across the SDK, etc.). Expanding the resolver to unlock them is a
+  post-1.0 effort.
 - **DCM (Dart Code Metrics) rule integration.** DCM's current special rules are
   paywalled and numerous; reimplement the useful ones as open falcon rules.
 - **Automatic documentation generation.** Generate rule docs from rule metadata and
