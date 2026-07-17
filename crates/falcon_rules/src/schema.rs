@@ -17,11 +17,11 @@ pub const SCHEMA_URL: &str =
     "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json";
 
 /// The `rules` sub-schema for one section: `recommended` plus one object per
-/// group listing exactly that section's rules (file rules unless `project`).
-fn section_rules(project: bool) -> Value {
+/// group listing exactly that section's rules (file rules unless `cross_file`).
+fn section_rules(cross_file: bool) -> Value {
     let mut groups: Map<String, Value> = Map::new();
     for meta in RULE_METADATA {
-        if meta.project != project {
+        if meta.cross_file != cross_file {
             continue;
         }
         let entry = groups.entry(meta.group.to_string()).or_insert_with(
@@ -85,7 +85,7 @@ pub fn config_schema() -> Value {
                     "rules": section_rules(false)
                 }
             },
-            "project": {
+            "cross-file": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
@@ -101,11 +101,11 @@ pub fn config_schema() -> Value {
                     "properties": {
                         "includes": string_globs,
                         "linter": { "$ref": "#/definitions/overrideLinter" },
-                        "project": { "$ref": "#/definitions/overrideProject" }
+                        "cross-file": { "$ref": "#/definitions/overrideCrossFile" }
                     }
                 }
             },
-            "max_errors": { "type": ["integer", "null"], "minimum": 0 }
+            "max-errors": { "type": ["integer", "null"], "minimum": 0 }
         },
         "definitions": {
             "ruleLevel": { "enum": ["off", "on", "info", "warn", "error"] },
@@ -128,7 +128,7 @@ pub fn config_schema() -> Value {
                 "additionalProperties": false,
                 "properties": { "enabled": { "type": "boolean" }, "rules": section_rules(false) }
             },
-            "overrideProject": {
+            "overrideCrossFile": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": { "enabled": { "type": "boolean" }, "rules": section_rules(true) }

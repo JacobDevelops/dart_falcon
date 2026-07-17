@@ -149,7 +149,7 @@ pub fn run_with_connection(
                     );
                     dirty.remove(&uri);
                     publish(&connection, &state, &uri, &diagnostics)?;
-                    project_pass_and_publish(&connection, &mut state, &mut dirty)?;
+                    cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
                 }
                 DidChangeTextDocument::METHOD => {
                     let params: DidChangeTextDocumentParams =
@@ -176,7 +176,7 @@ pub fn run_with_connection(
                     let diagnostics = state.save(&uri, params.text);
                     dirty.remove(&uri);
                     publish(&connection, &state, &uri, &diagnostics)?;
-                    project_pass_and_publish(&connection, &mut state, &mut dirty)?;
+                    cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
                 }
                 DidCloseTextDocument::METHOD => {
                     let params: DidCloseTextDocumentParams =
@@ -193,7 +193,7 @@ pub fn run_with_connection(
                         dirty.remove(&uri);
                         publish(&connection, &state, &uri, &diagnostics)?;
                     }
-                    project_pass_and_publish(&connection, &mut state, &mut dirty)?;
+                    cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
                     if dirty.is_empty() {
                         deadline = None;
                     }
@@ -265,18 +265,18 @@ fn hover(state: &LspState, params: &HoverParams) -> Option<Hover> {
     })
 }
 
-/// Run the cross-file (project) pass and publish merged diagnostics for every
-/// open document whose project set changed. A no-op when no project rule is
+/// Run the cross-file pass and publish merged diagnostics for every open
+/// document whose cross-file set changed. A no-op when no cross-file rule is
 /// enabled, so per-file-only configs keep their exact prior publish behavior.
-fn project_pass_and_publish(
+fn cross_file_pass_and_publish(
     connection: &Connection,
     state: &mut LspState,
     dirty: &mut HashSet<String>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if !state.project_rules_enabled() {
+    if !state.cross_file_rules_enabled() {
         return Ok(());
     }
-    for (uri, diagnostics) in state.project_pass() {
+    for (uri, diagnostics) in state.cross_file_pass() {
         dirty.remove(&uri);
         publish(connection, state, &uri, &diagnostics)?;
     }

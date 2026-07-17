@@ -44,7 +44,7 @@ automatically for any file named `falcon.json`.
     },
     "domains": { "flutter": "recommended" }
   },
-  "project": {
+  "cross-file": {
     "enabled": true,
     "rules": {
       "correctness": {
@@ -54,7 +54,7 @@ automatically for any file named `falcon.json`.
       }
     }
   },
-  "max_errors": null
+  "max-errors": null
 }
 ```
 
@@ -126,7 +126,7 @@ For each rule falcon resolves an effective severity (or "disabled"):
 
 Net effect: with no config file, every rule is on at warning.
 
-## `max_errors`
+## `max-errors`
 
 Optional cap on the number of reported diagnostics (`null` = unlimited). A CLI
 `--max-errors` flag overrides the config value.
@@ -265,10 +265,11 @@ Same glob syntax as `files.includes`: plain entries are positive includes,
 excluded by any `!`-pattern and either matches a positive pattern or none are
 given.
 
-### `overrides[].linter` and `overrides[].project`
+### `overrides[].linter` and `overrides[].cross-file`
 
-A partial rule block for file rules (`linter`) or project rules (`project`),
-respectively. Both have the same shape as `linter.rules`: rule levels, per-rule
+A partial rule block for file rules (`linter`) or cross-file rules (`cross-file`;
+the legacy key `project` is still accepted), respectively. Both have the same
+shape as `linter.rules`: rule levels, per-rule
 `options`, and an optional `enabled` master switch are honored — but no
 `domains`, no nested `overrides`, no `files`. An override may carry either or
 both sections; each patches the correspondingly-named base block.
@@ -336,12 +337,13 @@ instead, use an inline `// falcon-ignore` comment. The shape mirrors Biome's
 
 - **`lint/<group>/<rule>`** for a normal (file) rule, e.g.
   `lint/suspicious/avoid-dynamic`.
-- **`project/<group>/<rule>`** for a project (cross-file) rule, e.g.
-  `project/correctness/unused-files`.
+- **`cross-file/<group>/<rule>`** for a cross-file rule, e.g.
+  `cross-file/correctness/unused-files`. The legacy `project/<group>/<rule>`
+  spelling is still accepted as a deprecated alias.
 
 The group is the rule's category from its metadata (`complexity`,
 `correctness`, `performance`, `style`, `suspicious`), and the section is `lint`
-for file rules or `project` for project rules.
+for file rules or `cross-file` for cross-file rules.
 
 > Falcon does **not** read Dart's own `// ignore:` / `// ignore_for_file:`
 > comments — those still control the Dart analyzer's own lints and have no effect
@@ -399,15 +401,16 @@ does not appear in `falcon.json`, and cannot itself be suppressed.
   `/* block comment */` is not treated as a suppression.
 - Rule names are matched **exactly** against falcon rule names as registered.
 
-## `project` — project-level (cross-file) rules
+## `cross-file` — cross-file rules
 
-Most rules analyze one file at a time. A small set of **project rules** instead
+Most rules analyze one file at a time. A small set of **cross-file rules** instead
 reason across the whole analyzed file set — they need to see every file to decide
 whether something is referenced anywhere. They are a **separate feature** from the
-linter and live under their own top-level `project` block, *not* under `linter`:
+linter and live under their own top-level `cross-file` block, *not* under
+`linter`. The pre-1.0 key `project` is still accepted as a deprecated alias:
 
 ```json
-"project": {
+"cross-file": {
   "enabled": true,
   "rules": {
     "correctness": {
@@ -419,17 +422,18 @@ linter and live under their own top-level `project` block, *not* under `linter`:
 }
 ```
 
-- `enabled` (default `true`): when `false`, no project rule runs.
+- `enabled` (default `true`): when `false`, no cross-file rule runs.
 - `rules`: the recommended preset plus per-group rule levels — the **same shape**
   as `linter.rules` (level strings or `{ "level", "options" }` objects), but with
-  **no `domains`** gating, since project rules are not domain-scoped.
+  **no `domains`** gating, since cross-file rules are not domain-scoped.
 
-Project rules are grouped under their category (all three are `correctness`),
+Cross-file rules are grouped under their category (all three are `correctness`),
 share the same metadata table as file rules, and are suppressible with
-`// falcon-ignore project/<group>/<rule>: <reason>` comments (or the
-`// falcon-ignore-all` variant). Configuring a project rule under
-`linter.rules` (or a file rule under `project.rules`) is a mistake — falcon warns
-and steers you to the right section, and the misplaced entry does not take effect.
+`// falcon-ignore cross-file/<group>/<rule>: <reason>` comments (or the
+`// falcon-ignore-all` variant). Configuring a cross-file rule under
+`linter.rules` (or a file rule under `cross-file.rules`) is a mistake — falcon
+warns and steers you to the right section, and the misplaced entry does not take
+effect.
 
 | Rule                     | Group        | Recommended | Replaces (dart_code_linter)   |
 |--------------------------|--------------|-------------|-------------------------------|
@@ -439,11 +443,11 @@ and steers you to the right section, and the misplaced entry does not take effec
 
 Notes:
 
-- **CLI-only.** Project rules run in the `falcon check` pipeline's project pass,
-  after the per-file pass, over every collected file. The **LSP server does not
-  run them**: it analyzes a single open buffer and has no whole-project view, so
-  a cross-file rule cannot be evaluated soundly there. This is by design — the
-  editor keeps showing per-file diagnostics; run `falcon check` for project rules.
+- **Where they run.** Cross-file rules run in the `falcon check` pipeline's
+  cross-file pass, after the per-file pass, over every collected file. The **LSP
+  server also runs them**: it walks the workspace (open buffers overlaid on the
+  on-disk files) on didOpen/didSave/config-reload — not on every keystroke — and
+  republishes the merged per-file plus cross-file diagnostics for open documents.
 - **Scope.** `unused-files` and `unused-code` only flag files/declarations under
   the package `lib/` directory (resolved from the nearest `pubspec.yaml`), while
   counting references from every analyzed file (including `test/`). Exclude
@@ -456,7 +460,7 @@ Notes:
   non-null forms (literals, `new`, arithmetic), and a cross-file return-type index
   resolves a callee's or getter's declared return type. An argument proven
   non-null no longer counts as "passes null", which removed the false positives
-  that had kept the rule opt-in. It remains a project rule (CLI-only, whole-project
+  that had kept the rule opt-in. It remains a cross-file rule (whole-project
   pass). Per-file exclusions (the old `--exclude` flags) are expressible with
   `overrides`.
 
@@ -518,7 +522,7 @@ ignoring it. Migrate as follows:
 | `"severity_override": { "x": "error" }`            | `"linter": { "rules": { "<group>": { "x": "error" } } }`       |
 | `"rules": { "x": { "options": { ... } } }`         | `"linter": { "rules": { "<group>": { "x": { "level": "warn", "options": { ... } } } } }` |
 | `"exclude_patterns": ["**/gen/**"]`                | `"files": { "includes": ["**", "!**/gen/**"] }`                |
-| `"max_errors": 100`                                | unchanged (`"max_errors": 100`)                                |
+| `"max_errors": 100`                                | `"max-errors": 100`                                            |
 
 The group for a rule is its category (`complexity`, `correctness`,
 `performance`, `style`, `suspicious`); see `crates/falcon_rules/src/meta.rs`.

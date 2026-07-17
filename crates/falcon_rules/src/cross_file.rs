@@ -1,7 +1,7 @@
-//! Project-level (cross-file) rules — falcon's port of dart_code_linter's
-//! `check-unused-files` / `check-unused-code` commands plus a conservative
-//! `check-unnecessary-nullable`. These run in the CLI's project pass (see
-//! `falcon_analyze::ProjectRule`); the single-file LSP model never runs them.
+//! Cross-file rules — falcon's port of dart_code_linter's `check-unused-files` /
+//! `check-unused-code` commands plus a conservative `check-unnecessary-nullable`.
+//! These run in the CLI and LSP cross-file passes (see
+//! `falcon_analyze::CrossFileRule`).
 //!
 //! This module root holds the shared cross-file plumbing every rule needs:
 //! package/pubspec discovery, directive-URI resolution, and path normalization.

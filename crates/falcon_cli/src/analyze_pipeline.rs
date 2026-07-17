@@ -7,14 +7,14 @@ use std::collections::HashMap;
 
 use clap::ValueEnum;
 use falcon_analyze::{
-    FileSuppressions, ProjectFile, ProjectRuleRegistry, RuleRegistry,
+    CrossFileRuleRegistry, FileSuppressions, ProjectFile, RuleRegistry,
     analyze_parallel_collecting_resolving, analyze_sequential_collecting_resolving,
 };
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
-    ResolvedProjectRules, ResolvedRules, apply_severities, meta::suppression_lookup,
-    resolve_project_rules, resolve_rules,
+    ResolvedCrossFileRules, ResolvedRules, apply_severities, meta::suppression_lookup,
+    resolve_cross_file_rules, resolve_rules,
 };
 use glob::Pattern;
 
@@ -27,7 +27,7 @@ use crate::output;
 /// rules can reason about declaration return types project-wide. Kept here
 /// (rather than a rule-trait flag) as a deliberately small, explicit seam;
 /// extend this list as further resolver-dependent per-file rules are integrated.
-/// (Project rules such as `unnecessary-nullable` build their own index inside
+/// (Cross-file rules such as `unnecessary-nullable` build their own index inside
 /// `analyze_project` and are not listed here.)
 const RESOLVER_DEPENDENT_RULES: &[&str] =
     &["no-boolean-literal-compare", "avoid-ignoring-return-values"];
@@ -93,9 +93,9 @@ fn build_registry(resolved: ResolvedRules) -> RuleRegistry {
     registry
 }
 
-/// Build a project-rule registry from the resolved project rule set.
-fn build_project_registry(resolved: ResolvedProjectRules) -> ProjectRuleRegistry {
-    let mut registry = ProjectRuleRegistry::new();
+/// Build a cross-file-rule registry from the resolved cross-file rule set.
+fn build_cross_file_registry(resolved: ResolvedCrossFileRules) -> CrossFileRuleRegistry {
+    let mut registry = CrossFileRuleRegistry::new();
     for rule in resolved.rules {
         registry.register(rule);
     }
@@ -103,11 +103,11 @@ fn build_project_registry(resolved: ResolvedProjectRules) -> ProjectRuleRegistry
 }
 
 /// Honor inline `// falcon-ignore` / `// falcon-ignore-all` suppressions for
-/// project-rule diagnostics, mirroring the per-file pass. Suppressions are read
-/// from the diagnostic's own file (matched by path) and parsed lazily. This pass
-/// only *filters*; malformed-suppression diagnostics are emitted once, by the
-/// per-file pass over the same sources.
-fn suppress_project_diags(diags: &mut Vec<Diagnostic>, files: &[ProjectFile]) {
+/// cross-file-rule diagnostics, mirroring the per-file pass. Suppressions are
+/// read from the diagnostic's own file (matched by path) and parsed lazily. This
+/// pass only *filters*; malformed-suppression diagnostics are emitted once, by
+/// the per-file pass over the same sources.
+fn suppress_cross_file_diags(diags: &mut Vec<Diagnostic>, files: &[ProjectFile]) {
     if diags.is_empty() {
         return;
     }
@@ -131,19 +131,19 @@ fn suppress_project_diags(diags: &mut Vec<Diagnostic>, files: &[ProjectFile]) {
     });
 }
 
-/// Run the project (cross-file) pass and fold its diagnostics into `diagnostics`,
-/// applying inline suppressions and the same path-aware severity resolution as
-/// the per-file pass.
-fn run_project_pass(
-    registry: &ProjectRuleRegistry,
+/// Run the cross-file pass and fold its diagnostics into `diagnostics`, applying
+/// inline suppressions and the same path-aware severity resolution as the
+/// per-file pass.
+fn run_cross_file_pass(
+    registry: &CrossFileRuleRegistry,
     project_files: &[ProjectFile],
     config: &FalconConfig,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let mut project_diags = registry.run_all(project_files, config);
-    suppress_project_diags(&mut project_diags, project_files);
-    apply_severities(&mut project_diags, config);
-    diagnostics.extend(project_diags);
+    let mut cross_file_diags = registry.run_all(project_files, config);
+    suppress_cross_file_diags(&mut cross_file_diags, project_files);
+    apply_severities(&mut cross_file_diags, config);
+    diagnostics.extend(cross_file_diags);
 }
 
 /// Keep only files matching at least one positive include glob. A non-empty
@@ -203,10 +203,10 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
 
     let resolved = resolve_rules(&config);
     let registry = build_registry(resolved);
-    // Project (cross-file) rules run a second pass over the retained programs;
-    // only collect programs when at least one is enabled (they are memory-heavy).
-    let project_registry = build_project_registry(resolve_project_rules(&config));
-    let collect_programs = !project_registry.is_empty();
+    // Cross-file rules run a second pass over the retained programs; only collect
+    // programs when at least one is enabled (they are memory-heavy).
+    let cross_file_registry = build_cross_file_registry(resolve_cross_file_rules(&config));
+    let collect_programs = !cross_file_registry.is_empty();
     // Resolver seam: enable cross-file type resolution only when a per-file rule
     // that consumes it is active, so a default run pays nothing. When set, the
     // engine parses all files first and builds one shared `ProjectIndex` (every
@@ -218,7 +218,7 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     info!(
         file_count = files.len(),
         rule_count = registry.rules().len(),
-        project_rule_count = project_registry.rules().len(),
+        cross_file_rule_count = cross_file_registry.rules().len(),
         resolve,
         "starting check"
     );
@@ -237,7 +237,7 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     apply_severities(&mut diagnostics, &config);
 
     if collect_programs {
-        run_project_pass(&project_registry, &project_files, &config, &mut diagnostics);
+        run_cross_file_pass(&cross_file_registry, &project_files, &config, &mut diagnostics);
     }
 
     // Parallel analysis collects in nondeterministic file order; sort so
