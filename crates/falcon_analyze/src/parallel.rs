@@ -15,7 +15,7 @@ use crate::resolve::{
 use crate::{AnalyzeContext, ProjectFile, RuleRegistry};
 
 /// Parse `source`, run every per-file rule (with no project index), and
-/// optionally keep the parsed program for the project pass. This is the fast
+/// optionally keep the parsed program for the cross-file pass. This is the fast
 /// path: resolver-dependent rules are not enabled, so no cross-file index is
 /// built and each file is parsed and analyzed in one step.
 fn analyze_file(
@@ -60,7 +60,7 @@ fn parse_one(path: &Path, source: &str) -> Parsed {
     }
 }
 
-/// Retain the parsed programs as [`ProjectFile`]s for the project pass, or drop
+/// Retain the parsed programs as [`ProjectFile`]s for the cross-file pass, or drop
 /// them when the caller does not need them.
 fn retain(parsed: Vec<Parsed>, collect_programs: bool) -> Vec<ProjectFile> {
     if !collect_programs {
@@ -159,7 +159,7 @@ pub fn analyze_sequential(
 }
 
 /// Analyze in parallel, additionally retaining each parsed [`ProjectFile`] when
-/// `collect_programs` is set so the caller can run the project pass over them.
+/// `collect_programs` is set so the caller can run the cross-file pass over them.
 /// With `collect_programs = false` this behaves exactly like [`analyze_parallel`]
 /// (programs are dropped after per-file analysis).
 pub fn analyze_parallel_collecting(

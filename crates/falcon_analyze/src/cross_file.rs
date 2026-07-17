@@ -1,6 +1,6 @@
-//! Project-level (cross-file) rule infrastructure.
+//! Cross-file rule infrastructure.
 //!
-//! Unlike [`crate::Rule`], which sees one file at a time, a [`ProjectRule`]
+//! Unlike [`crate::Rule`], which sees one file at a time, a [`CrossFileRule`]
 //! receives every analyzed file's parsed [`Program`] at once so it can reason
 //! about references that span files (unused files, unused public API, call-site
 //! nullability). Both the CLI and the LSP run them: the CLI over its walked
@@ -13,10 +13,10 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 
-/// One analyzed file, retained with its parsed program for the project pass.
+/// One analyzed file, retained with its parsed program for the cross-file pass.
 ///
 /// The per-file pass normally drops each [`Program`] after analysis; these are
-/// only collected when at least one project rule is enabled.
+/// only collected when at least one cross-file rule is enabled.
 pub struct ProjectFile {
     pub path: PathBuf,
     pub source: String,
@@ -32,27 +32,27 @@ pub struct ProjectFile {
 ///
 /// Thread safety mirrors [`crate::Rule`]: implementors are immutable and must
 /// not use mutable `self` state.
-pub trait ProjectRule: Send + Sync {
+pub trait CrossFileRule: Send + Sync {
     fn name(&self) -> &'static str;
     fn analyze_project(&self, files: &[ProjectFile], config: &FalconConfig) -> Vec<Diagnostic>;
 }
 
-/// Registry of enabled project rules.
+/// Registry of enabled cross-file rules.
 #[derive(Default)]
-pub struct ProjectRuleRegistry {
-    rules: Vec<Box<dyn ProjectRule>>,
+pub struct CrossFileRuleRegistry {
+    rules: Vec<Box<dyn CrossFileRule>>,
 }
 
-impl ProjectRuleRegistry {
+impl CrossFileRuleRegistry {
     pub fn new() -> Self {
         Self { rules: Vec::new() }
     }
 
-    pub fn register(&mut self, rule: Box<dyn ProjectRule>) {
+    pub fn register(&mut self, rule: Box<dyn CrossFileRule>) {
         self.rules.push(rule);
     }
 
-    pub fn rules(&self) -> &[Box<dyn ProjectRule>] {
+    pub fn rules(&self) -> &[Box<dyn CrossFileRule>] {
         &self.rules
     }
 
@@ -60,7 +60,7 @@ impl ProjectRuleRegistry {
         self.rules.is_empty()
     }
 
-    /// Run every registered project rule over `files` and combine diagnostics.
+    /// Run every registered cross-file rule over `files` and combine diagnostics.
     /// Inline suppression and per-path severity resolution are applied by the
     /// caller (the CLI pipeline), exactly as for the per-file pass.
     pub fn run_all(&self, files: &[ProjectFile], config: &FalconConfig) -> Vec<Diagnostic> {

@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{ProjectFile, ProjectRule};
+use falcon_analyze::{ProjectFile, CrossFileRule};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
@@ -34,7 +34,7 @@ struct Candidate {
     kind: &'static str,
 }
 
-impl ProjectRule for UnusedCode {
+impl CrossFileRule for UnusedCode {
     fn name(&self) -> &'static str {
         NAME
     }

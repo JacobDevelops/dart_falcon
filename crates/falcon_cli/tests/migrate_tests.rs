@@ -15,7 +15,7 @@ fn parse(yaml: &str) -> (Value, Vec<String>, usize) {
 #[test]
 fn dcl_rule_with_differing_name_maps_to_falcon_name_and_group() {
     // dart_code_linter's `check-unused-files` maps to falcon `unused-files`
-    // (a project-level correctness rule) — upstream id differs from falcon name.
+    // (a cross-file correctness rule) — upstream id differs from falcon name.
     let yaml = "\
 dart_code_linter:
   rules:
@@ -25,7 +25,7 @@ dart_code_linter:
     assert!(unrecognized.is_empty());
     assert_eq!(count, 1);
     assert_eq!(
-        value["project"]["rules"]["correctness"]["unused-files"],
+        value["cross-file"]["rules"]["correctness"]["unused-files"],
         Value::String("warn".into())
     );
 }
@@ -136,7 +136,7 @@ custom_lint:
     let config: falcon_config::FalconConfig =
         serde_json::from_str(&result.json).expect("emitted JSON is a valid FalconConfig");
     assert_eq!(config.linter.rules.recommended, Some(false));
-    assert_eq!(config.project.rules.recommended, Some(false));
+    assert_eq!(config.cross_file.rules.recommended, Some(false));
 }
 
 #[test]
@@ -167,6 +167,35 @@ fn upgrade_rewrites_legacy_ids_in_existing_falcon_json() {
         value["linter"]["rules"]["style"]["class-members-ordering"],
         Value::String("warn".into())
     );
+}
+
+#[test]
+fn upgrade_rewrites_legacy_project_section_to_cross_file() {
+    // A pre-rename falcon.json using the top-level `project` section (and an
+    // override's `project` block) is rewritten to `cross_file`, preserving rules.
+    let input = r#"{
+      "project": {
+        "rules": { "correctness": { "unused-files": "error" } }
+      },
+      "overrides": [
+        { "includes": ["gen/**"], "project": { "enabled": false } }
+      ]
+    }"#;
+    let result = migrate_existing_config(input).expect("upgrade succeeds");
+    let value: Value = serde_json::from_str(&result.json).expect("valid JSON");
+    // The legacy key is gone; the canonical key carries the rules.
+    assert!(value.get("project").is_none());
+    assert_eq!(
+        value["cross-file"]["rules"]["correctness"]["unused-files"],
+        Value::String("error".into())
+    );
+    // The override's block is renamed too.
+    assert!(value["overrides"][0].get("project").is_none());
+    assert_eq!(value["overrides"][0]["cross-file"]["enabled"], Value::Bool(false));
+    // The upgraded config deserializes cleanly under the new key.
+    let config: falcon_config::FalconConfig =
+        serde_json::from_str(&result.json).expect("upgraded JSON is a valid FalconConfig");
+    assert!(config.cross_file.enabled);
 }
 
 #[test]

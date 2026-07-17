@@ -4,8 +4,8 @@
 //! Drives per-file Rayon parallelism: each .dart file is one work unit.
 
 pub mod context;
+pub mod cross_file;
 pub mod parallel;
-pub mod project;
 pub mod registry;
 pub mod resolve;
 pub mod rule;
@@ -17,7 +17,7 @@ pub use parallel::{
     analyze_parallel, analyze_parallel_collecting, analyze_parallel_collecting_resolving,
     analyze_sequential, analyze_sequential_collecting, analyze_sequential_collecting_resolving,
 };
-pub use project::{ProjectFile, ProjectRule, ProjectRuleRegistry};
+pub use cross_file::{CrossFileRule, CrossFileRuleRegistry, ProjectFile};
 pub use registry::RuleRegistry;
 pub use resolve::{
     LibraryGrouping, LibrarySource, LibraryUnit, LocalTypes, MemberKind, MemberResult,

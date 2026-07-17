@@ -4,7 +4,7 @@
 //!
 //! The mapping table is the rule metadata itself: [`RuleSource`] carries each
 //! rule's upstream id, so we invert it (upstream id → falcon `name`/`group`/
-//! `project`) and route every configured upstream rule to its falcon slot.
+//! `cross_file`) and route every configured upstream rule to its falcon slot.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -117,14 +117,14 @@ fn parse_linter_rules(rules: &Value) -> Vec<(String, RuleConfig)> {
 }
 
 /// Route one upstream (id, config) into its falcon slot via `lookup`, appending
-/// to the linter/project groups or recording the id as unrecognized.
+/// to the linter/cross-file groups or recording the id as unrecognized.
 #[allow(clippy::too_many_arguments)]
 fn place_rule(
     id: String,
     cfg: RuleConfig,
     lookup: &RuleLookup,
     linter_groups: &mut BTreeMap<String, Map<String, Value>>,
-    project_groups: &mut BTreeMap<String, Map<String, Value>>,
+    cross_file_groups: &mut BTreeMap<String, Map<String, Value>>,
     unrecognized: &mut Vec<String>,
     migrated_count: &mut usize,
 ) {
@@ -132,8 +132,8 @@ fn place_rule(
         unrecognized.push(id);
         return;
     };
-    let target = if meta.project {
-        project_groups
+    let target = if meta.cross_file {
+        cross_file_groups
     } else {
         linter_groups
     };
@@ -180,7 +180,7 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
     let (dcl, pyramid, lints) = build_lookups();
 
     let mut linter_groups: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
-    let mut project_groups: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
+    let mut cross_file_groups: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
     let mut unrecognized = Vec::new();
     let mut migrated_count = 0usize;
 
@@ -205,7 +205,7 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
                 cfg,
                 lookup,
                 &mut linter_groups,
-                &mut project_groups,
+                &mut cross_file_groups,
                 &mut unrecognized,
                 &mut migrated_count,
             );
@@ -221,7 +221,7 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
                 cfg,
                 &lints,
                 &mut linter_groups,
-                &mut project_groups,
+                &mut cross_file_groups,
                 &mut unrecognized,
                 &mut migrated_count,
             );
@@ -231,9 +231,9 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
     let mut root = Map::new();
     root.insert("$schema".into(), json!(SCHEMA_URL));
     root.insert("linter".into(), build_rules_object(linter_groups));
-    // Only emit the project block when a project rule was actually migrated.
-    if !project_groups.is_empty() {
-        root.insert("project".into(), build_rules_object(project_groups));
+    // Only emit the cross-file block when a cross-file rule was actually migrated.
+    if !cross_file_groups.is_empty() {
+        root.insert("cross-file".into(), build_rules_object(cross_file_groups));
     }
 
     let mut json = serde_json::to_string_pretty(&Value::Object(root))
@@ -256,17 +256,23 @@ fn looks_like_falcon_json(content: &str) -> bool {
         .as_ref()
         .and_then(Value::as_object)
         .is_some_and(|obj| {
-            ["linter", "project", "files", "overrides", "$schema"]
+            // `project` and the underscore `cross_file` are legacy spellings of
+            // `cross-file`; all flag a falcon.json so a pre-rename config is still
+            // detected for upgrade.
+            ["linter", "cross-file", "cross_file", "project", "files", "overrides", "$schema"]
                 .iter()
                 .any(|k| obj.contains_key(*k))
         })
 }
 
-/// Upgrade an existing falcon.json in place: rewrite legacy rule ids (the
-/// pre-1.0 `snake_case` ids and the removed twin variants) to their canonical
-/// ids across `linter`/`project` rule maps and every override, preserving each
-/// rule's level and options. When a legacy id and its canonical id (or two
-/// legacy twins) collide in the same group, the more severe level wins.
+/// Upgrade an existing falcon.json in place: canonicalize legacy top-level key
+/// spellings to kebab-case — the cross-file section (`project`/`cross_file` →
+/// `cross-file`, including each override's block) and `max_errors` → `max-errors`
+/// — then rewrite legacy rule ids (the pre-1.0 `snake_case` ids and the removed
+/// twin variants) to their canonical ids across `linter`/`cross-file` rule maps
+/// and every override, preserving each rule's level and options. When a legacy id
+/// and its canonical id (or two legacy twins) collide in the same group, the more
+/// severe level wins.
 ///
 /// # Errors
 ///
@@ -278,14 +284,25 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     let mut renamed = 0usize;
     let mut unrecognized = Vec::new();
 
-    for section in ["linter", "project"] {
+    // Canonicalize legacy top-level key spellings to kebab-case: the
+    // cross-file section (`project`/`cross_file` → `cross-file`) at the root and
+    // in every override, and `max_errors` → `max-errors`.
+    rename_cross_file_section(&mut root);
+    rename_key(&mut root, "max_errors", "max-errors");
+    if let Some(Value::Array(overrides)) = root.get_mut("overrides") {
+        for ov in overrides.iter_mut() {
+            rename_cross_file_section(ov);
+        }
+    }
+
+    for section in ["linter", "cross-file"] {
         if let Some(s) = root.get_mut(section) {
             canonicalize_section_rules(s, &mut renamed, &mut unrecognized);
         }
     }
     if let Some(Value::Array(overrides)) = root.get_mut("overrides") {
         for ov in overrides.iter_mut() {
-            for section in ["linter", "project"] {
+            for section in ["linter", "cross-file"] {
                 if let Some(s) = ov.get_mut(section) {
                     canonicalize_section_rules(s, &mut renamed, &mut unrecognized);
                 }
@@ -303,7 +320,41 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     })
 }
 
-/// Canonicalize the rule keys of one `linter`/`project` section's `rules`
+/// Canonicalize the cross-file section key on a JSON object to `cross-file`,
+/// accepting the legacy `project` and underscore `cross_file` spellings. If the
+/// canonical key is already present it wins; otherwise the first legacy spelling
+/// found (checked `project`, then `cross_file`) is moved to `cross-file`. No-op
+/// for non-objects.
+fn rename_cross_file_section(value: &mut Value) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    if obj.contains_key("cross-file") {
+        obj.remove("project");
+        obj.remove("cross_file");
+        return;
+    }
+    if let Some(section) = obj.remove("project").or_else(|| obj.remove("cross_file")) {
+        obj.insert("cross-file".to_string(), section);
+    }
+}
+
+/// Rename a top-level key on a JSON object, unless the canonical key already
+/// exists (it wins). No-op for non-objects and objects without the legacy key.
+fn rename_key(value: &mut Value, from: &str, to: &str) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    if obj.contains_key(to) {
+        obj.remove(from);
+        return;
+    }
+    if let Some(v) = obj.remove(from) {
+        obj.insert(to.to_string(), v);
+    }
+}
+
+/// Canonicalize the rule keys of one `linter`/`cross-file` section's `rules`
 /// object (each group is an object of rule id → configuration).
 fn canonicalize_section_rules(
     section: &mut Value,

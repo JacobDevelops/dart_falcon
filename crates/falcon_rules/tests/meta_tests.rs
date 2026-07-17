@@ -9,15 +9,15 @@
 use std::collections::HashSet;
 
 use falcon_rules::meta::{DOMAINS, GROUPS, RULE_METADATA, RuleSource, meta_for};
-use falcon_rules::{all_project_rules, all_rules};
+use falcon_rules::{all_cross_file_rules, all_rules};
 
-/// Every registered rule name — per-file rules plus project (cross-file) rules,
+/// Every registered rule name — per-file rules plus cross-file rules,
 /// which share the metadata table and config schema.
 fn registered_rule_names() -> Vec<&'static str> {
     all_rules()
         .iter()
         .map(|r| r.name())
-        .chain(all_project_rules().iter().map(|r| r.name()))
+        .chain(all_cross_file_rules().iter().map(|r| r.name()))
         .collect()
 }
 
@@ -76,8 +76,8 @@ fn metadata_domains_are_from_the_known_set() {
 fn metadata_count_matches_registered_rule_count() {
     assert_eq!(
         RULE_METADATA.len(),
-        all_rules().len() + all_project_rules().len(),
-        "metadata table must match the per-file plus project rule count"
+        all_rules().len() + all_cross_file_rules().len(),
+        "metadata table must match the per-file plus cross-file rule count"
     );
 }
 
@@ -109,36 +109,36 @@ fn metadata_names_are_unique() {
 }
 
 #[test]
-fn project_flag_matches_the_project_rule_set() {
-    let project_rule_names: HashSet<&str> = all_project_rules().iter().map(|r| r.name()).collect();
+fn cross_file_flag_matches_the_cross_file_rule_set() {
+    let cross_file_rule_names: HashSet<&str> = all_cross_file_rules().iter().map(|r| r.name()).collect();
     let file_rule_names: HashSet<&str> = all_rules().iter().map(|r| r.name()).collect();
 
     for meta in RULE_METADATA {
-        if project_rule_names.contains(meta.name) {
+        if cross_file_rule_names.contains(meta.name) {
             assert!(
-                meta.project,
-                "project rule `{}` must have project=true",
+                meta.cross_file,
+                "cross-file rule `{}` must have cross_file=true",
                 meta.name
             );
         }
         if file_rule_names.contains(meta.name) {
             assert!(
-                !meta.project,
-                "file rule `{}` must have project=false",
+                !meta.cross_file,
+                "file rule `{}` must have cross_file=false",
                 meta.name
             );
         }
     }
 
-    // Exactly the three known project rules carry the flag.
+    // Exactly the three known cross-file rules carry the flag.
     let flagged: HashSet<&str> = RULE_METADATA
         .iter()
-        .filter(|m| m.project)
+        .filter(|m| m.cross_file)
         .map(|m| m.name)
         .collect();
     assert_eq!(
-        flagged, project_rule_names,
-        "project=true set must equal all_project_rules()"
+        flagged, cross_file_rule_names,
+        "cross_file=true set must equal all_cross_file_rules()"
     );
 }
 

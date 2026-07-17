@@ -164,7 +164,7 @@
       }
     }
   },
-  "project": {
+  "cross-file": {
     "enabled": true,
     "rules": {
       "correctness": {
@@ -174,5 +174,5 @@
       }
     }
   },
-  "max_errors": null
+  "max-errors": null
 }
