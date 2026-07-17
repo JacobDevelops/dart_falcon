@@ -74,7 +74,7 @@ Every rule is validated against fixtures under
   positive and ≥5 negative examples.
 - **`config.json`** (optional) — a full-shaped `falcon.json` applied only when
   validating that directory; use it for threshold- or option-gated rules.
-- **`project/`** subdir — cross-file (project) rules put a small multi-file Dart
+- **`cross-file/`** subdir — cross-file rules put a small multi-file Dart
   project here so the harness can exercise whole-module analysis.
 
 The full spec, including the annotation format and upstream-fixture migration
@@ -109,12 +109,12 @@ notes, is in
 
 4. **Add metadata**: a `RuleMeta` entry in
    `crates/falcon_rules/src/meta.rs` with the correct `group`, `domains`,
-   `recommended`, `project`, and a `source` — `RuleSource::DartCodeLinter("...")`,
+   `recommended`, `cross_file`, and a `source` — `RuleSource::DartCodeLinter("...")`,
    `RuleSource::PyramidLint("...")`, or `RuleSource::Falcon` for original rules.
 
 5. **Add a showcase entry**: list the rule in the root `falcon.json` under its
-   group (`linter.rules.<group>` for file rules, `project.rules.<group>` for
-   project rules).
+   group (`linter.rules.<group>` for file rules, `"cross-file".rules.<group>` for
+   cross-file rules).
 
    Steps 3–5 are not optional: **contract tests enforce them.** `meta_tests.rs`
    requires every rule to have metadata with a non-empty source id, and
@@ -136,8 +136,9 @@ example, and document new options in [`docs/configuration.md`](./docs/configurat
 Inline suppression is handled centrally by
 `crates/falcon_analyze/src/suppressions.rs` — you don't wire it up per rule. The
 directive shape is `// falcon-ignore lint/<group>/<rule>: <reason>` (or
-`project/<group>/<rule>` for project rules, and the `falcon-ignore-all` whole-file
-variant). The reason is mandatory; a malformed directive is itself reported.
+`cross-file/<group>/<rule>` for cross-file rules — the legacy `project/…` spelling
+still works — and the `falcon-ignore-all` whole-file variant). The reason is
+mandatory; a malformed directive is itself reported.
 
 ## Commits & pull requests
 

@@ -20,7 +20,7 @@ use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
 use falcon_rules::lint::style::class_members_ordering::ClassMembersOrdering;
 use falcon_rules::lint::style::use_design_system_item::UseDesignSystemItem;
-use falcon_rules::{all_project_rules, all_rules};
+use falcon_rules::{all_cross_file_rules, all_rules};
 
 fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus")
@@ -154,15 +154,15 @@ fn corpus_matches_expectations() {
     let mut total_expectations = 0usize;
     let mut total_files = 0usize;
 
-    let project_rule_names: std::collections::HashSet<&str> =
-        all_project_rules().iter().map(|r| r.name()).collect();
+    let cross_file_rule_names: std::collections::HashSet<&str> =
+        all_cross_file_rules().iter().map(|r| r.name()).collect();
 
     for dir in &rule_dirs {
         let rule_name = dir.file_name().unwrap().to_string_lossy().to_string();
 
-        // Project (cross-file) rules keep their multi-file fixtures in a
-        // `project/` subdirectory and are validated by the dedicated test below.
-        if project_rule_names.contains(rule_name.as_str()) {
+        // Cross-file rules keep their multi-file fixtures in a `cross_file/`
+        // subdirectory and are validated by the dedicated test below.
+        if cross_file_rule_names.contains(rule_name.as_str()) {
             continue;
         }
 
@@ -427,21 +427,21 @@ fn collect_dart_files_recursive_inner(dir: &Path, out: &mut Vec<PathBuf>, limit:
     }
 }
 
-/// In-process validation of project (cross-file) rules against their multi-file
-/// fixtures under `corpus/<rule>/project/`. Each fixture directory is run as one
-/// unit; `/* expect: <rule> */` annotations are matched by (file, line).
+/// In-process validation of cross-file rules against their multi-file fixtures
+/// under `corpus/<rule>/cross-file/`. Each fixture directory is run as one unit;
+/// `/* expect: <rule> */` annotations are matched by (file, line).
 #[test]
-fn project_corpus_matches_expectations() {
+fn cross_file_corpus_matches_expectations() {
     let corpus = corpus_dir();
     let config = FalconConfig::default();
     let mut failures: Vec<String> = Vec::new();
     let mut total_expectations = 0usize;
 
-    for rule in all_project_rules() {
-        let dir = corpus.join(rule.name()).join("project");
+    for rule in all_cross_file_rules() {
+        let dir = corpus.join(rule.name()).join("cross-file");
         assert!(
             dir.is_dir(),
-            "project rule `{}` is missing its corpus/<rule>/project/ fixture",
+            "cross-file rule `{}` is missing its corpus/<rule>/cross-file/ fixture",
             rule.name()
         );
 
@@ -514,11 +514,11 @@ fn project_corpus_matches_expectations() {
 
     assert!(
         total_expectations > 0,
-        "project corpus produced no expectations — runner is not exercising fixtures"
+        "cross-file corpus produced no expectations — runner is not exercising fixtures"
     );
     assert!(
         failures.is_empty(),
-        "project corpus validation failed:\n{}",
+        "cross-file corpus validation failed:\n{}",
         failures.join("\n")
     );
 }

@@ -234,7 +234,7 @@ fn codegen(args: &[String]) {
         group, module, struct_name
     );
     println!(
-        "  3. add a `RuleMeta {{ name: \"{}\", group: \"{}\", domains, recommended, project: false, \
+        "  3. add a `RuleMeta {{ name: \"{}\", group: \"{}\", domains, recommended, cross_file: false, \
          source: RuleSource::Falcon }}` entry to RULE_METADATA (crates/falcon_rules/src/meta.rs)",
         rule_id, group
     );
@@ -454,20 +454,21 @@ fn validate_file(
     }
 }
 
-/// Validate a project (cross-file) rule's multi-file fixture directory
-/// (`corpus/<rule>/project/`) as ONE falcon invocation over the whole directory.
-/// Expectations are matched by (file name, line), since project diagnostics can
-/// land in any of the fixture's files. Returns (expected, matched, failures).
-fn validate_project_dir(
-    project_dir: &Path,
+/// Validate a cross-file rule's multi-file fixture directory
+/// (`corpus/<rule>/cross-file/`) as ONE falcon invocation over the whole
+/// directory. Expectations are matched by (file name, line), since cross-file
+/// diagnostics can land in any of the fixture's files. Returns (expected,
+/// matched, failures).
+fn validate_cross_file_dir(
+    cross_file_dir: &Path,
     rule_name: &str,
     falcon_bin: &str,
     config: Option<&Path>,
 ) -> (usize, usize, Vec<String>) {
     // Map each fixture file's basename → its source (for offset→line lookup).
     let mut sources: HashMap<String, String> = HashMap::new();
-    let mut dart_files: Vec<PathBuf> = fs::read_dir(project_dir)
-        .unwrap_or_else(|_| panic!("cannot read {}", project_dir.display()))
+    let mut dart_files: Vec<PathBuf> = fs::read_dir(cross_file_dir)
+        .unwrap_or_else(|_| panic!("cannot read {}", cross_file_dir.display()))
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("dart"))
@@ -493,7 +494,7 @@ fn validate_project_dir(
         sources.insert(base, source);
     }
 
-    let diags = run_falcon(falcon_bin, project_dir, config).unwrap_or_default();
+    let diags = run_falcon(falcon_bin, cross_file_dir, config).unwrap_or_default();
     let mut diag_keys: Vec<(String, usize)> = diags
         .iter()
         .filter(|d| d.rule == rule_name)
@@ -521,7 +522,7 @@ fn validate_project_dir(
         } else {
             failures.push(format!(
                 "MISS  {}/{}:{} — rule `{}` expected but not emitted",
-                project_dir.display(),
+                cross_file_dir.display(),
                 exp.0,
                 exp.1,
                 rule_name
@@ -531,7 +532,7 @@ fn validate_project_dir(
     for key in diag_keys {
         failures.push(format!(
             "EXTRA {}/{}:{} — rule `{}` fired unexpectedly",
-            project_dir.display(),
+            cross_file_dir.display(),
             key.0,
             key.1,
             rule_name
@@ -682,12 +683,12 @@ fn validate_rules(args: &[String]) {
             }
         }
 
-        // Project (cross-file) rules keep their fixtures in a `project/`
-        // subdirectory, run as one invocation over the whole directory.
-        let project_dir = rule_dir.join("project");
-        if project_dir.is_dir() {
-            let (expected, matched, failures) = validate_project_dir(
-                &project_dir,
+        // Cross-file rules keep their fixtures in a `cross-file/` subdirectory,
+        // run as one invocation over the whole directory.
+        let cross_file_dir = rule_dir.join("cross-file");
+        if cross_file_dir.is_dir() {
+            let (expected, matched, failures) = validate_cross_file_dir(
+                &cross_file_dir,
                 &rule_name,
                 &falcon_bin,
                 rule_config.as_deref(),

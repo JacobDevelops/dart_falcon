@@ -3,6 +3,39 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
+    "overrideCrossFile": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rules": {
+          "additionalProperties": false,
+          "properties": {
+            "correctness": {
+              "additionalProperties": false,
+              "properties": {
+                "unnecessary-nullable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unused-code": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unused-files": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "recommended": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "overrideLinter": {
       "additionalProperties": false,
       "properties": {
@@ -486,39 +519,6 @@
       },
       "type": "object"
     },
-    "overrideProject": {
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "rules": {
-          "additionalProperties": false,
-          "properties": {
-            "correctness": {
-              "additionalProperties": false,
-              "properties": {
-                "unnecessary-nullable": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "unused-code": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "unused-files": {
-                  "$ref": "#/definitions/ruleConfig"
-                }
-              },
-              "type": "object"
-            },
-            "recommended": {
-              "type": "boolean"
-            }
-          },
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
     "ruleConfig": {
       "oneOf": [
         {
@@ -555,6 +555,39 @@
   "properties": {
     "$schema": {
       "type": "string"
+    },
+    "cross-file": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rules": {
+          "additionalProperties": false,
+          "properties": {
+            "correctness": {
+              "additionalProperties": false,
+              "properties": {
+                "unnecessary-nullable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unused-code": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unused-files": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "recommended": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
     },
     "files": {
       "additionalProperties": false,
@@ -1064,7 +1097,7 @@
       },
       "type": "object"
     },
-    "max_errors": {
+    "max-errors": {
       "minimum": 0,
       "type": [
         "integer",
@@ -1075,6 +1108,9 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "cross-file": {
+            "$ref": "#/definitions/overrideCrossFile"
+          },
           "includes": {
             "items": {
               "type": "string"
@@ -1083,47 +1119,11 @@
           },
           "linter": {
             "$ref": "#/definitions/overrideLinter"
-          },
-          "project": {
-            "$ref": "#/definitions/overrideProject"
           }
         },
         "type": "object"
       },
       "type": "array"
-    },
-    "project": {
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "rules": {
-          "additionalProperties": false,
-          "properties": {
-            "correctness": {
-              "additionalProperties": false,
-              "properties": {
-                "unnecessary-nullable": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "unused-code": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "unused-files": {
-                  "$ref": "#/definitions/ruleConfig"
-                }
-              },
-              "type": "object"
-            },
-            "recommended": {
-              "type": "boolean"
-            }
-          },
-          "type": "object"
-        }
-      },
-      "type": "object"
     }
   },
   "title": "falcon.json",

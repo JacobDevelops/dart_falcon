@@ -4,16 +4,16 @@
 //! (complexity, correctness, performance, style, suspicious). Each rule is a
 //! zero-sized struct implementing the `Rule` trait and registered via
 //! `RuleRegistry` in `falcon_analyze`. Upstream provenance is recorded per rule
-//! by the `source` field of its `RuleMeta` entry (see `meta.rs`). Project
-//! (cross-file) rules live under `project/`.
+//! by the `source` field of its `RuleMeta` entry (see `meta.rs`). Cross-file
+//! rules live under `cross_file/`.
 
+pub mod cross_file;
 pub mod lint;
 pub mod member_order;
 pub mod meta;
-pub mod project;
 pub mod schema;
 
-use falcon_analyze::{ProjectRule, Rule};
+use falcon_analyze::{CrossFileRule, Rule};
 use falcon_config::{FalconConfig, ResolvedSeverity, Rules};
 use falcon_diagnostics::{Diagnostic, Severity};
 
@@ -24,9 +24,9 @@ pub struct ResolvedRules {
     pub rules: Vec<Box<dyn Rule>>,
 }
 
-/// The enabled project (cross-file) rule set. CLI-only; the LSP never runs it.
-pub struct ResolvedProjectRules {
-    pub rules: Vec<Box<dyn ProjectRule>>,
+/// The enabled cross-file rule set. Run by both the CLI and LSP cross-file passes.
+pub struct ResolvedCrossFileRules {
+    pub rules: Vec<Box<dyn CrossFileRule>>,
 }
 
 /// Resolve the rule set to register from `config`.
@@ -72,10 +72,10 @@ pub fn apply_severities(diags: &mut Vec<Diagnostic>, config: &FalconConfig) {
         let Some(meta) = meta_for(diag.rule) else {
             return true;
         };
-        // Route by rule kind: project rules resolve against the `project` config
-        // path, file rules against `linter`.
-        let resolved = if meta.project {
-            config.resolve_project_rule_for(
+        // Route by rule kind: cross-file rules resolve against the `cross_file`
+        // config path, file rules against `linter`.
+        let resolved = if meta.cross_file {
+            config.resolve_cross_file_rule_for(
                 &diag.file_path,
                 meta.group,
                 meta.name,
@@ -135,9 +135,9 @@ fn config_warnings(config: &FalconConfig) -> Vec<String> {
         &mut warnings,
     );
     check_rule_groups(
-        &config.project.rules,
+        &config.cross_file.rules,
         "falcon.json",
-        Section::Project,
+        Section::CrossFile,
         &mut warnings,
     );
     for (idx, over) in config.overrides.iter().enumerate() {
@@ -145,8 +145,8 @@ fn config_warnings(config: &FalconConfig) -> Vec<String> {
         if let Some(linter) = &over.linter {
             check_rule_groups(&linter.rules, &ctx, Section::Linter, &mut warnings);
         }
-        if let Some(project) = &over.project {
-            check_rule_groups(&project.rules, &ctx, Section::Project, &mut warnings);
+        if let Some(cross_file) = &over.cross_file {
+            check_rule_groups(&cross_file.rules, &ctx, Section::CrossFile, &mut warnings);
         }
     }
     warnings
@@ -157,12 +157,12 @@ fn config_warnings(config: &FalconConfig) -> Vec<String> {
 #[derive(Clone, Copy)]
 enum Section {
     Linter,
-    Project,
+    CrossFile,
 }
 
 /// Push a warning for every rule in `rules` that names no registered rule, sits
 /// under the wrong group, or is configured in the wrong top-level section (a
-/// project rule under `linter.rules`, or a file rule under `project.rules`).
+/// cross-file rule under `linter.rules`, or a file rule under `cross_file.rules`).
 /// `ctx` labels the source block (e.g. `falcon.json` or `overrides[1]`).
 fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut Vec<String>) {
     for (group, group_rules) in &rules.groups {
@@ -181,13 +181,13 @@ fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut 
                 ));
                 continue;
             }
-            match (section, meta.project) {
+            match (section, meta.cross_file) {
                 (Section::Linter, true) => warnings.push(format!(
-                    "warning: {ctx} configures `{name}` under `linter.rules`, but it is a project \
-                     rule; configure it under `project.rules`"
+                    "warning: {ctx} configures `{name}` under `linter.rules`, but it is a \
+                     cross-file rule; configure it under `cross_file.rules`"
                 )),
-                (Section::Project, false) => warnings.push(format!(
-                    "warning: {ctx} configures `{name}` under `project.rules`, but it is a \
+                (Section::CrossFile, false) => warnings.push(format!(
+                    "warning: {ctx} configures `{name}` under `cross_file.rules`, but it is a \
                      file-level rule; configure it under `linter.rules`"
                 )),
                 _ => {}
@@ -352,33 +352,33 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
     ]
 }
 
-/// Return all implemented project (cross-file) rules. These share the metadata
-/// table and config schema with per-file rules, but run in the CLI's project
-/// pass over every parsed file at once (see `falcon_analyze::ProjectRule`).
-pub fn all_project_rules() -> Vec<Box<dyn ProjectRule>> {
+/// Return all implemented cross-file rules. These share the metadata table and
+/// config schema with per-file rules, but run in the cross-file pass over every
+/// parsed file at once (see `falcon_analyze::CrossFileRule`).
+pub fn all_cross_file_rules() -> Vec<Box<dyn CrossFileRule>> {
     vec![
-        Box::new(project::unused_files::UnusedFiles),
-        Box::new(project::unused_code::UnusedCode),
-        Box::new(project::unnecessary_nullable::UnnecessaryNullable),
+        Box::new(cross_file::unused_files::UnusedFiles),
+        Box::new(cross_file::unused_code::UnusedCode),
+        Box::new(cross_file::unnecessary_nullable::UnnecessaryNullable),
     ]
 }
 
-/// Resolve the enabled project rule set from `config`, using the same
+/// Resolve the enabled cross-file rule set from `config`, using the same
 /// enablement semantics as [`resolve_rules`] (a rule registers if it is enabled
 /// for any path). Rules with no metadata entry are skipped with a warning.
-pub fn resolve_project_rules(config: &FalconConfig) -> ResolvedProjectRules {
+pub fn resolve_cross_file_rules(config: &FalconConfig) -> ResolvedCrossFileRules {
     let mut rules = Vec::new();
-    for rule in all_project_rules() {
+    for rule in all_cross_file_rules() {
         let name = rule.name();
         let Some(meta) = meta_for(name) else {
-            eprintln!("warning: project rule `{name}` has no metadata entry; skipping");
+            eprintln!("warning: cross-file rule `{name}` has no metadata entry; skipping");
             continue;
         };
-        if config.is_project_rule_enabled_anywhere(meta.group, meta.name, meta.recommended) {
+        if config.is_cross_file_rule_enabled_anywhere(meta.group, meta.name, meta.recommended) {
             rules.push(rule);
         }
     }
-    ResolvedProjectRules { rules }
+    ResolvedCrossFileRules { rules }
 }
 
 #[cfg(test)]
@@ -434,8 +434,10 @@ mod tests {
         assert_eq!(warnings.len(), 3, "unexpected warnings: {warnings:?}");
     }
 
-    /// A project rule under `linter.rules` (and a file rule under `project.rules`)
-    /// is flagged with a message steering it to the correct section.
+    /// A cross-file rule under `linter.rules` (and a file rule under
+    /// `cross_file.rules`) is flagged with a message steering it to the correct
+    /// section. The legacy `project` key is used here to confirm the serde alias
+    /// still lands rules in the cross-file section.
     #[test]
     fn config_warnings_flag_wrong_section() {
         let config: FalconConfig = serde_json::from_value(serde_json::json!({
@@ -452,15 +454,15 @@ mod tests {
 
         assert!(
             warnings.iter().any(|w| w.contains("`unused-files`")
-                && w.contains("project rule")
-                && w.contains("project.rules")),
-            "missing project-rule-under-linter warning: {warnings:?}"
+                && w.contains("cross-file rule")
+                && w.contains("cross_file.rules")),
+            "missing cross-file-rule-under-linter warning: {warnings:?}"
         );
         assert!(
             warnings.iter().any(|w| w.contains("`avoid-dynamic`")
                 && w.contains("file-level rule")
                 && w.contains("linter.rules")),
-            "missing file-rule-under-project warning: {warnings:?}"
+            "missing file-rule-under-cross-file warning: {warnings:?}"
         );
         assert_eq!(warnings.len(), 2, "unexpected warnings: {warnings:?}");
     }
