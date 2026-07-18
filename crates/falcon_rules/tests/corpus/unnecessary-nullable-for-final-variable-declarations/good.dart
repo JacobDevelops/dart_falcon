@@ -15,5 +15,8 @@ class C {
   }
 }
 
+// `second` needs the nullable type, so the shared type is not unnecessary.
+final int? first = 1, second = maybeNull();
+
 int? maybeNull() => null;
 int? compute() => null;

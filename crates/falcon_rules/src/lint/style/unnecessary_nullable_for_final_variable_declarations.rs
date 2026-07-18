@@ -62,19 +62,25 @@ impl Collector {
         if !t.is_nullable() {
             return;
         }
+        // The type is shared by every declarator, so it is only unnecessarily
+        // nullable when *all* of them are provably non-null.
+        if !declarators
+            .iter()
+            .all(|d| d.initializer.as_ref().is_some_and(is_provably_non_null))
+        {
+            return;
+        }
         for d in declarators {
-            if d.initializer.as_ref().is_some_and(is_provably_non_null) {
-                self.diags.push(Diagnostic::new(
-                    "unnecessary-nullable-for-final-variable-declarations",
-                    Severity::Warning,
-                    "Unnecessary nullable type for a final variable declaration.",
-                    self.file.clone(),
-                    DiagSpan {
-                        start: d.span.start,
-                        end: d.span.end,
-                    },
-                ));
-            }
+            self.diags.push(Diagnostic::new(
+                "unnecessary-nullable-for-final-variable-declarations",
+                Severity::Warning,
+                "Unnecessary nullable type for a final variable declaration.",
+                self.file.clone(),
+                DiagSpan {
+                    start: d.span.start,
+                    end: d.span.end,
+                },
+            ));
         }
     }
 }

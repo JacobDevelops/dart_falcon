@@ -553,6 +553,20 @@ impl<'src> Parser<'src> {
         )
     }
 
+    // `X.new(...)` declares the default constructor. `new` is a keyword token, so
+    // it is not `is_ident_like`; it is only a name in constructor-name position.
+    fn is_ctor_name_at_offset(&self, offset: usize) -> bool {
+        self.is_ident_like_at_offset(offset) || self.peek(offset).kind == TokenKind::New
+    }
+
+    fn expect_ctor_name(&mut self) -> Identifier {
+        if self.at(TokenKind::New) {
+            let tok = self.advance();
+            return Identifier::new(self.tok_text(&tok).to_string(), Self::tok_span(&tok));
+        }
+        self.expect_ident()
+    }
+
     fn parse_getter(
         &mut self,
         annotations: Vec<Annotation>,
@@ -652,7 +666,7 @@ impl<'src> Parser<'src> {
         self.advance(); // factory
         let name = self.expect_ident();
         let constructor_name = if self.eat(TokenKind::Dot).is_some() {
-            Some(self.expect_ident())
+            Some(self.expect_ctor_name())
         } else {
             None
         };
@@ -693,7 +707,7 @@ impl<'src> Parser<'src> {
             if is_const && self.is_ident_like() {
                 let p1 = self.peek(1).kind.clone();
                 let is_ctor = p1 == TokenKind::LParen
-                    || (p1 == TokenKind::Dot && self.is_ident_like_at_offset(2));
+                    || (p1 == TokenKind::Dot && self.is_ctor_name_at_offset(2));
                 if is_ctor {
                     let ctor_saved = self.pos;
                     let name_tok = self.cur().clone();
@@ -703,7 +717,7 @@ impl<'src> Parser<'src> {
                         Self::tok_span(&name_tok),
                     );
                     let constructor_name = if self.eat(TokenKind::Dot).is_some() {
-                        Some(self.expect_ident())
+                        Some(self.expect_ctor_name())
                     } else {
                         None
                     };
@@ -871,14 +885,14 @@ impl<'src> Parser<'src> {
             let name_tok = self.cur().clone();
             self.advance();
             if self.at(TokenKind::LParen)
-                || (self.at(TokenKind::Dot) && self.is_ident_like_at_offset(1))
+                || (self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1))
             {
                 let name = Identifier::new(
                     self.tok_text(&name_tok).to_string(),
                     Self::tok_span(&name_tok),
                 );
                 let constructor_name = if self.eat(TokenKind::Dot).is_some() {
-                    Some(self.expect_ident())
+                    Some(self.expect_ctor_name())
                 } else {
                     None
                 };

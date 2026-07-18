@@ -1,1 +1,3 @@
+library;
+
 class Model {}

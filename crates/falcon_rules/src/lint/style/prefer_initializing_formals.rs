@@ -1,11 +1,13 @@
-//! Flags constructors that copy a plain parameter into a same-named field
+//! Flags constructors that copy a plain parameter straight into a field
 //! (`prefer-initializing-formals`, adopted from package:lints). Both the
 //! initializer-list form `: x = x` and the body form `this.x = x;` should be
 //! replaced by an initializing formal `this.x`.
 //!
 //! Conservative: only exact `field = param` / `this.field = param` where the
-//! parameter name equals the field name and the parameter is a plain (non-field,
-//! non-super) constructor parameter.
+//! parameter is a plain (non-field, non-super) constructor parameter. A named
+//! parameter must already carry the field's name — renaming it would break
+//! callers — while a positional one may be named anything. A parameter copied
+//! into more than one field is skipped: it cannot become an initializing formal.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
@@ -46,28 +48,35 @@ fn members_of(decl: &TopLevelDecl) -> Option<&[ClassMember]> {
 }
 
 fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    let params: HashSet<&str> = ctor
+    let plain = |p: &&FormalParam| !p.is_field && !p.is_super;
+    let positional: HashSet<&str> = ctor
         .params
         .positional
         .iter()
         .chain(&ctor.params.optional_positional)
-        .chain(&ctor.params.named)
-        .filter(|p| !p.is_field && !p.is_super)
+        .filter(plain)
+        .map(|p| p.name.name.as_str())
+        .collect();
+    // A named parameter's name is part of the call-site API, so converting it to
+    // an initializing formal is only non-breaking when it already matches the field.
+    let named: HashSet<&str> = ctor
+        .params
+        .named
+        .iter()
+        .filter(plain)
         .map(|p| p.name.name.as_str())
         .collect();
 
-    // Initializer list: `: field = param`.
+    // (field, parameter name) for every `field = param` / `this.field = param`.
+    let mut copies: Vec<(&Identifier, &str)> = Vec::new();
+
     for init in &ctor.initializers {
         if let ConstructorInitializer::FieldInit { field, value, .. } = init
             && let Expr::Ident(v) = value
-            && v.name == field.name
-            && params.contains(field.name.as_str())
         {
-            push(diags, ctx, &field.span);
+            copies.push((field, v.name.as_str()));
         }
     }
-
-    // Body: `this.field = param;`.
     if let Some(FunctionBody::Block(block)) = &ctor.body {
         for stmt in &block.stmts {
             if let Stmt::Expr(expr_stmt) = stmt
@@ -80,11 +89,23 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
                 && let Expr::Field { object, field, .. } = target.as_ref()
                 && matches!(object.as_ref(), Expr::This { .. })
                 && let Expr::Ident(v) = value.as_ref()
-                && v.name == field.name
-                && params.contains(field.name.as_str())
             {
-                push(diags, ctx, &field.span);
+                copies.push((field, v.name.as_str()));
             }
+        }
+    }
+
+    for (i, (field, param)) in copies.iter().enumerate() {
+        // One parameter feeding two fields cannot become an initializing formal.
+        if copies
+            .iter()
+            .enumerate()
+            .any(|(j, (_, p))| j != i && p == param)
+        {
+            continue;
+        }
+        if positional.contains(param) || (named.contains(param) && *param == field.name) {
+            push(diags, ctx, &field.span);
         }
     }
 }

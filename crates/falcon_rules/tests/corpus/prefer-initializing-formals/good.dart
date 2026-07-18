@@ -1,17 +1,12 @@
-// Uses initializing formals, or assignments that are not a verbatim copy.
+// Uses initializing formals, or assignments that cannot become one.
 class A {
   int x;
   A(this.x);
 }
 
-class B {
-  int y;
-  B(int value) : y = value;
-}
-
 class C {
   int a;
-  C(int a) : a = a + 1;
+  C(int a) : a = a + 1; // not a verbatim copy
 }
 
 class D {
@@ -19,9 +14,14 @@ class D {
   D(this.v);
 }
 
-class E {
-  int w;
-  E(int input) { w = input; }
+class G {
+  int p, q;
+  G(int v) : p = v, q = v; // one parameter, two fields — no initializing formal
+}
+
+class H {
+  int r;
+  H({required int value}) : r = value; // renaming a named parameter breaks callers
 }
 
 class F {

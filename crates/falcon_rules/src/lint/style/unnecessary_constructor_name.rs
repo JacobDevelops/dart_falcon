@@ -5,7 +5,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_constructor_decl, walk_expr, walk_program};
 
 pub struct UnnecessaryConstructorName;
 
@@ -47,6 +47,16 @@ impl Collector {
 impl Visitor for Collector {
     fn visit_program(&mut self, node: &Program) {
         walk_program(self, node);
+    }
+
+    // `class A { A.new(); }` — declaring the default constructor as `.new`.
+    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+        if let Some(name) = &node.constructor_name
+            && name.name == "new"
+        {
+            self.flag(&name.span);
+        }
+        walk_constructor_decl(self, node);
     }
 
     fn visit_expr(&mut self, node: &Expr) {

@@ -3,6 +3,10 @@ class Foo {
   Foo();
 }
 
+class Baz {
+  Baz.new(); /* expect: unnecessary-constructor-name */
+}
+
 void examples() {
   final a = Foo.new(); /* expect: unnecessary-constructor-name */
   final b = Foo.new()..toString(); /* expect: unnecessary-constructor-name */

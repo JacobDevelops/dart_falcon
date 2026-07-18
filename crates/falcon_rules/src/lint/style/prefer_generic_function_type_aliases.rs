@@ -77,12 +77,24 @@ fn skip_trivia(bytes: &[u8], i: usize) -> Option<usize> {
     }
 }
 
+// Triple-quoted strings are one literal, so their contents (which may contain a
+// lone apostrophe or a `typedef` token) must be skipped as a whole.
 fn skip_string(bytes: &[u8], start: usize, quote: u8) -> usize {
-    let mut j = start + 1;
+    let triple = bytes.get(start + 1) == Some(&quote) && bytes.get(start + 2) == Some(&quote);
+    let delim = if triple { 3 } else { 1 };
+    let mut j = start + delim;
     while j < bytes.len() {
         match bytes[j] {
             b'\\' => j += 2,
-            c if c == quote => return j + 1,
+            c if c == quote => {
+                if !triple {
+                    return j + 1;
+                }
+                if bytes[j..].starts_with(&[quote; 3]) {
+                    return j + 3;
+                }
+                j += 1;
+            }
             _ => j += 1,
         }
     }

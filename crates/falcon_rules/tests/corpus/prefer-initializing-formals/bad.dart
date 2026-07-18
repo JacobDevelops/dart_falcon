@@ -23,3 +23,13 @@ class E {
   int v;
   E(int v) { this.v = v; } /* expect: prefer-initializing-formals */
 }
+
+class F {
+  int y;
+  F(int value) : y = value; /* expect: prefer-initializing-formals */
+}
+
+class G {
+  int z;
+  G(int input) { this.z = input; } /* expect: prefer-initializing-formals */
+}
