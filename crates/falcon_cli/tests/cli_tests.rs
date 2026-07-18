@@ -85,11 +85,11 @@ fn test_check_quiet_parses() {
 #[test]
 fn test_run_check_integration_clean_file_exit_zero() {
     let dir = tempdir().unwrap();
-    // A non-empty body avoids avoid_empty_blocks and the program uses no magic
-    // numbers, so a fully clean program makes the pipeline exit 0.
+    // A non-empty body avoids avoid_empty_blocks, uses no magic numbers, and
+    // avoids print (now a recommended rule), so a fully clean program exits 0.
     fs::write(
         dir.path().join("test.dart"),
-        "void main() {\n  print('ok');\n}\n",
+        "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
     let code = run_check(CheckOptions {

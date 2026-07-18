@@ -42,13 +42,15 @@ enum RuleConfig {
     Enabled(Option<Value>),
 }
 
-/// Invert [`RULE_METADATA`] into (dcl-id → meta, pyramid-id → meta) lookups.
-fn build_lookups() -> (
-    BTreeMap<&'static str, &'static RuleMeta>,
-    BTreeMap<&'static str, &'static RuleMeta>,
-) {
+/// An upstream-id → falcon-metadata lookup for one source linter.
+type RuleLookup = BTreeMap<&'static str, &'static RuleMeta>;
+
+/// Invert [`RULE_METADATA`] into (dcl-id → meta, pyramid-id → meta, lints-id →
+/// meta) lookups.
+fn build_lookups() -> (RuleLookup, RuleLookup, RuleLookup) {
     let mut dcl = BTreeMap::new();
     let mut pyramid = BTreeMap::new();
+    let mut lints = BTreeMap::new();
     for meta in RULE_METADATA {
         match meta.source {
             RuleSource::DartCodeLinter(id) => {
@@ -56,6 +58,9 @@ fn build_lookups() -> (
             }
             RuleSource::PyramidLint(id) => {
                 pyramid.insert(id, meta);
+            }
+            RuleSource::Lints(id) => {
+                lints.insert(id, meta);
             }
             RuleSource::Falcon => {}
         }
@@ -66,7 +71,7 @@ fn build_lookups() -> (
             pyramid.insert(upstream, meta);
         }
     }
-    (dcl, pyramid)
+    (dcl, pyramid, lints)
 }
 
 /// Parse one `rules:` list entry into its upstream id and falcon config. Entries
@@ -88,6 +93,55 @@ fn parse_entry(entry: &Value) -> Option<(String, RuleConfig)> {
         }
         _ => None,
     }
+}
+
+/// Normalize a `package:lints`-style `linter.rules` node into (id, config)
+/// pairs. It is either a YAML list of ids (`- avoid_print`) or a map of
+/// id → `true`/`false`/`null`/`{options}` (`avoid_print: true`).
+fn parse_linter_rules(rules: &Value) -> Vec<(String, RuleConfig)> {
+    match rules {
+        Value::Array(entries) => entries.iter().filter_map(parse_entry).collect(),
+        Value::Object(map) => map
+            .iter()
+            .map(|(id, val)| {
+                let cfg = match val {
+                    Value::Bool(false) => RuleConfig::Disabled,
+                    Value::Object(opts) => RuleConfig::Enabled(Some(Value::Object(opts.clone()))),
+                    _ => RuleConfig::Enabled(None),
+                };
+                (id.clone(), cfg)
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Route one upstream (id, config) into its falcon slot via `lookup`, appending
+/// to the linter/project groups or recording the id as unrecognized.
+#[allow(clippy::too_many_arguments)]
+fn place_rule(
+    id: String,
+    cfg: RuleConfig,
+    lookup: &RuleLookup,
+    linter_groups: &mut BTreeMap<String, Map<String, Value>>,
+    project_groups: &mut BTreeMap<String, Map<String, Value>>,
+    unrecognized: &mut Vec<String>,
+    migrated_count: &mut usize,
+) {
+    let Some(meta) = lookup.get(id.as_str()) else {
+        unrecognized.push(id);
+        return;
+    };
+    let target = if meta.project {
+        project_groups
+    } else {
+        linter_groups
+    };
+    target
+        .entry(meta.group.to_string())
+        .or_default()
+        .insert(meta.name.to_string(), config_to_json(cfg));
+    *migrated_count += 1;
 }
 
 /// Serialize a [`RuleConfig`] to its falcon.json value: `"off"`, `"warn"`, or
@@ -123,7 +177,7 @@ fn build_rules_object(groups: BTreeMap<String, Map<String, Value>>) -> Value {
 pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
     let doc: Value =
         serde_yaml::from_str(yaml).map_err(|e| format!("failed to parse YAML: {e}"))?;
-    let (dcl, pyramid) = build_lookups();
+    let (dcl, pyramid, lints) = build_lookups();
 
     let mut linter_groups: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
     let mut project_groups: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
@@ -131,7 +185,8 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
     let mut migrated_count = 0usize;
 
     // dart_code_linter rules live under `dart_code_linter.rules`; pyramid_lint is
-    // a custom_lint plugin, so its rules live under `custom_lint.rules`.
+    // a custom_lint plugin, so its rules live under `custom_lint.rules`. Both use
+    // the YAML list form.
     let sections = [("dart_code_linter", &dcl), ("custom_lint", &pyramid)];
     for (section, lookup) in sections {
         let Some(rules) = doc
@@ -145,20 +200,31 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
             let Some((id, cfg)) = parse_entry(entry) else {
                 continue;
             };
-            let Some(meta) = lookup.get(id.as_str()) else {
-                unrecognized.push(id);
-                continue;
-            };
-            let target = if meta.project {
-                &mut project_groups
-            } else {
-                &mut linter_groups
-            };
-            target
-                .entry(meta.group.to_string())
-                .or_default()
-                .insert(meta.name.to_string(), config_to_json(cfg));
-            migrated_count += 1;
+            place_rule(
+                id,
+                cfg,
+                lookup,
+                &mut linter_groups,
+                &mut project_groups,
+                &mut unrecognized,
+                &mut migrated_count,
+            );
+        }
+    }
+
+    // Official `package:lints` / `package:flutter_lints` rules live under the
+    // top-level `linter.rules` key (list or map form).
+    if let Some(rules) = doc.get("linter").and_then(|s| s.get("rules")) {
+        for (id, cfg) in parse_linter_rules(rules) {
+            place_rule(
+                id,
+                cfg,
+                &lints,
+                &mut linter_groups,
+                &mut project_groups,
+                &mut unrecognized,
+                &mut migrated_count,
+            );
         }
     }
 

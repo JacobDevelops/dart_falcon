@@ -21,6 +21,15 @@ void voidCallsAreOk() {
   [1, 2, 3].forEach(print);
 }
 
+// `configure` is NOT on the side-effect allowlist, but the project index proves
+// it returns void, so discarding its result is correctly not flagged — the
+// resolver removes a false positive the allowlist would have raised.
+void configure() {}
+
+void resolvedVoidDiscard() {
+  configure();
+}
+
 class Counter {
   int value = 0;
 

@@ -1,6 +1,6 @@
 //! Flags discarded non-void return values. Ported from dart_code_linter's `avoid-ignoring-return-values`.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, StaticType};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
@@ -247,34 +247,47 @@ fn callee_name(expr: &Expr) -> Option<&str> {
 }
 
 fn check_ignored_return_value(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match expr {
-        Expr::Call { callee, .. } => {
-            if !callee_name(callee).is_some_and(is_side_effect_name) {
-                diags.push(Diagnostic::new(
-                    "avoid-ignoring-return-values",
-                    Severity::Warning,
-                    "The return value is not being used",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: expr.span().start,
-                        end: expr.span().end,
-                    },
-                ));
-            }
-        }
-        Expr::Field { field, .. } if !is_side_effect_name(field.name.as_str()) => {
-            diags.push(Diagnostic::new(
-                "avoid-ignoring-return-values",
-                Severity::Warning,
-                "The return value is not being used",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: expr.span().start,
-                    end: expr.span().end,
-                },
-            ));
-        }
-        _ => {}
+    let name = match expr {
+        Expr::Call { callee, .. } => callee_name(callee),
+        Expr::Field { field, .. } => Some(field.name.as_str()),
+        _ => return,
+    };
+    if !is_ignored_value(name, ctx) {
+        return;
+    }
+    diags.push(Diagnostic::new(
+        "avoid-ignoring-return-values",
+        Severity::Warning,
+        "The return value is not being used",
+        ctx.file_path.to_string_lossy().into_owned(),
+        DiagSpan {
+            start: expr.span().start,
+            end: expr.span().end,
+        },
+    ));
+}
+
+/// Decide whether a discarded call/field access is worth flagging.
+///
+/// With a project index ([`AnalyzeContext::project`]), the callee's declared
+/// return type decides it: a known `void` return is safe to discard (suppress),
+/// a known non-void return is worth flagging, and only when the return type is
+/// `Unknown` (name absent, ambiguous, or inference lost) does it fall back to the
+/// receiver-less [`SIDE_EFFECT_NAMES`] allowlist. Without an index it keeps the
+/// original conservative behavior: flag anything not on the allowlist.
+fn is_ignored_value(name: Option<&str>, ctx: &AnalyzeContext) -> bool {
+    let allowlist_says_ignore = || !name.is_some_and(is_side_effect_name);
+    match ctx.project {
+        Some(index) => match name {
+            Some(n) => match index.return_type(n) {
+                StaticType::Void => false,
+                StaticType::Unknown => allowlist_says_ignore(),
+                _ => true,
+            },
+            // No simple callee name to resolve — keep the conservative default.
+            None => true,
+        },
+        None => allowlist_says_ignore(),
     }
 }
 
