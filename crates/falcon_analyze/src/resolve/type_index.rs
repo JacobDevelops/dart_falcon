@@ -123,6 +123,12 @@ pub struct LibrarySource<'a> {
 #[derive(Debug, Clone, Default)]
 pub struct TypeIndex {
     types: HashMap<String, Slot>,
+    /// At least one library file failed to parse and was skipped, so its
+    /// declarations are invisible to this index. Because that file could
+    /// redeclare a name we recorded as unique (hidden ambiguity) or declare an
+    /// ancestor we never saw, no definite lookup answer is sound — every
+    /// three-valued query degrades to `Unknown`.
+    incomplete: bool,
 }
 
 impl TypeIndex {
@@ -130,19 +136,28 @@ impl TypeIndex {
     pub fn new() -> Self {
         Self {
             types: HashMap::new(),
+            incomplete: false,
         }
     }
 
-    /// Build a cross-file index from every analyzed library file. Files whose
-    /// parse failed are skipped (their recovered nodes can be spurious); every
-    /// type inherits its file's `has_unresolved_parts` flag.
+    /// Build a cross-file index from every analyzed library file. Every type
+    /// inherits its file's `has_unresolved_parts` flag.
+    ///
+    /// Files whose parse failed are skipped (their recovered nodes can be
+    /// spurious), but skipping is not silent: it marks the whole index
+    /// `incomplete`, poisoning every three-valued lookup to `Unknown`. A skipped
+    /// file could redeclare a name we recorded as unique or declare an ancestor
+    /// we never saw, so once one is dropped no `Found` / `ProvenAbsent` /
+    /// `Yes` / `ProvenNo` answer can be trusted.
     pub fn from_library_files<'a, I>(files: I) -> Self
     where
         I: IntoIterator<Item = LibrarySource<'a>>,
     {
         let mut index = Self::new();
         for file in files {
-            if !file.has_parse_errors {
+            if file.has_parse_errors {
+                index.incomplete = true;
+            } else {
                 index.add_program(file.program, file.has_unresolved_parts);
             }
         }
@@ -168,11 +183,16 @@ impl TypeIndex {
         )
     }
 
-    /// The declaration kind of `name`, or `None` when it is unknown, ambiguous,
-    /// or a core type (core types have no user-`TypeKind`).
+    /// The declaration kind of a *user-declared* `name`, or `None` when no unique
+    /// user declaration exists (unknown, or two user decls collide on the name).
+    ///
+    /// Unlike the three-valued lookups, this reports the presence of a user
+    /// declaration even when its name shadows a core type: the declaration is a
+    /// real syntactic fact, independent of the import-ambiguity that poisons
+    /// proofs *through* the type.
     pub fn type_kind(&self, name: &str) -> Option<TypeKind> {
-        match self.resolve(name) {
-            Some(Resolved::User(e)) => Some(e.kind),
+        match self.types.get(name) {
+            Some(Slot::Unique(e)) => Some(e.kind),
             _ => None,
         }
     }
@@ -193,6 +213,9 @@ impl TypeIndex {
     /// none declares it, and [`MemberResult::Unknown`] whenever the chain has any
     /// unresolved edge (unknown ancestor, ambiguity, or unresolved part).
     pub fn member_lookup(&self, type_name: &str, member: &str) -> MemberResult {
+        if self.incomplete {
+            return MemberResult::Unknown;
+        }
         let mut visited = HashSet::new();
         let mut stack = vec![type_name.to_string()];
         let mut fully_resolved = true;
@@ -235,6 +258,9 @@ impl TypeIndex {
         if sub == super_ {
             return SubtypeResult::Yes;
         }
+        if self.incomplete {
+            return SubtypeResult::Unknown;
+        }
         let mut visited = HashSet::new();
         let mut stack = vec![sub.to_string()];
         let mut fully_resolved = true;
@@ -268,9 +294,20 @@ impl TypeIndex {
     // ── Internals ───────────────────────────────────────────────────────────────
 
     /// Resolve a name against user declarations first, then the core table.
+    ///
+    /// A user declaration whose name also exists in the core table cannot be
+    /// disambiguated from its core namesake (falcon has no import resolution), so
+    /// it resolves as [`Resolved::Ambiguous`] — every lookup through it poisons,
+    /// exactly as two colliding user declarations would.
     fn resolve(&self, name: &str) -> Option<Resolved<'_>> {
         match self.types.get(name) {
-            Some(Slot::Unique(e)) => Some(Resolved::User(e)),
+            Some(Slot::Unique(e)) => {
+                if core_table().contains_key(name) {
+                    Some(Resolved::Ambiguous)
+                } else {
+                    Some(Resolved::User(e))
+                }
+            }
             Some(Slot::Ambiguous) => Some(Resolved::Ambiguous),
             None => core_table().get(name).map(Resolved::Core),
         }
@@ -962,7 +999,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_error_files_skipped_but_good_ones_kept() {
+    fn parse_error_files_poison_the_index_to_uncertainty() {
         let good = program("class Good { void m() {} }");
         let (bad, _) = parse("class Bad extends {");
         let sources = [
@@ -978,11 +1015,45 @@ mod tests {
             },
         ];
         let idx = TypeIndex::from_library_files(sources);
+        // The skipped file could redeclare `Good` (hidden ambiguity) or declare
+        // an ancestor we never saw, so no definite answer through it is sound.
+        assert_eq!(idx.member_lookup("Good", "m"), MemberResult::Unknown);
+        assert_eq!(idx.is_subtype("Good", "Object"), SubtypeResult::Unknown);
+        // Reflexive subtyping is a syntactic identity, unaffected by the drop.
+        assert_eq!(idx.is_subtype("Good", "Good"), SubtypeResult::Yes);
+        assert!(!idx.is_known_type("Bad"));
+    }
+
+    #[test]
+    fn no_parse_errors_leaves_index_complete() {
+        let good = program("class Good { void m() {} }");
+        let sources = [LibrarySource {
+            program: &good,
+            has_parse_errors: false,
+            has_unresolved_parts: false,
+        }];
+        let idx = TypeIndex::from_library_files(sources);
         assert_eq!(
             idx.member_lookup("Good", "m"),
             MemberResult::Found(MemberKind::Method)
         );
-        assert!(!idx.is_known_type("Bad"));
+    }
+
+    #[test]
+    fn user_declaration_colliding_with_core_name_is_ambiguous() {
+        // A project that redeclares a core name (e.g. its own `List`) cannot be
+        // disambiguated from `dart:core`'s `List`, so every lookup poisons.
+        let idx = index("class List { void mine() {} }");
+        assert!(!idx.is_known_type("List"));
+        assert_eq!(idx.member_lookup("List", "mine"), MemberResult::Unknown);
+        assert_eq!(idx.member_lookup("List", "add"), MemberResult::Unknown);
+        assert_eq!(idx.is_subtype("List", "Iterable"), SubtypeResult::Unknown);
+        // A non-colliding user type still resolves as a user type.
+        let idx2 = index("class Widgetish { void mine() {} }");
+        assert_eq!(
+            idx2.member_lookup("Widgetish", "mine"),
+            MemberResult::Found(MemberKind::Method)
+        );
     }
 
     #[test]

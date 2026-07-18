@@ -78,15 +78,20 @@ pub fn group_libraries(files: &[(PathBuf, &Program)]) -> LibraryGrouping {
     let mut uf = UnionFind::new(n);
     let mut unresolved = vec![false; n];
 
-    // Index files by canonical path and by declared `library <name>;`.
+    // Index files by canonical path and by declared `library <name>;`. A name
+    // declared by more than one file is ambiguous (`None`) — links using it stay
+    // unresolved rather than silently binding to the first declarer.
     let mut by_path: HashMap<PathBuf, usize> = HashMap::with_capacity(n);
-    let mut by_lib_name: HashMap<String, usize> = HashMap::new();
+    let mut by_lib_name: HashMap<String, Option<usize>> = HashMap::new();
     for (i, (path, program)) in files.iter().enumerate() {
         by_path.insert(canonical_or_lexical(path), i);
         if let Some(lib) = &program.library_directive {
             let name = dotted(&lib.name);
             if !name.is_empty() {
-                by_lib_name.entry(name).or_insert(i);
+                by_lib_name
+                    .entry(name)
+                    .and_modify(|slot| *slot = None)
+                    .or_insert(Some(i));
             }
         }
     }
@@ -107,7 +112,7 @@ pub fn group_libraries(files: &[(PathBuf, &Program)]) -> LibraryGrouping {
             let owner = if let Some(uri) = &po.uri {
                 resolve_relative(dir, &uri.value).and_then(|p| by_path.get(&p).copied())
             } else if !po.name.is_empty() {
-                by_lib_name.get(&dotted(&po.name)).copied()
+                by_lib_name.get(&dotted(&po.name)).copied().flatten()
             } else {
                 None
             };
@@ -181,9 +186,15 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {
         match comp {
-            Component::ParentDir => {
-                out.pop();
-            }
+            // Only cancel a preceding *normal* component; at the root `..` has no
+            // effect, and an unmatched `..` (nothing to cancel) is preserved.
+            Component::ParentDir => match out.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                Some(Component::RootDir) => {}
+                _ => out.push(comp.as_os_str()),
+            },
             Component::CurDir => {}
             other => out.push(other.as_os_str()),
         }
@@ -280,6 +291,31 @@ mod tests {
         assert_eq!(g.siblings(0), &[1]);
         assert_eq!(g.siblings(1), &[0]);
         assert!(!g.is_unresolved(0));
+    }
+
+    #[test]
+    fn ambiguous_library_name_leaves_part_of_unresolved() {
+        // Two files declare the same library name, so a `part of <name>;` cannot
+        // pick a single owner — the link stays unresolved and no group forms.
+        let owner_a = prog("library my.lib; class A {}");
+        let owner_b = prog("library my.lib; class B {}");
+        let part = prog("part of my.lib; class Extra {}");
+        let files = vec![
+            (PathBuf::from("/proj/a.dart"), &owner_a),
+            (PathBuf::from("/proj/b.dart"), &owner_b),
+            (PathBuf::from("/proj/p.dart"), &part),
+        ];
+        let g = group_libraries(&files);
+        assert!(g.siblings(2).is_empty());
+        assert!(g.is_unresolved(2));
+    }
+
+    #[test]
+    fn unmatched_parent_dir_is_preserved_in_lexical_normalize() {
+        assert_eq!(
+            lexical_normalize(Path::new("src/../../outside.dart")),
+            PathBuf::from("../outside.dart")
+        );
     }
 
     #[test]

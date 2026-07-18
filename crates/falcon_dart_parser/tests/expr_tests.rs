@@ -663,6 +663,93 @@ fn nested_paren_arithmetic_initializer_before_block_body() {
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
 
+#[test]
+fn valid_param_list_initializer_before_block_body_is_not_a_lambda() {
+    // `C(): g = (e) {}` — `(e)` is a valid formal-parameter list, so the
+    // speculative lambda parse *succeeds*, yet the trailing `{}` is the
+    // constructor body: the initializer value is the parenthesized expression
+    // `(e)`, not a lambda `(e) {}`.
+    let (prog, errors) = parse("class C { var g; C(): g = (e) {} }");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let class = match &prog.declarations[0] {
+        TopLevelDecl::Class(c) => c,
+        other => panic!("expected class, got {other:?}"),
+    };
+    let ctor = class
+        .members
+        .iter()
+        .find_map(|m| match m {
+            ClassMember::Constructor(c) => Some(c),
+            _ => None,
+        })
+        .expect("constructor present");
+    assert!(matches!(ctor.body, Some(FunctionBody::Block(_))));
+    match &ctor.initializers[0] {
+        ConstructorInitializer::FieldInit { value, .. } => {
+            assert!(
+                !matches!(value, Expr::FuncExpr { .. }),
+                "value should be a parenthesized expr, not a lambda: {value:?}"
+            );
+        }
+        other => panic!("expected field initializer, got {other:?}"),
+    }
+}
+
+#[test]
+fn lambda_in_ctor_init_argument_is_still_a_lambda() {
+    // The ctor-body disambiguation must not leak into bracketed sub-parses:
+    // `foo((e) {})` inside an initializer is a genuine lambda argument.
+    let (_prog, errors) = parse("class C { var g; C(): g = foo((e) {}) {} }");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+}
+
+// The Dart SDK does not permit an *unparenthesized* function literal anywhere in
+// a constructor field-initializer expression: a `(...)` there is always a
+// parenthesized/record expression, and a trailing `{`/`=>` opens the constructor
+// *body*. So the ctor-body disambiguation is honored across the whole initializer
+// expression — conditional branches, binary RHS, and the outermost position — not
+// just the first primary. The three tests below lock in that SDK-matching
+// strictness (verified against Dart 3.11.5 `dart analyze`, which reports syntax
+// errors for each). To use a closure in an initializer it must be bracketed, e.g.
+// `g = (() {})` or `g = [() {}]` — those remain accepted (tests above).
+
+#[test]
+fn bare_block_lambda_conditional_branch_in_ctor_init_matches_sdk_rejection() {
+    // `C(): g = c ? () {} : null;` — the SDK parses `c ? ()` (empty record) and then
+    // treats `{` as the constructor body, leaving the conditional dangling: a syntax
+    // error. `() {}` is *not* accepted as the then-branch closure. Falcon must agree.
+    let (_prog, errors) = parse("class C { var g; C(): g = c ? () {} : null; }");
+    assert!(
+        !errors.is_empty(),
+        "SDK rejects a bare block closure in a ctor-init conditional branch; \
+         falcon must too, got no errors"
+    );
+}
+
+#[test]
+fn bare_block_lambda_binary_rhs_in_ctor_init_matches_sdk_rejection() {
+    // `C(): g = f + () {};` — the SDK parses `f + ()` and takes `{}` as the ctor body,
+    // leaving `;` stranded: a syntax error. Not a `f + <closure>` binary expression.
+    let (_prog, errors) = parse("class C { var g; C(): g = f + () {}; }");
+    assert!(
+        !errors.is_empty(),
+        "SDK rejects a bare block closure on a ctor-init binary RHS; \
+         falcon must too, got no errors"
+    );
+}
+
+#[test]
+fn bare_block_lambda_outermost_in_ctor_init_is_ctor_body_then_stray_semicolon() {
+    // `C(): g = () {};` — even outermost, `()` is a record and `{}` is the ctor body,
+    // so the trailing `;` is a stray token: the SDK reports a syntax error, as must we.
+    let (_prog, errors) = parse("class C { var g; C(): g = () {}; }");
+    assert!(
+        !errors.is_empty(),
+        "SDK treats `() {{}}` as record + ctor body, stranding `;`; \
+         falcon must report the same, got no errors"
+    );
+}
+
 // ── Item: assignment expressions in parenthesised / conditional-branch positions ─
 
 #[test]

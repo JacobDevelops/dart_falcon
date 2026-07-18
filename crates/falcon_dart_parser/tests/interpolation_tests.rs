@@ -101,8 +101,41 @@ fn adjacent_strings_concatenate_interpolations() {
 }
 
 #[test]
-fn malformed_inner_expression_is_dropped() {
-    // `${` with an unparseable body records no interpolation and no program error.
-    let (node, _src) = string_lit("'${a +}'");
-    assert!(node.interpolations.is_empty());
+fn malformed_inner_expression_is_dropped_but_error_propagates() {
+    // `${` with an unparseable body records no interpolation, but its parse
+    // diagnostic reaches the enclosing program with an absolute source offset.
+    let src = "void f() { var x = '${a +}'; }";
+    let (program, errors) = parse(src);
+    assert!(
+        !errors.is_empty(),
+        "expected a propagated interpolation error"
+    );
+
+    let TopLevelDecl::Function(f) = &program.declarations[0] else {
+        panic!("expected a top-level function");
+    };
+    let Some(FunctionBody::Block(block)) = &f.body else {
+        panic!("expected a block body");
+    };
+    let Stmt::LocalVar(lv) = &block.stmts[0] else {
+        panic!("expected a local var");
+    };
+    let Some(Expr::StringLit(node)) = &lv.declarators[0].initializer else {
+        panic!("expected a string literal initializer");
+    };
+    assert!(
+        node.interpolations.is_empty(),
+        "the malformed interpolation is omitted from the AST"
+    );
+
+    // The diagnostic's offset is absolute and falls inside the `${...}` body.
+    let body_start = src.find("${").unwrap() + 2;
+    let body_end = src.find('}').unwrap();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.offset >= body_start && e.offset <= body_end),
+        "diagnostic offsets {:?} should fall within the interpolation body {body_start}..={body_end}",
+        errors.iter().map(|e| e.offset).collect::<Vec<_>>(),
+    );
 }

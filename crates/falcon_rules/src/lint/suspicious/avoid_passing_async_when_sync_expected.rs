@@ -142,7 +142,8 @@ impl AvoidPassingAsyncWhenSyncExpected {
                             CascadeOp::Index(index, _) => {
                                 Self::visit_exprs(index, f);
                             }
-                            CascadeOp::Assign(_, _, value) => {
+                            CascadeOp::Assign(target, _, value) => {
+                                Self::visit_exprs(target, f);
                                 Self::visit_exprs(value, f);
                             }
                             _ => {}

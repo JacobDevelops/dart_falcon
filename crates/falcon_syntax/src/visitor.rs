@@ -673,6 +673,9 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
         Stmt::Switch(x) => {
             v.visit_expr(&x.subject);
             for case in &x.cases {
+                for label in &case.labels {
+                    v.visit_identifier(label);
+                }
                 for kind in &case.cases {
                     match kind {
                         SwitchCaseKind::Pattern(p, guard) => {

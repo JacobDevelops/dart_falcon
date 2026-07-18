@@ -186,6 +186,19 @@ impl<'src> Parser<'src> {
         self.advance(); // for
         self.expect(TokenKind::LParen);
         let (init, condition, update) = self.parse_for_clauses();
+        // `await for` is only valid over a for-in / pattern-for-in header, never a
+        // C-style `for (init; cond; update)` loop.
+        if is_await
+            && !matches!(
+                init,
+                Some(ForInit::ForIn { .. }) | Some(ForInit::PatternForIn { .. })
+            )
+        {
+            self.error(
+                "'await' cannot be used with a C-style for loop; use 'await for (x in ...)'"
+                    .to_string(),
+            );
+        }
         let body = self.parse_stmt();
         Stmt::For(ForStmt {
             is_await,
@@ -544,12 +557,13 @@ impl<'src> Parser<'src> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let case_start = self.cur().offset;
             let mut case_kinds = Vec::new();
+            let mut labels = Vec::new();
 
             loop {
                 // A case may carry statement labels used as `continue label;`
-                // targets: `label: case 2:` / `label: default:`. Consume them.
+                // targets: `label: case 2:` / `label: default:`. Retain them.
                 while self.at(TokenKind::Ident) && self.peek(1).kind == TokenKind::Colon {
-                    self.advance(); // label
+                    labels.push(self.expect_ident()); // label
                     self.advance(); // :
                 }
                 if self.at(TokenKind::Case) {
@@ -596,6 +610,7 @@ impl<'src> Parser<'src> {
                 body.push(self.parse_stmt());
             }
             cases.push(SwitchCase {
+                labels,
                 cases: case_kinds,
                 body,
                 span: self.span_from(case_start),

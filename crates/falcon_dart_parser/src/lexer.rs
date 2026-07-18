@@ -278,6 +278,40 @@ impl<'src> Lexer<'src> {
                             self.advance();
                             depth -= 1;
                         }
+                        // A `//` line comment runs to the end of the line; braces in
+                        // its text must not affect `depth`.
+                        Some('/') if self.peek(1) == Some('/') => {
+                            self.advance();
+                            self.advance();
+                            while !matches!(self.cur(), None | Some('\n')) {
+                                self.advance();
+                            }
+                        }
+                        // A `/* ... */` block comment (Dart nests them); its braces
+                        // must not affect `depth`. Unterminated is a hard failure.
+                        Some('/') if self.peek(1) == Some('*') => {
+                            self.advance();
+                            self.advance();
+                            let mut cdepth: usize = 1;
+                            while cdepth > 0 {
+                                match (self.cur(), self.peek(1)) {
+                                    (None, _) => return false,
+                                    (Some('/'), Some('*')) => {
+                                        self.advance();
+                                        self.advance();
+                                        cdepth += 1;
+                                    }
+                                    (Some('*'), Some('/')) => {
+                                        self.advance();
+                                        self.advance();
+                                        cdepth -= 1;
+                                    }
+                                    _ => {
+                                        self.advance();
+                                    }
+                                }
+                            }
+                        }
                         Some('\\') => {
                             self.advance();
                             self.advance();

@@ -11,11 +11,6 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 
-/// Parse whole-program `src` and return its parse-error count.
-fn errs(src: &str) -> usize {
-    parse(src).1.len()
-}
-
 /// Parse a single top-level `typedef` and return its aliased type.
 fn typedef_aliased(src: &str) -> DartType {
     let (prog, errors) = parse(src);
@@ -209,12 +204,38 @@ fn object_pattern_generic_function_field() {
 
 // ── Corpus-found function-type gaps: record return types ──────────────────
 
+/// The declared type of the sole field of a top-level `class C { <field> }`.
+fn sole_field_type(field: &str) -> DartType {
+    let (prog, errors) = parse(&format!("class C {{ {field} }}"));
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let class = match &prog.declarations[0] {
+        TopLevelDecl::Class(c) => c,
+        other => panic!("expected class, got {other:?}"),
+    };
+    match &class.members[0] {
+        ClassMember::Field(f) => f.field_type.clone().expect("field should carry a type"),
+        other => panic!("expected field, got {other:?}"),
+    }
+}
+
 #[test]
 fn record_return_function_type_in_typedef() {
-    assert_eq!(errs("typedef F = (int, int) Function();"), 0);
+    let aliased = typedef_aliased("typedef F = (int, int) Function();");
+    let f = as_function(&aliased);
+    assert!(!f.is_nullable);
+    match f.return_type.as_deref() {
+        Some(DartType::Record(r)) => assert_eq!(r.positional.len(), 2),
+        other => panic!("expected record return type, got {other:?}"),
+    }
 }
 
 #[test]
 fn record_return_function_type_as_field_type() {
-    assert_eq!(errs("class C { (int, int) Function()? f; }"), 0);
+    let ty = sole_field_type("(int, int) Function()? f;");
+    let f = as_function(&ty);
+    assert!(f.is_nullable, "field function type should be nullable");
+    match f.return_type.as_deref() {
+        Some(DartType::Record(r)) => assert_eq!(r.positional.len(), 2),
+        other => panic!("expected record return type, got {other:?}"),
+    }
 }

@@ -234,6 +234,7 @@ fn count_if_condition(cond: &IfCondition, count: &mut usize) {
         IfCondition::Case(e, _, guard) => {
             count_expr(e, count);
             if let Some(g) = guard {
+                *count += 1;
                 count_expr(g, count);
             }
         }

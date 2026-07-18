@@ -56,6 +56,12 @@ pub(super) struct Parser<'src> {
     /// where untyped members are always methods (no constructors permitted). An
     /// untyped `name(...)` member is a constructor only when `name` equals this.
     pub(super) enclosing_ctor_name: Option<String>,
+    /// Set while parsing the value of a constructor field initializer, where a
+    /// trailing `(...) {}` is a parenthesized expression followed by the enclosing
+    /// constructor body — not a lambda. Cleared inside bracketed sub-parses
+    /// (argument lists, parens, collection literals, index selectors) where a
+    /// following `{` can never be the constructor body.
+    pub(super) in_ctor_init_value: bool,
     /// Undo log for the in-place `>>`/`>>>` → `>` splits that [`parse_type_args`]
     /// performs while closing nested generics. Each entry is `(token index,
     /// original kind)`. A speculative rollback must restore these — see
@@ -74,6 +80,7 @@ impl<'src> Parser<'src> {
             suppress_conditional_qmark: false,
             pattern_binding: false,
             enclosing_ctor_name: None,
+            in_ctor_init_value: false,
             gt_undo: Vec::new(),
         }
     }
@@ -284,6 +291,14 @@ impl<'src> Parser<'src> {
         )
     }
 
+    /// True when `kind` can appear as a dotted-name segment in an annotation head:
+    /// an identifier or the `new` keyword (`@X.new`). Keeps the directive lookahead
+    /// (`index_after_annotations`) consistent with the metadata parser, whose
+    /// `expect_ctor_name` accepts the same segments.
+    fn kind_is_annotation_segment(kind: &TokenKind) -> bool {
+        Self::kind_is_ident_like(kind) || matches!(kind, TokenKind::New)
+    }
+
     pub(super) fn parse_ident(&mut self) -> Option<Identifier> {
         if self.is_ident_like() {
             let tok = self.advance();
@@ -392,6 +407,8 @@ impl<'src> Parser<'src> {
     pub(super) fn parse_arg_list(&mut self) -> ArgList {
         let start = self.cur().offset;
         self.expect(TokenKind::LParen);
+        // Inside an argument list a trailing `{` never opens the constructor body.
+        self.in_ctor_init_value = false;
         let mut positional = Vec::new();
         let mut named = Vec::new();
 
@@ -486,10 +503,11 @@ impl<'src> Parser<'src> {
             if i < n && Self::kind_is_ident_like(&self.tokens[i].kind) {
                 i += 1; // first name segment
             }
-            // dotted name: `.seg` while the next token names a segment
+            // dotted name: `.seg` while the next token names a segment (an
+            // identifier or `new`, as in `@X.new`)
             while i + 1 < n
                 && self.tokens[i].kind == TokenKind::Dot
-                && Self::kind_is_ident_like(&self.tokens[i + 1].kind)
+                && Self::kind_is_annotation_segment(&self.tokens[i + 1].kind)
             {
                 i += 2;
             }
@@ -497,10 +515,10 @@ impl<'src> Parser<'src> {
             if i < n && self.tokens[i].kind == TokenKind::Lt {
                 i = self.index_after_balanced_angles(i);
             }
-            // constructor name after type args: `@Foo<int>.named(…)`
+            // constructor name after type args: `@Foo<int>.named(…)`, `@Foo<int>.new(…)`
             if i + 1 < n
                 && self.tokens[i].kind == TokenKind::Dot
-                && Self::kind_is_ident_like(&self.tokens[i + 1].kind)
+                && Self::kind_is_annotation_segment(&self.tokens[i + 1].kind)
             {
                 i += 2;
             }

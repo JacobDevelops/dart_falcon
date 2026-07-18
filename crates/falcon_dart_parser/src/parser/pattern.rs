@@ -214,9 +214,21 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::Lt) {
             let type_args = self.parse_type_args();
             if self.at(TokenKind::LBracket) {
+                if type_args.len() != 1 {
+                    self.error(format!(
+                        "list pattern expects exactly one type argument, got {}",
+                        type_args.len()
+                    ));
+                }
                 return self.parse_list_pattern(start, type_args.into_iter().next());
             }
             if self.at(TokenKind::LBrace) {
+                if type_args.len() != 2 {
+                    self.error(format!(
+                        "map pattern expects exactly two type arguments, got {}",
+                        type_args.len()
+                    ));
+                }
                 return self.parse_map_pattern(start, type_args);
             }
             self.error(format!(

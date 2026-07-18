@@ -80,6 +80,13 @@ impl LocalTypes {
         StaticType::Unknown
     }
 
+    /// Whether `name` is a tracked local binding in any scope, regardless of its
+    /// type. Unlike [`Self::lookup`], this distinguishes an absent binding from a
+    /// local whose recorded type is [`StaticType::Unknown`].
+    pub fn is_bound(&self, name: &str) -> bool {
+        self.scopes.iter().any(|scope| scope.contains_key(name))
+    }
+
     /// Record an assignment to `name`. If `name` is a tracked local whose new
     /// type does not match the recorded one, the binding degrades to
     /// [`StaticType::Unknown`] (we can no longer state its type soundly).

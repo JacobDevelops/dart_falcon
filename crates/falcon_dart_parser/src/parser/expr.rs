@@ -679,17 +679,12 @@ impl<'src> Parser<'src> {
                                 span: self.span_from(start),
                             };
                         } else if self.at(TokenKind::Dot) || self.at(TokenKind::QmarkDot) {
-                            // Type instantiation expression: Name<T>.method(args) — keep type args,
-                            // represent as Call with empty args; next iteration handles the `.`.
-                            let empty_args = ArgList {
-                                positional: Vec::new(),
-                                named: Vec::new(),
-                                span: self.span_from(start),
-                            };
-                            expr = Expr::Call {
-                                callee: Box::new(expr),
+                            // Type instantiation expression: Name<T>.member — keep the
+                            // type args on a GenericInstantiation wrapping the target;
+                            // the next postfix iteration attaches the `.` selector.
+                            expr = Expr::GenericInstantiation {
+                                target: Box::new(expr),
                                 type_args,
-                                args: empty_args,
                                 span: self.span_from(start),
                             };
                         } else {
@@ -968,7 +963,23 @@ impl<'src> Parser<'src> {
                     let saved = self.pos;
                     let saved_errors = self.errors.len();
                     let expr = self.parse_function_expr_with_type_params(Vec::new(), start);
-                    if self.errors.len() > saved_errors {
+                    // Inside a constructor field-initializer value, a `(...)` whose
+                    // speculative parse yields a plain block-bodied lambda is really a
+                    // parenthesized expression followed by the constructor body: the
+                    // `{...}` is that body, not a lambda body. Rewind and reparse the
+                    // `(...)` as a paren/record, leaving `{` for the body parser.
+                    let is_plain_block_lambda = matches!(
+                        &expr,
+                        Expr::FuncExpr {
+                            is_async: false,
+                            is_generator: false,
+                            body,
+                            ..
+                        } if matches!(**body, FunctionBody::Block(_))
+                    );
+                    if self.errors.len() > saved_errors
+                        || (self.in_ctor_init_value && is_plain_block_lambda)
+                    {
                         self.rewind_to(saved);
                         self.errors.truncate(saved_errors);
                         self.parse_paren_or_record(false, start)
@@ -1055,6 +1066,8 @@ impl<'src> Parser<'src> {
 
     pub(super) fn parse_paren_or_record(&mut self, is_const: bool, start: usize) -> Expr {
         self.advance(); // (
+        // Within these parens a trailing `{` never opens the constructor body.
+        self.in_ctor_init_value = false;
         if self.at(TokenKind::RParen) {
             self.advance();
             return Expr::Record {
@@ -1304,6 +1317,8 @@ impl<'src> Parser<'src> {
         start: usize,
     ) -> Expr {
         self.advance(); // [
+        // Inside a list literal a trailing `{` never opens the constructor body.
+        self.in_ctor_init_value = false;
         let mut elements = Vec::new();
         while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
             elements.push(self.parse_collection_element());
@@ -1327,6 +1342,8 @@ impl<'src> Parser<'src> {
         start: usize,
     ) -> Expr {
         self.advance(); // {
+        // Inside a set/map literal a trailing `{` never opens the constructor body.
+        self.in_ctor_init_value = false;
         if self.at(TokenKind::RBrace) {
             self.advance();
             // Empty braces: a single type arg (`<int>{}`) is a Set; no type args
@@ -1417,9 +1434,20 @@ impl<'src> Parser<'src> {
         let saved = self.pos;
         let saved_errors = self.errors.len();
         let result = loop {
-            while let TokenKind::For | TokenKind::If = self.cur().kind {
-                self.advance();
-                self.skip_balanced_parens();
+            loop {
+                // `await for` comprehension headers lead with `await`; skip it so the
+                // `for` is recognized and `{ await for (...) k: v }` reaches the map
+                // classification path.
+                if self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For {
+                    self.advance();
+                }
+                match self.cur().kind {
+                    TokenKind::For | TokenKind::If => {
+                        self.advance();
+                        self.skip_balanced_parens();
+                    }
+                    _ => break,
+                }
             }
             match self.cur().kind {
                 TokenKind::DotDotDot | TokenKind::DotDotDotQmark => {
@@ -1611,6 +1639,12 @@ impl<'src> Parser<'src> {
                 condition,
                 updates,
             } => {
+                if is_await {
+                    self.error(
+                        "'await' cannot be used with a C-style for loop; use 'await for (x in ...)'"
+                            .to_string(),
+                    );
+                }
                 let element = Box::new(self.parse_collection_element());
                 CollectionElement::CFor {
                     init,
@@ -1648,6 +1682,12 @@ impl<'src> Parser<'src> {
                 condition,
                 updates,
             } => {
+                if is_await {
+                    self.error(
+                        "'await' cannot be used with a C-style for loop; use 'await for (x in ...)'"
+                            .to_string(),
+                    );
+                }
                 let entry = Box::new(self.parse_map_element());
                 MapElement::CFor {
                     init,

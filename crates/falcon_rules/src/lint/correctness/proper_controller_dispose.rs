@@ -126,8 +126,9 @@ fn collect_disposed(body: &FunctionBody, out: &mut HashSet<String>) {
                     object, sections, ..
                 } => {
                     if sections.iter().any(|s| {
-                        s.ops.iter().any(
-                            |op| matches!(op, CascadeOp::Call(id, _, _) if id.name == "dispose"),
+                        matches!(
+                            s.ops.first(),
+                            Some(CascadeOp::Call(id, _, _)) if id.name == "dispose",
                         )
                     }) && let Some(name) = receiver_name(object)
                     {

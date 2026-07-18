@@ -769,6 +769,9 @@ pub struct SwitchStmt {
 
 #[derive(Debug, Clone)]
 pub struct SwitchCase {
+    /// Statement labels preceding this case (`label: case 2:`), retained as
+    /// `continue label;` targets.
+    pub labels: Vec<Identifier>,
     /// One or more `case pattern:` / `default:` labels sharing this body.
     pub cases: Vec<SwitchCaseKind>,
     pub body: Vec<Stmt>,

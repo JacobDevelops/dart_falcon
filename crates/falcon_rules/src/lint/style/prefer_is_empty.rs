@@ -293,7 +293,12 @@ fn empty_comparison_receiver<'a>(
 /// The receiver object of a `.length` property access, if `expr` is one.
 fn length_receiver(expr: &Expr) -> Option<&Expr> {
     match expr {
-        Expr::Field { object, field, .. } if field.name == "length" => Some(object),
+        Expr::Field {
+            object,
+            field,
+            is_null_safe: false,
+            ..
+        } if field.name == "length" => Some(object),
         _ => None,
     }
 }

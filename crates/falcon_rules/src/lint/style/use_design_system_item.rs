@@ -464,7 +464,10 @@ fn scan_expr(
                                 scan_expr(&named.value, diags, ctx, items);
                             }
                         }
-                        CascadeOp::Assign(_, _, value) => scan_expr(value, diags, ctx, items),
+                        CascadeOp::Assign(target, _, value) => {
+                            scan_expr(target, diags, ctx, items);
+                            scan_expr(value, diags, ctx, items);
+                        }
                     }
                 }
             }

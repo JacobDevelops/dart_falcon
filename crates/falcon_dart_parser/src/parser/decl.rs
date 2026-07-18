@@ -1,7 +1,7 @@
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
 
-use super::Parser;
+use super::{ParseError, Parser};
 use crate::lexer::{Lexer, filter_trivia};
 
 impl<'src> Parser<'src> {
@@ -46,7 +46,7 @@ impl<'src> Parser<'src> {
         self.advance(); // part
         self.advance(); // of
         let (uri, name) = if matches!(self.cur().kind, TokenKind::StringLit) {
-            (Some(self.parse_string_lit()), vec![])
+            (Some(self.parse_uri()), vec![])
         } else {
             let mut segs = vec![self.expect_ident()];
             while self.eat(TokenKind::Dot).is_some() {
@@ -140,7 +140,7 @@ impl<'src> Parser<'src> {
                 None
             };
             self.expect(TokenKind::RParen);
-            let uri = self.parse_string_lit();
+            let uri = self.parse_uri();
             uris.push(ConfigurableUri {
                 test,
                 value,
@@ -296,11 +296,10 @@ impl<'src> Parser<'src> {
         // Mixin-application class: `class MA = Super with M [implements I];`
         if self.eat(TokenKind::Eq).is_some() {
             let superclass = self.parse_type();
-            let with_clause = if self.eat(TokenKind::With).is_some() {
-                self.parse_type_list()
-            } else {
-                Vec::new()
-            };
+            // A mixin-application class requires a `with` clause; without it this is
+            // not a valid class type alias.
+            self.expect(TokenKind::With);
+            let with_clause = self.parse_type_list();
             let implements = if self.eat(TokenKind::Implements).is_some() {
                 self.parse_type_list()
             } else {
@@ -902,7 +901,8 @@ impl<'src> Parser<'src> {
             None
         };
         let body = if redirect.is_some() {
-            self.eat(TokenKind::Semicolon);
+            // A redirecting factory has no body but must be terminated: `= D;`.
+            self.expect(TokenKind::Semicolon);
             None
         } else {
             self.parse_function_body()
@@ -964,8 +964,10 @@ impl<'src> Parser<'src> {
                 let name_text = self.cur_text().to_string();
                 let p1 = self.peek(1).kind.clone();
                 let dotted = p1 == TokenKind::Dot && self.is_ctor_name_at_offset(2);
+                // Both the dotted (`C.named(`) and parenthesized (`C(`) forms name a
+                // constructor only when the leading name is the enclosing type.
                 let is_ctor =
-                    dotted || (p1 == TokenKind::LParen && self.name_is_enclosing_type(&name_text));
+                    self.name_is_enclosing_type(&name_text) && (dotted || p1 == TokenKind::LParen);
                 if is_ctor {
                     let ctor_saved = self.pos;
                     let name_tok = self.cur().clone();
@@ -1162,10 +1164,13 @@ impl<'src> Parser<'src> {
                     let params = self.parse_formal_param_list();
                     let has_type_params = !type_params.is_empty();
                     let has_marker = matches!(self.cur().kind, TokenKind::Async | TokenKind::Sync);
+                    // A dotted (`C.named(`) or parenthesized (`C(`) form names a
+                    // constructor only when the leading name is the enclosing type —
+                    // `D.named()` in `class C` is not a constructor of C.
                     let is_constructor = self.enclosing_allows_ctor()
                         && !has_type_params
                         && !has_marker
-                        && (constructor_name.is_some() || self.name_is_enclosing_type(&name_text));
+                        && self.name_is_enclosing_type(&name_text);
                     if !is_constructor {
                         let (async_from_marker, is_generator) = self.parse_async_marker();
                         let body = self.parse_function_body();
@@ -1328,7 +1333,7 @@ impl<'src> Parser<'src> {
                         let field = call_name
                             .unwrap_or_else(|| Identifier::new("<error>", self.cur_span()));
                         self.expect(TokenKind::Eq);
-                        let value = self.parse_expr();
+                        let value = self.parse_ctor_init_value();
                         ConstructorInitializer::FieldInit {
                             field,
                             value,
@@ -1359,7 +1364,7 @@ impl<'src> Parser<'src> {
                     // field = value
                     let field = self.expect_ident();
                     self.expect(TokenKind::Eq);
-                    let value = self.parse_expr();
+                    let value = self.parse_ctor_init_value();
                     ConstructorInitializer::FieldInit {
                         field,
                         value,
@@ -1373,6 +1378,17 @@ impl<'src> Parser<'src> {
             }
         }
         inits
+    }
+
+    /// Parse a constructor field-initializer value with [`Parser::in_ctor_init_value`]
+    /// set, so a trailing `(...) {}` is disambiguated as a parenthesized expression
+    /// followed by the constructor body rather than a lambda.
+    fn parse_ctor_init_value(&mut self) -> Expr {
+        let prev = self.in_ctor_init_value;
+        self.in_ctor_init_value = true;
+        let value = self.parse_expr();
+        self.in_ctor_init_value = prev;
+        value
     }
 
     // ── Enum ──────────────────────────────────────────────────────────────────
@@ -1865,7 +1881,11 @@ impl<'src> Parser<'src> {
         // Simple value extraction: strip outer quotes
         let value = strip_quotes(&raw);
         let interpolations = if is_string_lit {
-            scan_interpolations(self.src, tok.offset, &raw)
+            let (interps, interp_errors) = scan_interpolations(self.src, tok.offset, &raw);
+            // Surface any interpolation sub-parse diagnostics to the enclosing
+            // program (their offsets are already absolute).
+            self.errors.extend(interp_errors);
+            interps
         } else {
             Vec::new()
         };
@@ -1885,19 +1905,24 @@ impl<'src> Parser<'src> {
 ///
 /// `lit_start` is the absolute byte offset of `raw` within `src`. Raw strings
 /// (`r'...'`) yield no interpolations. A `${expr}` whose inner slice fails to
-/// parse cleanly is dropped conservatively (no interpolation recorded), and its
-/// parse errors never reach the enclosing program.
-fn scan_interpolations(src: &str, lit_start: usize, raw: &str) -> Vec<StringInterpolation> {
+/// parse cleanly records no interpolation, but its parse diagnostics (with
+/// absolute source offsets) are returned alongside so the enclosing program can
+/// surface them.
+fn scan_interpolations(
+    src: &str,
+    lit_start: usize,
+    raw: &str,
+) -> (Vec<StringInterpolation>, Vec<ParseError>) {
     let bytes = raw.as_bytes();
     if bytes.first() == Some(&b'r') {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
     let dlen = if raw.starts_with("'''") || raw.starts_with("\"\"\"") {
         3
     } else if raw.starts_with('\'') || raw.starts_with('"') {
         1
     } else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let content_start = dlen;
     // A well-formed literal ends with the same delimiter; if it does not (e.g. a
@@ -1905,6 +1930,7 @@ fn scan_interpolations(src: &str, lit_start: usize, raw: &str) -> Vec<StringInte
     let content_end = raw.len().saturating_sub(dlen).max(content_start);
 
     let mut out = Vec::new();
+    let mut errs = Vec::new();
     let mut i = content_start;
     while i < content_end {
         match bytes[i] {
@@ -1912,11 +1938,12 @@ fn scan_interpolations(src: &str, lit_start: usize, raw: &str) -> Vec<StringInte
             b'$' if i + 1 < content_end && bytes[i + 1] == b'{' => {
                 if let Some(close) = find_interp_close(bytes, i + 1, content_end) {
                     let inner_start = i + 2;
-                    if let Some(interp) =
-                        parse_interp_expr(src, lit_start + inner_start, lit_start + close)
-                    {
+                    let (interp, interp_errs) =
+                        parse_interp_expr(src, lit_start + inner_start, lit_start + close);
+                    if let Some(interp) = interp {
                         out.push(interp);
                     }
+                    errs.extend(interp_errs);
                     i = close + 1;
                 } else {
                     i += 1;
@@ -1938,13 +1965,14 @@ fn scan_interpolations(src: &str, lit_start: usize, raw: &str) -> Vec<StringInte
             _ => i += 1,
         }
     }
-    out
+    (out, errs)
 }
 
 /// Find the byte index of the `}` closing a `${...}` region that opens at
-/// `open_brace` (the `{`). Tracks brace depth, skips escapes, and steps over
-/// nested Dart strings so their braces do not throw off the count. Returns
-/// `None` when unbalanced within `end`.
+/// `open_brace` (the `{`). Tracks brace depth, skips escapes, steps over nested
+/// Dart strings, and skips line/block comments so braces inside strings or
+/// comments do not throw off the count. Returns `None` when unbalanced within
+/// `end`.
 fn find_interp_close(bytes: &[u8], open_brace: usize, end: usize) -> Option<usize> {
     let mut depth = 1usize;
     let mut i = open_brace + 1;
@@ -1960,6 +1988,36 @@ fn find_interp_close(bytes: &[u8], open_brace: usize, end: usize) -> Option<usiz
                 if depth == 0 {
                     return Some(i);
                 }
+            }
+            // A `//` line comment runs to the end of the line; its braces must not
+            // affect `depth`.
+            b'/' if i + 1 < end && bytes[i + 1] == b'/' => {
+                i += 2;
+                while i < end && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            // A `/* ... */` block comment (Dart nests them); its braces must not
+            // affect `depth`. Unbalanced within `end` is treated as unbalanced.
+            b'/' if i + 1 < end && bytes[i + 1] == b'*' => {
+                i += 2;
+                let mut cdepth = 1usize;
+                while i < end && cdepth > 0 {
+                    if bytes[i] == b'/' && i + 1 < end && bytes[i + 1] == b'*' {
+                        cdepth += 1;
+                        i += 2;
+                    } else if bytes[i] == b'*' && i + 1 < end && bytes[i + 1] == b'/' {
+                        cdepth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                if cdepth != 0 {
+                    return None;
+                }
+                continue;
             }
             b'\'' | b'"' => {
                 i = skip_nested_string(bytes, i, end)?;
@@ -2004,12 +2062,18 @@ fn skip_nested_string(bytes: &[u8], open: usize, end: usize) -> Option<usize> {
 }
 
 /// Lex and parse the source slice `src[start..end]` as a standalone expression,
-/// shifting token offsets so the resulting AST carries absolute spans. Returns
-/// `None` unless it parses to a single non-error expression consuming the whole
-/// slice; sub-parse errors are discarded rather than surfaced.
-fn parse_interp_expr(src: &str, start: usize, end: usize) -> Option<StringInterpolation> {
+/// shifting token offsets so the resulting AST carries absolute spans. The first
+/// element is `Some` only when the slice parses to a single non-error expression
+/// consuming the whole slice; otherwise it is `None` and the second element
+/// carries the sub-parse diagnostics (with absolute offsets) so the caller can
+/// surface them instead of dropping the failure silently.
+fn parse_interp_expr(
+    src: &str,
+    start: usize,
+    end: usize,
+) -> (Option<StringInterpolation>, Vec<ParseError>) {
     if start >= end {
-        return None;
+        return (None, Vec::new());
     }
     let slice = &src[start..end];
     let mut tokens = Lexer::new(slice).tokenize();
@@ -2020,10 +2084,10 @@ fn parse_interp_expr(src: &str, start: usize, end: usize) -> Option<StringInterp
     let mut sub = Parser::new(tokens, src);
     let expr = sub.parse_expr();
     if !sub.errors.is_empty() || !sub.at(TokenKind::Eof) || matches!(expr, Expr::Error { .. }) {
-        return None;
+        return (None, sub.errors);
     }
     let span = expr.span().clone();
-    Some(StringInterpolation { expr, span })
+    (Some(StringInterpolation { expr, span }), Vec::new())
 }
 
 // `$` is excluded so `$a$b` reads as two interpolations, and `.`/`(` end a

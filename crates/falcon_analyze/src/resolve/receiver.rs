@@ -112,10 +112,11 @@ impl<'a> ReceiverTypes<'a> {
         types.is_known_type(name).then(|| other(name))
     }
 
-    /// Whether `name` is a currently-tracked local/parameter (has a non-Unknown
-    /// binding in scope).
+    /// Whether `name` is a currently-tracked local/parameter (has a binding in
+    /// scope), regardless of whether its type is known — an untyped local still
+    /// shadows a same-named type, so `X()` is a value call, not a constructor.
     fn is_local(&self, name: &str) -> bool {
-        !matches!(self.locals.lookup(name), StaticType::Unknown)
+        self.locals.is_bound(name)
     }
 }
 
@@ -249,6 +250,35 @@ mod tests {
         let rt = ReceiverTypes::new(&locals, Some(&types), None);
         assert_eq!(
             rt.of_expr(&first_init("void f() { var x = cb(); }")),
+            StaticType::Unknown
+        );
+    }
+
+    #[test]
+    fn untyped_local_shadowing_type_is_not_a_constructor() {
+        // A local of *unknown* type that shadows a same-named type: `Foo()` is a
+        // value call on the local, not a constructor. Distinguishing an absent
+        // binding from one whose type is Unknown is the whole point.
+        let types = type_index("class Foo {}");
+        let mut locals = LocalTypes::new();
+        locals.declare("Foo", StaticType::Unknown);
+        let rt = ReceiverTypes::new(&locals, Some(&types), None);
+        assert_eq!(
+            rt.of_expr(&first_init("void f() { var x = Foo(); }")),
+            StaticType::Unknown
+        );
+    }
+
+    #[test]
+    fn named_constructor_on_untyped_local_is_not_a_constructor() {
+        // `Foo.named()` where `Foo` is an untyped local: an instance member call,
+        // not the named constructor `Foo.named`.
+        let types = type_index("class Foo { Foo.named(); }");
+        let mut locals = LocalTypes::new();
+        locals.declare("Foo", StaticType::Unknown);
+        let rt = ReceiverTypes::new(&locals, Some(&types), None);
+        assert_eq!(
+            rt.of_expr(&first_init("void f() { var x = Foo.named(); }")),
             StaticType::Unknown
         );
     }

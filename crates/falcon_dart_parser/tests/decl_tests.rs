@@ -86,9 +86,8 @@ fn test_method_named_async_still_parses() {
     let (prog, errors) = parse("class C { async() {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let name = match &only_class(&prog).members[0] {
-        ClassMember::Constructor(c) => c.name.name.clone(),
         ClassMember::Method(m) => m.name.name.clone(),
-        other => panic!("unexpected member {other:?}"),
+        other => panic!("expected method, got {other:?}"),
     };
     assert_eq!(name, "async");
 }

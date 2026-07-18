@@ -363,7 +363,12 @@ mod dcl {
                 for section in sections {
                     for op in &section.ops {
                         match op {
-                            CascadeOp::Index(e, _) => scan_expr(e, in_const, diags, ctx, cfg),
+                            CascadeOp::Index(e, _) => {
+                                // A literal used directly as an index is exempt.
+                                if !is_direct_literal(e) {
+                                    scan_expr(e, in_const, diags, ctx, cfg);
+                                }
+                            }
                             CascadeOp::Call(_, _, args) => {
                                 for a in &args.positional {
                                     scan_expr(a, in_const, diags, ctx, cfg);
