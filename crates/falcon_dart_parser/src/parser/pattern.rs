@@ -164,6 +164,37 @@ impl<'src> Parser<'src> {
     fn parse_primary_pattern(&mut self) -> Pattern {
         let start = self.cur().offset;
 
+        // Dot-shorthand constant pattern (Dart 3.x): `.name` / `.new` — an
+        // enum/static-member shorthand used as a pattern (`case .build => ...`).
+        if self.at(TokenKind::Dot) {
+            let expr = self.parse_dot_shorthand(false, start);
+            return Pattern::Const(ConstPattern {
+                name: Vec::new(),
+                expr: Some(Box::new(expr)),
+                span: self.span_from(start),
+            });
+        }
+
+        // Record-type-led typed variable/wildcard: `(int, int)? b`. A `(...)`
+        // (optionally nullable) that is directly followed by a binding name is a
+        // record TYPE annotation, not a record pattern.
+        if self.at(TokenKind::LParen) && self.record_type_var_pattern_ahead() {
+            let ty = self.parse_type();
+            if self.at(TokenKind::Ident) && self.cur_text() == "_" {
+                self.advance();
+                return Pattern::Wildcard {
+                    type_: Some(ty),
+                    span: self.span_from(start),
+                };
+            }
+            let name = self.expect_ident();
+            return Pattern::Variable {
+                type_: Some(ty),
+                name,
+                span: self.span_from(start),
+            };
+        }
+
         // Parenthesised / record pattern
         if self.at(TokenKind::LParen) {
             return self.parse_paren_or_record_pattern(start);
@@ -301,11 +332,12 @@ impl<'src> Parser<'src> {
             let var_type = if self.is_type_start() {
                 let saved = self.pos;
                 let ty = self.parse_type();
-                // `when` here introduces a case guard, not a variable name.
-                if self.is_ident_like() && !self.at(TokenKind::When) {
+                // `when` introduces a case guard and `as` a cast pattern
+                // (`final x as int`), so neither is the variable name here.
+                if self.is_ident_like() && !self.at(TokenKind::When) && !self.at(TokenKind::As) {
                     Some(ty)
                 } else {
-                    self.pos = saved;
+                    self.rewind_to(saved);
                     None
                 }
             } else {
@@ -335,6 +367,41 @@ impl<'src> Parser<'src> {
         Pattern::Error {
             span: self.span_from(start),
         }
+    }
+
+    /// True when the `(` at the cursor opens a record TYPE that annotates a
+    /// variable pattern — a balanced `(...)`, an optional `?`, then a binding
+    /// name. Distinguishes `(int, int)? b` (typed variable) from `(a, b)` (a
+    /// record pattern, which is never directly followed by an identifier).
+    fn record_type_var_pattern_ahead(&self) -> bool {
+        debug_assert_eq!(self.cur().kind, TokenKind::LParen);
+        let mut depth = 0i32;
+        let mut i = self.pos;
+        while let Some(tok) = self.tokens.get(i) {
+            match tok.kind {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+        // `i` is at the closing `)`. Skip an optional nullable `?`.
+        let mut j = i + 1;
+        if matches!(self.tokens.get(j).map(|t| &t.kind), Some(TokenKind::Qmark)) {
+            j += 1;
+        }
+        // The binding name must be a real identifier. `as`/`when` are ident-like
+        // but here mean a cast pattern (`(a || b) as T`) or a case guard
+        // (`(.linux, _) when g`) applied to a record *pattern*, not a record type.
+        self.tokens.get(j).is_some_and(|t| {
+            Self::kind_is_ident_like(&t.kind) && !matches!(t.kind, TokenKind::As | TokenKind::When)
+        })
     }
 
     fn parse_paren_or_record_pattern(&mut self, start: usize) -> Pattern {
@@ -643,9 +710,9 @@ impl<'src> Parser<'src> {
         }
 
         // Typed variable: Type name. `when` here introduces a case guard
-        // (`case State.a when c`), not a variable name, so it must not be
-        // consumed as the binding.
-        if self.is_ident_like() && !self.at(TokenKind::When) {
+        // (`case State.a when c`) and `as` a cast pattern (`value as int`), not a
+        // variable name, so neither must be consumed as the binding.
+        if self.is_ident_like() && !self.at(TokenKind::When) && !self.at(TokenKind::As) {
             let name = self.expect_ident();
             return Pattern::Variable {
                 type_: Some(ty),

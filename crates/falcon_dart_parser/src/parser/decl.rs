@@ -8,7 +8,8 @@ impl<'src> Parser<'src> {
     // ── Directives ────────────────────────────────────────────────────────────
 
     pub(super) fn try_parse_library_directive(&mut self) -> Option<LibraryDirective> {
-        if !self.at(TokenKind::Library) {
+        // May be preceded by metadata: `@Deprecated('x') library foo;`.
+        if self.peek_kind_after_annotations() != TokenKind::Library {
             return None;
         }
         let start = self.cur().offset;
@@ -31,10 +32,13 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn try_parse_part_of(&mut self) -> Option<PartOfDirective> {
-        if !self.at(TokenKind::Part) {
-            return None;
-        }
-        if self.peek(1).kind != TokenKind::Ident || self.tok_text(self.peek(1)) != "of" {
+        // `part of …`, optionally preceded by metadata: `@A part of foo;`.
+        let i = self.index_after_annotations(self.pos);
+        let part = self.tokens.get(i);
+        let of = self.tokens.get(i + 1);
+        let is_part_of = part.is_some_and(|t| t.kind == TokenKind::Part)
+            && of.is_some_and(|t| t.kind == TokenKind::Ident && self.tok_text(t) == "of");
+        if !is_part_of {
             return None;
         }
         let start = self.cur().offset;
@@ -67,7 +71,7 @@ impl<'src> Parser<'src> {
             self.error("expected string literal in part directive");
             return None;
         }
-        let uri = self.parse_string_lit();
+        let uri = self.parse_uri();
         self.expect(TokenKind::Semicolon);
         Some(PartDirective {
             annotations,
@@ -80,7 +84,7 @@ impl<'src> Parser<'src> {
         let start = self.cur().offset;
         let annotations = self.parse_annotations();
         self.expect(TokenKind::Import);
-        let uri = self.parse_string_lit();
+        let uri = self.parse_uri();
         let configurable_uris = self.parse_configurable_uris();
         let is_deferred = self.eat(TokenKind::Deferred).is_some();
         let as_name = if self.eat(TokenKind::As).is_some() {
@@ -105,7 +109,7 @@ impl<'src> Parser<'src> {
         let start = self.cur().offset;
         let annotations = self.parse_annotations();
         self.expect(TokenKind::Export);
-        let uri = self.parse_string_lit();
+        let uri = self.parse_uri();
         let configurable_uris = self.parse_configurable_uris();
         let combinators = self.parse_import_combinators();
         self.expect(TokenKind::Semicolon);
@@ -478,6 +482,24 @@ impl<'src> Parser<'src> {
         let mut is_async = false;
 
         loop {
+            // A built-in-identifier modifier (`static`, `abstract`, `external`,
+            // `covariant`, `late`) directly followed by `=`/`;`/`,`/`(` is the
+            // member's own name, not a modifier — e.g. the field named `static` in
+            // `static const static = 1;`, or a method `external()`. A real modifier
+            // is always followed by another modifier, a type, or the member name.
+            if matches!(
+                self.cur().kind,
+                TokenKind::Static
+                    | TokenKind::Abstract
+                    | TokenKind::External
+                    | TokenKind::Covariant
+                    | TokenKind::Late
+            ) && matches!(
+                self.peek(1).kind,
+                TokenKind::Eq | TokenKind::Semicolon | TokenKind::Comma | TokenKind::LParen
+            ) {
+                break;
+            }
             match self.cur().kind {
                 TokenKind::Static => {
                     is_static = true;
@@ -553,7 +575,7 @@ impl<'src> Parser<'src> {
         }
 
         // Operator overload
-        if self.at(TokenKind::Operator) {
+        if self.at_operator_decl() {
             return ClassMember::Operator(self.parse_operator(
                 annotations,
                 is_external,
@@ -603,44 +625,39 @@ impl<'src> Parser<'src> {
     }
 
     fn is_ident_like_at_offset(&self, offset: usize) -> bool {
+        Self::kind_is_ident_like(&self.peek(offset).kind)
+    }
+
+    /// True when the `operator` keyword at the cursor actually declares an
+    /// operator overload — i.e. it is followed by an overloadable operator symbol
+    /// (or `[` for `[]`/`[]=`). `operator` is a built-in identifier, so shipped
+    /// code also uses it as a plain member name (`Token? operator;`); there the
+    /// next token is `;`/`=`/`,`/`(`, not an operator, so this returns false.
+    fn at_operator_decl(&self) -> bool {
         use TokenKind::*;
-        matches!(
-            self.peek(offset).kind,
-            Ident
-                | Abstract
-                | As
-                | Base
-                | Covariant
-                | Deferred
-                | Dynamic
-                | Export
-                | Extension
-                | External
-                | Factory
-                | Function
-                | Get
-                | Hide
-                | Implements
-                | Import
-                | Interface
-                | Late
-                | Library
-                | Mixin
-                | Operator
-                | Part
-                | Required
-                | Sealed
-                | Set
-                | Show
-                | Static
-                | Type
-                | Typedef
-                | Async
-                | Await
-                | Sync
-                | Yield
-                | When
-        )
+        self.at(Operator)
+            && matches!(
+                self.peek(1).kind,
+                LBracket
+                    | Lt
+                    | Gt
+                    | LtEq
+                    | GtEq
+                    | EqEq
+                    | Minus
+                    | Plus
+                    | Slash
+                    | TildeSlash
+                    | Star
+                    | Percent
+                    | Pipe
+                    | Caret
+                    | Amp
+                    | LtLt
+                    | GtGt
+                    | GtGtGt
+                    | Tilde
+            )
     }
 
     // `X.new(...)` declares the default constructor. `new` is a keyword token, so
@@ -695,19 +712,26 @@ impl<'src> Parser<'src> {
         self.advance(); // set
         let name = self.expect_ident();
         self.expect(TokenKind::LParen);
+        // A setter's single value parameter accepts the same leading modifiers as
+        // any formal (`set x(covariant final T v)`) and a trailing comma
+        // (`set x(int a,)`), which method parameter lists already allow.
+        let _ = self.eat(TokenKind::Covariant);
+        let _ = self.eat(TokenKind::Final);
+        let _ = self.eat(TokenKind::Var);
         let param_type = if self.is_type_start_at_cur() && self.peek(1).kind != TokenKind::RParen {
             let saved = self.pos;
             let ty = self.parse_type();
             if self.is_ident_like() {
                 Some(ty)
             } else {
-                self.pos = saved;
+                self.rewind_to(saved);
                 None
             }
         } else {
             None
         };
         let param = self.expect_ident();
+        self.eat(TokenKind::Comma); // optional trailing comma
         self.expect(TokenKind::RParen);
         let body = self.parse_function_body();
         SetterDecl {
@@ -877,7 +901,7 @@ impl<'src> Parser<'src> {
                         });
                     }
                     // Not a constructor (e.g. `const qualified.Type field = ...`) — rollback
-                    self.pos = ctor_saved;
+                    self.rewind_to(ctor_saved);
                 }
             }
             let field_type = if self.is_type_start_at_cur() {
@@ -886,7 +910,7 @@ impl<'src> Parser<'src> {
                 if self.is_ident_like() {
                     Some(ty)
                 } else {
-                    self.pos = saved2;
+                    self.rewind_to(saved2);
                     None
                 }
             } else {
@@ -932,7 +956,7 @@ impl<'src> Parser<'src> {
                 ));
             }
             // Typed operator: `ReturnType operator ...`
-            if self.at(TokenKind::Operator) {
+            if self.at_operator_decl() {
                 return ClassMember::Operator(self.parse_operator(
                     annotations,
                     is_external,
@@ -1015,7 +1039,7 @@ impl<'src> Parser<'src> {
                     span: self.span_from(start),
                 });
             }
-            self.pos = saved;
+            self.rewind_to(saved);
         }
 
         // No type prefix — `name(...)`, `name.ctor(...)`, or `name<T>(...)`.
@@ -1081,7 +1105,7 @@ impl<'src> Parser<'src> {
                     });
                 }
             }
-            self.pos = saved;
+            self.rewind_to(saved);
         }
 
         // Give up — emit error node and skip to next member
@@ -1292,6 +1316,14 @@ impl<'src> Parser<'src> {
             } else {
                 Vec::new()
             };
+            // Enhanced-enum constant invoking a named (or `.new`) constructor:
+            // `a.foo(1)`, `a.new(1)`.
+            let constructor_name = if self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1) {
+                self.advance(); // .
+                Some(self.expect_ctor_name())
+            } else {
+                None
+            };
             let args = if self.at(TokenKind::LParen) {
                 Some(self.parse_arg_list())
             } else {
@@ -1301,6 +1333,7 @@ impl<'src> Parser<'src> {
                 annotations: v_annotations,
                 name: v_name,
                 type_args,
+                constructor_name,
                 args,
                 span: self.span_from(v_start),
             });
@@ -1429,7 +1462,7 @@ impl<'src> Parser<'src> {
                     span: self.span_from(start),
                 };
             }
-            self.pos = saved;
+            self.rewind_to(saved);
         }
 
         // Legacy form: `typedef [returnType] Name<T>(params);` — synthesize a
@@ -1571,7 +1604,7 @@ impl<'src> Parser<'src> {
             if self.at(TokenKind::Get) || self.at(TokenKind::Set) || self.is_ident_like() {
                 Some(ty)
             } else {
-                self.pos = saved;
+                self.rewind_to(saved);
                 None
             }
         } else {
@@ -1697,6 +1730,24 @@ impl<'src> Parser<'src> {
     }
 
     // ── String literal helper ─────────────────────────────────────────────────
+
+    /// Parse a directive URI, concatenating adjacent string literals as Dart does
+    /// for any string context: `import 'package:foo' '/bar.dart';`.
+    fn parse_uri(&mut self) -> StringLitNode {
+        let mut node = self.parse_string_lit();
+        while self.at(TokenKind::StringLit) {
+            let next = self.parse_string_lit();
+            let mut interpolations = node.interpolations;
+            interpolations.extend(next.interpolations);
+            node = StringLitNode {
+                raw: node.raw + &next.raw,
+                value: node.value + &next.value,
+                span: node.span.merge(&next.span),
+                interpolations,
+            };
+        }
+        node
+    }
 
     pub(super) fn parse_string_lit(&mut self) -> StringLitNode {
         let tok = self.cur().clone();

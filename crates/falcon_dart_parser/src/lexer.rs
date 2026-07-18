@@ -67,6 +67,16 @@ impl<'src> Lexer<'src> {
     fn next_token(&mut self) -> Token {
         let start = self.pos;
 
+        // Shebang: `#!...` on the very first line is a script directive, not
+        // Dart source. Consume the whole line as a comment (trivia) — but only
+        // at byte offset 0, so a stray `#!` elsewhere still lexes normally.
+        if start == 0 && self.remaining().starts_with("#!") {
+            while !matches!(self.cur(), None | Some('\n')) {
+                self.advance();
+            }
+            return self.make(TokenKind::LineComment, start);
+        }
+
         let c = match self.cur() {
             None => return self.make(TokenKind::Eof, start),
             Some(c) => c,
@@ -197,46 +207,8 @@ impl<'src> Lexer<'src> {
                     self.advance(); // escaped char
                 }
                 Some('$') if !raw => {
-                    self.advance(); // '$'
-                    match self.cur() {
-                        Some('{') => {
-                            self.advance(); // '{'
-                            let mut depth: usize = 1;
-                            while depth > 0 {
-                                match self.cur() {
-                                    None => return self.make(TokenKind::Error, start),
-                                    Some('{') => {
-                                        self.advance();
-                                        depth += 1;
-                                    }
-                                    Some('}') => {
-                                        self.advance();
-                                        depth -= 1;
-                                    }
-                                    Some('\\') => {
-                                        self.advance();
-                                        self.advance();
-                                    }
-                                    // A nested string in the interpolation body may
-                                    // hold braces (e.g. `"${ m['}'] }"`); skip it
-                                    // whole so they don't miscount `depth`.
-                                    Some('\'' | '"') => {
-                                        if !self.skip_nested_string() {
-                                            return self.make(TokenKind::Error, start);
-                                        }
-                                    }
-                                    _ => {
-                                        self.advance();
-                                    }
-                                }
-                            }
-                        }
-                        Some(c) if is_ident_start(c) => {
-                            while matches!(self.cur(), Some(c) if is_ident_continue(c)) {
-                                self.advance();
-                            }
-                        }
-                        _ => {}
+                    if !self.lex_interpolation() {
+                        return self.make(TokenKind::Error, start);
                     }
                 }
                 Some(c) if c == quote => {
@@ -259,6 +231,14 @@ impl<'src> Lexer<'src> {
                     self.advance(); // backslash
                     self.advance(); // escaped char (e.g. an escaped quote)
                 }
+                // Track `$ident` / `${...}` interpolations so a nested string
+                // inside `${...}` — including a nested TRIPLE-quoted string —
+                // cannot prematurely close this literal.
+                Some('$') if !raw => {
+                    if !self.lex_interpolation() {
+                        return self.make(TokenKind::Error, start);
+                    }
+                }
                 Some(c) if c == quote => {
                     if self.peek(1) == Some(quote) && self.peek(2) == Some(quote) {
                         self.advance();
@@ -274,6 +254,60 @@ impl<'src> Lexer<'src> {
             }
         }
         self.make(TokenKind::StringLit, start)
+    }
+
+    /// Consume a `$ident` or `${ ... }` interpolation region. The cursor must be
+    /// positioned on the `$`, which this consumes along with the region. Returns
+    /// `false` if a `${ ... }` region is unterminated (unbalanced braces before
+    /// end of input). Shared by the single- and triple-quoted body scanners so
+    /// both track interpolation boundaries identically.
+    fn lex_interpolation(&mut self) -> bool {
+        self.advance(); // '$'
+        match self.cur() {
+            Some('{') => {
+                self.advance(); // '{'
+                let mut depth: usize = 1;
+                while depth > 0 {
+                    match self.cur() {
+                        None => return false,
+                        Some('{') => {
+                            self.advance();
+                            depth += 1;
+                        }
+                        Some('}') => {
+                            self.advance();
+                            depth -= 1;
+                        }
+                        Some('\\') => {
+                            self.advance();
+                            self.advance();
+                        }
+                        // A nested string in the interpolation body may hold
+                        // braces (e.g. `"${ m['}'] }"`) or triple quotes; skip
+                        // it whole so they don't miscount `depth` or close the
+                        // outer literal.
+                        Some('\'' | '"') => {
+                            if !self.skip_nested_string() {
+                                return false;
+                            }
+                        }
+                        _ => {
+                            self.advance();
+                        }
+                    }
+                }
+            }
+            // A simple `$identifier`. `$` cannot continue the identifier (unlike
+            // a normal Dart identifier) so `$a$b` reads as two interpolations and
+            // `$m${...}` stops the name at the `$` that opens the next region.
+            Some(c) if is_ident_start(c) => {
+                while matches!(self.cur(), Some(c) if is_ident_continue(c) && c != '$') {
+                    self.advance();
+                }
+            }
+            _ => {}
+        }
+        true
     }
 
     /// Advance the cursor from an opening quote past the matching closing quote,

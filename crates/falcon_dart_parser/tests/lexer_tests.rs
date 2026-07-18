@@ -1,5 +1,7 @@
 use falcon_dart_parser::lexer::{Lexer, filter_trivia};
-use falcon_syntax::token::TokenKind;
+use falcon_dart_parser::parser::parse;
+use falcon_syntax::ast::*;
+use falcon_syntax::token::{Token, TokenKind};
 
 // ── Literals ──────────────────────────────────────────────────────────────────
 
@@ -707,4 +709,379 @@ fn test_malformed_valid_tokens_after_error_recover() {
             || tokens.iter().any(|t| t.kind == TokenKind::IntLit)
     );
     // Must never panic — reaching this line is the assertion
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lexer-gap regressions: doc comments (/** */), symbol-literal `#`, escapes in
+// triple-quoted strings, and `${ ... }` interpolation depth across nested strings.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Lex `src` and return every token kind (trivia included).
+fn kinds(src: &str) -> Vec<TokenKind> {
+    Lexer::new(src)
+        .tokenize()
+        .into_iter()
+        .map(|t| t.kind)
+        .collect()
+}
+
+/// Assert the source lexes without producing any `Error` token.
+fn assert_no_errors(src: &str) {
+    let errs: Vec<_> = Lexer::new(src)
+        .tokenize()
+        .into_iter()
+        .filter(|t| t.kind == TokenKind::Error)
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "unexpected Error tokens in {src:?}: {errs:?}"
+    );
+}
+
+/// The single non-trivia, non-EOF token kind produced for `src`.
+fn only_kind(src: &str) -> TokenKind {
+    let toks: Vec<_> = Lexer::new(src)
+        .tokenize()
+        .into_iter()
+        .filter(|t| !t.is_trivia() && t.kind != TokenKind::Eof)
+        .collect();
+    assert_eq!(
+        toks.len(),
+        1,
+        "expected exactly one token in {src:?}, got {toks:?}"
+    );
+    toks[0].kind.clone()
+}
+
+// ── (a) Doc comments: /** ... */ vs /* ... */ vs /**/ ──────────────────────────
+
+#[test]
+fn doc_block_comment_is_doc_comment() {
+    // `/** ... */` is a documentation comment, not a plain block comment.
+    let toks = Lexer::new("/** doc */").tokenize();
+    assert_eq!(toks[0].kind, TokenKind::DocComment);
+    assert_eq!(toks[0].text("/** doc */"), "/** doc */");
+    assert_no_errors("/** doc */");
+}
+
+#[test]
+fn plain_block_comment_stays_block_comment() {
+    let toks = Lexer::new("/* block */").tokenize();
+    assert_eq!(toks[0].kind, TokenKind::BlockComment);
+}
+
+#[test]
+fn empty_block_comment_is_block_not_doc() {
+    // `/**/` closes immediately — the trailing `/` is the terminator, so this
+    // is an empty *block* comment, never a doc comment.
+    let src = "/**/";
+    let toks = Lexer::new(src).tokenize();
+    assert_eq!(toks[0].kind, TokenKind::BlockComment);
+    assert_eq!(toks[0].len, 4);
+    assert_no_errors(src);
+}
+
+#[test]
+fn triple_star_open_is_doc_comment() {
+    // `/***/` has a non-`/` char after `/**`, so it is a doc comment.
+    let toks = Lexer::new("/***/").tokenize();
+    assert_eq!(toks[0].kind, TokenKind::DocComment);
+}
+
+#[test]
+fn doc_comment_preserves_nested_depth() {
+    // Nested `/* */` inside a doc comment must not close it early.
+    let src = "/** outer /* inner */ still doc */";
+    let toks = Lexer::new(src).tokenize();
+    assert_eq!(toks[0].kind, TokenKind::DocComment);
+    assert_eq!(toks[0].text(src), src);
+    assert_no_errors(src);
+}
+
+#[test]
+fn unterminated_doc_comment_is_error() {
+    // Depth bookkeeping still governs termination.
+    let toks = Lexer::new("/** never closed").tokenize();
+    assert_eq!(toks[0].kind, TokenKind::Error);
+}
+
+// ── (b) Symbol literals: `#` lexes as Hash ─────────────────────────────────────
+
+#[test]
+fn hash_symbol_lexes_as_hash_plus_ident() {
+    let src = "#foo";
+    assert_eq!(
+        kinds(src),
+        vec![TokenKind::Hash, TokenKind::Ident, TokenKind::Eof]
+    );
+    assert_no_errors(src);
+}
+
+#[test]
+fn bare_hash_is_hash_not_error() {
+    assert_eq!(only_kind("#"), TokenKind::Hash);
+    assert_no_errors("#");
+}
+
+// ── (c) Escapes in non-raw triple-quoted strings ───────────────────────────────
+
+#[test]
+fn triple_string_honors_escaped_quote() {
+    // `'''foo\''''` — the `\'` is an escaped quote, so the string is `foo'`
+    // and the final `'''` closes it. Without escape handling the lexer would
+    // terminate early at the first run of three quotes and leave a stray quote.
+    let src = "'''foo\\''''";
+    assert_eq!(only_kind(src), TokenKind::StringLit);
+    // The whole source is one string literal — nothing trails it.
+    assert_no_errors(src);
+    let toks = Lexer::new(src).tokenize();
+    assert_eq!(toks[0].len, src.len());
+}
+
+#[test]
+fn triple_string_escaped_backslash_then_close() {
+    // `'''a\\'''` — escaped backslash, then the closing `'''`.
+    let src = "'''a\\\\'''";
+    assert_eq!(only_kind(src), TokenKind::StringLit);
+    assert_no_errors(src);
+}
+
+#[test]
+fn raw_triple_string_ignores_backslash() {
+    // Raw strings: `\` is literal; `r'''a\'''` closes at the first `'''`.
+    let src = "r'''a\\'''";
+    assert_eq!(only_kind(src), TokenKind::StringLit);
+    assert_no_errors(src);
+}
+
+// ── (d) `${ ... }` depth across nested strings ─────────────────────────────────
+
+#[test]
+fn interpolation_brace_inside_nested_single_string() {
+    // `"${ m['}'] }"` — the `}` lives inside a nested single-quoted string and
+    // must not close the interpolation early.
+    let src = "\"${ m['}'] }\"";
+    assert_eq!(only_kind(src), TokenKind::StringLit);
+    assert_no_errors(src);
+    let toks = Lexer::new(src).tokenize();
+    assert_eq!(toks[0].len, src.len());
+}
+
+#[test]
+fn interpolation_brace_inside_nested_double_string() {
+    // Nested double-quoted string inside a single-quoted host string.
+    let src = "'${ f(\"}\") }'";
+    assert_eq!(only_kind(src), TokenKind::StringLit);
+    assert_no_errors(src);
+}
+
+#[test]
+fn interpolation_nested_triple_string_with_brace() {
+    let src = "\"${ g('''}''') }\"";
+    assert_eq!(only_kind(src), TokenKind::StringLit);
+    assert_no_errors(src);
+}
+
+#[test]
+fn plain_interpolation_still_lexes() {
+    let src = "\"${x + 1}\"";
+    assert_eq!(only_kind(src), TokenKind::StringLit);
+    assert_no_errors(src);
+}
+
+// ── (e) Suppression pinning: block-doc directive is a single DocComment token ───
+
+#[test]
+fn block_doc_ignore_lexes_as_single_doc_comment() {
+    // A `/** falcon-ignore ... */` directive is now a DocComment token. This
+    // documents the token-level fact the suppressions layer must guard against
+    // (block-doc comments must not act as line-only directives).
+    let src = "/** falcon-ignore lint/suspicious/avoid-dynamic: x */";
+    let toks = Lexer::new(src).tokenize();
+    assert_eq!(toks[0].kind, TokenKind::DocComment);
+    assert_eq!(toks[0].text(src), src);
+    assert_no_errors(src);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lexer tail-end regressions: shebang lines, adjacent `$ident` + `${...}`
+// interpolations, and nested triple-quoted strings inside interpolations.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Every token (trivia included) produced for `src`.
+fn all_tokens(src: &str) -> Vec<Token> {
+    Lexer::new(src).tokenize()
+}
+
+/// Assert `src` lexes without producing any `Error` token.
+fn assert_no_error_tokens(src: &str) {
+    let errs: Vec<_> = all_tokens(src)
+        .into_iter()
+        .filter(|t| t.kind == TokenKind::Error)
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "unexpected Error tokens in {src:?}: {errs:?}"
+    );
+}
+
+/// The text of each non-trivia, non-EOF token.
+fn significant_texts(src: &str) -> Vec<String> {
+    all_tokens(src)
+        .into_iter()
+        .filter(|t| !t.is_trivia() && t.kind != TokenKind::Eof)
+        .map(|t| src[t.offset..t.offset + t.len].to_string())
+        .collect()
+}
+
+/// Parse `void f() { var x = <expr>; }` and return the initializer string
+/// literal together with the wrapped source (so interpolation spans can be
+/// sliced). Asserts the whole program parses without error.
+fn string_lit(expr_src: &str) -> (StringLitNode, String) {
+    let src = format!("void f() {{ var x = {expr_src}; }}");
+    let (program, errors) = parse(&src);
+    assert!(
+        errors.is_empty(),
+        "parse errors for `{expr_src}`: {errors:?}"
+    );
+    let TopLevelDecl::Function(f) = &program.declarations[0] else {
+        panic!("expected a top-level function");
+    };
+    let Some(FunctionBody::Block(block)) = &f.body else {
+        panic!("expected a block body");
+    };
+    let Stmt::LocalVar(lv) = &block.stmts[0] else {
+        panic!("expected a local var");
+    };
+    let Some(Expr::StringLit(node)) = &lv.declarators[0].initializer else {
+        panic!("expected a string literal initializer");
+    };
+    (node.clone(), src)
+}
+
+/// The source text under each interpolation's span.
+fn interp_texts(node: &StringLitNode, src: &str) -> Vec<String> {
+    node.interpolations
+        .iter()
+        .map(|i| src[i.span.start..i.span.end].to_string())
+        .collect()
+}
+
+// ── (a) Shebang ─────────────────────────────────────────────────────────────
+
+#[test]
+fn shebang_line_lexes_without_errors() {
+    assert_no_error_tokens("#!/usr/bin/env dart\nvoid main() {}");
+}
+
+#[test]
+fn shebang_is_the_first_token_as_a_comment() {
+    let toks = all_tokens("#!/usr/bin/env dart\nvoid main() {}");
+    let first = &toks[0];
+    assert_eq!(first.kind, TokenKind::LineComment);
+    assert!(
+        first.is_trivia(),
+        "shebang must be trivia so the parser skips it"
+    );
+    assert_eq!(
+        &"#!/usr/bin/env dart\nvoid main() {}"[first.offset..first.offset + first.len],
+        "#!/usr/bin/env dart"
+    );
+}
+
+#[test]
+fn shebang_without_trailing_newline_lexes_clean() {
+    assert_no_error_tokens("#!/usr/bin/env dart");
+    let toks = all_tokens("#!/usr/bin/env dart");
+    assert_eq!(toks[0].kind, TokenKind::LineComment);
+}
+
+#[test]
+fn shebang_file_parses_with_zero_errors() {
+    let (_program, errors) = parse("#!/usr/bin/env dart\nvoid main() {}");
+    assert!(
+        errors.is_empty(),
+        "shebang file should parse cleanly: {errors:?}"
+    );
+}
+
+#[test]
+fn hash_bang_not_at_offset_zero_is_not_trivia() {
+    // Only byte offset 0 gets the shebang treatment; a `#` elsewhere lexes as a
+    // normal symbol-literal introducer, never swallowing the rest of the line.
+    let toks = all_tokens("\n#!/usr/bin/env dart");
+    assert_ne!(toks[0].kind, TokenKind::LineComment);
+    // First non-trivia token is the `#`, not a line comment.
+    let first_sig = toks
+        .iter()
+        .find(|t| !t.is_trivia() && t.kind != TokenKind::Eof)
+        .unwrap();
+    assert_eq!(first_sig.kind, TokenKind::Hash);
+}
+
+// ── (b) Adjacent `$ident` immediately followed by `${...}` ──────────────────
+
+#[test]
+fn adjacent_ident_then_braced_is_one_string_token() {
+    // Regression: `$m` used to swallow the following `$` (it is a valid
+    // identifier-continue char), splitting the literal into three tokens.
+    let src = "void f() { var x = '$m${ 'y' }'; }";
+    assert_no_error_tokens(src);
+    let texts = significant_texts(src);
+    assert!(
+        texts.contains(&"'$m${ 'y' }'".to_string()),
+        "expected a single StringLit token, got {texts:?}"
+    );
+}
+
+#[test]
+fn adjacent_ident_then_braced_interpolations() {
+    let (node, src) = string_lit("'$a${ 'y' }'");
+    assert_eq!(interp_texts(&node, &src), vec!["a", "'y'"]);
+    assert!(matches!(&node.interpolations[0].expr, Expr::Ident(id) if id.name == "a"));
+    assert!(matches!(&node.interpolations[1].expr, Expr::StringLit(_)));
+}
+
+#[test]
+fn adjacent_braced_then_braced_interpolations() {
+    let (node, src) = string_lit("'${a}${ 'y' }'");
+    assert_eq!(interp_texts(&node, &src), vec!["a", "'y'"]);
+}
+
+#[test]
+fn several_simple_interpolations_stop_at_each_dollar() {
+    let (node, src) = string_lit("'$a$b${c}'");
+    assert_eq!(interp_texts(&node, &src), vec!["a", "b", "c"]);
+    assert!(matches!(&node.interpolations[0].expr, Expr::Ident(id) if id.name == "a"));
+    assert!(matches!(&node.interpolations[1].expr, Expr::Ident(id) if id.name == "b"));
+    assert!(matches!(&node.interpolations[2].expr, Expr::Ident(id) if id.name == "c"));
+}
+
+// ── (c) Nested triple-quoted string inside an interpolation ─────────────────
+
+#[test]
+fn nested_triple_quote_in_interpolation_is_one_token() {
+    let src = "void f() { var x = '''${wrap('''inner''')}'''; }";
+    assert_no_error_tokens(src);
+    let texts = significant_texts(src);
+    assert!(
+        texts.contains(&"'''${wrap('''inner''')}'''".to_string()),
+        "expected a single StringLit token, got {texts:?}"
+    );
+}
+
+#[test]
+fn nested_triple_quote_in_interpolation_interpolations() {
+    let (node, src) = string_lit("'''${wrap('''inner''')}'''");
+    assert_eq!(interp_texts(&node, &src), vec!["wrap('''inner''')"]);
+    assert!(matches!(node.interpolations[0].expr, Expr::Call { .. }));
+}
+
+#[test]
+fn nested_double_triple_quote_in_interpolation() {
+    let (node, src) = string_lit("\"\"\"${f(\"x\")}\"\"\"");
+    assert_eq!(interp_texts(&node, &src), vec!["f(\"x\")"]);
+    assert!(matches!(node.interpolations[0].expr, Expr::Call { .. }));
 }

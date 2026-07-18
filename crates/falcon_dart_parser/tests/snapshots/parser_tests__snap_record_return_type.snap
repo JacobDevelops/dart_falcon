@@ -82,6 +82,7 @@ Function(
         body: Some(
             Arrow(
                 Record {
+                    is_const: false,
                     fields: [
                         RecordField {
                             name: None,

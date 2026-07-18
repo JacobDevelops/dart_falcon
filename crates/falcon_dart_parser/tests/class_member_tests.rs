@@ -8,6 +8,11 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 
+/// Parse whole-program `src` and return its parse-error count.
+fn errs(src: &str) -> usize {
+    parse(src).1.len()
+}
+
 fn only_class(prog: &Program) -> &ClassDecl {
     match &prog.declarations[0] {
         TopLevelDecl::Class(c) => c,
@@ -298,4 +303,70 @@ fn test_extension_type_named_constructor_is_constructor() {
         },
         other => panic!("expected extension type, got {other:?}"),
     }
+}
+
+// ── Corpus-found class-member gaps ───────────────────────────────────────
+
+#[test]
+fn annotation_then_named_field_record_return() {
+    assert_eq!(errs("class C { @override ({int a, int b})? m() {} }"), 0);
+}
+
+#[test]
+fn annotation_with_real_args_still_parses() {
+    // Regression guard: a genuine annotation argument list is untouched.
+    let src = "class C { @Foo({'a': 1}) int m() => 0; }";
+    assert_eq!(errs(src), 0);
+}
+
+#[test]
+fn arrow_closure_field_initializer() {
+    assert_eq!(errs("class C { final f = () => 0; }"), 0);
+}
+
+#[test]
+fn arrow_closure_field_then_more_members() {
+    // The `;` must reach the field parser so the next member parses cleanly.
+    assert_eq!(errs("class C { final f = () => 0; final g = 1; }"), 0);
+}
+
+#[test]
+fn enum_constant_named_constructor() {
+    let src = "enum E { a.foo(1); const E.foo(this.n); final int n; }";
+    let (prog, errors) = parse(src);
+    assert_eq!(errors.len(), 0, "errors: {errors:?}");
+    let en = match &prog.declarations[0] {
+        TopLevelDecl::Enum(e) => e,
+        other => panic!("expected enum, got {other:?}"),
+    };
+    let ctor = en.variants[0].constructor_name.as_ref();
+    assert_eq!(ctor.map(|i| i.name.as_str()), Some("foo"));
+}
+
+#[test]
+fn setter_trailing_comma() {
+    assert_eq!(errs("class C { set x(int a,) {} }"), 0);
+}
+
+#[test]
+fn setter_final_param() {
+    assert_eq!(errs("class C { set x(final Level a) {} }"), 0);
+}
+
+#[test]
+fn field_named_operator() {
+    // `operator` is a built-in identifier: a real member name when not followed by
+    // an operator symbol.
+    assert_eq!(errs("class C { Token? operator; }"), 0);
+}
+
+#[test]
+fn operator_overload_still_parses() {
+    let src = "class C { int operator +(int o) => 0; C operator [](int i) => this; }";
+    assert_eq!(errs(src), 0);
+}
+
+#[test]
+fn modifier_keyword_static_used_as_field_name() {
+    assert_eq!(errs("class C { static const static = 1; }"), 0);
 }

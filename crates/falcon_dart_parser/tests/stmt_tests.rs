@@ -412,3 +412,11 @@ fn test_if_case_typed_variable_guard() {
         other => panic!("expected if statement, got {other:?}"),
     }
 }
+
+// ── Corpus-found statement gaps ──────────────────────────────────────────
+
+#[test]
+fn label_between_switch_cases() {
+    let (_stmts, e) = body_stmts("switch (x) { case 1: continue lbl; lbl: case 2: break; }");
+    assert_eq!(e, 0);
+}

@@ -12,8 +12,8 @@ impl<'src> Parser<'src> {
         // void
         if self.at(TokenKind::Void) {
             self.advance();
-            // `void Function(...)` is a function type returning void
-            if self.at(TokenKind::Function) && self.peek(1).kind == TokenKind::LParen {
+            // `void Function(...)` / `void Function<T>(...)` returns void
+            if self.at_function_type_start() {
                 let ret = DartType::Void {
                     span: self.span_from(start),
                 };
@@ -37,6 +37,13 @@ impl<'src> Parser<'src> {
         // dynamic
         if self.at(TokenKind::Dynamic) {
             self.advance();
+            // `dynamic Function(...)` / `dynamic Function<T>(...)` returns dynamic
+            if self.at_function_type_start() {
+                let ret = DartType::Dynamic {
+                    span: self.span_from(start),
+                };
+                return self.parse_function_type(Some(ret), start);
+            }
             let is_nullable = self.eat_type_qmark();
             let span = self.span_from(start);
             return if is_nullable {
@@ -51,8 +58,8 @@ impl<'src> Parser<'src> {
             };
         }
 
-        // Function type starting with `Function(`
-        if self.at(TokenKind::Function) && self.peek(1).kind == TokenKind::LParen {
+        // Function type starting with `Function(` or `Function<T>(`
+        if self.at_function_type_start() {
             return self.parse_function_type(None, start);
         }
 
@@ -83,8 +90,9 @@ impl<'src> Parser<'src> {
             // `String? Function(...)`.
             let is_nullable = self.eat_type_qmark();
 
-            // Could be `Function(...)` after a (possibly nullable) return type.
-            if self.at(TokenKind::Function) && self.peek(1).kind == TokenKind::LParen {
+            // Could be `Function(...)` / `Function<T>(...)` after a (possibly
+            // nullable) return type.
+            if self.at_function_type_start() {
                 let ret = DartType::Named(NamedType {
                     segments,
                     type_args,
@@ -164,6 +172,13 @@ impl<'src> Parser<'src> {
                 | On
                 | Override
         )
+    }
+
+    /// `Function(` or `Function<` — the start of an (optionally generic)
+    /// inline function type, distinct from a bare type named `Function`.
+    fn at_function_type_start(&self) -> bool {
+        self.at(TokenKind::Function)
+            && matches!(self.peek(1).kind, TokenKind::LParen | TokenKind::Lt)
     }
 
     fn parse_function_type(&mut self, return_type: Option<DartType>, start: usize) -> DartType {
@@ -275,12 +290,19 @@ impl<'src> Parser<'src> {
         }
         self.expect(TokenKind::RParen);
         let is_nullable = self.eat_type_qmark();
-        DartType::Record(RecordType {
+        let record = DartType::Record(RecordType {
             positional,
             named,
             is_nullable,
             span: self.span_from(start),
-        })
+        });
+        // A record type may itself be the return type of a function type, e.g.
+        // `(int, int) Function()` — check for the `Function(...)` suffix here so it
+        // parses in specialized type positions (typedef RHS, field/param types).
+        if self.at_function_type_start() {
+            return self.parse_function_type(Some(record), start);
+        }
+        record
     }
 
     // ── Type parameters <T extends Bound, U> ──────────────────────────────────
@@ -419,7 +441,7 @@ impl<'src> Parser<'src> {
                 if self.is_ident_like() || self.at(TokenKind::This) || self.at(TokenKind::Super) {
                     Some(ty)
                 } else {
-                    self.pos = saved_pos;
+                    self.rewind_to(saved_pos);
                     None
                 }
             } else {

@@ -56,6 +56,12 @@ pub(super) struct Parser<'src> {
     /// where untyped members are always methods (no constructors permitted). An
     /// untyped `name(...)` member is a constructor only when `name` equals this.
     pub(super) enclosing_ctor_name: Option<String>,
+    /// Undo log for the in-place `>>`/`>>>` → `>` splits that [`parse_type_args`]
+    /// performs while closing nested generics. Each entry is `(token index,
+    /// original kind)`. A speculative rollback must restore these — see
+    /// [`rewind_to`] — otherwise a discarded type parse over a shift-token close
+    /// leaves the token permanently narrowed and corrupts the re-parse.
+    pub(super) gt_undo: Vec<(usize, TokenKind)>,
 }
 
 impl<'src> Parser<'src> {
@@ -68,7 +74,24 @@ impl<'src> Parser<'src> {
             suppress_conditional_qmark: false,
             pattern_binding: false,
             enclosing_ctor_name: None,
+            gt_undo: Vec::new(),
         }
+    }
+
+    /// Roll the cursor back to `saved`, restoring any `>>`/`>>>` tokens that were
+    /// split at or after that position back to their original kind. Speculative
+    /// parses that may have entered [`parse_type_args`] must rewind through this
+    /// rather than assigning `self.pos` directly, so a discarded type parse never
+    /// leaves a narrowed shift token behind.
+    pub(super) fn rewind_to(&mut self, saved: usize) {
+        while let Some((idx, _)) = self.gt_undo.last() {
+            if *idx < saved {
+                break;
+            }
+            let (idx, kind) = self.gt_undo.pop().unwrap();
+            self.tokens[idx].kind = kind;
+        }
+        self.pos = saved;
     }
 
     /// Consume a trailing `?` as a nullable-type suffix, unless we are parsing an
@@ -78,7 +101,14 @@ impl<'src> Parser<'src> {
             return false;
         }
         if self.suppress_conditional_qmark && self.token_starts_expr(&self.peek(1).kind) {
-            return false;
+            // `T? Function(...)` / `T? Function<...>` is an unambiguous nullable
+            // function type after an `is`/`as` type, not a conditional `?` — so the
+            // `?` is still a nullable suffix here despite `Function` starting an expr.
+            let is_fn_type = self.peek(1).kind == TokenKind::Function
+                && matches!(self.peek(2).kind, TokenKind::LParen | TokenKind::Lt);
+            if !is_fn_type {
+                return false;
+            }
         }
         self.advance();
         true
@@ -113,6 +143,10 @@ impl<'src> Parser<'src> {
                 | LParen
                 | LBracket
                 | LBrace
+                // A `<` after an `is`/`as` type begins a typed collection literal
+                // in the then-branch of a conditional (`x is T ? <int>[] : y`), so
+                // it starts an expression rather than continuing the type.
+                | Lt
         ) || self.is_ident_like_kind(kind)
     }
 
@@ -291,8 +325,22 @@ impl<'src> Parser<'src> {
             } else {
                 None
             };
+            // A `(` here is the annotation's argument list — but only if it parses
+            // cleanly as one. Bare metadata directly followed by a record-type
+            // member return (`@override ({int a, int b})? m()`) would otherwise be
+            // misread as a set/map-literal argument; speculatively parse and, on
+            // failure, roll back so the `(` stays for the return type.
             let args = if self.at(TokenKind::LParen) {
-                Some(self.parse_arg_list())
+                let saved = self.pos;
+                let saved_errors = self.errors.len();
+                let arg_list = self.parse_arg_list();
+                if self.errors.len() > saved_errors {
+                    self.errors.truncate(saved_errors);
+                    self.rewind_to(saved);
+                    None
+                } else {
+                    Some(arg_list)
+                }
             } else {
                 None
             };
@@ -392,15 +440,113 @@ impl<'src> Parser<'src> {
         // the inner close mutates >> → > in place but does NOT advance, so the
         // enclosing type-args list sees the remaining > and closes on it.
         if self.at(TokenKind::GtGtGt) {
+            self.gt_undo.push((self.pos, TokenKind::GtGtGt));
             self.tokens[self.pos].kind = TokenKind::GtGt;
             // Do NOT advance — leave >> for the next two outer closes.
         } else if self.at(TokenKind::GtGt) {
+            self.gt_undo.push((self.pos, TokenKind::GtGt));
             self.tokens[self.pos].kind = TokenKind::Gt;
             // Do NOT advance — leave > for the outer close.
         } else {
             self.eat(TokenKind::Gt);
         }
         args
+    }
+
+    // ── Directive routing lookahead ────────────────────────────────────────────
+
+    /// Kind of the first token past any leading annotations, without moving the
+    /// cursor. Used to route `@meta import/export/part/library …` directives,
+    /// whose keyword is hidden behind metadata the directive parser re-consumes.
+    pub(super) fn peek_kind_after_annotations(&self) -> TokenKind {
+        let i = self.index_after_annotations(self.pos);
+        self.tokens
+            .get(i)
+            .map(|t| t.kind.clone())
+            .unwrap_or(TokenKind::Eof)
+    }
+
+    /// Token index after skipping any run of annotations starting at `i`. A pure
+    /// lookahead helper (no cursor mutation); approximate by design — it only has
+    /// to land on the token that follows the metadata.
+    fn index_after_annotations(&self, mut i: usize) -> usize {
+        let n = self.tokens.len();
+        while i < n && self.tokens[i].kind == TokenKind::At {
+            i += 1; // @
+            if i < n && Self::kind_is_ident_like(&self.tokens[i].kind) {
+                i += 1; // first name segment
+            }
+            // dotted name: `.seg` while the next token names a segment
+            while i + 1 < n
+                && self.tokens[i].kind == TokenKind::Dot
+                && Self::kind_is_ident_like(&self.tokens[i + 1].kind)
+            {
+                i += 2;
+            }
+            // type arguments: `@Native<int Function()>(…)`
+            if i < n && self.tokens[i].kind == TokenKind::Lt {
+                i = self.index_after_balanced_angles(i);
+            }
+            // constructor name after type args: `@Foo<int>.named(…)`
+            if i + 1 < n
+                && self.tokens[i].kind == TokenKind::Dot
+                && Self::kind_is_ident_like(&self.tokens[i + 1].kind)
+            {
+                i += 2;
+            }
+            // argument list `(…)`
+            if i < n && self.tokens[i].kind == TokenKind::LParen {
+                i = self.index_after_balanced_parens(i);
+            }
+        }
+        i
+    }
+
+    /// Index just past a balanced `(…)` starting at `i` (which must be `LParen`).
+    fn index_after_balanced_parens(&self, mut i: usize) -> usize {
+        let n = self.tokens.len();
+        let mut depth = 0i32;
+        while i < n {
+            match self.tokens[i].kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => {
+                    depth -= 1;
+                    i += 1;
+                    if depth <= 0 {
+                        return i;
+                    }
+                    continue;
+                }
+                TokenKind::Eof => return i,
+                _ => {}
+            }
+            i += 1;
+        }
+        i
+    }
+
+    /// Index just past a balanced `<…>` starting at `i` (which must be `Lt`),
+    /// accounting for the merged `>>`/`>>>` close tokens.
+    fn index_after_balanced_angles(&self, mut i: usize) -> usize {
+        let n = self.tokens.len();
+        let mut depth = 0i32;
+        while i < n {
+            match self.tokens[i].kind {
+                TokenKind::Lt => depth += 1,
+                TokenKind::Gt => depth -= 1,
+                TokenKind::GtGt => depth -= 2,
+                TokenKind::GtGtGt => depth -= 3,
+                // A bare `;`/`{`/EOF cannot appear inside real type args — bail so a
+                // stray `<` never swallows the rest of the file.
+                TokenKind::Semicolon | TokenKind::LBrace | TokenKind::Eof => return i,
+                _ => {}
+            }
+            i += 1;
+            if depth <= 0 {
+                return i;
+            }
+        }
+        i
     }
 
     // ── Entry point ───────────────────────────────────────────────────────────
@@ -415,8 +561,9 @@ impl<'src> Parser<'src> {
         let mut declarations = Vec::new();
 
         while !self.at(TokenKind::Eof) {
-            // Peek past any annotations
-            match self.cur().kind {
+            // Route past any leading metadata so `@meta import/export/part …`
+            // reaches the directive parser (which re-consumes the annotations).
+            match self.peek_kind_after_annotations() {
                 TokenKind::Import => imports.push(self.parse_import()),
                 TokenKind::Export => exports.push(self.parse_export()),
                 TokenKind::Part => {

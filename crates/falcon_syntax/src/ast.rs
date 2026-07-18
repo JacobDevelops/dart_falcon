@@ -414,6 +414,9 @@ pub struct EnumVariant {
     pub annotations: Vec<Annotation>,
     pub name: Identifier,
     pub type_args: Vec<DartType>,
+    /// Named (or `.new`) constructor invoked by an enhanced-enum constant, e.g.
+    /// `a.foo(1)` — `Some(foo)`; `None` for an unnamed-constructor constant.
+    pub constructor_name: Option<Identifier>,
     pub args: Option<ArgList>,
     pub span: Span,
 }
@@ -1020,6 +1023,8 @@ pub enum Expr {
 
     // Records
     Record {
+        /// `const ('', X)` — a const record literal.
+        is_const: bool,
         fields: Vec<RecordField>,
         span: Span,
     },
@@ -1229,6 +1234,8 @@ pub enum CollectionElement {
         span: Span,
     },
     For {
+        /// `await for (...)` — an asynchronous for-in element in an async context.
+        is_await: bool,
         /// Simple loop variable (`for (final x in xs)`). `None` when the header
         /// uses a Dart 3 pattern instead, in which case `pattern` is set.
         variable: Option<Identifier>,
@@ -1277,6 +1284,8 @@ pub enum MapElement {
         span: Span,
     },
     For {
+        /// `await for (...)` — an asynchronous for-in entry in an async context.
+        is_await: bool,
         variable: Option<Identifier>,
         var_type: Option<DartType>,
         pattern: Option<Box<Pattern>>,

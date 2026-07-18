@@ -1,7 +1,9 @@
 //! Minimal-repro tests for the Dart 3 pattern parsing gaps closed in the
 //! `patterns` group: `when` guards after constant/dotted patterns, const
 //! patterns beyond dotted idents, typed collection patterns, map-pattern rest,
-//! and object-pattern getter shorthand binding.
+//! and object-pattern getter shorthand binding. Also covers map-pattern
+//! assignment (`{'k': a} = e;`) and the LBrace statement-start disambiguation
+//! between blocks and map/set literal expression statements.
 //!
 //! Each test asserts ZERO parse errors and the exact AST shape.
 
@@ -354,4 +356,137 @@ fn object_pattern_for_in() {
         },
         other => panic!("expected PatternForIn, got {other:?}"),
     }
+}
+// ── map-pattern assignment ────────────────────────────────────────────────────
+
+#[test]
+fn map_pattern_assignment_binds_variable() {
+    let (stmts, errs) = parse_body("{'a': a} = e;");
+    assert_eq!(errs, 0, "stmts: {stmts:?}");
+    assert_eq!(stmts.len(), 1, "one statement expected: {stmts:?}");
+    match &stmts[0] {
+        Stmt::PatternAssign(pa) => match &pa.pattern {
+            Pattern::Map(mp) => {
+                assert_eq!(mp.entries.len(), 1);
+                assert!(!mp.has_rest);
+                let entry = &mp.entries[0];
+                // Key is the constant string literal `'a'`.
+                assert!(
+                    matches!(&entry.key, Expr::StringLit(_)),
+                    "key: {:?}",
+                    entry.key
+                );
+                // Value sub-pattern binds a variable (assignable target `a`).
+                assert!(
+                    matches!(&entry.pattern, Pattern::Variable { name, .. } if name.name == "a"),
+                    "entry pattern: {:?}",
+                    entry.pattern
+                );
+            }
+            other => panic!("expected Map pattern, got {other:?}"),
+        },
+        other => panic!("expected PatternAssign, got {other:?}"),
+    }
+}
+
+#[test]
+fn map_pattern_assignment_multiple_entries() {
+    let (stmts, errs) = parse_body("{'a': a, 'b': b} = e;");
+    assert_eq!(errs, 0, "stmts: {stmts:?}");
+    match &stmts[0] {
+        Stmt::PatternAssign(pa) => match &pa.pattern {
+            Pattern::Map(mp) => {
+                assert_eq!(mp.entries.len(), 2);
+                let names: Vec<&str> = mp
+                    .entries
+                    .iter()
+                    .map(|e| match &e.pattern {
+                        Pattern::Variable { name, .. } => name.name.as_str(),
+                        other => panic!("expected Variable, got {other:?}"),
+                    })
+                    .collect();
+                assert_eq!(names, ["a", "b"]);
+            }
+            other => panic!("expected Map pattern, got {other:?}"),
+        },
+        other => panic!("expected PatternAssign, got {other:?}"),
+    }
+}
+
+// ── regression guards: LBrace disambiguation is untouched ──────────────────────
+
+#[test]
+fn bare_block_still_a_block() {
+    let (stmts, errs) = parse_body("{ f(); }");
+    assert_eq!(errs, 0, "stmts: {stmts:?}");
+    assert_eq!(stmts.len(), 1, "stmts: {stmts:?}");
+    match &stmts[0] {
+        Stmt::Block(b) => assert_eq!(b.stmts.len(), 1, "block body: {:?}", b.stmts),
+        other => panic!("expected Block, got {other:?}"),
+    }
+}
+
+#[test]
+fn map_literal_expression_statement_unchanged() {
+    let (stmts, errs) = parse_body("{'k': 1};");
+    assert_eq!(errs, 0, "stmts: {stmts:?}");
+    match &stmts[0] {
+        Stmt::Expr(es) => assert!(
+            matches!(&es.expr, Expr::Map { .. } | Expr::Set { .. }),
+            "expected a map/set literal expression, got {:?}",
+            es.expr
+        ),
+        other => panic!("expected Expr statement, got {other:?}"),
+    }
+}
+
+// ── Corpus-found pattern gaps ───────────────────────────────────────────
+
+#[test]
+fn dot_shorthand_switch_pattern() {
+    let (_stmts, e) = parse_body("var r = switch (x) { .build => 1, _ => 0 };");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn record_pattern_field_with_record_type() {
+    let (_stmts, e) = parse_body("final (bool a, (int, int)? b) = x;");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn cast_pattern_in_switch_expression_arm() {
+    let (stmts, e) = parse_body("var r = switch (o) { value as int => 1, _ => 0 };");
+    assert_eq!(e, 0, "stmts: {stmts:?}");
+}
+
+#[test]
+fn cast_pattern_in_switch_case() {
+    let (_stmts, e) = parse_body("switch (o) { case value as int: break; }");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn cast_pattern_on_parenthesized_pattern() {
+    let (_stmts, e) = parse_body("switch (o) { case (B() || C()) as B: break; }");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn cast_pattern_in_map_pattern_field() {
+    let (_stmts, e) = parse_body("switch (o) { case {usesKey: final usage as String}: break; }");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn record_pattern_with_when_guard() {
+    // The `when` after a record pattern is a guard, not a typed-variable name.
+    let (_stmts, e) = parse_body("switch (o) { case (a, b) when a: break; }");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn dot_shorthand_in_record_pattern_with_when() {
+    let (_stmts, e) = parse_body("switch (o) { case (.linux, _) when h: break; }");
+    assert_eq!(e, 0);
 }

@@ -30,6 +30,26 @@ fn parse_ok(expr_src: &str) -> Expr {
     expr
 }
 
+/// Parse whole-program `src` and return its parse-error count.
+fn errs(src: &str) -> usize {
+    parse(src).1.len()
+}
+
+/// Parse `src` as the body of an async function and return `(statements, error_count)`.
+fn parse_body(src: &str) -> (Vec<Stmt>, usize) {
+    let wrapped = format!("void f() async {{ {src} }}");
+    let (prog, errors) = parse(&wrapped);
+    let func = match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("expected function, got {other:?}\nerrors: {errors:?}"),
+    };
+    let block = match func.body.as_ref().unwrap() {
+        FunctionBody::Block(b) => b,
+        other => panic!("expected block, got {other:?}"),
+    };
+    (block.stmts.clone(), errors.len())
+}
+
 // ── Item (a): leading-spread map/set disambiguation ───────────────────────────
 
 #[test]
@@ -375,4 +395,177 @@ fn test_symbol_literal_index_assign_operator() {
         Expr::SymbolLit { raw, .. } => assert_eq!(raw, "#[]="),
         other => panic!("expected SymbolLit, got {other:?}"),
     }
+}
+
+// ── Corpus-found expression gaps ─────────────────────────────────────────
+
+#[test]
+fn cast_binds_tighter_than_less_than() {
+    let (stmts, e) = parse_body("var r = a < b as int;");
+    assert_eq!(e, 0, "stmts: {stmts:?}");
+    // Expect `a < (b as int)`.
+    let init = match &stmts[0] {
+        Stmt::LocalVar(v) => v.declarators[0].initializer.as_ref().unwrap(),
+        other => panic!("expected LocalVar, got {other:?}"),
+    };
+    match init {
+        Expr::Binary { op, right, .. } => {
+            assert!(matches!(op, BinaryOp::Lt));
+            assert!(
+                matches!(right.as_ref(), Expr::As { .. }),
+                "right: {right:?}"
+            );
+        }
+        other => panic!("expected Binary(<), got {other:?}"),
+    }
+}
+
+#[test]
+fn cast_then_comparison() {
+    // `(x as int) <= y`.
+    let (_stmts, e) = parse_body("var r = x as int <= y;");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn is_test_then_typed_collection_ternary() {
+    let (_stmts, e) = parse_body("var y = a is Foo ? <int>[] : b;");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn await_for_collection_element() {
+    let (stmts, e) = parse_body("var b = [await for (var c in s) ...c];");
+    assert_eq!(e, 0, "stmts: {stmts:?}");
+    let init = match &stmts[0] {
+        Stmt::LocalVar(v) => v.declarators[0].initializer.as_ref().unwrap(),
+        other => panic!("expected LocalVar, got {other:?}"),
+    };
+    match init {
+        Expr::List { elements, .. } => match &elements[0] {
+            CollectionElement::For { is_await, .. } => assert!(is_await, "expected await for"),
+            other => panic!("expected For element, got {other:?}"),
+        },
+        other => panic!("expected List, got {other:?}"),
+    }
+}
+
+#[test]
+fn is_not_nullable_function_type() {
+    let (_stmts, e) = parse_body("if (a is! Object? Function()) return;");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn const_record_literal() {
+    let (stmts, e) = parse_body("var x = const (\"\", Y.Z);");
+    assert_eq!(e, 0, "stmts: {stmts:?}");
+    let init = match &stmts[0] {
+        Stmt::LocalVar(v) => v.declarators[0].initializer.as_ref().unwrap(),
+        other => panic!("expected LocalVar, got {other:?}"),
+    };
+    match init {
+        Expr::Record {
+            is_const, fields, ..
+        } => {
+            assert!(is_const, "expected const record");
+            assert_eq!(fields.len(), 2);
+        }
+        other => panic!("expected Record, got {other:?}"),
+    }
+}
+
+#[test]
+fn relational_lt_with_shift_in_ternary() {
+    assert_eq!(errs("var q = a < b ? (d >> (e)) : 0;"), 0);
+}
+
+#[test]
+fn method_type_args_nested_generic_in_function_type_param() {
+    // `Pointer<Uint32> count` is a generic-typed named parameter inside the
+    // function type, and the list closes with a `>>>` shift token — both of which
+    // used to make the type-arg scan fall back to a `<` comparison.
+    let (_stmts, e) =
+        parse_body("p.cast<Pointer<NativeFunction<Int32 Function(Pointer<Uint32> count)>>>();");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn method_type_args_survive_speculative_typed_decl_rollback() {
+    // As a bare expression statement the `>>>` close is first scanned by the
+    // speculative typed-declaration path; its rolled-back type parse must restore
+    // the split shift token so the committed re-parse still sees it.
+    assert_eq!(
+        errs("void f() { p.cast<Pointer<NativeFunction<Int32 Function(Pointer<Uint32> c)>>>(); }"),
+        0
+    );
+}
+
+#[test]
+fn multi_arg_method_type_args() {
+    let (_stmts, e) = parse_body("x.cast<A, B>();");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn record_type_with_generic_field_as_type_arg() {
+    let (_stmts, e) = parse_body("var q = Queue<(Uri sourceDoc, Ref<Parseable> ref)>();");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn record_type_type_arg_with_nested_generic() {
+    let (_stmts, e) = parse_body("isA<(String, List<String>)>();");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn cascade_on_as_cast() {
+    let (stmts, e) = parse_body("y = x as web.HTMLMetaElement ..name = 'n';");
+    assert_eq!(e, 0, "stmts: {stmts:?}");
+    // The cascade wraps the whole `(x as T)`.
+    let value = match &stmts[0] {
+        Stmt::Expr(s) => match &s.expr {
+            Expr::Assign { value, .. } => value.as_ref(),
+            other => panic!("expected Assign, got {other:?}"),
+        },
+        other => panic!("expected Expr stmt, got {other:?}"),
+    };
+    match value {
+        Expr::Cascade { object, .. } => {
+            assert!(
+                matches!(object.as_ref(), Expr::As { .. }),
+                "object: {object:?}"
+            );
+        }
+        other => panic!("expected Cascade, got {other:?}"),
+    }
+}
+
+#[test]
+fn plain_cascade_still_parses() {
+    let (_stmts, e) = parse_body("y..a()..b = 1;");
+    assert_eq!(e, 0);
+}
+
+#[test]
+fn const_generic_constructor_statement() {
+    let (stmts, e) = parse_body("const Optional<int>.absent();");
+    assert_eq!(e, 0, "stmts: {stmts:?}");
+    let expr = match &stmts[0] {
+        Stmt::Expr(s) => &s.expr,
+        other => panic!("expected Expr stmt, got {other:?}"),
+    };
+    assert!(
+        matches!(expr, Expr::New { is_const: true, .. }),
+        "expr: {expr:?}"
+    );
+}
+
+#[test]
+fn const_generic_typed_local_decl_still_parses() {
+    // Regression guard: `const List<int> xs = []` stays a const var declaration.
+    let (stmts, e) = parse_body("const List<int> xs = [];");
+    assert_eq!(e, 0);
+    assert!(matches!(&stmts[0], Stmt::LocalVar(v) if v.is_const));
 }

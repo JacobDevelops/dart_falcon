@@ -1,6 +1,5 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
-assertion_line: 1608
 expression: "prog.declarations[0]"
 ---
 Function(
@@ -139,6 +138,7 @@ Function(
                     type_arg: None,
                     elements: [
                         For {
+                            is_await: false,
                             variable: Some(
                                 Identifier {
                                     name: "x",
