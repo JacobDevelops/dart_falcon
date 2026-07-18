@@ -15,6 +15,9 @@
             "complexity": {
               "additionalProperties": false,
               "properties": {
+                "avoid-function-literals-in-foreach-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-inverted-boolean-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -25,6 +28,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-redundant-async": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-containers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-type-assertions": {
@@ -54,10 +60,19 @@
                 "no-boolean-literal-compare": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-conditional-assignment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-conditional-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-extracting-callbacks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-for-elements-to-map-from-iterable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-if-null-operators": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-immediate-return": {
@@ -70,6 +85,18 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-moving-to-variable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-null-aware-operators": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-const": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-getters-setters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-overrides": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -84,13 +111,28 @@
                 "avoid-mutable-global-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-relative-lib-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-returning-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-web-libraries-in-flutter": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "correct-order-for-super-dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "hash-and-equals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "implementation-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-logic-in-create-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "proper-controller-dispose": {
@@ -113,6 +155,9 @@
                 },
                 "use-once-constructors-once-provider": {
                   "$ref": "#/definitions/ruleConfig"
+                },
+                "valid-regexps": {
+                  "$ref": "#/definitions/ruleConfig"
                 }
               },
               "type": "object"
@@ -127,6 +172,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-declaring-const-constructor": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "sized-box-for-whitespace": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-to-list-in-spreads": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -216,7 +267,13 @@
                 "prefer-underscore-for-unused-callback-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "sort-child-properties-last": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "use-design-system-item": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-full-hex-values-for-flutter-colors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-spacer-as-expanded-child": {
@@ -231,16 +288,37 @@
                 "avoid-dynamic": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-empty-else": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-ignoring-return-values": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-passing-async-when-sync-expected": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-print": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-returning-null-for-void": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-shadowing-type-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-throw-in-catch-block": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unrelated-type-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "control-flow-in-finally": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "empty-catches": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "empty-statements": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-duplicate-case-values": {
@@ -256,6 +334,21 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-self-comparisons": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-wildcard-variable-uses": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "recursive-getters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-null-aware-assignments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-null-in-if-null-operators": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-rethrow-when-possible": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -374,6 +467,9 @@
             "complexity": {
               "additionalProperties": false,
               "properties": {
+                "avoid-function-literals-in-foreach-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-inverted-boolean-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -384,6 +480,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-redundant-async": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unnecessary-containers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unnecessary-type-assertions": {
@@ -413,10 +512,19 @@
                 "no-boolean-literal-compare": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-conditional-assignment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-conditional-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-extracting-callbacks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-for-elements-to-map-from-iterable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-if-null-operators": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-immediate-return": {
@@ -429,6 +537,18 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-moving-to-variable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-null-aware-operators": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-const": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-getters-setters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-overrides": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -443,13 +563,28 @@
                 "avoid-mutable-global-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-relative-lib-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-returning-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-web-libraries-in-flutter": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "correct-order-for-super-dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "hash-and-equals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "implementation-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-logic-in-create-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "proper-controller-dispose": {
@@ -472,6 +607,9 @@
                 },
                 "use-once-constructors-once-provider": {
                   "$ref": "#/definitions/ruleConfig"
+                },
+                "valid-regexps": {
+                  "$ref": "#/definitions/ruleConfig"
                 }
               },
               "type": "object"
@@ -486,6 +624,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-declaring-const-constructor": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "sized-box-for-whitespace": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-to-list-in-spreads": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -575,7 +719,13 @@
                 "prefer-underscore-for-unused-callback-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "sort-child-properties-last": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "use-design-system-item": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-full-hex-values-for-flutter-colors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-spacer-as-expanded-child": {
@@ -590,16 +740,37 @@
                 "avoid-dynamic": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-empty-else": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-ignoring-return-values": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-passing-async-when-sync-expected": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-print": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-returning-null-for-void": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-shadowing-type-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-throw-in-catch-block": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unrelated-type-assertions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "control-flow-in-finally": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "empty-catches": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "empty-statements": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-duplicate-case-values": {
@@ -615,6 +786,21 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-self-comparisons": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-wildcard-variable-uses": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "recursive-getters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-null-aware-assignments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-null-in-if-null-operators": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-rethrow-when-possible": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
