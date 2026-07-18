@@ -13,3 +13,30 @@ void examples() {
   final f = [new Foo()]; /* expect: unnecessary-new */
   print([a, b, c, d, e, f]);
 }
+
+// ── Reached only via the constructor-initializer walk ─────────────────────────
+// Each `new` below lives inside a ConstructorInitializer (field init, super-call,
+// this-call, or assert). The default walk descends into those nodes only after
+// the visitor traversal-gap fix, so these diagnostics regress if it is reverted.
+class Wrapper {
+  Wrapper([Object? o]);
+}
+
+class InitFieldInit {
+  final Object a;
+  InitFieldInit() : a = new Foo(); /* expect: unnecessary-new */
+}
+
+class InitSuperCall extends Wrapper {
+  InitSuperCall() : super(new Foo()); /* expect: unnecessary-new */
+}
+
+class InitThisCall {
+  final Object a;
+  InitThisCall() : this._(new Foo()); /* expect: unnecessary-new */
+  InitThisCall._(this.a);
+}
+
+class InitAssert {
+  InitAssert() : assert(new Foo() != null); /* expect: unnecessary-new */
+}

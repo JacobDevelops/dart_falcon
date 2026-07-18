@@ -14,3 +14,28 @@ String examples(String name, Object value, int n, String? maybe) {
   final l = '$value'; // Object interpolation
   return '$a$b$c$d$e$f$g$h$i$j$k$l';
 }
+
+class ShadowedField {
+  String? x;
+
+  // A try-body local must not leak past its block: `$x` below resolves to the
+  // nullable field, so proving it String via the leaked local would be wrong.
+  void f() {
+    try {
+      var x = 'lit';
+      print(x);
+    } catch (_) {}
+    print('$x');
+  }
+
+  // Same for a finally-body local.
+  void g() {
+    try {
+      print('');
+    } finally {
+      var x = 'lit';
+      print(x);
+    }
+    print('$x');
+  }
+}

@@ -737,7 +737,7 @@ impl<'src> Parser<'src> {
                     node = StringLitNode {
                         raw: node.raw + &next.raw,
                         value: node.value + &next.value,
-                        span: next.span,
+                        span: node.span.merge(&next.span),
                         interpolations,
                     };
                 }
