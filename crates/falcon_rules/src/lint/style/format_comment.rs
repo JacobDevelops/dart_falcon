@@ -89,9 +89,12 @@ struct CommentToken<'a> {
 
 const PUNCTUATION: [char; 4] = ['.', '!', '?', ':'];
 
-/// Terminators that end a "sentence" for the multiline split (dcl's
-/// `[\.|:]` char class, which also treats `|` as a boundary).
-const SENTENCE_TERMINATORS: [char; 3] = ['.', '|', ':'];
+/// Terminators that end a "sentence" for the multiline split. Unlike dcl's
+/// `[\.|:]` char class, `:` is NOT a terminator: a colon introduces a clause
+/// that may legitimately start lowercase ("Word: lowercase clause."), and the
+/// single-line path never splits on it — treating it as a boundary here made
+/// the verdict depend on how the comment happened to be line-wrapped.
+const SENTENCE_TERMINATORS: [char; 2] = ['.', '|'];
 
 /// Scan raw source for `//` / `///` line comments, skipping strings and block
 /// comments. This mirrors dart_code_linter operating on the analyzer token
@@ -320,9 +323,10 @@ fn is_valid_sentence(sentence: &str) -> bool {
     upper && last_symbol && has_empty_space
 }
 
-/// Split on the zero-width boundary *after* a `.`/`|`/`:` that is followed by
+/// Split on the zero-width boundary *after* a `.`/`|` that is followed by
 /// whitespace or end-of-text — a hand-rolled equivalent of dcl's lookbehind
-/// `RegExp(r'(?<=([\.|:](?=\s|\n|$)))')`, which the `regex` crate cannot express.
+/// `RegExp(r'(?<=([\.|:](?=\s|\n|$)))')` (minus `:`, see SENTENCE_TERMINATORS),
+/// which the `regex` crate cannot express.
 fn split_sentences(text: &str) -> Vec<&str> {
     let mut sentences = Vec::new();
     let mut start = 0;

@@ -10,11 +10,15 @@ fn main() {
         Some("validate-rules") => validate_rules(&args[1..]),
         Some("perf-lock") => perf_lock(&args[1..]),
         Some("schema") => schema(&args[1..]),
+        Some("docgen") => docgen(&args[1..]),
         _ => {
             eprintln!("Usage: cargo xtask <task>");
             eprintln!("Available tasks:");
             eprintln!("  codegen         Generate rule implementation + fixture stubs");
             eprintln!("  validate-rules  Validate rule implementations against golden corpus");
+            eprintln!(
+                "  docgen          Emit website/src/data/{{rules,domains}}.json for the docs site"
+            );
             eprintln!(
                 "  perf-lock       Enforce the M6 performance lock (<1000ms on jfit mobile lib)"
             );
@@ -877,4 +881,434 @@ fn perf_lock(args: &[String]) {
     if !pass {
         std::process::exit(1);
     }
+}
+
+// ── Docgen ──────────────────────────────────────────────────────────────────
+
+use falcon_rules::meta::{DOMAINS, RULE_METADATA, RuleMeta, RuleSource};
+use serde_json::{Map, Value, json};
+
+/// Convert a byte offset in `source` to a 1-indexed column (character count from
+/// the start of the line).
+fn byte_offset_to_col(source: &str, offset: usize) -> usize {
+    let clamped = offset.min(source.len());
+    let line_start = source[..clamped].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    source[line_start..clamped].chars().count() + 1
+}
+
+/// Map a rule's snake_case module name from its kebab id.
+fn snake_of(name: &str) -> String {
+    name.replace('-', "_")
+}
+
+/// The source file path for a rule's implementation.
+fn rule_source_path(root: &Path, meta: &RuleMeta) -> PathBuf {
+    let snake = snake_of(meta.name);
+    if meta.cross_file {
+        root.join(format!("crates/falcon_rules/src/cross_file/{snake}.rs"))
+    } else {
+        root.join(format!(
+            "crates/falcon_rules/src/lint/{}/{}.rs",
+            meta.group, snake
+        ))
+    }
+}
+
+/// Extract the lead description from a rule's `//!` module doc: the first
+/// sentence, with any trailing provenance sentence ("Ported from …", "Port of
+/// …", "Original to falcon.", "Adopted from …") dropped. Returns "" (and warns)
+/// when the file or doc is missing.
+fn extract_description(source_path: &Path, rule_name: &str) -> String {
+    let content = match fs::read_to_string(source_path) {
+        Ok(c) => c,
+        Err(_) => {
+            eprintln!(
+                "warning: {rule_name}: cannot read source {} for description",
+                source_path.display()
+            );
+            return String::new();
+        }
+    };
+
+    // Join the leading run of `//!` doc lines until the first complete sentence.
+    let mut doc = String::new();
+    let mut saw_doc = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("//!") {
+            saw_doc = true;
+            let seg = rest.trim();
+            if seg.is_empty() {
+                if !doc.is_empty() {
+                    break;
+                }
+                continue;
+            }
+            if !doc.is_empty() {
+                doc.push(' ');
+            }
+            doc.push_str(seg);
+            if doc.contains(". ") {
+                break;
+            }
+        } else if saw_doc {
+            break;
+        } else if !trimmed.is_empty() && !trimmed.starts_with("//") {
+            // Hit real code before any module doc — none present.
+            break;
+        }
+    }
+
+    if doc.is_empty() {
+        eprintln!("warning: {rule_name}: no //! module doc found for description");
+        return String::new();
+    }
+
+    // Take the first sentence (up to and including the first period followed by a
+    // space, or the whole string if there is no sentence break).
+    let first = match doc.find(". ") {
+        Some(idx) => doc[..=idx].trim().to_string(),
+        None => doc.trim().to_string(),
+    };
+
+    // Safety net: if the first sentence is itself a provenance note, drop it.
+    const PROVENANCE: [&str; 4] = ["Ported from", "Port of", "Original to", "Adopted from"];
+    if PROVENANCE.iter().any(|p| first.starts_with(p)) {
+        return String::new();
+    }
+    first
+}
+
+/// Remove all `/* expect: … */` annotation comments from fixture source, then
+/// rstrip each line so the displayed code is clean.
+fn strip_expectations(source: &str) -> String {
+    let mut cleaned = String::with_capacity(source.len());
+    for (i, line) in source.lines().enumerate() {
+        if i > 0 {
+            cleaned.push('\n');
+        }
+        let mut out = String::with_capacity(line.len());
+        let mut rest = line;
+        while let Some(start) = rest.find("/* expect:") {
+            out.push_str(&rest[..start]);
+            match rest[start..].find("*/") {
+                Some(end) => rest = &rest[start + end + 2..],
+                None => {
+                    rest = "";
+                    break;
+                }
+            }
+        }
+        out.push_str(rest);
+        cleaned.push_str(out.trim_end());
+    }
+    cleaned
+}
+
+/// Human-facing source provenance for a rule.
+fn source_json(source: &RuleSource) -> Value {
+    let (kind, label, upstream_id, upstream_url): (&str, &str, Option<String>, Option<String>) =
+        match source {
+            RuleSource::Lints(id) => (
+                "Lints",
+                "Dart lints",
+                Some((*id).to_string()),
+                Some(format!("https://dart.dev/tools/linter-rules/{id}")),
+            ),
+            // DCM rule ids don't map to a stable per-rule URL without the rule's
+            // DCM category, so keep the id + label but leave the URL null.
+            RuleSource::DartCodeLinter(id) => (
+                "DartCodeLinter",
+                "Dart Code Metrics",
+                Some((*id).to_string()),
+                None,
+            ),
+            RuleSource::PyramidLint(id) => (
+                "PyramidLint",
+                "Pyramid Lint",
+                Some((*id).to_string()),
+                Some("https://pub.dev/packages/pyramid_lint".to_string()),
+            ),
+            RuleSource::Falcon => ("Falcon", "Falcon", None, None),
+        };
+    json!({
+        "kind": kind,
+        "label": label,
+        "upstreamId": upstream_id,
+        "upstreamUrl": upstream_url,
+    })
+}
+
+/// Build the per-rule config passed to the falcon binary so that exactly this
+/// rule fires (even non-recommended ones). Rules that ship a corpus
+/// `config.json` (options/thresholds) reuse it verbatim; everything else gets a
+/// minimal generated config written to `temp_path`.
+fn docgen_config_for(root: &Path, meta: &RuleMeta, temp_path: &Path) -> Option<PathBuf> {
+    let corpus_config = root.join(format!(
+        "crates/falcon_rules/tests/corpus/{}/config.json",
+        meta.name
+    ));
+    if corpus_config.exists() {
+        return Some(corpus_config);
+    }
+
+    let mut group_map = Map::new();
+    group_map.insert(meta.name.to_string(), json!("error"));
+
+    let mut rules = Map::new();
+    rules.insert("recommended".to_string(), json!(false));
+    rules.insert(meta.group.to_string(), Value::Object(group_map));
+
+    let cfg = if meta.cross_file {
+        json!({
+            "linter": { "rules": { "recommended": false } },
+            "cross-file": { "rules": rules },
+        })
+    } else {
+        json!({
+            "linter": { "rules": rules },
+            "cross-file": { "rules": { "recommended": false } },
+        })
+    };
+
+    match fs::write(
+        temp_path,
+        serde_json::to_string_pretty(&cfg).unwrap_or_default(),
+    ) {
+        Ok(()) => Some(temp_path.to_path_buf()),
+        Err(e) => {
+            eprintln!(
+                "warning: {}: cannot write temp config {}: {e}",
+                meta.name,
+                temp_path.display()
+            );
+            None
+        }
+    }
+}
+
+/// Emit `website/src/data/rules.json` and `website/src/data/domains.json` from
+/// `RULE_METADATA`, corpus fixtures, and real diagnostics from the falcon
+/// binary. These committed files are the docs website's only data source; the
+/// site build never needs cargo.
+fn docgen(_args: &[String]) {
+    let root = workspace_root();
+    let corpus_root = root.join("crates/falcon_rules/tests/corpus");
+
+    // Build the debug falcon binary once, up front.
+    eprintln!("building falcon binary (debug)...");
+    let status = Command::new("cargo")
+        .args(["build", "--bin", "falcon"])
+        .current_dir(&root)
+        .status()
+        .expect("failed to spawn cargo build");
+    if !status.success() {
+        eprintln!("error: falcon build failed");
+        std::process::exit(1);
+    }
+    let falcon_bin = root.join("target/debug/falcon");
+    let falcon_bin = falcon_bin.to_string_lossy().to_string();
+    if RULE_METADATA.is_empty() {
+        eprintln!("error: RULE_METADATA is empty");
+        std::process::exit(1);
+    }
+
+    let temp_config = std::env::temp_dir().join("falcon-docgen-config.json");
+
+    // Deterministic order: by group, then name.
+    let mut metas: Vec<&RuleMeta> = RULE_METADATA.iter().collect();
+    metas.sort_by(|a, b| a.group.cmp(b.group).then(a.name.cmp(b.name)));
+
+    let mut records: Vec<Value> = Vec::with_capacity(metas.len());
+    let mut with_bad = 0usize;
+    let mut with_good = 0usize;
+    let mut with_diags = 0usize;
+    let mut zero_diag_with_fixture: Vec<String> = Vec::new();
+
+    for meta in &metas {
+        let rule_dir = corpus_root.join(meta.name);
+        let cross_file_dir = rule_dir.join("cross-file");
+
+        let source_path = rule_source_path(&root, meta);
+        let description = extract_description(&source_path, meta.name);
+
+        let config = docgen_config_for(&root, meta, &temp_config);
+
+        // ── examples ──
+        let bad_path = rule_dir.join("bad.dart");
+        let good_path = rule_dir.join("good.dart");
+        let bad_example = fs::read_to_string(&bad_path)
+            .ok()
+            .map(|s| strip_expectations(&s));
+        let good_example = fs::read_to_string(&good_path)
+            .ok()
+            .map(|s| strip_expectations(&s));
+        if bad_example.is_some() {
+            with_bad += 1;
+        }
+        if good_example.is_some() {
+            with_good += 1;
+        }
+
+        // Cross-file fixture files (bad side): every .dart under cross-file/.
+        let mut cross_file_sources: Vec<(String, String)> = Vec::new();
+        if cross_file_dir.is_dir()
+            && let Ok(entries) = fs::read_dir(&cross_file_dir)
+        {
+            let mut files: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("dart"))
+                .collect();
+            files.sort();
+            for f in files {
+                if let Ok(src) = fs::read_to_string(&f) {
+                    let base = f
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    cross_file_sources.push((base, src));
+                }
+            }
+        }
+        let cross_file_examples: Option<Value> = if cross_file_sources.is_empty() {
+            None
+        } else {
+            Some(Value::Array(
+                cross_file_sources
+                    .iter()
+                    .map(|(path, content)| {
+                        json!({ "path": path, "content": strip_expectations(content) })
+                    })
+                    .collect(),
+            ))
+        };
+
+        // ── diagnostics ── real output from the falcon binary, filtered to this rule.
+        let mut diagnostics: Vec<Value> = Vec::new();
+        let had_fixture;
+        if meta.cross_file && !cross_file_sources.is_empty() {
+            had_fixture = true;
+            let by_base: HashMap<&str, &str> = cross_file_sources
+                .iter()
+                .map(|(b, s)| (b.as_str(), s.as_str()))
+                .collect();
+            for d in run_falcon(&falcon_bin, &cross_file_dir, config.as_deref())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|d| d.rule == meta.name)
+            {
+                let base = Path::new(&d.file_path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let src = by_base.get(base.as_str()).copied().unwrap_or("");
+                diagnostics.push(json!({
+                    "message": d.message,
+                    "line": byte_offset_to_line(src, d.span.start),
+                    "column": byte_offset_to_col(src, d.span.start),
+                    "file": base,
+                }));
+            }
+        } else if bad_path.exists() {
+            had_fixture = true;
+            let src = fs::read_to_string(&bad_path).unwrap_or_default();
+            for d in run_falcon(&falcon_bin, &bad_path, config.as_deref())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|d| d.rule == meta.name)
+            {
+                diagnostics.push(json!({
+                    "message": d.message,
+                    "line": byte_offset_to_line(&src, d.span.start),
+                    "column": byte_offset_to_col(&src, d.span.start),
+                    "file": Value::Null,
+                }));
+            }
+        } else {
+            had_fixture = false;
+        }
+
+        if !diagnostics.is_empty() {
+            with_diags += 1;
+        } else if had_fixture {
+            zero_diag_with_fixture.push(meta.name.to_string());
+        }
+
+        records.push(json!({
+            "name": meta.name,
+            "group": meta.group,
+            "domains": meta.domains,
+            "recommended": meta.recommended,
+            "crossFile": meta.cross_file,
+            "source": source_json(&meta.source),
+            "description": description,
+            "examples": {
+                "bad": bad_example,
+                "good": good_example,
+                "crossFile": cross_file_examples,
+            },
+            "diagnostics": diagnostics,
+        }));
+    }
+
+    // ── domains.json ──
+    let domains: Vec<Value> = DOMAINS
+        .iter()
+        .map(|domain| {
+            let mut rules: Vec<&str> = metas
+                .iter()
+                .filter(|m| m.domains.contains(domain))
+                .map(|m| m.name)
+                .collect();
+            rules.sort_unstable();
+            json!({ "name": domain, "rules": rules })
+        })
+        .collect();
+
+    // ── write ──
+    let data_dir = root.join("website/src/data");
+    if let Err(e) = fs::create_dir_all(&data_dir) {
+        eprintln!("error: cannot create {}: {e}", data_dir.display());
+        std::process::exit(1);
+    }
+    let rules_path = data_dir.join("rules.json");
+    let domains_path = data_dir.join("domains.json");
+
+    let rules_json =
+        serde_json::to_string_pretty(&Value::Array(records.clone())).expect("serialize rules.json");
+    let domains_json =
+        serde_json::to_string_pretty(&Value::Array(domains)).expect("serialize domains.json");
+
+    if let Err(e) = fs::write(&rules_path, format!("{rules_json}\n")) {
+        eprintln!("error: cannot write {}: {e}", rules_path.display());
+        std::process::exit(1);
+    }
+    if let Err(e) = fs::write(&domains_path, format!("{domains_json}\n")) {
+        eprintln!("error: cannot write {}: {e}", domains_path.display());
+        std::process::exit(1);
+    }
+
+    println!();
+    println!("── docgen ──────────────────────────────────────────────");
+    println!("  Rules:              {}", records.len());
+    println!("  With bad example:   {with_bad}");
+    println!("  With good example:  {with_good}");
+    println!("  With diagnostics:   {with_diags}");
+    println!(
+        "  Cross-file rules:   {}",
+        metas.iter().filter(|m| m.cross_file).count()
+    );
+    if !zero_diag_with_fixture.is_empty() {
+        println!(
+            "  Zero-diag fixtures: {} ({})",
+            zero_diag_with_fixture.len(),
+            zero_diag_with_fixture.join(", ")
+        );
+    }
+    println!("  Wrote: {}", rules_path.display());
+    println!("  Wrote: {}", domains_path.display());
+    println!("────────────────────────────────────────────────────────");
 }
