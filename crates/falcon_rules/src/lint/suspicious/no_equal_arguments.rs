@@ -1,4 +1,13 @@
-//! Flags duplicate arguments passed to an invocation. Ported from dart_code_linter's `no-equal-arguments`.
+//! Flags an argument passed more than once in the same invocation.
+//!
+//! When two arguments to a call or constructor have identical source text — such
+//! as `Point(x, x)` where one was meant to be `y` — the repetition is usually a
+//! copy-paste slip that silently produces wrong results. Positional arguments are
+//! compared against other positional arguments by source text, and named
+//! arguments against other named arguments by their value expression (the label
+//! is ignored); a positional is never matched against a named. Literal-valued
+//! arguments are excluded, since repeating a literal like `Size(48, 48)` is
+//! intentional. The report lands on the last duplicate.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

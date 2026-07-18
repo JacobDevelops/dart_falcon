@@ -1,8 +1,11 @@
-//! Flags empty `catch` blocks, ported from package:lints `empty_catches`.
-//! Swallowing an exception silently hides errors. Two escape hatches match the
-//! official lint: a catch whose body contains a comment (the emptiness is
-//! deliberate and documented), and a catch whose exception is bound to `_`
-//! (an explicit "I am ignoring this" marker).
+//! Flags empty `catch` blocks.
+//!
+//! A catch clause with no body silently swallows the exception, hiding failures
+//! that should be handled, logged, or rethrown and making bugs far harder to
+//! diagnose. Handle the error, or at minimum log it, rather than discarding it.
+//! Two escape hatches match the official lint: a catch whose body contains a
+//! comment (the emptiness is deliberate and documented), and a catch that binds
+//! its exception to `_`, an explicit "I am ignoring this" marker.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

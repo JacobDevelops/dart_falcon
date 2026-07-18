@@ -1,4 +1,11 @@
-//! Flags mutable global variables. Ported from pyramid_lint's `avoid_mutable_global_variables`.
+//! Disallow mutable top-level variables.
+//!
+//! Flags a top-level variable that is neither `const` nor `final`. A mutable
+//! global can be reassigned from anywhere in the program, so its value at any
+//! moment depends on execution order that no local reading of the code reveals —
+//! a recurring source of subtle bugs and flaky, order-dependent tests. Declare
+//! it `const` or `final`; when a value genuinely must change over time, hold it
+//! in an object with a clear owner rather than a free-floating global.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

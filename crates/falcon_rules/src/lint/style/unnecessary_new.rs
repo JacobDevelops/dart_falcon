@@ -1,5 +1,10 @@
-//! Flags explicit `new` in instance-creation expressions. Ported from package:lints `unnecessary_new`.
-//! The `new` keyword is always optional in Dart 2+, so every occurrence is redundant.
+//! Flags an explicit `new` keyword in an instance-creation expression.
+//!
+//! Since Dart 2.0 the `new` keyword is always optional: `new Foo()` and `Foo()`
+//! construct identically. Keeping `new` is pure noise and breaks visual
+//! consistency with the surrounding code, which almost always omits it. The rule
+//! only targets explicit `new`; an implicit `Foo()` parses as a call and a
+//! `const Foo()` keeps its `const`, so neither is touched. Delete the `new`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

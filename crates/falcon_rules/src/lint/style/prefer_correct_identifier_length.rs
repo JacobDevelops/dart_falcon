@@ -1,4 +1,18 @@
-//! Flags identifiers that are too short or too long. Ported from dart_code_linter's `prefer-correct-identifier-length`.
+//! Flags declared identifiers that are shorter or longer than the allowed range.
+//!
+//! Very short names rarely convey meaning and very long ones hurt readability, so
+//! this rule keeps declared names within a configurable length band. Its scope is
+//! deliberately limited to variable and field declarations, getter and setter
+//! names, and enum constants; parameters, catch-clause variables, for-each loop
+//! variables, and plain function and method names are never checked, because
+//! short names are often idiomatic there. A single leading underscore is stripped
+//! before both the length and exception checks, so `_id` is judged as `id`.
+//!
+//! ## Options
+//!
+//! `min_length` (int, default: 3) — flag identifiers shorter than this.
+//! `max_length` (int, default: 300) — flag identifiers longer than this.
+//! `exceptions` (list of strings, default: []) — names always allowed regardless of length.
 
 use std::collections::HashSet;
 

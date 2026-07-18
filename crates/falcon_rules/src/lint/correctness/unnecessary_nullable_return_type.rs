@@ -1,4 +1,14 @@
-//! Flags nullable return types that never return null. Ported from pyramid_lint's `unnecessary_nullable_return_type`.
+//! Disallow nullable return types on functions that never return null.
+//!
+//! Flags a function or method whose return type is nullable (`T?`) even though
+//! every `return` in its body yields a provably non-null value. A needless `?`
+//! forces callers to null-check a result that can never be null, spreading
+//! defensive code that adds no safety. Drop the `?` from the return type. Only
+//! the outer nullability counts, so `Future<T?>` and `List<int?>` are left
+//! alone. Without full type resolution the check is conservative: it fires only
+//! when the body has at least one `return` and every returned expression is a
+//! literal or constructor invocation — any return it cannot prove non-null (a
+//! variable, a call, `await`, or a bare `return;`) suppresses the report.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

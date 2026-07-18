@@ -1,7 +1,11 @@
-//! Flags a redundant `late` on an initialized static or top-level variable
-//! (`unnecessary-late`, adopted from package:lints). Static and top-level
-//! variables are already initialized lazily, so `late` with an initializer adds
-//! nothing.
+//! Flags a redundant `late` modifier on an initialized static or top-level variable.
+//!
+//! Static fields and top-level variables in Dart are already initialized lazily:
+//! their initializer does not run until the variable is first read. Marking such
+//! a declaration `late` therefore buys nothing, and it misleads readers into
+//! thinking deferred initialization is significant here. The rule only fires when
+//! the declarator actually has an initializer, since `late` on an uninitialized
+//! static or top-level variable does carry meaning. Drop the `late` keyword.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

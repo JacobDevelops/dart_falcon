@@ -1,4 +1,15 @@
-//! Flags discarded non-void return values. Ported from dart_code_linter's `avoid-ignoring-return-values`.
+//! Flags a call whose non-void return value is discarded.
+//!
+//! A function that returns a value usually expects the caller to use it, so
+//! dropping the result often signals a bug — forgetting that immutable APIs like
+//! `String.replaceAll` or `List.map` return a new value instead of mutating in
+//! place, or ignoring a status code. When a project index is available the
+//! callee's declared return type decides: a known `void` return is safe to
+//! discard, a known non-void return is flagged, and only an unresolved return
+//! type falls back to a built-in allowlist of conventionally side-effecting
+//! names (logging, collection mutation, stream and sink writes, lifecycle hooks,
+//! navigation). Without an index every discarded call not on that allowlist is
+//! flagged. Assign the result, act on it, or make the discard explicit.
 
 use falcon_analyze::{AnalyzeContext, Rule, StaticType};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
@@ -152,8 +163,8 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 /// heuristic to suppress the dominant false positives seen on real code:
 /// lifecycle hooks, collection mutation, logging, stream/sink writes, disposal,
 /// and navigation. Derived from adopter-codebase sampling + dart_code_linter's
-/// known-void exemptions. (This rule is off in the recommended preset — see its
-/// metadata note — because it is inherently noisy without a type system.)
+/// known-void exemptions. The allowlist only matters for names the project
+/// index cannot resolve; resolved return types take precedence.
 const SIDE_EFFECT_NAMES: &[&str] = &[
     // logging / debug
     "print",

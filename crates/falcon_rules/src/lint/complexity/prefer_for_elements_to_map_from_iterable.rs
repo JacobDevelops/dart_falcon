@@ -1,6 +1,12 @@
-//! Flags `Map.fromIterable(x, key: ..., value: ...)`, which a map literal with a
-//! `for` element expresses more directly. Adopted from package:lints
-//! `prefer_for_elements_to_map_fromIterable`.
+//! Flags `Map.fromIterable(x, key: ..., value: ...)`.
+//!
+//! A collection-`for` element inside a map literal —
+//! `{ for (final e in x) key(e): value(e) }` — expresses the same
+//! transformation more directly, can be const, and avoids the intermediate
+//! closures `Map.fromIterable` requires. The rule fires on both
+//! `Map.fromIterable(...)` and `new Map.fromIterable(...)` when at least one
+//! positional argument and both the `key:` and `value:` named arguments are
+//! present.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

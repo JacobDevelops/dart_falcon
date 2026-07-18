@@ -1,4 +1,12 @@
-//! Flags `if`/`else` that could be a conditional expression. Ported from dart_code_linter's `prefer-conditional-expressions`.
+//! Flags an `if`/`else` whose branches each reduce to a single return or a
+//! single assignment to the same target.
+//!
+//! When both branches differ only in the value they return or assign, a
+//! conditional expression — `return c ? a : b;` or `x = c ? a : b;` — says the
+//! same thing in one line. The rule reports only the outermost `if` of a chain
+//! (whose parent is not an `if` and whose `else` is not an `else if`) where both
+//! branches reduce to a single return, or to a single assignment to the same
+//! variable.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

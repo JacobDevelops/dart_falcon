@@ -1,4 +1,9 @@
-//! Flags `.where(...).isNotEmpty` in favor of `.any`. Ported from pyramid_lint's `prefer_iterable_any`.
+//! Flags `iterable.where(...).isNotEmpty`.
+//!
+//! Testing whether a filtered iterable is non-empty walks the filter just to
+//! check for any match; `iterable.any(...)` short-circuits on the first match
+//! and reads better. The rule matches an `.isNotEmpty` access on the result of a
+//! `.where(...)` call.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

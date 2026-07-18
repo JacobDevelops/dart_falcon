@@ -1,4 +1,11 @@
-//! Flags non-const `BorderRadius` values that could be const. Ported from dart_code_linter's `prefer-const-border-radius`.
+//! Flags `BorderRadius.only(...)` whose four corner radii are all equal.
+//!
+//! When every corner uses the same `Radius.circular(n)`,
+//! `BorderRadius.circular(n)` is shorter and const-constructible, so Flutter can
+//! canonicalize and reuse the value instead of rebuilding it. The rule fires
+//! only when all four corners (`topLeft`, `topRight`, `bottomLeft`,
+//! `bottomRight`) are present and their `Radius.circular(...)` values are
+//! textually equal.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

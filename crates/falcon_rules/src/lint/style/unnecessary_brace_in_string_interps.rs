@@ -1,7 +1,12 @@
-//! Flags `${x}` interpolations whose braces are unnecessary. Ported from package:lints
-//! `unnecessary_brace_in_string_interps`. When the interpolated expression is a plain
-//! identifier and the character following the `}` cannot extend that identifier, `${x}`
-//! can be written `$x`.
+//! Flags `${x}` string interpolations whose braces can be dropped.
+//!
+//! When the interpolated expression is a single plain identifier and the character
+//! immediately after the closing `}` cannot extend that identifier, `${name}` is
+//! equivalent to the leaner `$name`. The braces are still required for anything more
+//! than a bare identifier (field access, calls, operators) or when the following
+//! character would otherwise merge into the name, so those cases are left alone. Raw
+//! strings and escaped `\$` sequences are skipped, and a `$` right after the `}` is
+//! treated as extending the name so the braces are kept.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

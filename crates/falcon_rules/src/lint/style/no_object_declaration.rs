@@ -1,4 +1,12 @@
-//! Flags members declared with the type `Object`. Ported from dart_code_linter's `no-object-declaration`.
+//! Flags class members declared with the type `Object` (or `Object?`).
+//!
+//! Typing a field or a method's return as `Object` discards nearly all static
+//! information, forcing callers into casts or type checks and defeating the
+//! type system's guarantees. A specific type documents the real contract, and
+//! `dynamic` is the honest choice when a value genuinely may be anything. The
+//! rule inspects only field types and the return types of methods, getters, and
+//! operators; parameters, local variables, setters, and top-level declarations
+//! are out of scope.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

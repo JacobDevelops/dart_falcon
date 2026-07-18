@@ -1,4 +1,17 @@
-//! Flags code nested deeper than the configured level. Ported from pyramid_lint's `maximum_nesting_level`.
+//! Flags a function whose control-flow nesting runs deeper than the configured level.
+//!
+//! Deeply nested blocks push logic to the right and make control flow hard to
+//! follow; early returns, guard clauses, and extracted helpers flatten it. The
+//! rule measures the deepest nesting of control structures — `if`, `for`,
+//! `while`, `do`, `switch`, and `try` — within a function body. A plain block
+//! does not add a level, `else if` chains stay at the same level, and a nested
+//! local function restarts the count. It reports at the function name when the
+//! depth exceeds the threshold.
+//!
+//! ## Options
+//!
+//! `max_nesting` (integer, default: 5) — flag when the nesting depth exceeds
+//! this.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

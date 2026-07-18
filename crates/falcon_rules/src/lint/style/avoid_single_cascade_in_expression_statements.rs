@@ -1,6 +1,9 @@
-//! Flags an expression statement that is a cascade with a single section,
-//! ported from package:lints `avoid_single_cascade_in_expression_statements`.
-//! A lone `..` buys nothing over a plain `.` and only obscures the intent.
+//! Flags an expression statement that is a cascade with a single section.
+//!
+//! A cascade (`..`) exists to chain several operations on one receiver; with a
+//! single section it buys nothing over an ordinary member access and only
+//! obscures intent. Rewrite `foo..bar()` as `foo.bar()`. Cascades with two or
+//! more sections are the idiomatic form and are not flagged.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,4 +1,11 @@
-//! Flags `MediaQuery.of(context)` property access in favor of dedicated methods. Ported from pyramid_lint's `prefer_dedicated_media_query_methods`.
+//! Flags `MediaQuery.of(context).size` access in favor of `MediaQuery.sizeOf`.
+//!
+//! Reading `.width` or `.height` off `MediaQuery.of(context).size` subscribes the
+//! widget to the entire `MediaQueryData`, so it rebuilds whenever any media property
+//! changes — text scale, padding, orientation — not just the screen size. Flutter's
+//! dedicated `MediaQuery.sizeOf(context)` aspect getter subscribes only to size
+//! changes, avoiding those spurious rebuilds. Use `MediaQuery.sizeOf(context)` (and
+//! its siblings) instead of pulling fields out of the whole `MediaQueryData`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

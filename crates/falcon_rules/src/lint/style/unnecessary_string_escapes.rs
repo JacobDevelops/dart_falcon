@@ -1,9 +1,13 @@
-//! Flags backslash escapes that have no effect. Ported from package:lints
-//! `unnecessary_string_escapes`. Escaping a character that is not special in the current
-//! string context (e.g. `\a`, or `\'` inside a double-quoted string) is redundant.
+//! Flags a backslash escape that has no effect on the string's value.
 //!
-//! Raw strings (`r'...'`) are never analyzed, and triple-quoted strings are skipped to avoid
-//! the edge cases around escaping runs of quotes.
+//! A backslash only matters before a character that is special in the current
+//! string context: recognized escapes (`\n`, `\t`, `\x`, `\u`, and friends), the
+//! active quote character, `$`, and `\` itself. Escaping anything else — `\a`, or
+//! `\'` inside a double-quoted string — produces the same character while adding
+//! visual clutter and inviting confusion about whether an escape was intended.
+//! Raw strings (`r'...'`) are never analyzed since backslashes are literal there,
+//! and triple-quoted strings are skipped to avoid the edge cases around escaping
+//! runs of quotes. Remove the redundant backslash.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

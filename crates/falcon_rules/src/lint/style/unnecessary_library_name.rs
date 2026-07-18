@@ -1,5 +1,11 @@
-//! Flags a `library` directive that carries a name. Ported from package:lints
-//! `unnecessary_library_name`: Dart no longer requires a name on `library`.
+//! Flags a `library` directive that carries an explicit name.
+//!
+//! Since Dart 2.19 the `library` directive no longer needs a name: `part of`
+//! directives can reference their parent by URI, and library-level doc comments
+//! and annotations attach to a bare `library;`. A named library is legacy syntax
+//! that only adds a global identifier which can collide across packages. Remove
+//! the name, keeping the `library;` directive itself if it anchors documentation
+//! or annotations.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

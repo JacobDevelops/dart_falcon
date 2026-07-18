@@ -1,4 +1,10 @@
-//! Flags unnecessarily nested `if` statements. Ported from pyramid_lint's `avoid_nested_if`.
+//! Flags an `if` statement whose then-branch contains nested `if` statements.
+//!
+//! Pyramid-shaped nesting is hard to follow; combining conditions with `&&`,
+//! using early returns, or extracting a method flattens it. The rule counts the
+//! `if` statements within a then-branch subtree and fires when at least two are
+//! present (pyramid_lint's default `max_nesting_level` of two), so an `if` whose
+//! body nests two further `if`s is reported.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

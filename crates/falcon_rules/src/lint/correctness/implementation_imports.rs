@@ -1,5 +1,13 @@
-//! Flags `import 'package:foo/src/...'` that reaches into another package's
-//! private `src/` tree. Ported from package:lints `implementation_imports`.
+//! Disallow importing another package's private `src/` files.
+//!
+//! Flags a `package:` import that reaches into another package's `src/`
+//! directory, such as `import 'package:other/src/internal.dart'`. Everything
+//! under a package's `lib/src/` is private implementation detail, not part of
+//! its public API, and may change or vanish in any release without notice.
+//! Depending on it couples your code to internals the author never promised to
+//! keep stable. Import only the package's public libraries — the files directly
+//! under `lib/`. Imports into your own package's `src/` are allowed; the owning
+//! package is inferred from the file's path.
 
 use std::path::Path;
 

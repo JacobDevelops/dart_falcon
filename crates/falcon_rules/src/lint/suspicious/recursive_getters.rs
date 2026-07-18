@@ -1,8 +1,12 @@
-//! Flags getters that unconditionally return themselves, ported from
-//! package:lints `recursive_getters`. `int get x => x;` (or `=> this.x`) recurses
-//! forever. Only the direct, unconditional self-reference is reported, so a
-//! getter that merely mentions its own name inside a larger expression is left
-//! alone.
+//! Flags a getter that unconditionally returns itself.
+//!
+//! A body of `=> x` (or `=> this.x`, or `return x;`) inside `get x` calls the
+//! getter again with no base case, recursing until the stack overflows at
+//! runtime. It almost always means a backing field was intended — typically an
+//! underscore-prefixed `_x` — but was misspelled as the getter's own name.
+//! Return the backing field instead. Only a direct, unconditional self-reference
+//! is reported; a getter that merely mentions its own name inside a larger
+//! expression is left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,10 +1,15 @@
-//! Flags function and method parameters that are never used
-//! (`avoid-unused-parameters`). Originally ported from dart_code_linter and
-//! unifies the former pyramid_lint twin `avoid_unused_parameters`. The
-//! dart_code_linter behavior wins where the two conflicted (only all-underscore
-//! names like `_`/`__` are treated as intentional markers, and `dynamic`-typed
-//! parameters are still checked); the pyramid twin's wider declaration reach —
-//! mixins, mixin classes, enums, and extension types — is folded in additively.
+//! Disallow declared parameters that are never used.
+//!
+//! Flags a function or method parameter whose name never appears in the body. An
+//! unused parameter is usually a leftover from a refactor or a sign the
+//! implementation drifted from its signature; either way it misleads callers
+//! about what the function actually consumes. Remove it, or rename it to `_` — an
+//! all-underscore name (`_`, `__`, …) is the convention for a deliberately
+//! ignored parameter and is never flagged. Parameters of `@override` methods and
+//! of `noSuchMethod` are exempt because their signatures are dictated by the
+//! supertype, as are constructor field (`this.x`) and super (`super.x`)
+//! parameters. The check reaches into functions and the members of classes,
+//! mixins, mixin classes, enums, extensions, and extension types.
 
 /// The `avoid-unused-parameters` rule.
 pub use dcl::AvoidUnusedParameters;

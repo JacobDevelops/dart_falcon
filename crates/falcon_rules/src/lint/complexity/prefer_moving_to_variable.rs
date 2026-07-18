@@ -1,4 +1,17 @@
-//! Flags repeated complex expressions that should be extracted to a variable. Ported from dart_code_linter's `prefer-moving-to-variable`.
+//! Flags a non-trivial expression duplicated across local variable initializers
+//! in the same block.
+//!
+//! Repeating the same complex expression risks the copies drifting apart and
+//! recomputes the work; binding it to one variable names the value and evaluates
+//! it once. Within a block, the rule compares local-variable initializer source
+//! text (trivial literals and bare identifiers are ignored) and flags a repeat
+//! once its occurrence count reaches the threshold.
+//!
+//! ## Options
+//!
+//! `allowed_duplicated_chains` (integer, default: 2) — the occurrence index at
+//! which a repeat is flagged; `2` flags the 2nd and later occurrences, `3` the
+//! 3rd and later. Values below `2` are clamped to `2`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

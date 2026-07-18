@@ -1,6 +1,10 @@
-//! Flags `x == null ? y : x` (and the inverted `x != null ? x : y`) conditional
-//! expressions that are better written with the `??` operator. Ported from
-//! dart_code_linter's `prefer-if-null-operators`.
+//! Flags `x == null ? y : x` (and the inverted `x != null ? x : y`).
+//!
+//! A ternary that returns its own operand on the non-null branch is exactly the
+//! `??` if-null operator: `x ?? y`. The operator is shorter and evaluates `x`
+//! only once. The rule takes the operand of the `== null`/`!= null` check and
+//! compares it (ignoring whitespace) against the branch that falls through to
+//! it, firing when the two are textually equal.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

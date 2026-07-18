@@ -1,4 +1,13 @@
-//! Flags logic inside `createState`. Ported from package:lints `no_logic_in_create_state`.
+//! Require `createState` to do nothing but return a new `State` instance.
+//!
+//! Flags a `StatefulWidget`'s `createState` whose body is anything other than a
+//! bare zero-argument construction of its `State` — that is, `=> _MyState()` or
+//! `{ return _MyState(); }`. Flutter may call `createState` more than once over
+//! a widget's lifetime and does not promise when, so initialization, argument
+//! passing, or side effects placed here run at unpredictable moments and can
+//! leak data between distinct `State` objects. Do that work in
+//! `State.initState` or in the `State`'s field initializers instead, and pass
+//! configuration through the widget rather than the constructor call.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

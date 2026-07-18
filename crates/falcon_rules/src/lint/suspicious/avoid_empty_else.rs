@@ -1,6 +1,11 @@
-//! Flags an `else` clause whose body is an empty statement (`else ;`), ported
-//! from package:lints `avoid_empty_else`. The empty statement almost always
-//! means a stray semicolon slipped between `else` and the intended block.
+//! Flags an `else` clause whose body is an empty statement (`else ;`).
+//!
+//! An `else` immediately followed by a semicolon binds that empty statement as
+//! the whole else branch, so the block meant to run instead executes
+//! unconditionally right after the `if`. This is nearly always a stray semicolon
+//! typed between `else` and the intended `{ ... }`. Remove the semicolon so the
+//! following block becomes the else body, or delete the `else` entirely if no
+//! alternative branch is needed.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

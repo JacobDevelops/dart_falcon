@@ -1,4 +1,12 @@
-//! Flags `super.initState()` not called first in `initState`. Ported from pyramid_lint's `proper_super_init_state`.
+//! Require `super.initState()` to be the first call in `initState`.
+//!
+//! Flags an `initState` method whose first statement is not `super.initState()`,
+//! whether the call comes later or is missing altogether. The framework's
+//! `State.initState` establishes the base bookkeeping the object depends on, so
+//! a subclass must let it run before its own setup; initialization that touches
+//! `context` or framework state before `super.initState()` runs against an
+//! object that is not yet fully wired. Make `super.initState()` the first line
+//! of the method.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

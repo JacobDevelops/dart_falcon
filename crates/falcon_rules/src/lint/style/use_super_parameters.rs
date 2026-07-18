@@ -1,10 +1,14 @@
-//! Flags a constructor parameter forwarded verbatim to `super(...)` and used
-//! nowhere else (`use-super-parameters`, adopted from package:lints): such a
-//! parameter should become a super parameter `super.x`.
+//! Flags a constructor parameter forwarded verbatim to `super(...)` and used nowhere else.
 //!
-//! Conservative: the parameter must appear exactly once across the whole
-//! constructor — as a plain `Ident` positional super argument, or as a named
-//! super argument whose key and value both equal the parameter name.
+//! Since Dart 2.17, a parameter that exists only to be passed straight through to
+//! the superclass constructor can be declared as a super parameter — `super.x` —
+//! which removes both the parameter declaration and the redundant `super(x)`
+//! argument. Doing so cuts boilerplate and keeps subclass constructors in sync
+//! with the base class automatically. The rule is conservative: it fires only
+//! when the parameter is used exactly once across the entire constructor (all
+//! initializers plus the body), forwarded either as a plain positional `super`
+//! argument at the matching index or as a named argument `super(x: x)`. Convert
+//! it to a `super.` parameter.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

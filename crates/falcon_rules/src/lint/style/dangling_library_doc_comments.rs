@@ -1,7 +1,11 @@
-//! Flags a `///` doc comment at the top of a file that is not attached to a
-//! declaration (it precedes a directive, is separated by a blank line, or ends
-//! the file) and so should document a `library` directive instead. Ported from
-//! package:lints `dangling_library_doc_comments`.
+//! Flags a file-level `///` doc comment that is not attached to any declaration.
+//!
+//! A doc comment floating at the top of a file — separated from the first
+//! declaration by a blank line, sitting above a directive, or ending the file —
+//! is silently dropped by the documentation tooling. If it is meant to describe
+//! the library, attach it to an explicit `library` directive; otherwise move it
+//! onto the declaration it documents. Only the first such comment block in a
+//! file is reported.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

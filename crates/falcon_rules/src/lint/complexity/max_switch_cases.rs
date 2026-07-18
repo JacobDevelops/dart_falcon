@@ -1,4 +1,15 @@
-//! Flags switch statements with more than the configured number of cases. Ported from pyramid_lint's `max_switch_cases`.
+//! Flags a `switch` statement with more than the configured number of cases.
+//!
+//! A switch with many cases is often better modeled as a map lookup,
+//! polymorphism, or a sealed type with exhaustive handling. The rule counts
+//! non-default (pattern) cases — the `default` clause is not counted — and
+//! reports at the switch when the count exceeds the threshold. Nested switches
+//! are checked independently.
+//!
+//! ## Options
+//!
+//! `max_cases` (integer, default: 10) — flag when the number of non-default
+//! cases exceeds this.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

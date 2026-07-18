@@ -1,6 +1,13 @@
-//! Flags `return null;` (and `=> null` bodies) inside functions whose declared
-//! return type is `void` or `Future<void>`. Ported from package:lints'
-//! `avoid_returning_null_for_void`.
+//! Flags `return null;` (and `=> null` bodies) in a function whose declared
+//! return type is `void` or `Future<void>`.
+//!
+//! Returning an explicit `null` from a void function is contradictory: the
+//! signature promises no value, so the `null` is dead and usually reflects
+//! confusion about the function's contract or a copy-paste from a nullable one.
+//! Drop the value and write a bare `return;`, or change the return type if the
+//! function is really meant to produce a value. Each nested function is judged by
+//! its own return type, so an inner closure is not tainted by an enclosing void
+//! frame.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

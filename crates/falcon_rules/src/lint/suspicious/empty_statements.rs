@@ -1,8 +1,12 @@
-//! Flags stray empty statements (`;`), ported from package:lints
-//! `empty_statements`. A lone `;` is almost always a mistake — an accidental
-//! extra semicolon or a loop body that was meant to be a block. The semicolons
-//! in a `for (;;)` header are part of the loop syntax, not statements, so the
-//! parser never surfaces them here.
+//! Flags stray empty statements (a lone `;`).
+//!
+//! A solitary semicolon does nothing, and where it slips in it usually changes
+//! meaning: `while (cond);` turns the following block into an unconditional body,
+//! and a stray `;` after an `if` header detaches the intended branch. It is
+//! almost always an accidental extra semicolon or a loop body that should have
+//! been a block. Remove it, or replace it with the block that was intended. The
+//! semicolons in a `for (;;)` header are loop syntax, not statements, and are
+//! never reported.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
