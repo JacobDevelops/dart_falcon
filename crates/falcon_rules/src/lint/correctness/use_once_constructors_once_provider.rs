@@ -209,21 +209,23 @@ fn scan_cascade_section(
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    match &section.op {
-        CascadeOp::Field(_, _) => {}
-        CascadeOp::Index(idx_expr, _) => {
-            scan_expr(idx_expr, diags, ctx);
-        }
-        CascadeOp::Call(_, _, args) => {
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx);
+    for op in &section.ops {
+        match op {
+            CascadeOp::Field(_, _) => {}
+            CascadeOp::Index(idx_expr, _) => {
+                scan_expr(idx_expr, diags, ctx);
             }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx);
+            CascadeOp::Call(_, _, args) => {
+                for arg in &args.positional {
+                    scan_expr(arg, diags, ctx);
+                }
+                for named in &args.named {
+                    scan_expr(&named.value, diags, ctx);
+                }
             }
-        }
-        CascadeOp::Assign(_, _, value) => {
-            scan_expr(value, diags, ctx);
+            CascadeOp::Assign(_, _, value) => {
+                scan_expr(value, diags, ctx);
+            }
         }
     }
 }

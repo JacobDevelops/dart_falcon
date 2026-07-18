@@ -185,6 +185,7 @@ pub enum TokenKind {
     Semicolon,
     Colon,
     At,
+    Hash, // #  (symbol-literal introducer)
 
     // ── Dot family ────────────────────────────────────────────────────────────
     Dot,
@@ -356,6 +357,7 @@ impl TokenKind {
                 | TokenKind::Semicolon
                 | TokenKind::Colon
                 | TokenKind::At
+                | TokenKind::Hash
                 | TokenKind::Dot
                 | TokenKind::DotDot
                 | TokenKind::DotDotQmark

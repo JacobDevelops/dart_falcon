@@ -8,7 +8,10 @@ use falcon_dart_parser::parse;
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::Program;
 
-use crate::resolve::{ProgramSource, ProjectIndex};
+use crate::resolve::{
+    LibrarySource, LibraryUnit, ProgramSource, ProjectIndex, TypeIndex, group_libraries,
+    library_unit,
+};
 use crate::{AnalyzeContext, ProjectFile, RuleRegistry};
 
 /// Parse `source`, run every per-file rule (with no project index), and
@@ -93,18 +96,44 @@ fn analyze_indexed(
             .collect();
         ProjectIndex::from_project_files(&sources)
     };
-    let run_one = |p: &Parsed| {
+
+    // Partition files into libraries, then build the type index (each type
+    // inheriting its library's unresolved-part flag) and per-file library units.
+    let grouping = {
+        let files: Vec<(PathBuf, &Program)> = parsed
+            .iter()
+            .map(|p| (p.path.clone(), &p.program))
+            .collect();
+        group_libraries(&files)
+    };
+    let type_index = {
+        let sources = parsed.iter().enumerate().map(|(i, p)| LibrarySource {
+            program: &p.program,
+            has_parse_errors: p.has_parse_errors,
+            has_unresolved_parts: grouping.is_unresolved(i),
+        });
+        TypeIndex::from_library_files(sources)
+    };
+    let programs: Vec<&Program> = parsed.iter().map(|p| &p.program).collect();
+    let library_units: Vec<LibraryUnit> = (0..parsed.len())
+        .map(|i| library_unit(&grouping, &programs, i))
+        .collect();
+
+    let run_one = |(i, p): (usize, &Parsed)| {
         let span = info_span!("analyze_file", file = %p.path.display());
         let _enter = span.enter();
-        let ctx = AnalyzeContext::new(&p.path, &p.source, config).with_project(&index);
+        let ctx = AnalyzeContext::new(&p.path, &p.source, config)
+            .with_project(&index)
+            .with_types(&type_index)
+            .with_library(&library_units[i]);
         let diagnostics = registry.run_all(&p.program, &ctx);
         info!(file = %p.path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
         diagnostics
     };
     if parallel {
-        parsed.par_iter().flat_map(run_one).collect()
+        parsed.par_iter().enumerate().flat_map(run_one).collect()
     } else {
-        parsed.iter().flat_map(run_one).collect()
+        parsed.iter().enumerate().flat_map(run_one).collect()
     }
 }
 

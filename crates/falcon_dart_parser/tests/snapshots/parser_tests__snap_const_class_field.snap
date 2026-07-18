@@ -1,6 +1,5 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
-assertion_line: 1392
 expression: "prog.declarations[0]"
 ---
 Class(
@@ -135,6 +134,7 @@ Class(
                                             start: 78,
                                             end: 103,
                                         },
+                                        interpolations: [],
                                     },
                                 ),
                             ),

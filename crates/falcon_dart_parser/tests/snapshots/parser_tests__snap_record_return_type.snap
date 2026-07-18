@@ -1,6 +1,5 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
-assertion_line: 1328
 expression: "prog.declarations[0]"
 ---
 Function(
@@ -83,6 +82,7 @@ Function(
         body: Some(
             Arrow(
                 Record {
+                    is_const: false,
                     fields: [
                         RecordField {
                             name: None,
@@ -94,6 +94,7 @@ Function(
                                         start: 25,
                                         end: 32,
                                     },
+                                    interpolations: [],
                                 },
                             ),
                             span: Span {

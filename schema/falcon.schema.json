@@ -237,10 +237,16 @@
                 "no-object-declaration": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-adjacent-string-concatenation": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-async-await": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-async-callback": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-collection-literals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-correct-identifier-length": {
@@ -252,22 +258,82 @@
                 "prefer-dedicated-media-query-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-final-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-function-declarations-over-variables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-generic-function-type-aliases": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-initializing-formals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-inlined-adds": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-is-empty": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-is-not-empty": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-is-not-operator": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-iterable-of": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-iterable-where-type": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-last": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-spread-collections": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-trailing-comma": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-typing-uninitialized-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-underscore-for-unused-callback-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "sort-child-properties-last": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-brace-in-string-interps": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-constructor-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-late": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-library-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-new": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-nullable-for-final-variable-declarations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-string-escapes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-string-interpolations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-this": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-design-system-item": {
@@ -689,10 +755,16 @@
                 "no-object-declaration": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-adjacent-string-concatenation": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-async-await": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-async-callback": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-collection-literals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-correct-identifier-length": {
@@ -704,22 +776,82 @@
                 "prefer-dedicated-media-query-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-final-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-function-declarations-over-variables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-generic-function-type-aliases": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-initializing-formals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-inlined-adds": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-is-empty": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-is-not-empty": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-is-not-operator": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-iterable-of": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-iterable-where-type": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-last": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-spread-collections": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-trailing-comma": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-typing-uninitialized-variables": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-underscore-for-unused-callback-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "sort-child-properties-last": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-brace-in-string-interps": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-constructor-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-late": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-library-name": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-new": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-nullable-for-final-variable-declarations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-string-escapes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-string-interpolations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-this": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-design-system-item": {

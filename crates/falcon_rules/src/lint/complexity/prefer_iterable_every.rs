@@ -175,7 +175,12 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Stmt::If(i) => {
             match &i.condition {
                 IfCondition::Expr(e) => scan_expr(e, diags, ctx),
-                IfCondition::Case(e, _) => scan_expr(e, diags, ctx),
+                IfCondition::Case(e, _, guard) => {
+                    scan_expr(e, diags, ctx);
+                    if let Some(g) = guard {
+                        scan_expr(g, diags, ctx);
+                    }
+                }
             }
             scan_stmt(&i.then_branch, diags, ctx);
             if let Some(eb) = &i.else_branch {

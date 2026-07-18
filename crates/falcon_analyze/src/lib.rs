@@ -19,7 +19,11 @@ pub use parallel::{
 };
 pub use project::{ProjectFile, ProjectRule, ProjectRuleRegistry};
 pub use registry::RuleRegistry;
-pub use resolve::{LocalTypes, ProjectIndex, StaticType};
+pub use resolve::{
+    LibraryGrouping, LibrarySource, LibraryUnit, LocalTypes, MemberKind, MemberResult,
+    ProjectIndex, ReceiverTypes, StaticType, SubtypeResult, TypeIndex, TypeKind, group_libraries,
+    library_unit,
+};
 pub use rule::Rule;
 pub use suppressions::{FileSuppressions, MALFORMED_SUPPRESSION, RuleLookup};
 pub use visitor::RuleVisitor;

@@ -50,11 +50,12 @@ fn is_from_constructor(dart_type: &DartType, constructor_name: &Option<Identifie
 
 /// Resolve the base type name of a receiver expression.
 /// `List`            -> `Expr::Ident("List")`
-/// `List<int>`       -> `Expr::Call { callee: Ident("List"), type_args: [int], .. }` (type instantiation)
+/// `List<int>`       -> `Expr::GenericInstantiation { target: Ident("List"), type_args: [int], .. }`
 fn base_type_name(expr: &Expr) -> Option<&str> {
     match expr {
         Expr::Ident(id) => Some(id.name.as_str()),
         Expr::Call { callee, .. } => base_type_name(callee),
+        Expr::GenericInstantiation { target, .. } => base_type_name(target),
         _ => None,
     }
 }
@@ -182,7 +183,12 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Stmt::If(i) => {
             match &i.condition {
                 IfCondition::Expr(e) => scan_expr(e, diags, ctx),
-                IfCondition::Case(e, _) => scan_expr(e, diags, ctx),
+                IfCondition::Case(e, _, guard) => {
+                    scan_expr(e, diags, ctx);
+                    if let Some(g) = guard {
+                        scan_expr(g, diags, ctx);
+                    }
+                }
             }
             scan_stmt(&i.then_branch, diags, ctx);
             if let Some(eb) = &i.else_branch {

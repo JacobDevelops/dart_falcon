@@ -26,6 +26,7 @@ Enum(
                     },
                 },
                 type_args: [],
+                constructor_name: None,
                 args: None,
                 span: Span {
                     start: 13,
@@ -42,6 +43,7 @@ Enum(
                     },
                 },
                 type_args: [],
+                constructor_name: None,
                 args: None,
                 span: Span {
                     start: 18,
@@ -58,6 +60,7 @@ Enum(
                     },
                 },
                 type_args: [],
+                constructor_name: None,
                 args: None,
                 span: Span {
                     start: 25,

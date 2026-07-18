@@ -170,9 +170,12 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, lt: &mut LocalTypes, ctx:
             lt.push_scope();
             match &i.condition {
                 IfCondition::Expr(e) => scan_expr(e, diags, lt, ctx),
-                IfCondition::Case(scrutinee, pattern) => {
+                IfCondition::Case(scrutinee, pattern, guard) => {
                     scan_expr(scrutinee, diags, lt, ctx);
                     lt.bind_pattern(pattern);
+                    if let Some(g) = guard {
+                        scan_expr(g, diags, lt, ctx);
+                    }
                 }
             }
             scan_stmt(&i.then_branch, diags, lt, ctx);

@@ -29,7 +29,7 @@ impl<'src> Parser<'src> {
 
     fn parse_assign(&mut self) -> Expr {
         let start = self.cur().offset;
-        let lhs = self.parse_conditional();
+        let lhs = self.parse_cascade();
 
         let op = match self.cur().kind {
             TokenKind::Eq => AssignOp::Eq,
@@ -59,15 +59,41 @@ impl<'src> Parser<'src> {
         }
     }
 
+    // ── Cascade  ..  ?.. ──────────────────────────────────────────────────────
+
+    /// Cascade binds looser than every operator except assignment, so it wraps a
+    /// whole conditional/relational/cast subject: `x as T ..m()` is `(x as T)..m()`
+    /// and `a = b..c` is `a = (b..c)`. Parsed here — above the operator ladder —
+    /// rather than in `parse_postfix`, which only ever sees a primary target.
+    fn parse_cascade(&mut self) -> Expr {
+        let start = self.cur().offset;
+        let object = self.parse_conditional();
+        if matches!(self.cur().kind, TokenKind::DotDot | TokenKind::DotDotQmark) {
+            let is_null_aware = self.at(TokenKind::DotDotQmark);
+            let sections = self.parse_cascade_sections();
+            return Expr::Cascade {
+                object: Box::new(object),
+                sections,
+                is_null_aware,
+                span: self.span_from(start),
+            };
+        }
+        object
+    }
+
     // ── Conditional ternary ───────────────────────────────────────────────────
 
     fn parse_conditional(&mut self) -> Expr {
         let start = self.cur().offset;
         let cond = self.parse_null_coalesce();
         if self.eat(TokenKind::Qmark).is_some() {
-            let then_expr = self.parse_expr();
+            // Both branches are `expressionWithoutCascade` in the Dart grammar,
+            // which *includes* assignment — `a ? b = c : d = e` is valid, with each
+            // branch a right-associative assignment. (Cascades are excluded; a
+            // cascade in a branch must be parenthesised.)
+            let then_expr = self.parse_expr_without_cascade();
             self.expect(TokenKind::Colon);
-            let else_expr = self.parse_conditional();
+            let else_expr = self.parse_expr_without_cascade();
             let span = self.span_from(start);
             return Expr::Conditional {
                 condition: Box::new(cond),
@@ -77,6 +103,39 @@ impl<'src> Parser<'src> {
             };
         }
         cond
+    }
+
+    /// Parse an `expressionWithoutCascade`: an assignment whose left-hand side is a
+    /// conditional (cascade-excluding) subject. Used for the branches of a ternary,
+    /// where Dart permits assignment but not a bare cascade.
+    fn parse_expr_without_cascade(&mut self) -> Expr {
+        let start = self.cur().offset;
+        let lhs = self.parse_conditional();
+        let op = match self.cur().kind {
+            TokenKind::Eq => AssignOp::Eq,
+            TokenKind::PlusEq => AssignOp::PlusEq,
+            TokenKind::MinusEq => AssignOp::MinusEq,
+            TokenKind::StarEq => AssignOp::MulEq,
+            TokenKind::SlashEq => AssignOp::DivEq,
+            TokenKind::PercentEq => AssignOp::ModEq,
+            TokenKind::TildeSlashEq => AssignOp::IntDivEq,
+            TokenKind::AmpEq => AssignOp::AndEq,
+            TokenKind::PipeEq => AssignOp::OrEq,
+            TokenKind::CaretEq => AssignOp::XorEq,
+            TokenKind::LtLtEq => AssignOp::ShlEq,
+            TokenKind::GtGtEq => AssignOp::ShrEq,
+            TokenKind::GtGtGtEq => AssignOp::UShrEq,
+            TokenKind::QmarkQmarkEq => AssignOp::NullCoalesceEq,
+            _ => return lhs,
+        };
+        self.advance();
+        let rhs = self.parse_expr_without_cascade(); // right-associative
+        Expr::Assign {
+            target: Box::new(lhs),
+            op,
+            value: Box::new(rhs),
+            span: self.span_from(start),
+        }
     }
 
     // ── Null coalescing ?? ────────────────────────────────────────────────────
@@ -155,57 +214,117 @@ impl<'src> Parser<'src> {
 
     // ── Relational / type tests ───────────────────────────────────────────────
 
-    /// True when the `<` at the cursor opens a generic-invocation type-argument
-    /// list — a balanced `<...>` containing only type-ish tokens and closed
-    /// immediately before `(`, `.`, or `?.`. Distinguishes `f<T>()` from the
-    /// comparison operator in `a < b ? () => c() : null`.
-    fn is_generic_invocation(&self) -> bool {
+    /// Scan a balanced `<...>` starting at the cursor (which must be `<`),
+    /// returning the token index immediately *after* the closing `>` when the
+    /// span contains only type-ish tokens, or `None` when some token means the
+    /// `<` is really a comparison operator. Shared by generic-invocation and
+    /// generic-instantiation detection.
+    fn after_generic_type_args(&self) -> Option<usize> {
         use TokenKind::*;
         debug_assert_eq!(self.cur().kind, Lt);
         let mut depth = 0i32;
+        // Angle depth captured at each open `(`/`[`/`{`. Records and function types
+        // nest inside type arguments (`Foo<(int, Bar<T>)>`, `Foo<int Function()>`),
+        // and their own generics must be tracked — but a `>`/`>>` may never close an
+        // angle opened *outside* the current bracket group. That would be an
+        // expression `>`/shift (`a < b ? (d >> e) : 0`), not a type-arg close.
+        let mut bracket_stack: Vec<i32> = Vec::new();
         let mut i = self.pos;
         while let Some(tok) = self.tokens.get(i) {
             match &tok.kind {
                 Lt => depth += 1,
-                Gt => {
-                    depth -= 1;
-                    if depth <= 0 {
-                        return self.after_type_args_is_call(i + 1);
+                Gt | GtGt | GtGtGt => {
+                    let dec = match tok.kind {
+                        Gt => 1,
+                        GtGt => 2,
+                        _ => 3,
+                    };
+                    let base = bracket_stack.last().copied().unwrap_or(0);
+                    if depth - dec < base {
+                        return None;
+                    }
+                    depth -= dec;
+                    if bracket_stack.is_empty() && depth <= 0 {
+                        return Some(i + 1);
                     }
                 }
-                GtGt => {
-                    depth -= 2;
-                    if depth <= 0 {
-                        return self.after_type_args_is_call(i + 1);
-                    }
-                }
-                GtGtGt => {
-                    depth -= 3;
-                    if depth <= 0 {
-                        return self.after_type_args_is_call(i + 1);
-                    }
-                }
+                LParen | LBracket | LBrace => bracket_stack.push(depth),
+                RParen | RBracket | RBrace => match bracket_stack.pop() {
+                    // A type-arg list's brackets are angle-balanced within: the
+                    // depth on close must equal the depth captured on open.
+                    Some(base) if base == depth => {}
+                    _ => return None,
+                },
                 // Tokens that legitimately appear inside a type-argument list
                 // (named/qualified types, records, function types, nullability).
-                Dot | Comma | Qmark | Void | LParen | RParen | LBracket | RBracket | LBrace
-                | RBrace => {}
+                Dot | Comma | Qmark | Void => {}
                 k if self.is_ident_like_kind(k) => {}
                 // Anything else (operators, literals, `=>`, `:`, `;`, …) means
                 // this `<` is a comparison, not type arguments.
-                _ => return false,
+                _ => return None,
             }
             i += 1;
             if i - self.pos > 512 {
-                return false;
+                return None;
             }
         }
-        false
+        None
+    }
+
+    /// True when the `<` at the cursor opens a generic-invocation type-argument
+    /// list — a balanced `<...>` closed immediately before `(`, `.`, or `?.`.
+    /// Distinguishes `f<T>()` from the comparison in `a < b ? () => c() : null`.
+    fn is_generic_invocation(&self) -> bool {
+        self.after_generic_type_args()
+            .is_some_and(|idx| self.after_type_args_is_call(idx))
+    }
+
+    /// True when the `<` at the cursor opens a bare generic-instantiation
+    /// tear-off (`identity<int>`) — a balanced `<...>` *not* followed by a call
+    /// token, whose following token cannot continue a `<` comparison (Dart's own
+    /// disambiguation rule, per the constructor-tearoffs spec).
+    fn is_generic_instantiation(&self) -> bool {
+        match self.after_generic_type_args() {
+            Some(idx) if !self.after_type_args_is_call(idx) => {
+                self.token_ends_generic_instantiation(idx)
+            }
+            _ => false,
+        }
     }
 
     fn after_type_args_is_call(&self, idx: usize) -> bool {
         matches!(
             self.tokens.get(idx).map(|t| &t.kind),
             Some(TokenKind::LParen | TokenKind::Dot | TokenKind::QmarkDot)
+        )
+    }
+
+    /// True when the token at `idx` (following a balanced `<...>`) cannot begin
+    /// or continue the right-hand side of a `<` comparison, so the `<...>` must
+    /// be a generic-instantiation type-argument list. `f(a < b, c > d)` stays a
+    /// comparison because an identifier follows `>`, which is *not* in this set.
+    fn token_ends_generic_instantiation(&self, idx: usize) -> bool {
+        use TokenKind::*;
+        matches!(
+            self.tokens.get(idx).map(|t| &t.kind),
+            Some(
+                RParen
+                    | RBracket
+                    | RBrace
+                    | Colon
+                    | Semicolon
+                    | Comma
+                    | Qmark
+                    | QmarkQmark
+                    | Eq
+                    | EqEq
+                    | BangEq
+                    | DotDot
+                    | DotDotQmark
+                    | AmpAmp
+                    | PipePipe
+                    | Eof
+            ) | None
         )
     }
 
@@ -222,75 +341,61 @@ impl<'src> Parser<'src> {
 
     fn parse_relational(&mut self) -> Expr {
         let start = self.cur().offset;
-        let lhs = self.parse_bitwise_or();
-        match self.cur().kind {
-            TokenKind::Lt => {
-                self.advance();
-                let r = self.parse_bitwise_or();
-                Expr::Binary {
-                    op: BinaryOp::Lt,
-                    left: Box::new(lhs),
-                    right: Box::new(r),
-                    span: self.span_from(start),
-                }
-            }
-            TokenKind::Gt => {
-                self.advance();
-                let r = self.parse_bitwise_or();
-                Expr::Binary {
-                    op: BinaryOp::Gt,
-                    left: Box::new(lhs),
-                    right: Box::new(r),
-                    span: self.span_from(start),
-                }
-            }
-            TokenKind::LtEq => {
-                self.advance();
-                let r = self.parse_bitwise_or();
-                Expr::Binary {
-                    op: BinaryOp::LtEq,
-                    left: Box::new(lhs),
-                    right: Box::new(r),
-                    span: self.span_from(start),
-                }
-            }
-            TokenKind::GtEq => {
-                self.advance();
-                let r = self.parse_bitwise_or();
-                Expr::Binary {
-                    op: BinaryOp::GtEq,
-                    left: Box::new(lhs),
-                    right: Box::new(r),
-                    span: self.span_from(start),
-                }
-            }
-            TokenKind::Is => {
-                self.advance();
-                let negated = self.eat(TokenKind::Bang).is_some();
-                let dart_type = self.parse_type_after_is_as();
-                Expr::Is {
-                    expr: Box::new(lhs),
-                    dart_type,
-                    negated,
-                    span: self.span_from(start),
-                }
-            }
-            TokenKind::As => {
-                self.advance();
-                let dart_type = self.parse_type_after_is_as();
-                Expr::As {
-                    expr: Box::new(lhs),
-                    dart_type,
-                    span: self.span_from(start),
-                }
-            }
-            _ => lhs,
+        let lhs = self.parse_cast();
+        let op = match self.cur().kind {
+            TokenKind::Lt => BinaryOp::Lt,
+            TokenKind::Gt => BinaryOp::Gt,
+            TokenKind::LtEq => BinaryOp::LtEq,
+            TokenKind::GtEq => BinaryOp::GtEq,
+            _ => return lhs,
+        };
+        self.advance();
+        let r = self.parse_cast();
+        Expr::Binary {
+            op,
+            left: Box::new(lhs),
+            right: Box::new(r),
+            span: self.span_from(start),
         }
+    }
+
+    /// Type test / cast level (`is`, `is!`, `as`), which binds tighter than the
+    /// relational comparison operators — so `a < b as C` is `a < (b as C)` and
+    /// `x as int <= y` is `(x as int) <= y`. Loops to allow chains (`a as B as C`).
+    fn parse_cast(&mut self) -> Expr {
+        let start = self.cur().offset;
+        let mut lhs = self.parse_bitwise_or();
+        loop {
+            match self.cur().kind {
+                TokenKind::Is => {
+                    self.advance();
+                    let negated = self.eat(TokenKind::Bang).is_some();
+                    let dart_type = self.parse_type_after_is_as();
+                    lhs = Expr::Is {
+                        expr: Box::new(lhs),
+                        dart_type,
+                        negated,
+                        span: self.span_from(start),
+                    };
+                }
+                TokenKind::As => {
+                    self.advance();
+                    let dart_type = self.parse_type_after_is_as();
+                    lhs = Expr::As {
+                        expr: Box::new(lhs),
+                        dart_type,
+                        span: self.span_from(start),
+                    };
+                }
+                _ => break,
+            }
+        }
+        lhs
     }
 
     // ── Bitwise OR/XOR/AND ────────────────────────────────────────────────────
 
-    fn parse_bitwise_or(&mut self) -> Expr {
+    pub(super) fn parse_bitwise_or(&mut self) -> Expr {
         let start = self.cur().offset;
         let mut lhs = self.parse_bitwise_xor();
         while self.eat(TokenKind::Pipe).is_some() {
@@ -551,46 +656,53 @@ impl<'src> Parser<'src> {
                         span: self.span_from(start),
                     };
                 }
-                // Generic call  <T>(args)
+                // Generic call  <T>(args)  or bare instantiation  identity<int>
                 TokenKind::Lt => {
-                    // Only a balanced `<...>` closed and immediately followed by
-                    // `(`, `.`, or `?.` is a generic invocation; otherwise `<` is
-                    // a comparison operator (`a < b ? () => c() : null`).
-                    if !self.is_generic_invocation() {
-                        break;
-                    }
-                    // Speculative: try to parse type args; restore errors on rollback
-                    // to avoid spurious "expected type" errors in relational expressions.
-                    let saved = self.pos;
-                    let saved_errors = self.errors.len();
-                    let type_args = self.parse_type_args();
-                    if self.at(TokenKind::LParen) {
-                        // Generic call: expr<T>(args)
-                        let args = self.parse_arg_list();
-                        expr = Expr::Call {
-                            callee: Box::new(expr),
+                    // A balanced `<...>` closed immediately before `(`, `.`, or
+                    // `?.` is a generic invocation; one followed by a token that
+                    // cannot continue a comparison is a bare tear-off
+                    // instantiation; otherwise `<` is a comparison operator
+                    // (`a < b ? () => c() : null`).
+                    if self.is_generic_invocation() {
+                        // Speculative: try to parse type args; restore errors on
+                        // rollback to avoid spurious "expected type" errors.
+                        let saved = self.pos;
+                        let saved_errors = self.errors.len();
+                        let type_args = self.parse_type_args();
+                        if self.at(TokenKind::LParen) {
+                            // Generic call: expr<T>(args)
+                            let args = self.parse_arg_list();
+                            expr = Expr::Call {
+                                callee: Box::new(expr),
+                                type_args,
+                                args,
+                                span: self.span_from(start),
+                            };
+                        } else if self.at(TokenKind::Dot) || self.at(TokenKind::QmarkDot) {
+                            // Type instantiation expression: Name<T>.member — keep the
+                            // type args on a GenericInstantiation wrapping the target;
+                            // the next postfix iteration attaches the `.` selector.
+                            expr = Expr::GenericInstantiation {
+                                target: Box::new(expr),
+                                type_args,
+                                span: self.span_from(start),
+                            };
+                        } else {
+                            // Not a call or type instantiation — restore position and any spurious errors
+                            self.rewind_to(saved);
+                            self.errors.truncate(saved_errors);
+                            break;
+                        }
+                    } else if self.is_generic_instantiation() {
+                        // Bare generic tear-off: `identity<int>` with no call/`.`
+                        // following. Preserve the target and its type arguments.
+                        let type_args = self.parse_type_args();
+                        expr = Expr::GenericInstantiation {
+                            target: Box::new(expr),
                             type_args,
-                            args,
-                            span: self.span_from(start),
-                        };
-                    } else if self.at(TokenKind::Dot) || self.at(TokenKind::QmarkDot) {
-                        // Type instantiation expression: Name<T>.method(args) — keep type args,
-                        // represent as Call with empty args; next iteration handles the `.`.
-                        let empty_args = ArgList {
-                            positional: Vec::new(),
-                            named: Vec::new(),
-                            span: self.span_from(start),
-                        };
-                        expr = Expr::Call {
-                            callee: Box::new(expr),
-                            type_args,
-                            args: empty_args,
                             span: self.span_from(start),
                         };
                     } else {
-                        // Not a call or type instantiation — restore position and any spurious errors
-                        self.pos = saved;
-                        self.errors.truncate(saved_errors);
                         break;
                     }
                 }
@@ -625,15 +737,6 @@ impl<'src> Parser<'src> {
                         span: self.span_from(start),
                     };
                 }
-                // Cascade  ..  ?..
-                TokenKind::DotDot | TokenKind::DotDotQmark => {
-                    let sections = self.parse_cascade_sections();
-                    expr = Expr::Cascade {
-                        object: Box::new(expr),
-                        sections,
-                        span: self.span_from(start),
-                    };
-                }
                 _ => break,
             }
         }
@@ -644,44 +747,116 @@ impl<'src> Parser<'src> {
         let mut sections = Vec::new();
         while matches!(self.cur().kind, TokenKind::DotDot | TokenKind::DotDotQmark) {
             let start = self.cur().offset;
+            // A `?..` section is reached null-awarely; that shorting also covers a
+            // `?[` null-aware index selector on the section's first selector.
+            let section_null_aware = self.at(TokenKind::DotDotQmark);
             self.advance(); // .. or ?..
-            let op = if self.at(TokenKind::LBracket) {
-                self.advance();
-                let idx = self.parse_expr();
-                self.expect(TokenKind::RBracket);
-                // optional assignment
-                if let Some(assign_op) = self.try_parse_assign_op() {
-                    let rhs = self.parse_expr();
-                    CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs))
-                } else {
-                    CascadeOp::Index(Box::new(idx), false)
-                }
-            } else if self.is_ident_like() {
-                let name = self.expect_ident();
-                if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
-                    let type_args = if self.at(TokenKind::Lt) {
-                        self.parse_type_args()
-                    } else {
-                        Vec::new()
-                    };
-                    let args = self.parse_arg_list();
-                    CascadeOp::Call(name, type_args, args)
-                } else if let Some(assign_op) = self.try_parse_assign_op() {
-                    let rhs = self.parse_expr();
-                    let field_expr = Expr::Ident(name);
-                    CascadeOp::Assign(Box::new(field_expr), assign_op, Box::new(rhs))
-                } else {
-                    CascadeOp::Field(name, false)
-                }
-            } else {
+            let ops = self.parse_cascade_section_ops(section_null_aware);
+            if ops.is_empty() {
                 break;
-            };
+            }
             sections.push(CascadeSection {
-                op,
+                ops,
                 span: self.span_from(start),
             });
         }
         sections
+    }
+
+    /// Parse the selector chain of a single cascade section (everything after the
+    /// `..`/`?..`). Dart allows a full assignable-selector chain here — `..a.b()`,
+    /// `..m().n()`, `..a[i]=x`, `..a?.b()` — not just one selector, so this mirrors
+    /// the `parse_postfix` selector loop but seeds the first selector as a bare
+    /// identifier or `[index]` (no leading dot) and stops at a terminal assignment.
+    fn parse_cascade_section_ops(&mut self, section_null_aware: bool) -> Vec<CascadeOp> {
+        let mut ops = Vec::new();
+        // First selector after `..`: bare identifier or `[index]`, no leading dot.
+        let first = if self.at(TokenKind::LBracket) || self.at(TokenKind::QmarkLBracket) {
+            let index_null_aware = section_null_aware || self.at(TokenKind::QmarkLBracket);
+            self.advance();
+            let idx = self.parse_expr();
+            self.expect(TokenKind::RBracket);
+            if let Some(assign_op) = self.try_parse_assign_op() {
+                let rhs = self.parse_expr();
+                ops.push(CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs)));
+                return ops; // assignment terminates the section
+            }
+            CascadeOp::Index(Box::new(idx), index_null_aware)
+        } else if self.is_ident_like() {
+            let name = self.expect_ident();
+            if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
+                let type_args = if self.at(TokenKind::Lt) {
+                    self.parse_type_args()
+                } else {
+                    Vec::new()
+                };
+                let args = self.parse_arg_list();
+                CascadeOp::Call(name, type_args, args)
+            } else if let Some(assign_op) = self.try_parse_assign_op() {
+                let rhs = self.parse_expr();
+                ops.push(CascadeOp::Assign(
+                    Box::new(Expr::Ident(name)),
+                    assign_op,
+                    Box::new(rhs),
+                ));
+                return ops;
+            } else {
+                CascadeOp::Field(name, section_null_aware)
+            }
+        } else {
+            return ops; // empty section
+        };
+        ops.push(first);
+        // Subsequent selectors use a leading `.`/`?.` or `[`/`?[`, each optionally
+        // invoked, with an optional terminal assignment.
+        loop {
+            match self.cur().kind {
+                TokenKind::Dot | TokenKind::QmarkDot => {
+                    let is_null_safe = self.at(TokenKind::QmarkDot);
+                    self.advance();
+                    // `.new` is a valid constructor tear-off in Dart 3.
+                    let name = if self.at(TokenKind::New) {
+                        let tok = self.advance();
+                        Identifier::new("new", Self::tok_span(&tok))
+                    } else {
+                        self.expect_ident()
+                    };
+                    if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
+                        let type_args = if self.at(TokenKind::Lt) {
+                            self.parse_type_args()
+                        } else {
+                            Vec::new()
+                        };
+                        let args = self.parse_arg_list();
+                        ops.push(CascadeOp::Call(name, type_args, args));
+                    } else if let Some(assign_op) = self.try_parse_assign_op() {
+                        let rhs = self.parse_expr();
+                        ops.push(CascadeOp::Assign(
+                            Box::new(Expr::Ident(name)),
+                            assign_op,
+                            Box::new(rhs),
+                        ));
+                        break;
+                    } else {
+                        ops.push(CascadeOp::Field(name, is_null_safe));
+                    }
+                }
+                TokenKind::LBracket | TokenKind::QmarkLBracket => {
+                    let is_null_safe = self.at(TokenKind::QmarkLBracket);
+                    self.advance();
+                    let idx = self.parse_expr();
+                    self.expect(TokenKind::RBracket);
+                    if let Some(assign_op) = self.try_parse_assign_op() {
+                        let rhs = self.parse_expr();
+                        ops.push(CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs)));
+                        break;
+                    }
+                    ops.push(CascadeOp::Index(Box::new(idx), is_null_safe));
+                }
+                _ => break,
+            }
+        }
+        ops
     }
 
     fn try_parse_assign_op(&mut self) -> Option<AssignOp> {
@@ -732,10 +907,13 @@ impl<'src> Parser<'src> {
                 let mut node = self.parse_string_lit();
                 while self.at(TokenKind::StringLit) {
                     let next = self.parse_string_lit();
+                    let mut interpolations = node.interpolations;
+                    interpolations.extend(next.interpolations);
                     node = StringLitNode {
                         raw: node.raw + &next.raw,
                         value: node.value + &next.value,
-                        span: next.span,
+                        span: node.span.merge(&next.span),
+                        interpolations,
                     };
                 }
                 Expr::StringLit(node)
@@ -777,9 +955,39 @@ impl<'src> Parser<'src> {
             // Parenthesised / record / function expression
             TokenKind::LParen => {
                 if self.looks_like_function_expr() {
-                    self.parse_function_expr_with_type_params(Vec::new(), start)
+                    // `(...)` followed by `{` is ambiguous: a lambda `(params) {body}`,
+                    // or a parenthesized expression whose trailing `{` opens an
+                    // *enclosing* block (e.g. a constructor body in `C(): g = (e) {}`).
+                    // Speculatively parse the lambda; if its parameter list doesn't
+                    // parse cleanly, roll back and treat it as a paren/record.
+                    let saved = self.pos;
+                    let saved_errors = self.errors.len();
+                    let expr = self.parse_function_expr_with_type_params(Vec::new(), start);
+                    // Inside a constructor field-initializer value, a `(...)` whose
+                    // speculative parse yields a plain block-bodied lambda is really a
+                    // parenthesized expression followed by the constructor body: the
+                    // `{...}` is that body, not a lambda body. Rewind and reparse the
+                    // `(...)` as a paren/record, leaving `{` for the body parser.
+                    let is_plain_block_lambda = matches!(
+                        &expr,
+                        Expr::FuncExpr {
+                            is_async: false,
+                            is_generator: false,
+                            body,
+                            ..
+                        } if matches!(**body, FunctionBody::Block(_))
+                    );
+                    if self.errors.len() > saved_errors
+                        || (self.in_ctor_init_value && is_plain_block_lambda)
+                    {
+                        self.rewind_to(saved);
+                        self.errors.truncate(saved_errors);
+                        self.parse_paren_or_record(false, start)
+                    } else {
+                        expr
+                    }
                 } else {
-                    self.parse_paren_or_record(start)
+                    self.parse_paren_or_record(false, start)
                 }
             }
             // Generic function expression: `<T>(params) => ...` / `<T>(params) { ... }`
@@ -835,6 +1043,8 @@ impl<'src> Parser<'src> {
                     span: self.span_from(start),
                 }
             }
+            // Symbol literal:  #name  #foo.bar  #+  #[]  #[]=
+            TokenKind::Hash => self.parse_symbol_literal(start),
             // function expression: (params) => / (params) {
             // handled by falling through to identifier parse then seeing no ident
             _ if self.is_ident_like() => {
@@ -854,11 +1064,14 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_paren_or_record(&mut self, start: usize) -> Expr {
+    pub(super) fn parse_paren_or_record(&mut self, is_const: bool, start: usize) -> Expr {
         self.advance(); // (
+        // Within these parens a trailing `{` never opens the constructor body.
+        self.in_ctor_init_value = false;
         if self.at(TokenKind::RParen) {
             self.advance();
             return Expr::Record {
+                is_const,
                 fields: Vec::new(),
                 span: self.span_from(start),
             };
@@ -883,6 +1096,7 @@ impl<'src> Parser<'src> {
                 span: self.span_from(start),
             }];
             return Expr::Record {
+                is_const,
                 fields,
                 span: self.span_from(start),
             };
@@ -915,6 +1129,7 @@ impl<'src> Parser<'src> {
         self.eat(TokenKind::Comma);
         self.expect(TokenKind::RParen);
         Expr::Record {
+            is_const,
             fields,
             span: self.span_from(start),
         }
@@ -1031,13 +1246,26 @@ impl<'src> Parser<'src> {
     ) -> Expr {
         let params = self.parse_formal_param_list();
         let (is_async, is_generator) = self.parse_async_marker();
-        let body = self.parse_function_body().unwrap_or_else(|| {
-            self.error("expected function body after parameter list".to_string());
-            FunctionBody::Block(Block {
-                stmts: Vec::new(),
-                span: self.span_from(start),
-            })
-        });
+        // A closure's `=>` body is an expression, so it must NOT swallow the `;`
+        // that terminates the enclosing declaration/statement — unlike a function
+        // *declaration* body. `class C { final f = () => 0; }` relies on the `;`
+        // reaching the field parser.
+        let body = match self.cur().kind {
+            TokenKind::Arrow => {
+                let bstart = self.cur().offset;
+                self.advance();
+                let e = self.parse_expr();
+                FunctionBody::Arrow(Box::new(e), self.span_from(bstart))
+            }
+            TokenKind::LBrace => FunctionBody::Block(self.parse_block()),
+            _ => {
+                self.error("expected function body after parameter list".to_string());
+                FunctionBody::Block(Block {
+                    stmts: Vec::new(),
+                    span: self.span_from(start),
+                })
+            }
+        };
         Expr::FuncExpr {
             type_params,
             params,
@@ -1089,6 +1317,8 @@ impl<'src> Parser<'src> {
         start: usize,
     ) -> Expr {
         self.advance(); // [
+        // Inside a list literal a trailing `{` never opens the constructor body.
+        self.in_ctor_init_value = false;
         let mut elements = Vec::new();
         while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
             elements.push(self.parse_collection_element());
@@ -1112,9 +1342,20 @@ impl<'src> Parser<'src> {
         start: usize,
     ) -> Expr {
         self.advance(); // {
+        // Inside a set/map literal a trailing `{` never opens the constructor body.
+        self.in_ctor_init_value = false;
         if self.at(TokenKind::RBrace) {
             self.advance();
-            // Empty literal — default to map
+            // Empty braces: a single type arg (`<int>{}`) is a Set; no type args
+            // (`{}`) or two (`<K, V>{}`) is a Map.
+            if type_args.len() == 1 {
+                return Expr::Set {
+                    is_const,
+                    type_arg: type_args.into_iter().next(),
+                    elements: Vec::new(),
+                    span: self.span_from(start),
+                };
+            }
             return Expr::Map {
                 is_const,
                 type_args,
@@ -1123,10 +1364,13 @@ impl<'src> Parser<'src> {
                 span: self.span_from(start),
             };
         }
-        // Decide map vs set by looking at the first element's leaf: a `k: v` entry
-        // means a map, anything else a set. Works for plain, spread- and
-        // comprehension-led (`for`/`if`) literals alike.
-        if self.map_literal_lookahead() {
+        // Decide map vs set by looking for a `k: v` entry leaf: a colon means a
+        // map, a plain/spread element a set. Works for plain, spread- and
+        // comprehension-led (`for`/`if`) literals alike. A spread-only literal is
+        // ambiguous (`{...a}` could be either) — explicit type-arg arity decides,
+        // otherwise it defaults to a Set.
+        let is_map = self.map_literal_lookahead().unwrap_or(type_args.len() == 2);
+        if is_map {
             let mut elements = Vec::new();
             while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
                 elements.push(self.parse_map_element());
@@ -1180,29 +1424,54 @@ impl<'src> Parser<'src> {
         }
     }
 
-    /// Look ahead (without consuming) to classify a `{...}` literal as a map. The
-    /// leaf of a map element is a `k: v` entry; descend through leading `for`/`if`
-    /// comprehension headers to reach it. A spread leaf is treated as a set.
-    fn map_literal_lookahead(&mut self) -> bool {
+    /// Look ahead (without consuming) to classify a non-empty `{...}` literal:
+    /// `Some(true)` for a map (a `k: v` entry leaf), `Some(false)` for a set (a
+    /// plain element leaf), `None` when every element is a spread and no entry is
+    /// present (`{...a}` / `{...a, ...b}`) — genuinely ambiguous, so the caller
+    /// decides. Descends through leading `for`/`if` comprehension headers and
+    /// looks *past* leading spreads for a decisive `:` leaf.
+    fn map_literal_lookahead(&mut self) -> Option<bool> {
         let saved = self.pos;
         let saved_errors = self.errors.len();
-        while let TokenKind::For | TokenKind::If = self.cur().kind {
-            self.advance();
-            self.skip_balanced_parens();
-        }
-        let is_map = match self.cur().kind {
-            TokenKind::DotDotDot | TokenKind::DotDotDotQmark => false,
-            _ => {
-                // A null-aware key/element leads with `?`; skip it so `{?k: v}`
-                // (map) is told apart from `{?x}` (set).
-                let _ = self.eat(TokenKind::Qmark);
-                let _ = self.parse_expr();
-                self.at(TokenKind::Colon)
+        let result = loop {
+            loop {
+                // `await for` comprehension headers lead with `await`; skip it so the
+                // `for` is recognized and `{ await for (...) k: v }` reaches the map
+                // classification path.
+                if self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For {
+                    self.advance();
+                }
+                match self.cur().kind {
+                    TokenKind::For | TokenKind::If => {
+                        self.advance();
+                        self.skip_balanced_parens();
+                    }
+                    _ => break,
+                }
+            }
+            match self.cur().kind {
+                TokenKind::DotDotDot | TokenKind::DotDotDotQmark => {
+                    // A spread is ambiguous on its own; skip it and inspect the
+                    // next element for a decisive `k: v` entry.
+                    self.advance();
+                    let _ = self.parse_expr();
+                    if self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RBrace) {
+                        continue;
+                    }
+                    break None;
+                }
+                _ => {
+                    // A null-aware key/element leads with `?`; skip it so `{?k: v}`
+                    // (map) is told apart from `{?x}` (set).
+                    let _ = self.eat(TokenKind::Qmark);
+                    let _ = self.parse_expr();
+                    break Some(self.at(TokenKind::Colon));
+                }
             }
         };
-        self.pos = saved;
+        self.rewind_to(saved);
         self.errors.truncate(saved_errors);
-        is_map
+        result
     }
 
     /// Skip a balanced `( ... )` group starting at the current token. Used by
@@ -1264,40 +1533,14 @@ impl<'src> Parser<'src> {
                     span: self.span_from(start),
                 }
             }
+            TokenKind::Await if self.peek(1).kind == TokenKind::For => {
+                self.advance(); // await
+                self.advance(); // for
+                self.finish_for_map_element(true, start)
+            }
             TokenKind::For => {
                 self.advance();
-                match self.parse_collection_for_header() {
-                    ForHeader::ForIn {
-                        variable,
-                        var_type,
-                        pattern,
-                        iterable,
-                    } => {
-                        let entry = Box::new(self.parse_map_element());
-                        MapElement::For {
-                            variable,
-                            var_type,
-                            pattern,
-                            iterable,
-                            entry,
-                            span: self.span_from(start),
-                        }
-                    }
-                    ForHeader::CStyle {
-                        init,
-                        condition,
-                        updates,
-                    } => {
-                        let entry = Box::new(self.parse_map_element());
-                        MapElement::CFor {
-                            init,
-                            condition,
-                            updates,
-                            entry,
-                            span: self.span_from(start),
-                        }
-                    }
-                }
+                self.finish_for_map_element(false, start)
             }
             _ => {
                 // Dart 3.0 null-aware key `?k: v` and/or value `k: ?v`.
@@ -1355,57 +1598,122 @@ impl<'src> Parser<'src> {
                     span: self.span_from(start),
                 }
             }
+            // `await for (...)` — an asynchronous for-in element (async context).
+            TokenKind::Await if self.peek(1).kind == TokenKind::For => {
+                self.advance(); // await
+                self.advance(); // for
+                self.finish_for_collection_element(true, start)
+            }
             TokenKind::For => {
                 self.advance(); // for
-                match self.parse_collection_for_header() {
-                    ForHeader::ForIn {
-                        variable,
-                        var_type,
-                        pattern,
-                        iterable,
-                    } => {
-                        let element = Box::new(self.parse_collection_element());
-                        CollectionElement::For {
-                            variable,
-                            var_type,
-                            pattern,
-                            iterable,
-                            element,
-                            span: self.span_from(start),
-                        }
-                    }
-                    ForHeader::CStyle {
-                        init,
-                        condition,
-                        updates,
-                    } => {
-                        let element = Box::new(self.parse_collection_element());
-                        CollectionElement::CFor {
-                            init,
-                            condition,
-                            updates,
-                            element,
-                            span: self.span_from(start),
-                        }
-                    }
-                }
+                self.finish_for_collection_element(false, start)
             }
             _ => CollectionElement::Expr(self.parse_expr()),
         }
     }
 
+    /// Finish a collection `for`/`await for` element after the `for` keyword has
+    /// been consumed, building either a for-in ([`CollectionElement::For`], which
+    /// carries `is_await`) or a C-style ([`CollectionElement::CFor`]) element.
+    fn finish_for_collection_element(&mut self, is_await: bool, start: usize) -> CollectionElement {
+        match self.parse_collection_for_header() {
+            ForHeader::ForIn {
+                variable,
+                var_type,
+                pattern,
+                iterable,
+            } => {
+                let element = Box::new(self.parse_collection_element());
+                CollectionElement::For {
+                    is_await,
+                    variable,
+                    var_type,
+                    pattern,
+                    iterable,
+                    element,
+                    span: self.span_from(start),
+                }
+            }
+            ForHeader::CStyle {
+                init,
+                condition,
+                updates,
+            } => {
+                if is_await {
+                    self.error(
+                        "'await' cannot be used with a C-style for loop; use 'await for (x in ...)'"
+                            .to_string(),
+                    );
+                }
+                let element = Box::new(self.parse_collection_element());
+                CollectionElement::CFor {
+                    init,
+                    condition,
+                    updates,
+                    element,
+                    span: self.span_from(start),
+                }
+            }
+        }
+    }
+
+    /// Map-comprehension twin of [`finish_for_collection_element`].
+    fn finish_for_map_element(&mut self, is_await: bool, start: usize) -> MapElement {
+        match self.parse_collection_for_header() {
+            ForHeader::ForIn {
+                variable,
+                var_type,
+                pattern,
+                iterable,
+            } => {
+                let entry = Box::new(self.parse_map_element());
+                MapElement::For {
+                    is_await,
+                    variable,
+                    var_type,
+                    pattern,
+                    iterable,
+                    entry,
+                    span: self.span_from(start),
+                }
+            }
+            ForHeader::CStyle {
+                init,
+                condition,
+                updates,
+            } => {
+                if is_await {
+                    self.error(
+                        "'await' cannot be used with a C-style for loop; use 'await for (x in ...)'"
+                            .to_string(),
+                    );
+                }
+                let entry = Box::new(self.parse_map_element());
+                MapElement::CFor {
+                    init,
+                    condition,
+                    updates,
+                    entry,
+                    span: self.span_from(start),
+                }
+            }
+        }
+    }
+
     /// Parse a collection/comprehension `if (...)` condition (the `if` keyword is
     /// already consumed): `(expr)` or `(expr case pattern [when guard])`. The
-    /// `when` guard is parsed but not retained — `IfCondition` has no guard slot.
+    /// optional `when` guard is retained in [`IfCondition::Case`].
     fn parse_collection_if_condition(&mut self) -> IfCondition {
         self.expect(TokenKind::LParen);
         let scrutinee = self.parse_expr();
         let condition = if self.eat(TokenKind::Case).is_some() {
             let pattern = self.parse_pattern();
-            if self.eat(TokenKind::When).is_some() {
-                let _ = self.parse_expr();
-            }
-            IfCondition::Case(scrutinee, Box::new(pattern))
+            let guard = if self.eat(TokenKind::When).is_some() {
+                Some(Box::new(self.parse_expr()))
+            } else {
+                None
+            };
+            IfCondition::Case(scrutinee, Box::new(pattern), guard)
         } else {
             IfCondition::Expr(scrutinee)
         };
@@ -1473,7 +1781,7 @@ impl<'src> Parser<'src> {
     /// Parses a dot shorthand head: `.name` or `.new`. The caller has already
     /// recorded `start`; the leading `.` is still current. Any trailing
     /// invocation or selector is left for `parse_postfix`.
-    fn parse_dot_shorthand(&mut self, is_const: bool, start: usize) -> Expr {
+    pub(super) fn parse_dot_shorthand(&mut self, is_const: bool, start: usize) -> Expr {
         self.advance(); // consume `.`
         let name = if self.at(TokenKind::New) {
             let tok = self.advance();
@@ -1488,11 +1796,76 @@ impl<'src> Parser<'src> {
         }
     }
 
+    /// Parse a symbol literal — the leading `#` is current. The body is either a
+    /// dotted identifier chain (`#foo`, `#foo.bar.baz`) or a user-definable
+    /// operator (`#+`, `#==`, `#[]`, `#[]=`, `#~`). `raw` is sliced verbatim from
+    /// source so it always includes the `#` and exact operator spelling.
+    pub(super) fn parse_symbol_literal(&mut self, start: usize) -> Expr {
+        use TokenKind::*;
+        let hash = self.advance(); // #
+        let mut end = hash.offset + hash.len;
+        if self.is_ident_like() || self.at(Void) {
+            let tok = self.advance();
+            end = tok.offset + tok.len;
+            while self.at(Dot) {
+                let dot = self.advance();
+                end = dot.offset + dot.len;
+                if self.is_ident_like() || self.at(Void) {
+                    let id = self.advance();
+                    end = id.offset + id.len;
+                } else {
+                    self.error("expected identifier after '.' in symbol literal".to_string());
+                    break;
+                }
+            }
+        } else if self.at(LBracket) {
+            // Index operator `[]` or index-assign `[]=`.
+            self.advance();
+            let rb = self.expect(RBracket);
+            end = rb.offset + rb.len;
+            if let Some(eq) = self.eat(Eq) {
+                end = eq.offset + eq.len;
+            }
+        } else if matches!(
+            self.cur().kind,
+            Lt | Gt
+                | LtEq
+                | GtEq
+                | EqEq
+                | Minus
+                | Plus
+                | Slash
+                | TildeSlash
+                | Star
+                | Percent
+                | Pipe
+                | Caret
+                | Amp
+                | LtLt
+                | GtGt
+                | GtGtGt
+                | Tilde
+        ) {
+            let op = self.advance();
+            end = op.offset + op.len;
+        } else {
+            self.error("expected symbol name after '#'".to_string());
+        }
+        let raw = self.src[start..end].to_string();
+        Expr::SymbolLit {
+            raw,
+            span: Span::new(start, end),
+        }
+    }
+
     fn parse_const_expr(&mut self, start: usize) -> Expr {
         // const can prefix a constructor call, collection literal, or (Dart 3.9)
         // a dot shorthand: `const .fromLtrb(...)`.
         match self.cur().kind {
             TokenKind::Dot => self.parse_dot_shorthand(true, start),
+            // `const ('', X)` — a const record literal. Without this the `_` arm
+            // would demand a type name after `const` and choke on the `(`.
+            TokenKind::LParen => self.parse_paren_or_record(true, start),
             TokenKind::LBracket => self.parse_list_literal(true, None, start),
             TokenKind::LBrace => self.parse_map_or_set_literal(true, Vec::new(), start),
             TokenKind::Lt => {
@@ -1502,16 +1875,24 @@ impl<'src> Parser<'src> {
                         self.parse_list_literal(true, type_args.into_iter().next(), start)
                     }
                     TokenKind::LBrace => self.parse_map_or_set_literal(true, type_args, start),
-                    _ => Expr::Error {
-                        span: self.span_from(start),
-                    },
+                    _ => {
+                        self.error(
+                            "expected '[' or '{' after type arguments in collection literal"
+                                .to_string(),
+                        );
+                        Expr::Error {
+                            span: self.span_from(start),
+                        }
+                    }
                 }
             }
             _ => {
                 // const constructor
                 let dart_type = self.parse_type();
+                // A named constructor may be `.new` (`const C.new()`); `new` is a
+                // keyword token, so accept it explicitly here.
                 let constructor_name = if self.eat(TokenKind::Dot).is_some() {
-                    Some(self.expect_ident())
+                    Some(self.expect_ctor_name())
                 } else {
                     None
                 };

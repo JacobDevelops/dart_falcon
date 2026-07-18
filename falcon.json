@@ -1,13 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json",
   "files": {
-    "includes": [
-      "**",
-      "!.dart_tool/**",
-      "!build/**",
-      "!**/*.g.dart",
-      "!**/*.freezed.dart"
-    ]
+    "includes": ["**", "!.dart_tool/**", "!build/**", "!**/*.g.dart", "!**/*.freezed.dart"]
   },
   "linter": {
     "enabled": true,
@@ -73,6 +67,28 @@
       "style": {
         "sort-child-properties-last": "warn",
         "use-full-hex-values-for-flutter-colors": "warn",
+        "prefer-generic-function-type-aliases": "warn",
+        "prefer-is-empty": "warn",
+        "prefer-is-not-empty": "warn",
+        "prefer-iterable-where-type": "warn",
+        "prefer-typing-uninitialized-variables": "warn",
+        "prefer-adjacent-string-concatenation": "warn",
+        "prefer-collection-literals": "warn",
+        "prefer-final-fields": "warn",
+        "prefer-function-declarations-over-variables": "warn",
+        "prefer-initializing-formals": "warn",
+        "prefer-inlined-adds": "warn",
+        "prefer-is-not-operator": "warn",
+        "prefer-spread-collections": "warn",
+        "unnecessary-brace-in-string-interps": "warn",
+        "unnecessary-constructor-name": "warn",
+        "unnecessary-late": "warn",
+        "unnecessary-library-name": "warn",
+        "unnecessary-new": "warn",
+        "unnecessary-nullable-for-final-variable-declarations": "warn",
+        "unnecessary-string-escapes": "warn",
+        "unnecessary-string-interpolations": "warn",
+        "unnecessary-this": "warn",
         "avoid-late-keyword": "warn",
         "avoid-non-null-assertion": "warn",
         "avoid-top-level-member-access": "warn",

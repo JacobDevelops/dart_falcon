@@ -166,7 +166,12 @@ fn scan_stmt(
         Stmt::If(i) => {
             match &i.condition {
                 IfCondition::Expr(e) => scan_expr(e, diags, ctx, items),
-                IfCondition::Case(e, _) => scan_expr(e, diags, ctx, items),
+                IfCondition::Case(e, _, guard) => {
+                    scan_expr(e, diags, ctx, items);
+                    if let Some(g) = guard {
+                        scan_expr(g, diags, ctx, items);
+                    }
+                }
             }
             scan_stmt(&i.then_branch, diags, ctx, items);
             if let Some(eb) = &i.else_branch {
@@ -447,18 +452,23 @@ fn scan_expr(
         } => {
             scan_expr(object, diags, ctx, items);
             for section in sections {
-                match &section.op {
-                    CascadeOp::Field(_, _) => {}
-                    CascadeOp::Index(e, _) => scan_expr(e, diags, ctx, items),
-                    CascadeOp::Call(_, _, args) => {
-                        for arg in &args.positional {
-                            scan_expr(arg, diags, ctx, items);
+                for op in &section.ops {
+                    match op {
+                        CascadeOp::Field(_, _) => {}
+                        CascadeOp::Index(e, _) => scan_expr(e, diags, ctx, items),
+                        CascadeOp::Call(_, _, args) => {
+                            for arg in &args.positional {
+                                scan_expr(arg, diags, ctx, items);
+                            }
+                            for named in &args.named {
+                                scan_expr(&named.value, diags, ctx, items);
+                            }
                         }
-                        for named in &args.named {
-                            scan_expr(&named.value, diags, ctx, items);
+                        CascadeOp::Assign(target, _, value) => {
+                            scan_expr(target, diags, ctx, items);
+                            scan_expr(value, diags, ctx, items);
                         }
                     }
-                    CascadeOp::Assign(_, _, value) => scan_expr(value, diags, ctx, items),
                 }
             }
         }

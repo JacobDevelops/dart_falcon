@@ -19,11 +19,17 @@
 //! miss violations, but it must not fire a false positive because of a bad
 //! type fact.
 
+mod library;
 mod local_types;
 mod project_index;
+mod receiver;
+mod type_index;
 
+pub use library::{LibraryGrouping, LibraryUnit, group_libraries, library_unit};
 pub use local_types::LocalTypes;
 pub use project_index::{ProgramSource, ProjectIndex};
+pub use receiver::ReceiverTypes;
+pub use type_index::{LibrarySource, MemberKind, MemberResult, SubtypeResult, TypeIndex, TypeKind};
 
 use falcon_syntax::ast::DartType;
 

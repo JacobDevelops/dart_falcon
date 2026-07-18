@@ -532,7 +532,7 @@ fn test_stmt_if_case() {
             let Stmt::If(if_stmt) = &b.stmts[0] else {
                 panic!("expected if")
             };
-            assert!(matches!(if_stmt.condition, IfCondition::Case(_, _)));
+            assert!(matches!(if_stmt.condition, IfCondition::Case(_, _, _)));
         }
         _ => panic!("expected block body"),
     }
@@ -1461,7 +1461,7 @@ fn test_pattern_wildcard() {
             let Stmt::If(if_stmt) = &b.stmts[0] else {
                 panic!("expected if")
             };
-            assert!(matches!(if_stmt.condition, IfCondition::Case(_, _)));
+            assert!(matches!(if_stmt.condition, IfCondition::Case(_, _, _)));
         }
         _ => panic!("expected block body"),
     }

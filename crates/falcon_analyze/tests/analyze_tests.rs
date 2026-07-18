@@ -71,6 +71,8 @@ fn test_mock_rule_analyze_empty() {
         source: "void main() {}",
         config: &config,
         project: None,
+        types: None,
+        library: None,
     };
 
     let diagnostics = rule.analyze(&program, &ctx);
@@ -89,6 +91,8 @@ fn test_registry_register_and_run_all_empty() {
         source: "void main() {}",
         config: &config,
         project: None,
+        types: None,
+        library: None,
     };
 
     let diagnostics = registry.run_all(&program, &ctx);
@@ -107,6 +111,8 @@ fn test_registry_run_all_emits_diagnostic() {
         source: "void main() {}",
         config: &config,
         project: None,
+        types: None,
+        library: None,
     };
 
     let diagnostics = registry.run_all(&program, &ctx);
@@ -129,6 +135,8 @@ fn test_registry_multiple_rules() {
         source: "void main() {}",
         config: &config,
         project: None,
+        types: None,
+        library: None,
     };
 
     let diagnostics = registry.run_all(&program, &ctx);
@@ -147,6 +155,8 @@ fn test_analyze_context_fields() {
         source,
         config: &config,
         project: None,
+        types: None,
+        library: None,
     };
 
     assert_eq!(ctx.file_path, path);
@@ -273,6 +283,8 @@ fn test_end_to_end_parse_analyze_serialize() {
         source,
         config: &config,
         project: None,
+        types: None,
+        library: None,
     };
 
     let diagnostics = registry.run_all(&program, &ctx);

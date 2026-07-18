@@ -59,6 +59,7 @@ fn visit_top_level_decl(
         }
         TopLevelDecl::ExtensionType(_) => {}
         TopLevelDecl::TypeAlias(_) => {}
+        TopLevelDecl::ClassTypeAlias(_) => {}
         TopLevelDecl::Error(_) => {}
     }
 }
@@ -211,8 +212,11 @@ fn visit_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
                 IfCondition::Expr(expr) => {
                     visit_expr(expr, diagnostics, ctx);
                 }
-                IfCondition::Case(expr, _pattern) => {
+                IfCondition::Case(expr, _pattern, guard) => {
                     visit_expr(expr, diagnostics, ctx);
+                    if let Some(g) = guard {
+                        visit_expr(g, diagnostics, ctx);
+                    }
                 }
             }
             visit_stmt(&if_stmt.then_branch, diagnostics, ctx);
@@ -300,6 +304,12 @@ fn visit_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         }
         Stmt::PatternDecl(pat_decl) => {
             visit_expr(&pat_decl.init, diagnostics, ctx);
+        }
+        Stmt::PatternAssign(pat_assign) => {
+            visit_expr(&pat_assign.value, diagnostics, ctx);
+        }
+        Stmt::Labeled(labeled) => {
+            visit_stmt(&labeled.stmt, diagnostics, ctx);
         }
         Stmt::Error(_) => {}
     }
@@ -402,25 +412,27 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         } => {
             visit_expr(object, diagnostics, ctx);
             for section in sections {
-                match &section.op {
-                    CascadeOp::Call(_, type_args, args) => {
-                        for type_arg in type_args {
-                            check_dart_type(type_arg, diagnostics, ctx);
+                for op in &section.ops {
+                    match op {
+                        CascadeOp::Call(_, type_args, args) => {
+                            for type_arg in type_args {
+                                check_dart_type(type_arg, diagnostics, ctx);
+                            }
+                            for expr in &args.positional {
+                                visit_expr(expr, diagnostics, ctx);
+                            }
+                            for named_arg in &args.named {
+                                visit_expr(&named_arg.value, diagnostics, ctx);
+                            }
                         }
-                        for expr in &args.positional {
-                            visit_expr(expr, diagnostics, ctx);
+                        CascadeOp::Index(index, _) => {
+                            visit_expr(index, diagnostics, ctx);
                         }
-                        for named_arg in &args.named {
-                            visit_expr(&named_arg.value, diagnostics, ctx);
+                        CascadeOp::Field(_, _) => {}
+                        CascadeOp::Assign(target, _, value) => {
+                            visit_expr(target, diagnostics, ctx);
+                            visit_expr(value, diagnostics, ctx);
                         }
-                    }
-                    CascadeOp::Index(index, _) => {
-                        visit_expr(index, diagnostics, ctx);
-                    }
-                    CascadeOp::Field(_, _) => {}
-                    CascadeOp::Assign(target, _, value) => {
-                        visit_expr(target, diagnostics, ctx);
-                        visit_expr(value, diagnostics, ctx);
                     }
                 }
             }
@@ -499,7 +511,16 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         Expr::NullAssert { operand, .. } => {
             visit_expr(operand, diagnostics, ctx);
         }
+        Expr::GenericInstantiation {
+            target, type_args, ..
+        } => {
+            visit_expr(target, diagnostics, ctx);
+            for type_arg in type_args {
+                check_dart_type(type_arg, diagnostics, ctx);
+            }
+        }
         Expr::DotShorthand { .. } => {}
+        Expr::SymbolLit { .. } => {}
         Expr::Error { .. } => {}
     }
 }
@@ -529,8 +550,11 @@ fn visit_collection_element(
                 IfCondition::Expr(expr) => {
                     visit_expr(expr, diagnostics, ctx);
                 }
-                IfCondition::Case(expr, _) => {
+                IfCondition::Case(expr, _, guard) => {
                     visit_expr(expr, diagnostics, ctx);
+                    if let Some(g) = guard {
+                        visit_expr(g, diagnostics, ctx);
+                    }
                 }
             }
             visit_collection_element(then_elem, diagnostics, ctx);

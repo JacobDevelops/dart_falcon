@@ -184,6 +184,8 @@ fn run_all_rules_on_source(rules: &[Box<dyn Rule>], path: &Path, source: &str) {
         source,
         config: &config,
         project: None,
+        types: None,
+        library: None,
     };
     for rule in rules {
         let _ = rule.analyze(&program, &ctx);
@@ -257,6 +259,8 @@ fn bench_per_rule(c: &mut Criterion) {
                     source: snippet,
                     config: &config,
                     project: None,
+                    types: None,
+                    library: None,
                 };
                 let _ = rule.analyze(&program, &ctx);
             });
