@@ -310,9 +310,12 @@ impl<'src> Parser<'src> {
         while self.at(TokenKind::At) {
             let start = self.cur().offset;
             self.advance(); // @
+            // A `.new` reference names the unnamed constructor (`@X.new()`); `new`
+            // is a keyword token, so accept it in the dotted-name segments here and
+            // in the trailing constructor name below.
             let mut name = vec![self.expect_ident()];
             while self.eat(TokenKind::Dot).is_some() {
-                name.push(self.expect_ident());
+                name.push(self.expect_ctor_name());
             }
             // Type arguments: `@Native<int Function()>(...)`, `@Foo<int>.named()`.
             let type_args = if self.at(TokenKind::Lt) {
@@ -321,7 +324,7 @@ impl<'src> Parser<'src> {
                 Vec::new()
             };
             let constructor_name = if self.eat(TokenKind::Dot).is_some() {
-                Some(self.expect_ident())
+                Some(self.expect_ctor_name())
             } else {
                 None
             };
@@ -367,7 +370,11 @@ impl<'src> Parser<'src> {
                 let start = self.cur().offset;
                 self.advance();
                 let expr = self.parse_expr();
-                self.eat(TokenKind::Semicolon);
+                // An `=> expr` declaration body is terminated by `;`; a missing one
+                // is a syntax error the SDK reports (EXPECTED_TOKEN), not silent
+                // recovery. Function *expressions* (closures) use a separate arrow
+                // path in `expr.rs` that carries no terminator.
+                self.expect(TokenKind::Semicolon);
                 Some(FunctionBody::Arrow(Box::new(expr), self.span_from(start)))
             }
             TokenKind::LBrace => Some(FunctionBody::Block(self.parse_block())),

@@ -420,3 +420,74 @@ fn label_between_switch_cases() {
     let (_stmts, e) = body_stmts("switch (x) { case 1: continue lbl; lbl: case 2: break; }");
     assert_eq!(e, 0);
 }
+
+// ── Item: `{ literal; ... }` at statement start is a block, not a set literal ──
+
+#[test]
+fn test_brace_with_literal_then_semicolon_is_block() {
+    // `{ 1; }` — a leading literal makes it *look* like a set, but the top-level
+    // `;` proves it is a block of statements.
+    let stmt = only_stmt("{ 1; }");
+    match stmt {
+        Stmt::Block(b) => {
+            assert_eq!(b.stmts.len(), 1);
+            assert!(matches!(b.stmts[0], Stmt::Expr(_)), "{:?}", b.stmts[0]);
+        }
+        other => panic!("expected block, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_brace_set_literal_statement_still_expr() {
+    // Control: `{1};` (no inner `;`) stays a set-literal expression statement.
+    let stmt = only_stmt("{1};");
+    match stmt {
+        Stmt::Expr(e) => assert!(matches!(e.expr, Expr::Set { .. }), "{:?}", e.expr),
+        other => panic!("expected expression statement, got {other:?}"),
+    }
+}
+
+// ── Item: assignment / complex expressions in statement-leading parens ─────────
+
+#[test]
+fn test_paren_assignment_statement() {
+    // `(v = 0) ?? 0;` — the leading `(` must not be misparsed as a pattern
+    // assignment; it is an ordinary parenthesised assignment expression.
+    let stmt = only_stmt("(v = 0) ?? 0;");
+    match stmt {
+        Stmt::Expr(e) => assert!(
+            matches!(
+                e.expr,
+                Expr::Binary {
+                    op: BinaryOp::NullCoalesce,
+                    ..
+                }
+            ),
+            "{:?}",
+            e.expr
+        ),
+        other => panic!("expected expression statement, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_conditional_with_assignments_statement() {
+    // `a ? b = c : d = e;` — a ternary expression statement whose branches assign.
+    let stmt = only_stmt("a ? b = c : d = e;");
+    match stmt {
+        Stmt::Expr(e) => assert!(matches!(e.expr, Expr::Conditional { .. }), "{:?}", e.expr),
+        other => panic!("expected expression statement, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_parenthesised_collection_with_complex_element() {
+    // `({if (a) b = c});` — a parenthesised set literal whose element is an
+    // `if` comprehension with an assignment body. The leading `(` must not be
+    // taken for a pattern assignment.
+    let stmt = only_stmt("({if (a) b = c});");
+    match stmt {
+        Stmt::Expr(e) => assert!(matches!(e.expr, Expr::Set { .. }), "{:?}", e.expr),
+        other => panic!("expected expression statement, got {other:?}"),
+    }
+}

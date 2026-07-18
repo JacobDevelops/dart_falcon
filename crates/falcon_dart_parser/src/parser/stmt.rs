@@ -60,7 +60,10 @@ impl<'src> Parser<'src> {
                 }
                 // Disambiguate block vs map/set literal expression statement.
                 // If the first token inside is something that can't start a statement
-                // (a literal value), treat the whole `{...}` as an expression.
+                // (a literal value), treat the whole `{...}` as an expression — but
+                // only when the brace group has no top-level `;`. A `;` at the outer
+                // brace level (`{ 1; }`) can never appear in a collection literal, so
+                // the group is a block of statements, not a `{1}` set literal.
                 let next = self.peek(1).kind.clone();
                 let looks_like_collection = matches!(
                     next,
@@ -70,7 +73,7 @@ impl<'src> Parser<'src> {
                         | TokenKind::True
                         | TokenKind::False
                         | TokenKind::Null
-                );
+                ) && !self.brace_group_has_top_level_semicolon();
                 if looks_like_collection {
                     self.parse_expr_or_local_decl_stmt()
                 } else {
@@ -852,15 +855,24 @@ impl<'src> Parser<'src> {
                             span: self.span_from(d2),
                         });
                     }
-                    self.eat(TokenKind::Semicolon);
-                    return Stmt::LocalVar(LocalVarDecl {
-                        is_final: false,
-                        is_const: false,
-                        is_late: false,
-                        var_type: Some(ty),
-                        declarators,
-                        span: self.span_from(start),
-                    });
+                    // A real declaration ends at `;` (or the enclosing block's
+                    // `}`/EOF). If instead a `:` follows, the speculative type +
+                    // name + `= init` was actually a ternary whose `?` was misread
+                    // as a nullable-type suffix (`a ? b = c : d = e`) — restore and
+                    // parse it as an expression.
+                    if self.at_any(&[TokenKind::Semicolon, TokenKind::RBrace, TokenKind::Eof]) {
+                        self.eat(TokenKind::Semicolon);
+                        return Stmt::LocalVar(LocalVarDecl {
+                            is_final: false,
+                            is_const: false,
+                            is_late: false,
+                            var_type: Some(ty),
+                            declarators,
+                            span: self.span_from(start),
+                        });
+                    }
+                    self.rewind_to(saved);
+                    self.errors.truncate(saved_errs);
                 } else {
                     self.rewind_to(saved);
                     self.errors.truncate(saved_errs);
@@ -998,6 +1010,13 @@ impl<'src> Parser<'src> {
         let is_final = self.at(TokenKind::Final);
         self.advance(); // final / var
         let pattern = self.parse_binding_pattern();
+        // What follows the keyword did not parse cleanly as a destructuring
+        // pattern — restore and let the LocalVar path handle it.
+        if self.errors.len() > saved_errs {
+            self.rewind_to(saved);
+            self.errors.truncate(saved_errs);
+            return None;
+        }
         // A bare (possibly typed) variable/wildcard outer pattern — e.g.
         // `final (int, String) rec = ..` — is a record-typed variable
         // *declaration*, not a pattern declaration. Fall through to the LocalVar
@@ -1086,6 +1105,33 @@ impl<'src> Parser<'src> {
         }
     }
 
+    /// True when the balanced `{...}` group starting at the statement-leading `{`
+    /// contains a `;` at its own (outer) brace level. A collection literal never
+    /// holds a top-level `;`, so such a group is a block of statements
+    /// (`{ 1; }`, `{ 'x'; f(); }`) rather than a `{1}` set/map literal. Nested `;`
+    /// inside deeper brackets (e.g. a closure body) is ignored.
+    fn brace_group_has_top_level_semicolon(&self) -> bool {
+        debug_assert_eq!(self.cur().kind, TokenKind::LBrace);
+        let kind = |i: usize| self.tokens.get(i).map(|t| &t.kind);
+        let mut depth = 0i32;
+        let mut i = self.pos;
+        loop {
+            match kind(i) {
+                Some(TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket) => depth += 1,
+                Some(TokenKind::RBrace | TokenKind::RParen | TokenKind::RBracket) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return false;
+                    }
+                }
+                Some(TokenKind::Semicolon) if depth == 1 => return true,
+                Some(TokenKind::Eof) | None => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
     /// Speculatively parse a Dart 3 pattern-assignment
     /// `(<pattern>|[<pattern>]|{<pattern>}) = expr;`. Returns `None` (restoring
     /// position and errors) when the `(`/`[`/`{` prefix is not a pattern followed
@@ -1098,6 +1144,15 @@ impl<'src> Parser<'src> {
         // mode so each parses as `Pattern::Variable` (which the visitor walks),
         // matching the declaration twin `var (a, b) = e;`.
         let pattern = self.parse_binding_pattern();
+        // The `(`/`[`/`{` prefix did not parse cleanly as a pattern — it is an
+        // ordinary parenthesised/record/collection expression whose contents a
+        // pattern grammar rejects (`(v = 0) ?? 0;`, `({if (a) b = c});`). Restore
+        // and let expression parsing handle it.
+        if self.errors.len() > saved_errs {
+            self.rewind_to(saved);
+            self.errors.truncate(saved_errs);
+            return None;
+        }
         // A bare (possibly record-typed) variable/wildcard is a typed variable
         // *declaration* (`(String, bool) t = ..`), not a pattern assignment — let
         // it fall through to the typed-decl path.

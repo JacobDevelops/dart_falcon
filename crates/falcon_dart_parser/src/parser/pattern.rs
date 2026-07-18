@@ -295,6 +295,17 @@ impl<'src> Parser<'src> {
             });
         }
 
+        // Symbol literal (`#name`, `#foo.bar`, `#+`) — a constant expression, so
+        // it is a constant pattern in refutable positions (`case #add:`).
+        if self.at(TokenKind::Hash) {
+            let expr = self.parse_symbol_literal(start);
+            return Pattern::Const(ConstPattern {
+                name: Vec::new(),
+                expr: Some(Box::new(expr)),
+                span: self.span_from(start),
+            });
+        }
+
         // const keyword → const constructor or const value pattern
         if self.at(TokenKind::Const) {
             return self.parse_const_pattern(start);
@@ -570,13 +581,14 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_const_pattern(&mut self, start: usize) -> Pattern {
-        // Parenthesized constant expression: `const (1 + 2)`. Handled here rather
-        // than via `parse_primary`, which would read `(...)` as a record type.
+        // Parenthesized constant expression `const (1 + 2)`, or a const record
+        // `const (1, 2)`. Handled here rather than via `parse_primary`, which would
+        // read `(...)` as a record type. `parse_paren_or_record` yields the inner
+        // expression for a single element and a const `Expr::Record` when commas
+        // make it a record shape.
         if self.peek(1).kind == TokenKind::LParen {
             self.advance(); // const
-            self.advance(); // (
-            let inner = self.parse_expr();
-            self.expect(TokenKind::RParen);
+            let inner = self.parse_paren_or_record(true, start);
             return Pattern::Const(ConstPattern {
                 name: Vec::new(),
                 expr: Some(Box::new(inner)),

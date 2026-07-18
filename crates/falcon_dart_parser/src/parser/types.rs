@@ -193,13 +193,21 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::RParen);
         let is_nullable = self.eat_type_qmark();
         let span = self.span_from(start);
-        DartType::Function(Box::new(FunctionType {
+        let fn_type = DartType::Function(Box::new(FunctionType {
             return_type: return_type.map(Box::new),
             type_params,
             params,
             is_nullable,
             span,
-        }))
+        }));
+        // Curried function type: the function type just parsed may itself be the
+        // return type of another, `int Function() Function()` being a function
+        // returning `int Function()`. Fold left-to-right so the inner type nests as
+        // the return type of the outer.
+        if self.at_function_type_start() {
+            return self.parse_function_type(Some(fn_type), start);
+        }
+        fn_type
     }
 
     fn parse_function_type_params(&mut self) -> Vec<FunctionTypeParam> {
@@ -462,6 +470,16 @@ impl<'src> Parser<'src> {
                 (leading, self.expect_ident())
             }
         };
+
+        // A named initializing/super formal with a private name
+        // (`{required this._x}`, `{super._y}`) needs the off-by-default
+        // `private-named-parameters` feature; the pinned front end rejects it as a
+        // syntactic error rather than accepting the looser grammar.
+        if is_named && (is_field || is_super) && name.name.starts_with('_') {
+            self.error(
+                "This requires the 'private-named-parameters' language feature to be enabled",
+            );
+        }
 
         // function-typed param: name(params)
         let function_params = if self.at(TokenKind::LParen) {

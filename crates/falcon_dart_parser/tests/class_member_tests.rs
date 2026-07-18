@@ -463,3 +463,201 @@ fn builtin_override_identifier_as_field_name() {
         other => panic!("expected field, got {other:?}"),
     }
 }
+
+// ── Regression: member named after a modifier keyword with an async/generator ──
+// body. `external`/`late`/`covariant` before `()` followed by an `async`/`sync`
+// body modifier is the member's OWN name (a method), not a leading modifier —
+// the `record_type_prefixes_member` scan must treat `async`/`sync` after `)` as
+// a body marker, not a member-name signal.
+
+#[test]
+fn test_member_named_external_with_async_body() {
+    let (prog, errors) = parse("class C { external() async {} }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Method(m) => {
+            assert_eq!(m.name.name, "external");
+            assert!(!m.is_external, "keyword is the name, not a modifier");
+            assert!(m.is_async);
+            assert!(!m.is_generator);
+            assert!(m.return_type.is_none());
+        }
+        other => panic!("expected method `external`, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_member_named_late_with_async_body() {
+    let (prog, errors) = parse("class C { late() async {} }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Method(m) => {
+            assert_eq!(m.name.name, "late");
+            assert!(m.is_async);
+            assert!(m.return_type.is_none());
+        }
+        other => panic!("expected method `late`, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_member_named_covariant_with_sync_star_body() {
+    let (prog, errors) = parse("class C { covariant() sync* {} }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Method(m) => {
+            assert_eq!(m.name.name, "covariant");
+            assert!(m.is_generator);
+            assert!(!m.is_async);
+        }
+        other => panic!("expected method `covariant`, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_static_record_return_type_still_modifier() {
+    // Control: a genuine record return type keeps `static` as a modifier.
+    let (prog, errors) = parse("class C { static (int, int) m() {} }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Method(m) => {
+            assert_eq!(m.name.name, "m");
+            assert!(m.is_static);
+            assert!(matches!(m.return_type, Some(DartType::Record(_))));
+        }
+        other => panic!("expected static method `m`, got {other:?}"),
+    }
+}
+
+// ── Regression: a member literally named `async`/`sync` prefixed by a record ───
+// return type. Here the modifier keyword (static/external/covariant/late) IS a
+// modifier, the `(...)` IS the record return type, and `async`/`sync` is the
+// member's own name — distinguished from a body modifier by the token that
+// follows the name (`(`/`<`/`;`/`=`/`,` → name; `{`/`=>`/`*` → body marker).
+
+#[test]
+fn test_static_record_return_method_named_async() {
+    let (prog, errors) = parse("class C { static (int, int) async() => (1, 2); }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Method(m) => {
+            assert_eq!(m.name.name, "async");
+            assert!(m.is_static, "`static` stays a modifier");
+            assert!(
+                !m.is_async,
+                "trailing keyword is the name, not a body marker"
+            );
+            assert!(matches!(m.return_type, Some(DartType::Record(_))));
+        }
+        other => panic!("expected static method `async`, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_external_record_return_method_named_sync() {
+    let (prog, errors) = parse("class C { external (int, int) sync(); }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Method(m) => {
+            assert_eq!(m.name.name, "sync");
+            assert!(m.is_external, "`external` stays a modifier");
+            assert!(!m.is_generator);
+            assert!(matches!(m.return_type, Some(DartType::Record(_))));
+        }
+        other => panic!("expected external method `sync`, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_late_record_typed_field_named_async() {
+    let (prog, errors) = parse("class C { late (int, int) async; }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Field(f) => {
+            assert_eq!(f.declarators[0].name.name, "async");
+            assert!(f.is_late, "`late` stays a modifier");
+            assert!(matches!(f.field_type, Some(DartType::Record(_))));
+        }
+        other => panic!("expected late field named `async`, got {other:?}"),
+    }
+}
+
+// ── `factory` is a built-in identifier, legal as a member name ─────────────────
+
+#[test]
+fn test_factory_is_field_name() {
+    // `factory` followed by `=`/`;`/`,` is the field's own name, not the factory
+    // keyword — the SDK accepts a field named `factory`.
+    let (prog, errors) = parse("class C { late final factory = 1; }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Field(f) => {
+            assert_eq!(f.declarators[0].name.name, "factory");
+            assert!(f.is_late);
+            assert!(f.is_final);
+        }
+        other => panic!("expected field named `factory`, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_factory_constructor_still_parses() {
+    // Control: a genuine factory constructor (name follows `factory`) is intact.
+    let (prog, errors) = parse("class C { factory C() => C._(); C._(); }");
+    assert_clean(&errors);
+    assert!(matches!(
+        &only_class(&prog).members[0],
+        ClassMember::Constructor(c) if c.is_factory
+    ));
+}
+
+// ── Private-named initializing/super formals need the off-by-default feature ───
+
+#[test]
+fn test_private_named_initializing_formal_rejected() {
+    // `{required this._x}` needs the `private-named-parameters` experiment; the
+    // pinned front end rejects it as a syntax error.
+    let (_prog, errors) = parse("class C { final int _x; C({required this._x}); }");
+    assert_eq!(errors.len(), 1, "errors: {errors:?}");
+    assert!(errors[0].message.contains("private-named-parameters"));
+}
+
+#[test]
+fn test_private_named_super_formal_rejected() {
+    let (_prog, errors) = parse("class C extends B { C({super._x}); }");
+    assert_eq!(errors.len(), 1, "errors: {errors:?}");
+    assert!(errors[0].message.contains("private-named-parameters"));
+}
+
+#[test]
+fn test_private_positional_initializing_formal_ok() {
+    // Control: a *positional* private initializing formal is legal — the feature
+    // only gates named private formals.
+    let (_prog, errors) = parse("class C { final int _x; C(this._x); }");
+    assert_clean(&errors);
+}
+
+#[test]
+fn test_public_named_initializing_formal_ok() {
+    // Control: a public named initializing formal is always legal.
+    let (_prog, errors) = parse("class C { int x; C({required this.x}); }");
+    assert_clean(&errors);
+}
+
+// ── Missing `;` after an `=>` member body is a syntax error, not recovered ─────
+
+#[test]
+fn test_missing_semicolon_after_getter_arrow_body() {
+    // `num get a => 42` with no `;` before the next member must ERROR — falcon
+    // used to silently recover the missing terminator.
+    let (_prog, errors) = parse("class A { num get a => 42 int get b => 42; }");
+    assert!(!errors.is_empty(), "expected a missing-semicolon error");
+    assert!(errors.iter().any(|e| e.message.contains("Semicolon")));
+}
+
+#[test]
+fn test_getter_arrow_body_with_semicolon_ok() {
+    // Control: the terminated form parses clean.
+    let (_prog, errors) = parse("class A { int get b => 42; }");
+    assert_clean(&errors);
+}

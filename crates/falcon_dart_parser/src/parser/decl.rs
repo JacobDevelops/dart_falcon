@@ -216,6 +216,16 @@ impl<'src> Parser<'src> {
                     is_sealed = true;
                     self.advance();
                 }
+                // `static` is only legal on class members. At top level it is an
+                // extraneous modifier — unless it is actually the name of a
+                // top-level function (`static() => ...`, `static<T>() ...`), where
+                // a `(`/`<` follows. Report and recover by skipping it.
+                TokenKind::Static
+                    if !matches!(self.peek(1).kind, TokenKind::LParen | TokenKind::Lt) =>
+                {
+                    self.error("Can't have modifier 'static' here".to_string());
+                    self.advance();
+                }
                 _ => break,
             }
         }
@@ -463,6 +473,19 @@ impl<'src> Parser<'src> {
                         }
                         return match self.tokens.get(j).map(|t| &t.kind) {
                             Some(Function | Get | Set | Operator) => true,
+                            // `async`/`sync` after `)` is ambiguous: it may be a
+                            // function *body* modifier (`external() async {}`,
+                            // `covariant() sync* {}` — the `(...)` is a parameter
+                            // list, the keyword the member's own name) OR the member
+                            // *name* itself prefixed by a record return type
+                            // (`static (int,int) async()`, `late (int,int) async;`).
+                            // The token *after* async/sync decides: a name is
+                            // followed by `(`/`<`/`;`/`=`/`,`; a body modifier by
+                            // `{`/`=>`/`*` (generator marker).
+                            Some(Async | Sync) => matches!(
+                                self.tokens.get(j + 1).map(|t| &t.kind),
+                                Some(LParen | Lt | Semicolon | Eq | Comma)
+                            ),
                             Some(k) => Self::kind_is_ident_like(k),
                             None => false,
                         };
@@ -645,8 +668,21 @@ impl<'src> Parser<'src> {
             ));
         }
 
-        // Factory constructor
-        if self.at(TokenKind::Factory) {
+        // Factory constructor. `factory` is a built-in identifier, so shipped code
+        // also uses it as a plain member name (`late final factory = 1;`, a method
+        // `factory() {}`, a getter `factory<T>`). A real factory keyword is always
+        // followed by the enclosing type name; when it is followed by
+        // `=`/`;`/`,`/`(`/`<` instead it is the member's own name.
+        if self.at(TokenKind::Factory)
+            && !matches!(
+                self.peek(1).kind,
+                TokenKind::Eq
+                    | TokenKind::Semicolon
+                    | TokenKind::Comma
+                    | TokenKind::LParen
+                    | TokenKind::Lt
+            )
+        {
             return ClassMember::Constructor(self.parse_factory_constructor(
                 annotations,
                 is_external,
@@ -727,7 +763,7 @@ impl<'src> Parser<'src> {
         self.is_ident_like_at_offset(offset) || self.peek(offset).kind == TokenKind::New
     }
 
-    fn expect_ctor_name(&mut self) -> Identifier {
+    pub(super) fn expect_ctor_name(&mut self) -> Identifier {
         if self.at(TokenKind::New) {
             let tok = self.advance();
             return Identifier::new(self.tok_text(&tok).to_string(), Self::tok_span(&tok));
@@ -1656,8 +1692,14 @@ impl<'src> Parser<'src> {
         let is_const = self.eat(TokenKind::Const).is_some();
         let _ = self.eat(TokenKind::Var);
 
-        // Return type (optional)
-        let return_type = if self.is_type_start_at_cur() {
+        // Return type (optional). A bare `get`/`set` directly followed by the
+        // accessor name is an *untyped* top-level getter/setter (`get foo => 1;`),
+        // not a return type — leave the keyword for the getter/setter handling
+        // below, which the speculative type parse would otherwise consume as a
+        // type named `get`/`set`.
+        let at_untyped_accessor =
+            self.at_any(&[TokenKind::Get, TokenKind::Set]) && self.is_ident_like_at_offset(1);
+        let return_type = if !at_untyped_accessor && self.is_type_start_at_cur() {
             let saved = self.pos;
             let ty = self.parse_type();
             // Accept the type only if followed by an ident-like token (the name).
@@ -1934,11 +1976,14 @@ fn find_interp_close(bytes: &[u8], open_brace: usize, end: usize) -> Option<usiz
 /// quote (handling triple quotes and escapes). `None` when unterminated.
 fn skip_nested_string(bytes: &[u8], open: usize, end: usize) -> Option<usize> {
     let quote = bytes[open];
+    // A raw-string `r` prefix suppresses escapes: `r'\'` closes at its second
+    // quote, so a backslash must not consume the next byte here.
+    let raw = open > 0 && bytes[open - 1] == b'r';
     let triple = open + 2 < end && bytes[open + 1] == quote && bytes[open + 2] == quote;
     let mut i = if triple { open + 3 } else { open + 1 };
     while i < end {
         let b = bytes[i];
-        if b == b'\\' {
+        if b == b'\\' && !raw {
             i += 2;
             continue;
         }

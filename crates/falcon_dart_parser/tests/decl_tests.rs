@@ -381,3 +381,175 @@ fn test_type_param_annotation() {
     assert_eq!(c.type_params[0].annotations.len(), 1);
     assert_eq!(c.type_params[0].annotations[0].name[0].name, "foo");
 }
+
+// ── Item: `.new` named-constructor references in annotations ───────────────────
+
+#[test]
+fn test_annotation_dot_new_reference() {
+    // `@X.new()` — a metadata reference to the unnamed constructor. `new` is a
+    // keyword token, so the annotation name parser must accept it.
+    let (prog, errors) = parse("@X.new() class C {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let c = only_class(&prog);
+    let ann = &c.annotations[0];
+    assert_eq!(ann.name.last().unwrap().name, "new");
+    assert!(ann.args.is_some(), "the `()` is an argument list");
+}
+
+#[test]
+fn test_annotation_arg_const_dot_new() {
+    // `@Helper(const C.new())` — a const object creation using `.new` inside the
+    // annotation's argument list.
+    let (prog, errors) = parse("@Helper(const C.new()) class D {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let ann = &only_class(&prog).annotations[0];
+    assert_eq!(ann.name[0].name, "Helper");
+    let arg = &ann.args.as_ref().unwrap().positional[0];
+    match arg {
+        Expr::New {
+            is_const,
+            constructor_name,
+            ..
+        } => {
+            assert!(is_const);
+            assert_eq!(constructor_name.as_ref().unwrap().name, "new");
+        }
+        other => panic!("expected const `C.new()`, got {other:?}"),
+    }
+}
+
+// ── Item: curried function types (return type is itself a function type) ───────
+
+#[test]
+fn test_curried_function_type_param() {
+    // `int Function() Function() x` — a function returning `int Function()`.
+    let (prog, errors) = parse("foo(int Function() Function() x) {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let func = match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("expected function, got {other:?}"),
+    };
+    let param = &func.params.positional[0];
+    assert_eq!(param.name.name, "x");
+    match param.param_type.as_ref().unwrap() {
+        DartType::Function(outer) => {
+            // The outer function type's return type is another function type.
+            match outer.return_type.as_deref() {
+                Some(DartType::Function(inner)) => {
+                    assert!(
+                        matches!(inner.return_type.as_deref(), Some(DartType::Named(_))),
+                        "innermost return should be `int`"
+                    );
+                }
+                other => panic!("expected inner function-type return, got {other:?}"),
+            }
+        }
+        other => panic!("expected function type, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_curried_function_type_in_type_args() {
+    // `@G<void Function() Function(), int>()` — a curried function type as a
+    // type argument alongside a plain type.
+    let (prog, errors) = parse("@G<void Function() Function(), int>() class E {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let ann = &only_class(&prog).annotations[0];
+    assert_eq!(ann.type_args.len(), 2);
+    match &ann.type_args[0] {
+        DartType::Function(outer) => assert!(matches!(
+            outer.return_type.as_deref(),
+            Some(DartType::Function(_))
+        )),
+        other => panic!("expected curried function type, got {other:?}"),
+    }
+    assert!(matches!(ann.type_args[1], DartType::Named(_)));
+}
+
+// ── Item: top-level untyped getters (`get foo => 1;`, `get foo {}`) ────────────
+
+#[test]
+fn test_top_level_untyped_getter_arrow() {
+    let (prog, errors) = parse("get foo => 1;");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => {
+            assert!(f.is_getter);
+            assert_eq!(f.name.name, "foo");
+            assert!(f.return_type.is_none());
+            assert!(matches!(f.body, Some(FunctionBody::Arrow(..))));
+        }
+        other => panic!("expected getter function, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_top_level_untyped_getter_block() {
+    let (prog, errors) = parse("get foo {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => {
+            assert!(f.is_getter);
+            assert_eq!(f.name.name, "foo");
+            assert!(f.return_type.is_none());
+            assert!(matches!(f.body, Some(FunctionBody::Block(_))));
+        }
+        other => panic!("expected getter function, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_top_level_typed_getter_still_parses() {
+    // Control: a getter WITH a return type keeps the type.
+    let (prog, errors) = parse("int get foo => 1;");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => {
+            assert!(f.is_getter);
+            assert!(matches!(f.return_type, Some(DartType::Named(_))));
+        }
+        other => panic!("expected getter function, got {other:?}"),
+    }
+}
+
+// ── `static` is only legal on class members, not at top level ──────────────────
+
+#[test]
+fn test_static_modifier_at_top_level_rejected() {
+    // `static` on a top-level declaration is an extraneous modifier the SDK
+    // reports; falcon used to silently accept it. It still recovers and parses
+    // the underlying variable.
+    let (prog, errors) = parse("static final clientInfo = 3;");
+    assert_eq!(errors.len(), 1, "errors: {errors:?}");
+    assert!(errors[0].message.contains("static"));
+    assert!(matches!(&prog.declarations[0], TopLevelDecl::Variable(_)));
+}
+
+#[test]
+fn test_top_level_function_named_static_ok() {
+    // Control: a top-level function *named* `static` (a `(`/`<` follows) is legal.
+    let (prog, errors) = parse("static() => 1;");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => assert_eq!(f.name.name, "static"),
+        other => panic!("expected function named `static`, got {other:?}"),
+    }
+}
+
+// ── Missing `;` after an `=> switch(...) {...}` body is a syntax error ──────────
+
+#[test]
+fn test_missing_semicolon_after_arrow_switch_body_rejected() {
+    // An `=> switch (a) {...}` function body with no trailing `;` must ERROR;
+    // falcon used to silently recover the missing terminator.
+    let (_prog, errors) = parse("int f(Object a) => switch (a) { int x => 0, _ => 1 }");
+    assert!(!errors.is_empty(), "expected a missing-semicolon error");
+    assert!(errors.iter().any(|e| e.message.contains("Semicolon")));
+}
+
+#[test]
+fn test_arrow_switch_body_with_semicolon_ok() {
+    // Control: the terminated form parses clean.
+    let (_prog, errors) = parse("int f(Object a) => switch (a) { int x => 0, _ => 1 };");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+}

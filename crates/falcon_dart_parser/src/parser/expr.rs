@@ -87,9 +87,13 @@ impl<'src> Parser<'src> {
         let start = self.cur().offset;
         let cond = self.parse_null_coalesce();
         if self.eat(TokenKind::Qmark).is_some() {
-            let then_expr = self.parse_expr();
+            // Both branches are `expressionWithoutCascade` in the Dart grammar,
+            // which *includes* assignment — `a ? b = c : d = e` is valid, with each
+            // branch a right-associative assignment. (Cascades are excluded; a
+            // cascade in a branch must be parenthesised.)
+            let then_expr = self.parse_expr_without_cascade();
             self.expect(TokenKind::Colon);
-            let else_expr = self.parse_conditional();
+            let else_expr = self.parse_expr_without_cascade();
             let span = self.span_from(start);
             return Expr::Conditional {
                 condition: Box::new(cond),
@@ -99,6 +103,39 @@ impl<'src> Parser<'src> {
             };
         }
         cond
+    }
+
+    /// Parse an `expressionWithoutCascade`: an assignment whose left-hand side is a
+    /// conditional (cascade-excluding) subject. Used for the branches of a ternary,
+    /// where Dart permits assignment but not a bare cascade.
+    fn parse_expr_without_cascade(&mut self) -> Expr {
+        let start = self.cur().offset;
+        let lhs = self.parse_conditional();
+        let op = match self.cur().kind {
+            TokenKind::Eq => AssignOp::Eq,
+            TokenKind::PlusEq => AssignOp::PlusEq,
+            TokenKind::MinusEq => AssignOp::MinusEq,
+            TokenKind::StarEq => AssignOp::MulEq,
+            TokenKind::SlashEq => AssignOp::DivEq,
+            TokenKind::PercentEq => AssignOp::ModEq,
+            TokenKind::TildeSlashEq => AssignOp::IntDivEq,
+            TokenKind::AmpEq => AssignOp::AndEq,
+            TokenKind::PipeEq => AssignOp::OrEq,
+            TokenKind::CaretEq => AssignOp::XorEq,
+            TokenKind::LtLtEq => AssignOp::ShlEq,
+            TokenKind::GtGtEq => AssignOp::ShrEq,
+            TokenKind::GtGtGtEq => AssignOp::UShrEq,
+            TokenKind::QmarkQmarkEq => AssignOp::NullCoalesceEq,
+            _ => return lhs,
+        };
+        self.advance();
+        let rhs = self.parse_expr_without_cascade(); // right-associative
+        Expr::Assign {
+            target: Box::new(lhs),
+            op,
+            value: Box::new(rhs),
+            span: self.span_from(start),
+        }
     }
 
     // ── Null coalescing ?? ────────────────────────────────────────────────────
@@ -1016,7 +1053,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_paren_or_record(&mut self, is_const: bool, start: usize) -> Expr {
+    pub(super) fn parse_paren_or_record(&mut self, is_const: bool, start: usize) -> Expr {
         self.advance(); // (
         if self.at(TokenKind::RParen) {
             self.advance();
@@ -1723,7 +1760,7 @@ impl<'src> Parser<'src> {
     /// dotted identifier chain (`#foo`, `#foo.bar.baz`) or a user-definable
     /// operator (`#+`, `#==`, `#[]`, `#[]=`, `#~`). `raw` is sliced verbatim from
     /// source so it always includes the `#` and exact operator spelling.
-    fn parse_symbol_literal(&mut self, start: usize) -> Expr {
+    pub(super) fn parse_symbol_literal(&mut self, start: usize) -> Expr {
         use TokenKind::*;
         let hash = self.advance(); // #
         let mut end = hash.offset + hash.len;
@@ -1812,8 +1849,10 @@ impl<'src> Parser<'src> {
             _ => {
                 // const constructor
                 let dart_type = self.parse_type();
+                // A named constructor may be `.new` (`const C.new()`); `new` is a
+                // keyword token, so accept it explicitly here.
                 let constructor_name = if self.eat(TokenKind::Dot).is_some() {
-                    Some(self.expect_ident())
+                    Some(self.expect_ctor_name())
                 } else {
                     None
                 };

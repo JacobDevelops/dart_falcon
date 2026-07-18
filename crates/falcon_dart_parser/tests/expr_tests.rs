@@ -662,3 +662,45 @@ fn nested_paren_arithmetic_initializer_before_block_body() {
     let (_prog, errors) = parse("class C { var g; C(): g = (((o + 1) << 8) | 1) {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
+
+// ── Item: assignment expressions in parenthesised / conditional-branch positions ─
+
+#[test]
+fn test_assignment_inside_parens() {
+    // `(v = 0)` is an assignment expression, valid as a parenthesised subject.
+    let expr = parse_ok("(v = 0) ?? 0");
+    match expr {
+        Expr::Binary {
+            op: BinaryOp::NullCoalesce,
+            left,
+            ..
+        } => assert!(
+            matches!(*left, Expr::Assign { .. }),
+            "left of ?? should be an assignment, got {left:?}"
+        ),
+        other => panic!("expected `?? ` binary, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_assignment_in_both_conditional_branches() {
+    // `a ? b = c : d = e` — both ternary branches are assignments.
+    let expr = parse_ok("a ? b = c : d = e");
+    match expr {
+        Expr::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            assert!(
+                matches!(*then_expr, Expr::Assign { .. }),
+                "then: {then_expr:?}"
+            );
+            assert!(
+                matches!(*else_expr, Expr::Assign { .. }),
+                "else: {else_expr:?}"
+            );
+        }
+        other => panic!("expected conditional, got {other:?}"),
+    }
+}

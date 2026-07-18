@@ -1085,3 +1085,38 @@ fn nested_double_triple_quote_in_interpolation() {
     assert_eq!(interp_texts(&node, &src), vec!["f(\"x\")"]);
     assert!(matches!(node.interpolations[0].expr, Expr::Call { .. }));
 }
+
+// ── Raw string inside an interpolation body ───────────────────────────────────
+
+#[test]
+fn test_raw_string_with_backslash_in_interpolation() {
+    // Inside `${...}` the nested-string skipper must honor the `r` prefix: a raw
+    // string has no escapes, so `r'\'` closes at its second quote. Without this
+    // the backslash swallows the closing quote and the outer literal never ends.
+    let src = "var x = '${d.replaceAll(r'\\', '/')}';";
+    let tokens = filter_trivia(Lexer::new(src).tokenize());
+    assert!(
+        tokens.iter().all(|t| t.kind != TokenKind::Error),
+        "unexpected Error token: {tokens:?}"
+    );
+    assert!(
+        tokens.iter().any(|t| t.kind == TokenKind::StringLit),
+        "expected a StringLit token: {tokens:?}"
+    );
+
+    // And it parses cleanly end-to-end, recording the interpolation.
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let init = match &prog.declarations[0] {
+        TopLevelDecl::Variable(v) => v.declarators[0].initializer.as_ref().unwrap(),
+        other => panic!("expected variable, got {other:?}"),
+    };
+    match init {
+        Expr::StringLit(node) => assert_eq!(
+            node.interpolations.len(),
+            1,
+            "expected one interpolation: {node:?}"
+        ),
+        other => panic!("expected string literal, got {other:?}"),
+    }
+}

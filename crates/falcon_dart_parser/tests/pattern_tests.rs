@@ -490,3 +490,59 @@ fn dot_shorthand_in_record_pattern_with_when() {
     let (_stmts, e) = parse_body("switch (o) { case (.linux, _) when h: break; }");
     assert_eq!(e, 0);
 }
+
+// ── Item: const record pattern `case const (1, 2)` ────────────────────────────
+
+#[test]
+fn const_record_pattern() {
+    // `const (1, 2)` — a const *record*, not a single parenthesised expression.
+    let (sw, errs) = parse_switch("case const (1, 2): break;");
+    assert_eq!(errs, 0, "switch: {sw:?}");
+    let (pat, _) = first_case(&sw);
+    match pat {
+        Pattern::Const(cp) => match cp.expr.as_deref() {
+            Some(Expr::Record {
+                fields, is_const, ..
+            }) => {
+                assert!(is_const);
+                assert_eq!(fields.len(), 2);
+            }
+            other => panic!("expected const record expr, got {other:?}"),
+        },
+        other => panic!("expected const pattern, got {other:?}"),
+    }
+}
+
+#[test]
+fn symbol_literal_constant_pattern() {
+    // A symbol literal (`#add`) is a constant expression, so it is a valid
+    // constant pattern in a `case` — the SDK accepts it. falcon must not reject
+    // the `#` token here.
+    let (sw, errs) = parse_switch("case #add: break;");
+    assert_eq!(errs, 0, "switch: {sw:?}");
+    let (pat, _) = first_case(&sw);
+    match pat {
+        Pattern::Const(cp) => assert!(
+            matches!(cp.expr.as_deref(), Some(Expr::SymbolLit { raw, .. }) if raw == "#add"),
+            "expected symbol-literal const pattern, got {:?}",
+            cp.expr
+        ),
+        other => panic!("expected const pattern, got {other:?}"),
+    }
+}
+
+#[test]
+fn const_parenthesised_expr_pattern_still_single() {
+    // Control: `const (1 + 2)` remains a single parenthesised const expression.
+    let (sw, errs) = parse_switch("case const (1 + 2): break;");
+    assert_eq!(errs, 0, "switch: {sw:?}");
+    let (pat, _) = first_case(&sw);
+    match pat {
+        Pattern::Const(cp) => assert!(
+            matches!(cp.expr.as_deref(), Some(Expr::Binary { .. })),
+            "expected single binary expr, got {:?}",
+            cp.expr
+        ),
+        other => panic!("expected const pattern, got {other:?}"),
+    }
+}

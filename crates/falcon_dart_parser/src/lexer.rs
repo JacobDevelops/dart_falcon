@@ -320,6 +320,11 @@ impl<'src> Lexer<'src> {
             Some(c) => c,
             None => return false,
         };
+        // Honor a raw-string `r` prefix: raw strings have no escapes, so a
+        // backslash must not swallow the next char — which may be the closing
+        // quote, as in `${d.replaceAll(r'\', '/')}` where `r'\'` ends at the
+        // second quote.
+        let raw = self.pos > 0 && self.src.as_bytes()[self.pos - 1] == b'r';
         let triple = self.peek(1) == Some(quote) && self.peek(2) == Some(quote);
         if triple {
             self.advance();
@@ -331,7 +336,7 @@ impl<'src> Lexer<'src> {
         loop {
             match self.cur() {
                 None => return false,
-                Some('\\') => {
+                Some('\\') if !raw => {
                     self.advance();
                     self.advance();
                 }
