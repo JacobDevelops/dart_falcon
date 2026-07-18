@@ -1,4 +1,13 @@
-//! Flags `Expanded(child: SizedBox())` in favor of `Spacer`. Ported from pyramid_lint's `use_spacer_as_expanded_child`.
+//! Flags an `Expanded` wrapping an empty `SizedBox` or `Container` that should be a `Spacer`.
+//!
+//! Flutter's `Spacer` is exactly an `Expanded` whose child is an empty box, so
+//! `Expanded(child: SizedBox())` or `Expanded(child: Container())` is a verbose
+//! spelling of `Spacer()`. Using `Spacer` states the intent — reserve flexible
+//! empty space in a `Row`, `Column`, or `Flex` — and drops a layer of nesting.
+//! The rule matches an `Expanded` whose `child:` constructs a `Container` or
+//! `SizedBox` with no `child:` argument of its own; other arguments such as
+//! `color` do not disqualify the match, only a nested `child` does. Replace it
+//! with `Spacer()`, moving any `flex:` across.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

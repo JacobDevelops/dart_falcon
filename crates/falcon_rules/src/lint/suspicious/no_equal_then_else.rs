@@ -1,4 +1,12 @@
-//! Flags `if`/`else` branches with identical bodies. Ported from dart_code_linter's `no-equal-then-else`.
+//! Flags an `if`/`else` or ternary whose two branches are identical.
+//!
+//! When the then and else branches have the same body, the condition decides
+//! nothing — the same code runs either way — so either the condition is pointless
+//! or one branch was never edited to differ. Comparison is on branch source text
+//! with whitespace and block comments normalized away, so formatting differences
+//! do not hide a match. Remove the condition and keep the single body, or correct
+//! the branch that was supposed to differ. Applies to both `if`/`else` statements
+//! and `?:` ternary expressions.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

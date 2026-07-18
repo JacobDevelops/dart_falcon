@@ -1,6 +1,10 @@
-//! Flags setters declared with a return type (`avoid-return-types-on-setters`,
-//! adopted from package:lints). A setter never returns a value, so any return
-//! type — even `void` — is redundant noise.
+//! Flags setters declared with an explicit return type.
+//!
+//! A setter never returns a value, so annotating one with a return type — even
+//! `void` — is redundant and can mislead readers into thinking the result is
+//! usable. Drop the return type and write `set foo(int v)`. Both top-level
+//! setters and setters declared in classes, mixins, enums, and extensions are
+//! checked.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

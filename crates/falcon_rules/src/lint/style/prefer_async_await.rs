@@ -1,4 +1,12 @@
-//! Flags raw `Future.then` chains in favor of `async`/`await`. Ported from dart_code_linter's `prefer-async-await`.
+//! Flags `.then(...)` future chains that should use `async`/`await`.
+//!
+//! Chaining callbacks with `Future.then` nests logic inside closures and scatters
+//! error handling across `onError`/`catchError`, whereas `async`/`await` lets
+//! asynchronous code read top-to-bottom with ordinary `try`/`catch`. The rule
+//! walks statement and expression trees looking for any method call named `then`,
+//! reporting each one; it treats function-literal arguments as opaque and does
+//! not descend into lambda bodies. Matching is purely syntactic on the `then`
+//! name, so it does not confirm the receiver is actually a `Future`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

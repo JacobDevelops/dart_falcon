@@ -1,7 +1,11 @@
-//! Flags a trivial getter/setter pair that only exposes a private field
-//! (`unnecessary-getters-setters`, adopted from package:lints). When the getter
-//! just returns `_x` and the setter just assigns `_x`, the field should be
-//! public instead.
+//! Flags a trivial getter/setter pair that only reads and writes a private field.
+//!
+//! When a getter merely returns `_x` and a setter merely assigns `_x` with no
+//! validation or side effect, the pair buys nothing over a public field — Dart
+//! lets you later replace a public field with a getter/setter without changing
+//! call sites, so the wrapping is premature. The rule fires only when a getter
+//! and setter share a name, both target the same backing field, and that field
+//! is private (has a leading underscore).
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

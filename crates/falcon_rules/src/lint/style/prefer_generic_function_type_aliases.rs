@@ -1,11 +1,14 @@
-//! Flags old-style function typedefs (`prefer-generic-function-type-aliases`,
-//! adopted from package:lints): `typedef int F(int x);` should be written with
-//! the generic function type syntax `typedef F = int Function(int);`.
+//! Flags old-style function typedefs written with inline parameter syntax.
 //!
-//! The parser only accepts the modern `typedef Name = Type;` form, so an
-//! old-style typedef never survives as a clean `TypeAliasDecl`. Detection is
-//! therefore done over the raw source: a `typedef` whose declaration reaches an
-//! opening `(` before any `=` is the old, non-generic form.
+//! Dart's original typedef form, `typedef int F(int x);`, predates generic
+//! function types and cannot express a function type in every position the
+//! modern syntax can. Rewriting it as `typedef F = int Function(int);` is more
+//! uniform, composes with generics, and reads consistently with other type
+//! aliases. Because the parser only accepts the modern `typedef Name = Type;`
+//! form, detection scans the raw source rather than the AST: a `typedef` whose
+//! declaration reaches an opening `(` before any `=` or `;` is the old,
+//! non-generic form. The scan skips comments and string literals so the keyword
+//! appearing in text is not mistaken for a declaration.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

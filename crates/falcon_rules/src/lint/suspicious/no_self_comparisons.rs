@@ -1,4 +1,11 @@
-//! Flags comparisons of an expression with itself. Ported from pyramid_lint's `no_self_comparisons`.
+//! Flags a comparison whose two operands are identical.
+//!
+//! An expression like `x == x` or `count < count` compares a value with itself,
+//! so `==`, `<=`, and `>=` are always true while `!=`, `<`, and `>` are always
+//! false. It is almost always a typo for a different variable or a leftover from
+//! a refactor, and the constant result masks the check that was intended.
+//! Operands are compared by source text with whitespace removed, covering `==`,
+//! `!=`, `<`, `>`, `<=`, and `>=`. Fix the operand that was meant to differ.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,5 +1,9 @@
-//! Flags constructors with an empty block body `{}`, ported from package:lints
-//! `empty_constructor_bodies`. An empty body should be written as `;` instead.
+//! Flags constructors with an empty block body `{}`.
+//!
+//! An empty `{}` is indistinguishable from a body someone forgot to fill in,
+//! whereas a bare `;` states plainly that the constructor does no extra work.
+//! Prefer `Foo();` over `Foo() {}`. Only a block body containing no statements
+//! is reported; a constructor whose body does something is left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

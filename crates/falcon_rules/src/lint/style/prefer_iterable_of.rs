@@ -1,4 +1,11 @@
-//! Flags `List.from`/`Set.from` in favor of the `.of` constructor. Ported from dart_code_linter's `prefer-iterable-of`.
+//! Flags `.from` collection constructors in favor of the `.of` constructor.
+//!
+//! Catches `List.from`, `Set.from`, and `Iterable.from` — whether written as a
+//! static call (`List.from(xs)`, `List<int>.from(xs)`) or with `new`. The `.from`
+//! constructor takes an `Iterable<dynamic>` and re-types its elements, so a type
+//! mismatch surfaces only as a runtime cast failure; the `.of` constructor takes a
+//! statically typed `Iterable<E>`, letting the compiler reject bad element types up
+//! front. Prefer `.of` unless you specifically need `.from`'s dynamic widening.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

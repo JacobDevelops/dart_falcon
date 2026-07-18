@@ -1,15 +1,26 @@
-//! Flags a string whose entire content is a single interpolation of a provably
-//! non-nullable `String`. Ported from package:lints `unnecessary_string_interpolations`.
-//! `'$x'` / `'${x}'` where the whole string is just one interpolated `String`
-//! expression is equivalent to writing that expression directly.
+//! Flags a string literal whose entire content is a single interpolation of a
+//! provably non-nullable `String`. Ported from package:lints
+//! `unnecessary_string_interpolations`.
 //!
-//! The type proof is file-local ([`LocalTypes`]), widened by the project index's
-//! declared/builtin return types for member accesses and calls, and
-//! sound-over-precise: it fires only when the interpolated expression is *known*
-//! to be a non-nullable `String` (a string literal, a local/param declared
-//! `String`, `String + String`, a call returning `String`, …).
-//! `String?` and unknown types never fire — replacing `'${n + 1}'` (an `int`)
-//! with `n + 1` would silently change the value's type, the very bug this guards.
+//! When a string is nothing but `'$x'` or `'${x}'` and `x` is already a string,
+//! wrapping the value in quotes and interpolation markers is redundant — the
+//! literal is equivalent to writing the expression directly. The quotes only add
+//! noise and obscure that no formatting or concatenation is happening. The rule
+//! requires the interpolation to span the whole content, whether a bare
+//! `$identifier` or a full `${...}` expression; a string with any surrounding
+//! text, or two adjacent interpolations like `'$a$b'`, is left alone. Raw strings
+//! are never flagged. Use the interpolated expression on its own.
+//!
+//! The `String` requirement is enforced, not assumed. The type proof is
+//! file-local ([`LocalTypes`]), widened by the project index's declared/builtin
+//! return types keyed on the member name for member accesses and calls
+//! (`toUpperCase` -> `String`), and sound-over-precise: it fires only when the
+//! interpolated expression is *known* to be a non-nullable `String` (a string
+//! literal, a local/param declared `String`, `String + String`, a call returning
+//! `String`, …). `String?` and unknown types never fire — replacing `'${n + 1}'`
+//! (an `int`) with `n + 1` would silently change the value's type, the very bug
+//! this guards. A null-aware access (`a?.b`) is never proven, since its result is
+//! nullable regardless of the member's own return type.
 
 use falcon_analyze::{AnalyzeContext, LocalTypes, ProjectIndex, Rule, StaticType};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

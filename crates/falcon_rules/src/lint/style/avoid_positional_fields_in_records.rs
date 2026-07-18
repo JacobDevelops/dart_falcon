@@ -1,4 +1,11 @@
-//! Flags positional fields in record types. Ported from pyramid_lint's `avoid_positional_fields_in_records`.
+//! Flags positional fields in record types.
+//!
+//! Positional record fields are accessed as `$1`, `$2`, and so on, which convey
+//! nothing about what each field means and break silently when fields are
+//! reordered. Named fields (`({int x, int y})`) document intent at both the
+//! declaration and every use site. The check recurses through type arguments
+//! and nested record and function types, so a positional field buried inside a
+//! generic is still reported.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

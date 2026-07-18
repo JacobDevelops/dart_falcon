@@ -1,4 +1,15 @@
-//! Flags functions longer than the configured line limit. Ported from pyramid_lint's `max_lines_for_function`.
+//! Flags a function or method longer than the configured line limit.
+//!
+//! Long functions are hard to reason about and test; extracting helpers keeps
+//! each unit focused. The rule measures a function's span from its declaration
+//! through the end of its body (in source lines) and reports at the declaration
+//! when the length exceeds the threshold. Only functions with a body are
+//! measured — abstract and external declarations are skipped.
+//!
+//! ## Options
+//!
+//! `max_lines` (integer, default: 100) — flag functions/methods spanning more
+//! than this many lines.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

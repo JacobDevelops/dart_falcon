@@ -1,4 +1,12 @@
-//! Flags switch cases with duplicate values. Ported from pyramid_lint's `no_duplicate_case_values`.
+//! Flags a switch `case` whose value duplicates an earlier case in the same
+//! switch.
+//!
+//! Two cases with the same constant value can never both be reachable — Dart
+//! dispatches to the first, so the later duplicate is dead code and usually
+//! signals a paste that was never edited to its intended value. Literal cases
+//! (null, bool, int, double, string, and their negations) and named constant
+//! references are compared by value, and the duplicate occurrence is reported.
+//! Give the redundant case its intended distinct value, or remove it.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

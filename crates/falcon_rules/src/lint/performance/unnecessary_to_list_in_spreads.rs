@@ -1,6 +1,9 @@
-//! Flags `...x.toList()` / `...?x.toList()` inside a spread: a spread already
-//! accepts any iterable, so the `.toList()` allocation is redundant. Adopted
-//! from package:lints `unnecessary_to_list_in_spreads`.
+//! Flags a `.toList()` call on the operand of a spread, e.g. `...x.toList()`.
+//!
+//! A spread element accepts any iterable, so converting to a list first
+//! allocates a throwaway `List` for no reason — spread the iterable directly.
+//! The rule matches a no-argument `.toList()` call spread into a list, set, or
+//! map literal, including null-aware spreads (`...?x.toList()`).
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

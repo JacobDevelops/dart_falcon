@@ -1,6 +1,12 @@
-//! Flags angle-bracket text in `///` doc comments that Markdown would render as
-//! an HTML tag (e.g. `List<int>` outside backticks). Ported from package:lints
-//! `unintended_html_in_doc_comment`.
+//! Flags angle-bracket text in doc comments that Markdown would render as an HTML tag.
+//!
+//! Dart renders doc comments as Markdown, so an unbacktick-quoted `<int>` or
+//! `List<int>` is parsed as an HTML tag and silently dropped from the generated docs.
+//! The rule scans `///` comment lines for `<name` sequences whose name is not a known
+//! HTML tag and is followed by a tag-like character (`>`, `,`, `<`, or whitespace),
+//! which distinguishes a stray generic from real markup or a `<https://...>` autolink.
+//! Wrap such type references in backticks so they survive rendering. Fenced code blocks,
+//! indented code, and inline code spans are skipped.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

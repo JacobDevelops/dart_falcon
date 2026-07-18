@@ -1,9 +1,17 @@
-//! Flags non-constant identifiers that are not lowerCamelCase. Ported from
-//! package:lints `non_constant_identifier_names`. Covers variables (non-const),
-//! formal parameters, catch clause bindings, pattern variables, named
-//! constructor names, and function/method/getter/setter names. Operator names
-//! are exempt (they are not identifiers). Type names (see `camel-case-types`)
-//! and constants (see `constant-identifier-names`) are out of scope.
+//! Flags non-constant identifiers that are not written in lowerCamelCase.
+//!
+//! Dart convention reserves lowerCamelCase for everything that holds a runtime
+//! value — non-const variables and fields, formal and closure parameters, for-in
+//! and pattern variables, catch clause bindings, named constructors, and
+//! function, method, getter, and setter names. Consistent casing lets readers
+//! distinguish these from types (UpperCamelCase) and compile-time constants at a
+//! glance. Operator names are exempt: they are not identifiers. The check mirrors
+//! the analyzer's `isLowerCamelCase`: leading underscores are ignored, an
+//! all-underscore wildcard name is accepted, a single uppercase letter is
+//! tolerated, and the remainder must begin with a lowercase letter or `$` and
+//! contain no further underscores. Type names (see `camel-case-types`) and
+//! constants (see `constant-identifier-names`) are covered by separate rules and
+//! are out of scope here.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

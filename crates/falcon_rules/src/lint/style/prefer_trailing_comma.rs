@@ -1,4 +1,12 @@
-//! Flags argument and parameter lists missing a trailing comma. Ported from dart_code_linter's `prefer-trailing-comma`.
+//! Flags multi-line argument lists that are missing a trailing comma.
+//!
+//! A trailing comma is required only when the argument list is already broken
+//! across lines — that is, when the last significant token sits on an earlier line
+//! than the closing `)`. This mirrors the Dart 3.x tall-style formatter, which adds
+//! a trailing comma when it splits a list one element per line and omits it when the
+//! final argument hugs the bracket, so the rule stays silent on single-line calls,
+//! trailing-closure arguments, and method chains. Adding the comma keeps diffs small
+//! and lets the formatter preserve the one-argument-per-line layout.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

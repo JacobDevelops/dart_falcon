@@ -1,5 +1,11 @@
-//! Flags a class/mixin that overrides `==` without `hashCode` (or vice versa).
-//! Ported from package:lints' `hash_and_equals`.
+//! Require `hashCode` and `==` to be overridden together.
+//!
+//! Flags a class, mixin, or mixin class that overrides the `==` operator without
+//! also defining `hashCode`, or defines `hashCode` without overriding `==`. The
+//! two are bound by a contract: any two objects that compare equal must return
+//! the same hash code. Overriding only one breaks that invariant, so the type
+//! misbehaves as a `Map` key or `Set` element — lookups miss and duplicates slip
+//! through. Override both and derive them from the same fields.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

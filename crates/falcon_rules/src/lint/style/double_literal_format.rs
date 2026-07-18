@@ -1,4 +1,11 @@
-//! Flags incorrectly formatted double literals. Ported from dart_code_linter's `double-literal-format`.
+//! Flags double literals written with redundant or missing digits.
+//!
+//! Consistent numeric literals are easier to scan and diff. Three formatting
+//! mistakes are reported: a redundant leading zero (`05.0`), a missing leading
+//! zero before the decimal point (`.5`, which should be `0.5`), and a redundant
+//! trailing zero in the fractional part (`1.50`). A literal whose fractional
+//! part is exactly `0` (`24.0`) is deliberately left alone, since stripping that
+//! digit would turn the `double` into an `int`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

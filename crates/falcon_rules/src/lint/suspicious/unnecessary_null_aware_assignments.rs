@@ -1,5 +1,10 @@
-//! Flags `x ??= null;`, which has no effect. Ported from package:lints'
-//! `unnecessary_null_aware_assignments`.
+//! Flags `x ??= null`, which can never have an effect.
+//!
+//! The `??=` operator assigns only when the target is currently null, so
+//! assigning `null` is a guaranteed no-op: a null target stays null, and
+//! otherwise nothing happens. Such a statement is dead code that usually points
+//! to a mistaken right-hand side — the author likely meant a real default value.
+//! Remove the statement, or supply the value that was intended.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

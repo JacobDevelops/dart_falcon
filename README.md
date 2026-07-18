@@ -1,3 +1,5 @@
+<img src="assets/logo/falcon-icon.svg" width="96" alt="falcon logo" align="right">
+
 # falcon
 
 [![CI](https://github.com/JacobDevelops/dart_falcon/actions/workflows/ci.yml/badge.svg)](https://github.com/JacobDevelops/dart_falcon/actions/workflows/ci.yml)
@@ -28,35 +30,27 @@ severities and options, per-path overrides, a `flutter` domain, and a separate
 
 ## Installation
 
-falcon is distributed as a Nix flake whose default package is a **prebuilt static
-binary** fetched from GitHub Releases — zero compilation, no Rust toolchain.
+falcon is a single self-contained binary — no Dart SDK, no analysis server.
 
-Add it as a flake input:
-
-```nix
-{
-  inputs.falcon.url = "github:JacobDevelops/dart_falcon";
-}
-```
-
-Then reference `falcon.packages.${system}.default` in a devShell or package list.
-Or run it directly without installing anything:
+**Prebuilt binaries** (Linux x86_64/aarch64 static, macOS Intel/Apple Silicon)
+are attached to every [GitHub Release](https://github.com/JacobDevelops/dart_falcon/releases):
 
 ```sh
-nix run github:JacobDevelops/dart_falcon -- check .
+curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-0.3.0-x86_64-linux.tar.gz | tar -xz
+sudo mv falcon /usr/local/bin/
 ```
 
-See [docs/installation.md](./docs/installation.md) for supported systems, the
-build-from-source package, and how releases are cut.
-
-### Build from source
-
-With a stable Rust toolchain and Cargo:
+**From source** with a stable Rust toolchain:
 
 ```sh
-cargo build --release
-./target/release/falcon check .
+cargo install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
 ```
+
+**Nix** users can consume the flake (`github:JacobDevelops/dart_falcon`) or
+`nix run github:JacobDevelops/dart_falcon -- check .`.
+
+See [docs/installation.md](./docs/installation.md) for all channels, supported
+platforms, and how releases are cut.
 
 ## Usage
 

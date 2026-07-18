@@ -1,4 +1,11 @@
-//! Flags `Future<void> Function()` in favor of `AsyncCallback`. Ported from pyramid_lint's `prefer_async_callback`.
+//! Flags the type `Future<void> Function()` in favor of Flutter's `AsyncCallback`.
+//!
+//! Flutter's `foundation` library defines `AsyncCallback` as a typedef for exactly
+//! `Future<void> Function()`, the standard signature for an asynchronous, argument-less
+//! callback. Spelling the type out longhand is more verbose and less recognizable than
+//! the named alias that the rest of the framework uses. The rule matches only the
+//! zero-parameter function type returning `Future<void>`; any parameters or a different
+//! return type leave it untouched.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,14 +1,26 @@
-//! Flags `.length` comparisons equivalent to `.isNotEmpty` (`length != 0`,
-//! `length > 0`, `length >= 1`, and their mirrors). Adopted from package:lints
+//! Flags `.length` comparisons equivalent to a `.isNotEmpty` check.
+//!
+//! Collections and strings expose an `isNotEmpty` getter that reads as plain
+//! intent and, for lazy iterables, can avoid computing the full `length`.
+//! Comparing `length` against a constant makes the reader infer the meaning, so
+//! `list.isNotEmpty` should replace forms such as `length != 0`, `length > 0`,
+//! and `length >= 1`, along with their operand-swapped mirrors (`0 != length`,
+//! `0 < length`, `1 <= length`). Adopted from package:lints
 //! `prefer_is_not_empty`.
+//!
+//! Only a plain `.length` property access matches against the relevant integer
+//! literal. A null-aware `receiver?.length` is deliberately left alone: that
+//! comparison also has to account for a `null` receiver, so `isNotEmpty` is not
+//! a drop-in replacement.
 //!
 //! Type knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context
 //! and the receiver's static type is *positively proven* to be a concrete type
-//! that (a) definitely has no `isNotEmpty` member and (b) is definitely not a core
-//! collection/string (`is_subtype … ProvenNo` for `Iterable`, `String`, `Map`),
-//! suggesting `isNotEmpty` would be wrong, so the diagnostic is withheld. An
-//! `Unknown` receiver — the common case, and every receiver when no type index is
-//! attached — behaves exactly as before: it keeps firing.
+//! that (a) definitely has no `isNotEmpty` member (`member_lookup …
+//! ProvenAbsent`) and (b) is definitely not a core collection/string
+//! (`is_subtype … ProvenNo` for `Iterable`, `String`, `Map`), suggesting
+//! `isNotEmpty` would be wrong, so the diagnostic is withheld. An `Unknown`
+//! receiver — the common case, and every receiver when no type index is
+//! attached — keeps firing.
 
 use falcon_analyze::{
     AnalyzeContext, LocalTypes, MemberResult, ReceiverTypes, Rule, StaticType, SubtypeResult,

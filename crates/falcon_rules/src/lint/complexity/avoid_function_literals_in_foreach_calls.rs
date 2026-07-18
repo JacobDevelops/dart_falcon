@@ -1,7 +1,11 @@
-//! Flags `xs.forEach((e) { ... })` — a function literal passed to `forEach`,
-//! which a `for`-in loop expresses more clearly. Tear-offs (`xs.forEach(print)`)
-//! and null-aware `?.forEach` are left alone. Adopted from package:lints
-//! `avoid_function_literals_in_foreach_calls`.
+//! Flags a function literal passed to `forEach`, e.g. `xs.forEach((e) { ... })`.
+//!
+//! A `for`-in loop reads more clearly than `forEach` with a closure, and unlike
+//! the closure it can `await`, `break`, and `continue`, and it allocates no
+//! per-call function object. The rule fires only for single-parameter
+//! function-literal callbacks, so `Map.forEach` (which takes two parameters) is
+//! left alone, as are tear-offs like `xs.forEach(print)` and null-aware
+//! `xs?.forEach(...)`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

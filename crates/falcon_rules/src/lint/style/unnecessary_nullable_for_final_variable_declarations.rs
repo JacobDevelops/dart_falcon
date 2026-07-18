@@ -1,6 +1,14 @@
-//! Flags `final int? x = 3;` — a final variable given a nullable type but
-//! initialized to a provably non-null value. Ported from dart_code_linter's
-//! `unnecessary-nullable-for-final-variable-declarations`.
+//! Flags a `final` or `const` variable given a nullable type but initialized to a
+//! provably non-null value.
+//!
+//! A `final int? x = 3;` can never hold null: it is initialized once, at the
+//! declaration, to a value that is obviously non-null. The `?` widens the static
+//! type for no reason, forcing needless null checks at every use. The rule is
+//! deliberately conservative about "provably non-null" — only literals (numbers,
+//! strings, booleans, collections, records), constructor invocations, and function
+//! expressions qualify; anything whose value flows from another binding is left
+//! alone. It applies to final/const top-level variables, static fields, and local
+//! variables. Drop the `?` from the declared type.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

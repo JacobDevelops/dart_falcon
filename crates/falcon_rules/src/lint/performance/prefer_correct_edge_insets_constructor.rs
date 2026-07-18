@@ -1,4 +1,11 @@
-//! Flags `EdgeInsets` constructions with a more concise equivalent. Ported from dart_code_linter's `prefer-correct-edge-insets-constructor`.
+//! Flags an `EdgeInsets.only(...)` that a more specific constructor expresses better.
+//!
+//! `EdgeInsets.only` with symmetric values is clearer and cheaper as
+//! `EdgeInsets.all(n)` (all four sides equal), `EdgeInsets.symmetric(vertical:
+//! n)` (only top and bottom, equal), or `EdgeInsets.symmetric(horizontal: n)`
+//! (only left and right, equal). The rule detects these three shapes on
+//! `EdgeInsets.only(...)` (and a direct `EdgeInsets(...)` carrying the same
+//! named arguments) and reports the equivalent to prefer.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

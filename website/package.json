@@ -1,0 +1,32 @@
+{
+  "name": "falcon-website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync-docs": "bun run scripts/sync-docs.ts",
+    "predev": "bun run sync-docs",
+    "prebuild": "bun run sync-docs",
+    "dev": "vite dev --port 3000",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "bun run build && wrangler deploy",
+    "cf-dry-run": "bun run build && wrangler deploy --dry-run --outdir dist-check"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "^1.95.0",
+    "@tanstack/react-start": "^1.95.0",
+    "marked": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.45.1",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "wrangler": "^4.112.0"
+  }
+}

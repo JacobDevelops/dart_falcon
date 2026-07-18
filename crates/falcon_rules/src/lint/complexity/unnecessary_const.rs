@@ -1,7 +1,13 @@
-//! Flags a `const` keyword used inside an already-const context. Ported from package:lints
-//! `unnecessary_const`. Inside a const collection, a const constructor invocation's arguments,
-//! a const variable initializer, or another const expression, nested `const` keywords are
-//! redundant and can be removed.
+//! Flags a redundant `const` keyword inside an already-const context.
+//!
+//! Once an expression sits in a constant context — a const collection, the
+//! arguments of a const constructor invocation, a const variable initializer,
+//! or another const expression — every nested `const` is inferred and the
+//! keyword is just noise; removing it leaves behavior unchanged. The rule
+//! tracks const depth as it descends through const variable, field, and local
+//! declarations and const expressions, flagging any explicit `const` marker
+//! (on a `new`, list, map, set, or dot-shorthand) found at depth greater than
+//! zero.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

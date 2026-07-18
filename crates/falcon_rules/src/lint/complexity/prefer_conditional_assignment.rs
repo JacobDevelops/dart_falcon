@@ -1,5 +1,10 @@
-//! Flags `if (x == null) { x = y; }` with no else, which is better written as
-//! `x ??= y`. Ported from package:lints' `prefer_conditional_assignment`.
+//! Flags `if (x == null) { x = y; }` with no else branch.
+//!
+//! A null-guarded assignment like this is exactly what the `??=` compound
+//! operator expresses: `x ??= y`. The shorter form removes a branch and states
+//! the intent — assign only when currently null — directly. The rule matches an
+//! `if` with no `else` whose condition is an `== null` check and whose single
+//! then-statement assigns to that same operand.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

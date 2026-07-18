@@ -1,4 +1,12 @@
-//! Flags `fromEnvironment` not evaluated in a const context. Ported from pyramid_lint's `proper_from_environment`.
+//! Require `fromEnvironment` to be evaluated in a const context.
+//!
+//! Flags a `String.fromEnvironment`, `int.fromEnvironment`, or
+//! `bool.fromEnvironment` invocation that is not in a const context. These
+//! constructors read `--dart-define` values only when evaluated at compile time;
+//! called at runtime they ignore the environment entirely and silently return
+//! the default, so a missing `const` turns a configured value into its fallback
+//! with no error. Prefix the call with `const`, or place it somewhere already
+//! const — a `const` variable initializer or an annotation argument.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

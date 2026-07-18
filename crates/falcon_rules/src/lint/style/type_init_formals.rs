@@ -1,9 +1,12 @@
 //! Flags a *redundant* type annotation on an initializing formal or super
-//! parameter (`type-init-formals`, adopted from package:lints): in `C(int this.x)`
-//! the annotation is redundant only when it is the same type the field already
-//! declares. Annotating a *narrower* type — `num x; C(int this.x);` — is legal
-//! Dart that meaningfully restricts the constructor's parameter, and upstream
-//! (`nodeType.type == field.type`) does not report it.
+//! parameter (`type-init-formals`, adopted from package:lints).
+//!
+//! In `C(int this.x)` or `C(int super.x)` the annotation restates a type the
+//! field (or super-parameter) already fixes, so it adds nothing and risks
+//! drifting out of sync with that declaration. It is redundant only when it
+//! names the *same* type: annotating a narrower one — `num x; C(int this.x);` —
+//! is legal Dart that meaningfully restricts the constructor's parameter, and
+//! upstream (`nodeType.type == field.type`) does not report it.
 //!
 //! Falcon has no type resolver, so the comparison is made on the written type's
 //! source text after whitespace normalization: `int` matches `int`, `int` does

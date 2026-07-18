@@ -1,4 +1,13 @@
-//! Flags `child`/`children` not being the last argument of a widget. Ported from package:lints `sort_child_properties_last`.
+//! Flags a `child` or `children` argument that is not the last named argument in a widget constructor call.
+//!
+//! In a Flutter widget tree the child is usually the largest and most deeply
+//! nested argument, so keeping it last lets the eye follow the configuration
+//! (padding, color, alignment) before descending into the subtree, and keeps the
+//! closing `)` visually adjacent to the child's own closing bracket. This rule
+//! flags any `child:`/`children:` named argument that appears before another
+//! named argument. To avoid firing on ordinary function calls that happen to take
+//! a `child` parameter, it only considers constructions whose callee is
+//! PascalCase — implicit `Foo(...)` calls and explicit `new`/`const Foo(...)`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,4 +1,11 @@
-//! Flags `as` casts that are unnecessary. Ported from dart_code_linter's `avoid-unnecessary-type-casts`.
+//! Flags an `as` cast to a type the operand already has.
+//!
+//! Casting a variable to its own declared type does nothing at runtime and
+//! hides the fact that no conversion occurs; remove it. Lacking full type
+//! inference, the rule tracks the non-nullable declared types of local
+//! variables and class fields and reports `x as T` when `x`'s declared type
+//! matches `T` (same name and type arguments). A nullable-declared operand is
+//! never flagged, since a cast can still strip its nullability.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
