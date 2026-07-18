@@ -1,6 +1,14 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 
 pub use crate::analyze_pipeline::OutputFormat;
+
+/// The fully-built clap [`Command`](clap::Command) tree for the `falcon` CLI.
+///
+/// Exposed so tooling (the docs `cli.json` generator in `xtask`) can walk the
+/// real parser definition instead of re-describing the flags by hand.
+pub fn command() -> clap::Command {
+    Cli::command()
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "falcon", about = "A fast Dart linter", version)]

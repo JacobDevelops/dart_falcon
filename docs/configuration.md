@@ -228,6 +228,9 @@ instance fields → constructors → static methods → instance methods).
 > relative order of the recognized lifecycle members is checked;
 > `overridden-methods` matches any other `@override` method.
 
+`class-members-ordering` (`style`) accepts the same `order` option with the same
+category tokens; it differs from `member-ordering` only in its default sequence.
+
 ## Overrides
 
 `overrides` re-configures rules per path, mirroring biome's `overrides`. The
@@ -325,83 +328,14 @@ sets only a level leaves the base options intact.
 ## Suppressing diagnostics
 
 `falcon.json` turns whole rules on or off. To silence a single occurrence
-instead, use an inline `// falcon-ignore` comment. The shape mirrors Biome's
-`// biome-ignore lint/<group>/<rule>: <reason>`:
-
-```
-// falcon-ignore <path>: <reason>
-// falcon-ignore-all <path>: <reason>
-```
-
-`<path>` names exactly one rule and always includes its section and group:
-
-- **`lint/<group>/<rule>`** for a normal (file) rule, e.g.
-  `lint/suspicious/avoid-dynamic`.
-- **`cross-file/<group>/<rule>`** for a cross-file rule, e.g.
-  `cross-file/correctness/unused-files`. The legacy `project/<group>/<rule>`
-  spelling is still accepted as a deprecated alias.
-
-The group is the rule's category from its metadata (`complexity`,
-`correctness`, `performance`, `style`, `suspicious`), and the section is `lint`
-for file rules or `cross-file` for cross-file rules.
-
-> Falcon does **not** read Dart's own `// ignore:` / `// ignore_for_file:`
-> comments — those still control the Dart analyzer's own lints and have no effect
-> on falcon. Suppress a falcon diagnostic only with `// falcon-ignore`.
-
-### Placement
-
-- **Same line** — a comment after code suppresses that line:
-
-  ```dart
-  dynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic: interop boundary
-  ```
-
-- **Next line** — a comment alone on its line suppresses the code line below it:
-
-  ```dart
-  // falcon-ignore lint/suspicious/avoid-dynamic: interop boundary
-  dynamic x = 1;
-  ```
-
-- **Whole file** — `falcon-ignore-all`, placed anywhere (conventionally at the
-  top), suppresses the rule everywhere in the file:
-
-  ```dart
-  // falcon-ignore-all lint/suspicious/avoid-dynamic: generated file
-  ```
-
-### Stacking multiple rules
-
-One comment carries **one** rule. To suppress several rules on the same line,
-stack the comments directly above it — consecutive suppression-only lines all
-apply to the next line of code (Biome semantics):
+instead, annotate the code with an inline `// falcon-ignore <section>/<group>/<rule>:
+<reason>` comment (the reason is mandatory) — or `// falcon-ignore-all` for a
+whole file. The full grammar, placement rules, stacking, and error cases are
+documented in **[suppressions.md](./suppressions.md)**.
 
 ```dart
-// falcon-ignore lint/suspicious/avoid-dynamic: interop boundary
-// falcon-ignore lint/style/prefer-const-constructors: perf-tested
-final widget = build(dynamicValue);
+dynamic payload = decode(bytes); // falcon-ignore lint/suspicious/avoid-dynamic: interop boundary
 ```
-
-### The reason is required
-
-Every `// falcon-ignore` must end with a non-empty reason after the colon. A
-comment with no reason **does not suppress**; instead falcon reports a
-`malformed-suppression` warning pointing at the comment. The same warning is
-raised when the path is malformed, when it uses the wrong group or section for a
-known rule (the message tells you the correct path), or when the rule name is
-unknown (catching typos that would otherwise silently fail to suppress).
-
-`malformed-suppression` is an internal diagnostic: it is not a configurable rule,
-does not appear in `falcon.json`, and cannot itself be suppressed.
-
-### Details
-
-- Only `//`-style line comments count; a directive inside a string literal or a
-  `/* block comment */` is not treated as a suppression.
-- The path structure (`<section>/<group>/<rule>`) is matched **exactly**. Rule
-  names themselves are canonicalized first, so a legacy id still matches its
-  current rule and the suppression is recorded against the canonical name.
 
 ## `cross-file` — cross-file rules
 

@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Fragment } from 'react'
 import { CodeBlock } from '../components/CodeBlock'
+import { Tabs } from '../components/Tabs'
 import { highlightDart } from '../lib/highlight'
 import { rules, recommendedCount, heroRule } from '../lib/rules'
 
@@ -8,11 +9,23 @@ export const Route = createFileRoute('/')({
   component: Home,
 })
 
-const INSTALL = `# install with nix
-nix profile install github:JacobDevelops/dart_falcon
+const INSTALL_BINARY = `# download the prebuilt static binary (Linux x86_64)
+curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-0.3.0-x86_64-linux.tar.gz | tar -xz
+sudo mv falcon /usr/local/bin/
 
 # lint your project — no Dart SDK required
 falcon check lib/`
+
+const INSTALL_CARGO = `# build from source with a stable Rust toolchain
+cargo install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
+
+falcon check lib/`
+
+const INSTALL_NIX = `# run it directly, or add the flake to a devShell
+nix run github:JacobDevelops/dart_falcon -- check lib/
+
+# or install into your profile
+nix profile install github:JacobDevelops/dart_falcon`
 
 function Home() {
   return (
@@ -177,13 +190,45 @@ function QuickStart() {
           falcon.json for configuration.
         </p>
         <div className="install">
-          <CodeBlock code={INSTALL} lang="bash" filename="terminal" />
+          <Tabs
+            tabs={[
+              {
+                id: 'binary',
+                label: 'Binary',
+                content: (
+                  <CodeBlock
+                    code={INSTALL_BINARY}
+                    lang="bash"
+                    filename="terminal"
+                  />
+                ),
+              },
+              {
+                id: 'cargo',
+                label: 'Cargo',
+                content: (
+                  <CodeBlock
+                    code={INSTALL_CARGO}
+                    lang="bash"
+                    filename="terminal"
+                  />
+                ),
+              },
+              {
+                id: 'nix',
+                label: 'Nix',
+                content: (
+                  <CodeBlock code={INSTALL_NIX} lang="bash" filename="terminal" />
+                ),
+              },
+            ]}
+          />
           <div style={{ marginTop: '18px', display: 'flex', gap: '12px' }}>
-            <Link to="/docs/installation" className="btn btn-ghost">
-              Installation guide
+            <Link to="/docs/getting-started" className="btn btn-ghost">
+              Getting started
             </Link>
-            <Link to="/docs/configuration" className="btn btn-ghost">
-              Configuration
+            <Link to="/docs/installation" className="btn btn-ghost">
+              All channels
             </Link>
           </div>
         </div>

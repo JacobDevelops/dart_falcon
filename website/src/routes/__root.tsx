@@ -53,22 +53,18 @@ function SiteNav() {
           </span>
         </Link>
         <nav className="nav-links">
-          <Link
-            to="/docs/installation"
-            activeProps={{ className: 'active' }}
-            className="hide-sm"
-          >
+          <Link to="/docs/getting-started" activeProps={{ className: 'active' }}>
             Docs
           </Link>
           <Link to="/linter/rules" activeProps={{ className: 'active' }}>
             Rules
           </Link>
           <Link
-            to="/linter/domains"
+            to="/reference/cli"
             activeProps={{ className: 'active' }}
             className="hide-sm"
           >
-            Domains
+            Reference
           </Link>
           <a
             className="nav-gh"
@@ -87,14 +83,33 @@ function SiteNav() {
 function SiteFooter() {
   return (
     <footer className="footer">
-      <div className="wrap footer-inner">
-        <div>
+      <div className="wrap footer-cols">
+        <div className="footer-brand">
           falcon — a fast Dart &amp; Flutter linter, written in Rust.
         </div>
-        <div style={{ display: 'flex', gap: '18px' }}>
-          <Link to="/docs/installation">Install</Link>
-          <Link to="/docs/configuration">Configure</Link>
+        <div className="footer-group">
+          <h5>Guides</h5>
+          <Link to="/docs/getting-started">Getting started</Link>
+          <Link to="/docs/installation">Installation</Link>
+          <Link to="/docs/configuration">Configuration</Link>
+          <Link to="/docs/suppressions">Suppressions</Link>
+        </div>
+        <div className="footer-group">
+          <h5>Linter</h5>
           <Link to="/linter/rules">Rules</Link>
+          <Link to="/linter/domains">Domains</Link>
+        </div>
+        <div className="footer-group">
+          <h5>Reference</h5>
+          <Link to="/reference/cli">CLI</Link>
+          <Link to="/reference/configuration">Configuration keys</Link>
+          <a
+            href="https://github.com/JacobDevelops/dart_falcon"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub
+          </a>
         </div>
       </div>
     </footer>

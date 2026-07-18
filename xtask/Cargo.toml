@@ -4,7 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+falcon_cli = { path = "../crates/falcon_cli" }
 falcon_rules = { path = "../crates/falcon_rules" }
+clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 walkdir = { workspace = true }
