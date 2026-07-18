@@ -52,6 +52,8 @@ impl Visitor for Collector {
             && is_collection_literal(object)
         {
             for section in sections {
+                // A section reports at most once: multiple `addAll` ops in one
+                // cascade section share the same span, so stop after the first.
                 for op in &section.ops {
                     if let CascadeOp::Call(ident, _, args) = op
                         && ident.name == "addAll"
@@ -59,6 +61,7 @@ impl Visitor for Collector {
                         && args.named.is_empty()
                     {
                         self.push(&section.span);
+                        break;
                     }
                 }
             }
