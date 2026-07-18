@@ -1,6 +1,17 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
+import { marked } from 'marked'
 import { CodeBlock } from '../../../components/CodeBlock'
-import { getRule, groupLabel, type Rule } from '../../../lib/rules'
+import { DocsLayout } from '../../../components/DocsLayout'
+import { Tabs } from '../../../components/Tabs'
+import { DiagnosticFrame } from '../../../components/DiagnosticFrame'
+import {
+  getRule,
+  groupLabel,
+  type Rule,
+  type RuleDiagnostic,
+} from '../../../lib/rules'
+
+marked.setOptions({ gfm: true })
 
 export const Route = createFileRoute('/linter/rules/$rule')({
   head: ({ params }) => ({
@@ -9,18 +20,99 @@ export const Route = createFileRoute('/linter/rules/$rule')({
   component: RuleDetail,
 })
 
+function categoryPath(rule: Rule): string {
+  const section = rule.crossFile ? 'cross-file' : 'lint'
+  return `${section}/${rule.group}/${rule.name}`
+}
+
 function configSnippet(rule: Rule): string {
   const section = rule.crossFile ? 'cross-file' : 'linter'
   const config = {
-    [section]: {
-      rules: {
-        [rule.group]: {
-          [rule.name]: 'error',
-        },
-      },
-    },
+    [section]: { rules: { [rule.group]: { [rule.name]: 'error' } } },
   }
   return JSON.stringify(config, null, 2)
+}
+
+function SourceCrosswalk({ rule }: { rule: Rule }) {
+  const { source } = rule
+  if (!source.upstreamId) {
+    return (
+      <span className="rule-source">
+        Source: <span className="src-origin">{source.label}</span>
+      </span>
+    )
+  }
+  const same = (
+    <>
+      Same as <code>{source.upstreamId}</code>
+    </>
+  )
+  return (
+    <span className="rule-source">
+      {source.upstreamUrl ? (
+        <a href={source.upstreamUrl} target="_blank" rel="noreferrer">
+          {same}
+        </a>
+      ) : (
+        same
+      )}{' '}
+      <span className="src-origin">· {source.label}</span>
+    </span>
+  )
+}
+
+function InvalidSingle({ rule }: { rule: Rule }) {
+  const bad = rule.examples.bad
+  if (!bad) return null
+  return (
+    <>
+      <CodeBlock code={bad} filename="example.dart" />
+      {rule.diagnostics.length > 0 ? (
+        <div className="diag-frames">
+          {rule.diagnostics.map((d, i) => (
+            <DiagnosticFrame key={i} source={bad} diagnostic={d} />
+          ))}
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+function InvalidCrossFile({ rule }: { rule: Rule }) {
+  const fixtures = rule.examples.crossFile ?? []
+  if (fixtures.length === 0) return null
+  const byFile = new Map<string, RuleDiagnostic[]>()
+  for (const d of rule.diagnostics) {
+    const key = d.file ?? ''
+    const list = byFile.get(key) ?? []
+    list.push(d)
+    byFile.set(key, list)
+  }
+  return (
+    <Tabs
+      tabs={fixtures.map((f) => {
+        const diags = byFile.get(f.path) ?? []
+        return {
+          id: f.path,
+          label: diags.length > 0 ? `${f.path} ·${diags.length}` : f.path,
+          content: (
+            <>
+              <CodeBlock code={f.content} filename={f.path} />
+              {diags.length > 0 ? (
+                <div className="diag-frames">
+                  {diags.map((d, i) => (
+                    <DiagnosticFrame key={i} source={f.content} diagnostic={d} />
+                  ))}
+                </div>
+              ) : (
+                <p className="fixture-clean">No diagnostics in this file.</p>
+              )}
+            </>
+          ),
+        }
+      })}
+    />
+  )
 }
 
 function RuleDetail() {
@@ -29,37 +121,42 @@ function RuleDetail() {
 
   if (!rule) {
     return (
-      <div className="wrap">
-        <div style={{ padding: '60px 0', maxWidth: 820 }}>
-          <p className="crumbs">
-            <Link to="/linter/rules">Rules</Link> / {name}
-          </p>
-          <h1>Rule not found</h1>
-          <p style={{ color: 'var(--muted)' }}>
-            No rule named <code>{name}</code> exists.{' '}
-            <Link to="/linter/rules" style={{ color: 'var(--amber-bright)' }}>
-              Browse all rules
-            </Link>
-            .
-          </p>
-        </div>
-      </div>
+      <DocsLayout>
+        <p className="crumbs">
+          <Link to="/linter/rules">Rules</Link> / {name}
+        </p>
+        <h1>Rule not found</h1>
+        <p style={{ color: 'var(--muted)' }}>
+          No rule named <code>{name}</code> exists.{' '}
+          <Link to="/linter/rules" style={{ color: 'var(--amber-bright)' }}>
+            Browse all rules
+          </Link>
+          .
+        </p>
+      </DocsLayout>
     )
   }
 
-  const fixtures = rule.examples.crossFile ?? []
+  const docsHtml = rule.docs
+    ? (marked.parse(rule.docs, { async: false }) as string)
+    : ''
+  const hasInvalid =
+    !!rule.examples.bad || (rule.examples.crossFile?.length ?? 0) > 0
 
   return (
-    <div className="wrap">
-      <div style={{ padding: '36px 0 72px', maxWidth: 840 }}>
-        <div className="detail-head">
-          <p className="crumbs">
-            <Link to="/linter/rules">Rules</Link> /{' '}
-            <a href={`/linter/rules#${rule.group}`}>{groupLabel(rule.group)}</a> /{' '}
-            {rule.name}
-          </p>
-          <h1>{rule.name}</h1>
-          <div className="detail-badges">
+    <DocsLayout>
+      <div className="rule-detail">
+        <p className="crumbs">
+          <Link to="/linter/rules">Rules</Link> /{' '}
+          <a href={`/linter/rules#${rule.group}`}>{groupLabel(rule.group)}</a> /{' '}
+          {rule.name}
+        </p>
+        <h1 className="rule-title">{rule.name}</h1>
+
+        {/* Metadata summary block */}
+        <div className="rule-summary">
+          <code className="category-path">{categoryPath(rule)}</code>
+          <div className="rule-summary-badges">
             {rule.recommended ? (
               <span className="badge badge-rec">recommended</span>
             ) : null}
@@ -72,79 +169,45 @@ function RuleDetail() {
               </span>
             ))}
           </div>
-          {rule.description ? (
-            <p style={{ color: 'var(--muted)', margin: 0, fontSize: '1.05rem' }}>
-              {rule.description}
-            </p>
-          ) : null}
-
-          <dl className="meta-table">
-            <dt>Group</dt>
-            <dd>{groupLabel(rule.group)}</dd>
-            <dt>Recommended</dt>
-            <dd>{rule.recommended ? 'Yes' : 'No'}</dd>
-            <dt>Scope</dt>
-            <dd>{rule.crossFile ? 'Cross-file (whole project)' : 'Single file'}</dd>
-            <dt>Source</dt>
-            <dd>
-              {rule.source.upstreamUrl ? (
-                <a href={rule.source.upstreamUrl} target="_blank" rel="noreferrer">
-                  {rule.source.label}
-                </a>
-              ) : (
-                rule.source.label
-              )}
-              {rule.source.upstreamId ? (
-                <span style={{ color: 'var(--faint)' }}>
-                  {' '}
-                  · <code>{rule.source.upstreamId}</code>
-                </span>
-              ) : null}
-            </dd>
-            {rule.domains.length > 0 ? (
-              <>
-                <dt>Domains</dt>
-                <dd>{rule.domains.join(', ')}</dd>
-              </>
-            ) : null}
-          </dl>
+          <SourceCrosswalk rule={rule} />
         </div>
 
-        {/* Invalid example */}
-        {rule.examples.bad || fixtures.length > 0 ? (
-          <section className="detail-section example-invalid">
+        {/* Cross-file callout */}
+        {rule.crossFile ? (
+          <div className="callout callout-cross">
+            <strong>Cross-file rule.</strong> This rule runs in falcon's
+            whole-project pass, analyzing relationships across every file rather
+            than one file at a time. Configure it under the top-level{' '}
+            <code>cross-file</code> key, and expect it to do more work on large
+            projects than a single-file rule.
+          </div>
+        ) : null}
+
+        {/* Full rule docs */}
+        {docsHtml ? (
+          <article
+            className="prose rule-docs"
+            dangerouslySetInnerHTML={{ __html: docsHtml }}
+          />
+        ) : null}
+
+        {/* Invalid */}
+        {hasInvalid ? (
+          <section className="rule-section example-invalid">
             <h2>
               <span className="dot-bad" /> Invalid
             </h2>
-            {rule.examples.bad ? (
-              <CodeBlock code={rule.examples.bad} filename="example.dart" />
+            {rule.crossFile ? (
+              <InvalidCrossFile rule={rule} />
             ) : (
-              fixtures.map((f) => (
-                <div key={f.path}>
-                  <div className="fixture-name">{f.path}</div>
-                  <CodeBlock code={f.content} filename={f.path} />
-                </div>
-              ))
+              <InvalidSingle rule={rule} />
             )}
-            {rule.diagnostics.length > 0 ? (
-              <div className="diag-list">
-                {rule.diagnostics.map((d, i) => (
-                  <div className="diag" key={i}>
-                    <span className="loc">
-                      {d.file ? `${d.file}:` : ''}
-                      {d.line}:{d.column}
-                    </span>
-                    <span className="msg">{d.message}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
           </section>
         ) : null}
 
-        {/* Valid example */}
+        {/* Valid */}
         {rule.examples.good ? (
-          <section className="detail-section example-valid">
+          <section className="rule-section example-valid">
             <h2>
               <span className="dot-good" /> Valid
             </h2>
@@ -152,12 +215,19 @@ function RuleDetail() {
           </section>
         ) : null}
 
-        {/* Configure */}
-        <section className="detail-section">
-          <h2>Configure</h2>
+        {/* How to configure */}
+        <section className="rule-section">
+          <h2>How to configure</h2>
           <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-            Enable or set the severity of <code>{rule.name}</code> in your{' '}
-            <code>falcon.json</code>:
+            Set the severity of <code>{rule.name}</code> in your{' '}
+            <code>falcon.json</code>
+            {rule.crossFile ? (
+              <>
+                {' '}
+                under the <code>cross-file</code> section
+              </>
+            ) : null}
+            :
           </p>
           <CodeBlock
             code={configSnippet(rule)}
@@ -165,7 +235,37 @@ function RuleDetail() {
             filename="falcon.json"
           />
         </section>
+
+        {/* Related */}
+        <section className="rule-section related">
+          <h2>Related</h2>
+          <ul>
+            <li>
+              <Link to="/linter/rules">All rules</Link>
+            </li>
+            <li>
+              <a href={`/linter/rules#${rule.group}`}>
+                {groupLabel(rule.group)} rules
+              </a>
+            </li>
+            {rule.domains.map((d) => (
+              <li key={d}>
+                <Link to="/linter/domains">{d} domain</Link>
+              </li>
+            ))}
+            <li>
+              <Link to="/docs/suppressions">Suppress this rule inline</Link>
+            </li>
+            {rule.source.upstreamUrl ? (
+              <li>
+                <a href={rule.source.upstreamUrl} target="_blank" rel="noreferrer">
+                  {rule.source.label} source
+                </a>
+              </li>
+            ) : null}
+          </ul>
+        </section>
       </div>
-    </div>
+    </DocsLayout>
   )
 }

@@ -41,6 +41,7 @@ export interface Rule {
   crossFile: boolean
   source: RuleSource
   description: string
+  docs: string
   examples: RuleExamples
   diagnostics: RuleDiagnostic[]
 }

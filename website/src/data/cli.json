@@ -1,0 +1,172 @@
+{
+  "about": "A fast Dart linter",
+  "globalArgs": [
+    {
+      "default": "text",
+      "help": "Log output format",
+      "long": "--log-format",
+      "name": "log_format",
+      "positional": false,
+      "possibleValues": [
+        "text",
+        "json"
+      ],
+      "short": null,
+      "valueName": "FORMAT"
+    },
+    {
+      "default": "false",
+      "help": null,
+      "long": "--verbose",
+      "name": "verbose",
+      "positional": false,
+      "possibleValues": [],
+      "short": null,
+      "valueName": null
+    }
+  ],
+  "name": "falcon",
+  "subcommands": [
+    {
+      "about": "Lint one or more Dart files or directories",
+      "args": [
+        {
+          "default": null,
+          "help": "Paths to lint",
+          "long": null,
+          "name": "paths",
+          "positional": true,
+          "possibleValues": [],
+          "short": null,
+          "valueName": "PATHS"
+        },
+        {
+          "default": null,
+          "help": "Path to falcon.json config",
+          "long": "--config",
+          "name": "config",
+          "positional": false,
+          "possibleValues": [],
+          "short": null,
+          "valueName": "CONFIG"
+        },
+        {
+          "default": "text",
+          "help": "Output format for diagnostics",
+          "long": "--format",
+          "name": "format",
+          "positional": false,
+          "possibleValues": [
+            "text",
+            "json"
+          ],
+          "short": null,
+          "valueName": "FORMAT"
+        },
+        {
+          "default": null,
+          "help": "Glob patterns to exclude (repeatable)",
+          "long": "--exclude",
+          "name": "exclude",
+          "positional": false,
+          "possibleValues": [],
+          "short": null,
+          "valueName": "GLOB"
+        },
+        {
+          "default": null,
+          "help": "Stop after this many diagnostics",
+          "long": "--max-errors",
+          "name": "max_errors",
+          "positional": false,
+          "possibleValues": [],
+          "short": null,
+          "valueName": "N"
+        },
+        {
+          "default": "false",
+          "help": "Suppress all diagnostic output",
+          "long": "--quiet",
+          "name": "quiet",
+          "positional": false,
+          "possibleValues": [],
+          "short": null,
+          "valueName": null
+        },
+        {
+          "default": "1",
+          "help": "Exit code to use when violations are found (default: 1)",
+          "long": "--exit-code",
+          "name": "exit_code",
+          "positional": false,
+          "possibleValues": [],
+          "short": null,
+          "valueName": "N"
+        },
+        {
+          "default": "false",
+          "help": "Use Rayon parallel file analysis instead of sequential",
+          "long": "--parallel",
+          "name": "parallel",
+          "positional": false,
+          "possibleValues": [],
+          "short": null,
+          "valueName": null
+        }
+      ],
+      "name": "check",
+      "usage": "falcon check [OPTIONS] [PATHS]..."
+    },
+    {
+      "about": "Start the LSP server (reads JSON-RPC 2.0 from stdin)",
+      "args": [],
+      "name": "lsp",
+      "usage": "falcon lsp [OPTIONS]"
+    },
+    {
+      "about": "Migrate to falcon.json. Converts a dart_code_linter / pyramid_lint analysis_options.yaml, or upgrades an existing falcon.json by rewriting legacy rule ids to their canonical form (auto-detected from the input)",
+      "args": [
+        {
+          "default": null,
+          "help": "Path to the input: an analysis_options.yaml to convert, or an existing falcon.json to upgrade (default: ./analysis_options.yaml)",
+          "long": "--input",
+          "name": "input",
+          "positional": false,
+          "possibleValues": [],
+          "short": null,
+          "valueName": "PATH"
+        },
+        {
+          "default": "false",
+          "help": "Write falcon.json instead of printing to stdout",
+          "long": "--write",
+          "name": "write",
+          "positional": false,
+          "possibleValues": [],
+          "short": null,
+          "valueName": null
+        },
+        {
+          "default": null,
+          "help": "Output path when --write is set (default: ./falcon.json)",
+          "long": "--output",
+          "name": "output",
+          "positional": false,
+          "possibleValues": [],
+          "short": null,
+          "valueName": "PATH"
+        }
+      ],
+      "name": "migrate",
+      "usage": "falcon migrate [OPTIONS]"
+    },
+    {
+      "about": "Print version information and exit",
+      "args": [],
+      "name": "version",
+      "usage": "falcon version [OPTIONS]"
+    }
+  ],
+  "usage": "falcon [OPTIONS] <COMMAND>",
+  "version": "0.3.0"
+}

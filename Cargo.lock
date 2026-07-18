@@ -1345,6 +1345,8 @@ dependencies = [
 name = "xtask"
 version = "0.3.0"
 dependencies = [
+ "clap",
+ "falcon_cli",
  "falcon_rules",
  "serde",
  "serde_json",

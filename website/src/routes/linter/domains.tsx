@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { SidebarLayout } from '../../components/SidebarLayout'
+import { DocsLayout } from '../../components/DocsLayout'
 import { domains, getRule } from '../../lib/rules'
 
 export const Route = createFileRoute('/linter/domains')({
@@ -12,32 +12,19 @@ const DOMAIN_BLURBS: Record<string, string> = {
     'Rules that only make sense in a Flutter project — widget construction, lifecycle, and framework APIs. Enable the domain to turn them all on at once.',
 }
 
-function DomainsSidebar() {
-  return (
-    <nav>
-      <h4>Linter</h4>
-      <Link to="/linter/rules" activeProps={{ className: 'active' }}>
-        Rules
-      </Link>
-      <Link to="/linter/domains" activeProps={{ className: 'active' }}>
-        Domains
-      </Link>
-      <h4>Docs</h4>
-      <Link to="/docs/installation">Installation</Link>
-      <Link to="/docs/configuration">Configuration</Link>
-    </nav>
-  )
-}
-
 function Domains() {
   return (
-    <SidebarLayout sidebar={<DomainsSidebar />}>
+    <DocsLayout>
       <div className="rules-head">
         <h1>Domains</h1>
         <p>
           Domains group rules by the framework they apply to. Toggle a whole
           domain in <code>falcon.json</code> under{' '}
-          <code>linter.domains</code>.
+          <code>linter.domains</code> — see the{' '}
+          <Link to="/reference/configuration" className="inline-link">
+            configuration reference
+          </Link>
+          .
         </p>
       </div>
 
@@ -77,6 +64,6 @@ function Domains() {
           </div>
         </div>
       ))}
-    </SidebarLayout>
+    </DocsLayout>
   )
 }

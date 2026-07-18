@@ -979,6 +979,70 @@ fn extract_description(source_path: &Path, rule_name: &str) -> String {
     first
 }
 
+/// Extract the FULL `//!` module doc from a rule's source as markdown: every
+/// leading `//!` line with the `//! ` marker stripped, joined with newlines. A
+/// trailing provenance sentence ("Ported from …", "Port of …", "Original to …",
+/// "Adopted from …") is cut from any line that still carries one, and the block
+/// is trimmed of leading/blank framing. Returns "" when no module doc is present.
+fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
+    const PROVENANCE: [&str; 4] = ["Ported from", "Port of", "Original to", "Adopted from"];
+
+    let content = match fs::read_to_string(source_path) {
+        Ok(c) => c,
+        Err(_) => {
+            eprintln!(
+                "warning: {rule_name}: cannot read source {} for docs",
+                source_path.display()
+            );
+            return String::new();
+        }
+    };
+
+    // Collect the contiguous leading run of `//!` lines (blank `//!` lines
+    // included as paragraph breaks). Stop at the first non-`//!` line once the
+    // block has started.
+    let mut lines: Vec<String> = Vec::new();
+    let mut started = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("//!") {
+            started = true;
+            // Drop exactly one leading space after the marker, if present.
+            let text = rest.strip_prefix(' ').unwrap_or(rest);
+            lines.push(text.to_string());
+        } else if started {
+            break;
+        }
+        // Before the block starts, skip anything (blank lines, attributes).
+    }
+
+    // Cut a trailing provenance sentence from any line that still carries one.
+    for line in &mut lines {
+        if let Some(cut) = PROVENANCE
+            .iter()
+            .filter_map(|p| line.find(p))
+            .min()
+        {
+            line.truncate(cut);
+            let trimmed_len = line.trim_end().len();
+            line.truncate(trimmed_len);
+        }
+    }
+
+    // Trim leading and trailing blank lines so the markdown starts at the summary.
+    while lines.first().is_some_and(|l| l.trim().is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+
+    if lines.is_empty() {
+        eprintln!("warning: {rule_name}: no //! module doc found for docs");
+    }
+    lines.join("\n")
+}
+
 /// Remove all `/* expect: … */` annotation comments from fixture source, then
 /// rstrip each line so the displayed code is clean.
 fn strip_expectations(source: &str) -> String {
@@ -1087,6 +1151,284 @@ fn docgen_config_for(root: &Path, meta: &RuleMeta, temp_path: &Path) -> Option<P
     }
 }
 
+// ── CLI reference (cli.json) ─────────────────────────────────────────────────
+
+/// One CLI argument (option or positional) rendered from its clap definition.
+fn cli_arg_json(arg: &clap::Arg) -> Value {
+    // A flag (no value) carries no meaningful value name — only surface one for
+    // args that actually take a value.
+    let takes_value = arg
+        .get_num_args()
+        .map(|r| r.takes_values())
+        .unwrap_or(false);
+    let value_name = takes_value
+        .then(|| {
+            arg.get_value_names()
+                .and_then(|vs| vs.first())
+                .map(|v| v.to_string())
+        })
+        .flatten();
+
+    let defaults: Vec<String> = arg
+        .get_default_values()
+        .iter()
+        .map(|v| v.to_string_lossy().to_string())
+        .collect();
+    let default = match defaults.as_slice() {
+        [] => Value::Null,
+        [one] => json!(one),
+        many => json!(many),
+    };
+
+    let possible_values: Vec<String> = arg
+        .get_possible_values()
+        .iter()
+        .map(|pv| pv.get_name().to_string())
+        .collect();
+
+    json!({
+        "name": arg.get_id().as_str(),
+        "long": arg.get_long().map(|l| format!("--{l}")),
+        "short": arg.get_short().map(|c| format!("-{c}")),
+        "valueName": value_name,
+        "default": default,
+        "help": arg.get_help().map(|h| h.to_string()),
+        "possibleValues": possible_values,
+        "positional": arg.is_positional(),
+    })
+}
+
+/// Whether an arg is a clap auto-generated help/version flag (excluded from the
+/// reference — every command has them and they carry no falcon-specific meaning).
+fn is_builtin_flag(arg: &clap::Arg) -> bool {
+    matches!(arg.get_id().as_str(), "help" | "version")
+}
+
+/// Build the CLI reference from falcon's real clap `Command` tree: global args
+/// plus one section per subcommand (name, about, usage, args).
+fn cli_reference_json(mut root: clap::Command) -> Value {
+    // Propagate globals into subcommands and finalize usage strings.
+    root.build();
+
+    let global_ids: HashSet<String> = root
+        .get_arguments()
+        .filter(|a| a.is_global_set())
+        .map(|a| a.get_id().to_string())
+        .collect();
+
+    let mut globals: Vec<(&str, Value)> = root
+        .get_arguments()
+        .filter(|a| a.is_global_set() && !is_builtin_flag(a))
+        .map(|a| (a.get_id().as_str(), cli_arg_json(a)))
+        .collect();
+    globals.sort_by(|a, b| a.0.cmp(b.0));
+    let globals: Vec<Value> = globals.into_iter().map(|(_, v)| v).collect();
+
+    // After `build()`, clap's rendered usage already carries the `falcon` bin
+    // name; only the leading "Usage: " label needs trimming.
+    let root_usage_raw = root.render_usage().to_string();
+    let root_usage = root_usage_raw
+        .strip_prefix("Usage: ")
+        .unwrap_or(&root_usage_raw)
+        .to_string();
+
+    let mut subcommands: Vec<(String, Value)> = Vec::new();
+    for sub in root.get_subcommands() {
+        // Skip clap's auto-generated `help` subcommand — it is not a falcon command.
+        if sub.get_name() == "help" {
+            continue;
+        }
+        let mut sub = sub.clone();
+        sub.build();
+        let name = sub.get_name().to_string();
+
+        let usage_raw = sub.render_usage().to_string();
+        let usage = usage_raw
+            .strip_prefix("Usage: ")
+            .unwrap_or(&usage_raw)
+            .to_string();
+
+        let args: Vec<Value> = sub
+            .get_arguments()
+            .filter(|a| !global_ids.contains(a.get_id().as_str()) && !is_builtin_flag(a))
+            .map(cli_arg_json)
+            .collect();
+
+        subcommands.push((
+            name.clone(),
+            json!({
+                "name": name,
+                "about": sub.get_about().map(|a| a.to_string()),
+                "usage": usage,
+                "args": args,
+            }),
+        ));
+    }
+    subcommands.sort_by(|a, b| a.0.cmp(&b.0));
+    let subcommands: Vec<Value> = subcommands.into_iter().map(|(_, v)| v).collect();
+
+    json!({
+        "name": root.get_name(),
+        "about": root.get_about().map(|a| a.to_string()),
+        "version": root.get_version(),
+        "usage": root_usage,
+        "globalArgs": globals,
+        "subcommands": subcommands,
+    })
+}
+
+// ── Config reference (config-reference.json) ─────────────────────────────────
+
+/// Resolve a `{"$ref": "#/definitions/X"}` node against the root schema, or
+/// return the node unchanged when it is not a local `$ref`.
+fn schema_resolve<'a>(root: &'a Value, node: &'a Value) -> &'a Value {
+    node.get("$ref")
+        .and_then(|r| r.as_str())
+        .and_then(|r| r.strip_prefix("#/definitions/"))
+        .and_then(|name| root.pointer(&format!("/definitions/{name}")))
+        .unwrap_or(node)
+}
+
+/// A human-readable type label for a schema node (following `$ref`s).
+fn schema_type_label(root: &Value, node: &Value) -> String {
+    let resolved = schema_resolve(root, node);
+    if resolved.get("oneOf").is_some() {
+        // The only `oneOf` in the schema is `ruleConfig`.
+        return "rule level (or object with level + options)".to_string();
+    }
+    match resolved.get("type") {
+        Some(Value::String(s)) if s == "array" => {
+            let item = resolved
+                .get("items")
+                .map(|i| schema_type_label(root, i))
+                .unwrap_or_else(|| "value".to_string());
+            format!("{item}[]")
+        }
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>()
+            .join(" | "),
+        _ if resolved.get("enum").is_some() => "string".to_string(),
+        _ => "object".to_string(),
+    }
+}
+
+/// The accepted values for a node, if it is an enum (or a `ruleConfig` whose
+/// severity branch is `ruleLevel`).
+fn schema_allowed_values(root: &Value, node: &Value) -> Vec<Value> {
+    let resolved = schema_resolve(root, node);
+    if let Some(Value::Array(e)) = resolved.get("enum") {
+        return e.clone();
+    }
+    if let Some(Value::Array(branches)) = resolved.get("oneOf") {
+        for branch in branches {
+            let b = schema_resolve(root, branch);
+            if let Some(Value::Array(e)) = b.get("enum") {
+                return e.clone();
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Build one flat config-reference entry for a leaf key.
+fn config_leaf(root: &Value, node: &Value, path: &str) -> Value {
+    let resolved = schema_resolve(root, node);
+    let description = node
+        .get("description")
+        .or_else(|| resolved.get("description"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let mut obj = Map::new();
+    obj.insert("path".into(), json!(path));
+    obj.insert("type".into(), json!(schema_type_label(root, node)));
+    let allowed = schema_allowed_values(root, node);
+    if !allowed.is_empty() {
+        obj.insert("allowedValues".into(), Value::Array(allowed));
+    }
+    if let Some(default) = node.get("default").or_else(|| resolved.get("default")) {
+        obj.insert("default".into(), default.clone());
+    }
+    obj.insert("description".into(), json!(description));
+    Value::Object(obj)
+}
+
+/// Emit the two entries for a `rules` section: the `recommended` preset toggle
+/// and a single templated `<path>.<group>.<rule>` entry (per-rule detail lives
+/// in rules.json, so the reference stays structural).
+fn emit_rules_section(root: &Value, node: &Value, path: &str, out: &mut Vec<Value>) {
+    if let Some(rec) = node.pointer("/properties/recommended") {
+        out.push(config_leaf(root, rec, &format!("{path}.recommended")));
+    }
+    let rule_config = root
+        .pointer("/definitions/ruleConfig")
+        .cloned()
+        .unwrap_or(Value::Null);
+    out.push(config_leaf(
+        root,
+        &rule_config,
+        &format!("{path}.<group>.<rule>"),
+    ));
+}
+
+/// Recursively walk the config schema, emitting a flat list of config-key
+/// entries. Object keys recurse; `rules` sections and repetitive `overrides`
+/// items collapse to templated paths; everything else is a leaf.
+fn walk_config_schema(root: &Value, node: &Value, path: &str, out: &mut Vec<Value>) {
+    let resolved = schema_resolve(root, node);
+
+    if let Some(Value::Object(props)) = resolved.get("properties") {
+        // A `recommended` property uniquely marks a `rules` section in this schema.
+        if props.contains_key("recommended") {
+            emit_rules_section(root, resolved, path, out);
+            return;
+        }
+        for (key, child) in props {
+            let child_path = if path.is_empty() {
+                key.clone()
+            } else {
+                format!("{path}.{key}")
+            };
+            walk_config_schema(root, child, &child_path, out);
+        }
+        return;
+    }
+
+    // Array of objects → descend into the item schema with a `[]` marker.
+    if resolved.get("type").and_then(|t| t.as_str()) == Some("array")
+        && let Some(items) = resolved.get("items")
+        && matches!(schema_resolve(root, items).get("properties"), Some(Value::Object(_)))
+    {
+        walk_config_schema(root, items, &format!("{path}[]"), out);
+        return;
+    }
+
+    out.push(config_leaf(root, node, path));
+}
+
+/// Build the per-key config reference by walking the committed
+/// `schema/falcon.schema.json` (the metadata-generated source of truth).
+fn config_reference_json(root: &Path) -> Value {
+    let schema_path = root.join("schema/falcon.schema.json");
+    let schema: Value = match fs::read_to_string(&schema_path) {
+        Ok(s) => serde_json::from_str(&s).expect("schema is valid JSON"),
+        Err(e) => {
+            eprintln!(
+                "error: cannot read {} for config reference: {e}",
+                schema_path.display()
+            );
+            std::process::exit(1);
+        }
+    };
+    let mut out: Vec<Value> = Vec::new();
+    walk_config_schema(&schema, &schema, "", &mut out);
+    Value::Array(out)
+}
+
 /// Emit `website/src/data/rules.json` and `website/src/data/domains.json` from
 /// `RULE_METADATA`, corpus fixtures, and real diagnostics from the falcon
 /// binary. These committed files are the docs website's only data source; the
@@ -1131,6 +1473,7 @@ fn docgen(_args: &[String]) {
 
         let source_path = rule_source_path(&root, meta);
         let description = extract_description(&source_path, meta.name);
+        let docs = extract_full_docs(&source_path, meta.name);
 
         let config = docgen_config_for(&root, meta, &temp_config);
 
@@ -1245,6 +1588,7 @@ fn docgen(_args: &[String]) {
             "crossFile": meta.cross_file,
             "source": source_json(&meta.source),
             "description": description,
+            "docs": docs,
             "examples": {
                 "bad": bad_example,
                 "good": good_example,
@@ -1276,19 +1620,30 @@ fn docgen(_args: &[String]) {
     }
     let rules_path = data_dir.join("rules.json");
     let domains_path = data_dir.join("domains.json");
+    let cli_path = data_dir.join("cli.json");
+    let config_ref_path = data_dir.join("config-reference.json");
 
     let rules_json =
         serde_json::to_string_pretty(&Value::Array(records.clone())).expect("serialize rules.json");
     let domains_json =
         serde_json::to_string_pretty(&Value::Array(domains)).expect("serialize domains.json");
+    let cli_json = serde_json::to_string_pretty(&cli_reference_json(falcon_cli::args::command()))
+        .expect("serialize cli.json");
+    let config_ref = config_reference_json(&root);
+    let config_ref_count = config_ref.as_array().map(|a| a.len()).unwrap_or(0);
+    let config_ref_json =
+        serde_json::to_string_pretty(&config_ref).expect("serialize config-reference.json");
 
-    if let Err(e) = fs::write(&rules_path, format!("{rules_json}\n")) {
-        eprintln!("error: cannot write {}: {e}", rules_path.display());
-        std::process::exit(1);
-    }
-    if let Err(e) = fs::write(&domains_path, format!("{domains_json}\n")) {
-        eprintln!("error: cannot write {}: {e}", domains_path.display());
-        std::process::exit(1);
+    for (path, contents) in [
+        (&rules_path, &rules_json),
+        (&domains_path, &domains_json),
+        (&cli_path, &cli_json),
+        (&config_ref_path, &config_ref_json),
+    ] {
+        if let Err(e) = fs::write(path, format!("{contents}\n")) {
+            eprintln!("error: cannot write {}: {e}", path.display());
+            std::process::exit(1);
+        }
     }
 
     println!();
@@ -1308,7 +1663,10 @@ fn docgen(_args: &[String]) {
             zero_diag_with_fixture.join(", ")
         );
     }
+    println!("  Config-ref keys:    {config_ref_count}");
     println!("  Wrote: {}", rules_path.display());
     println!("  Wrote: {}", domains_path.display());
+    println!("  Wrote: {}", cli_path.display());
+    println!("  Wrote: {}", config_ref_path.display());
     println!("────────────────────────────────────────────────────────");
 }

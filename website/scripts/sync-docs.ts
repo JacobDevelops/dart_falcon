@@ -11,7 +11,12 @@ const outDir = join(websiteRoot, 'src', 'content')
 
 mkdirSync(outDir, { recursive: true })
 
-for (const name of ['installation', 'configuration']) {
+for (const name of [
+  'getting-started',
+  'installation',
+  'configuration',
+  'suppressions',
+]) {
   const src = join(repoRoot, 'docs', `${name}.md`)
   const md = readFileSync(src, 'utf-8')
   writeFileSync(join(outDir, `${name}.md`), md)

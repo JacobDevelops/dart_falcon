@@ -5,15 +5,19 @@
   "definitions": {
     "overrideCrossFile": {
       "additionalProperties": false,
+      "description": "Cross-file settings applied by an override to its matched files.",
       "properties": {
         "enabled": {
+          "description": "Master switch for cross-file analysis within this override.",
           "type": "boolean"
         },
         "rules": {
           "additionalProperties": false,
+          "description": "Rule severity levels grouped by category, plus the `recommended` preset toggle.",
           "properties": {
             "correctness": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
                 "unnecessary-nullable": {
                   "$ref": "#/definitions/ruleConfig"
@@ -28,6 +32,8 @@
               "type": "object"
             },
             "recommended": {
+              "default": true,
+              "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
               "type": "boolean"
             }
           },
@@ -38,15 +44,19 @@
     },
     "overrideLinter": {
       "additionalProperties": false,
+      "description": "Linter settings applied by an override to its matched files.",
       "properties": {
         "enabled": {
+          "description": "Master switch for the single-file linter within this override.",
           "type": "boolean"
         },
         "rules": {
           "additionalProperties": false,
+          "description": "Rule severity levels grouped by category, plus the `recommended` preset toggle.",
           "properties": {
             "complexity": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `complexity` group.",
               "properties": {
                 "avoid-function-literals-in-foreach-calls": {
                   "$ref": "#/definitions/ruleConfig"
@@ -137,6 +147,7 @@
             },
             "correctness": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
                 "avoid-global-state": {
                   "$ref": "#/definitions/ruleConfig"
@@ -197,6 +208,7 @@
             },
             "performance": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
                 "prefer-const-border-radius": {
                   "$ref": "#/definitions/ruleConfig"
@@ -217,10 +229,13 @@
               "type": "object"
             },
             "recommended": {
+              "default": true,
+              "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
               "type": "boolean"
             },
             "style": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `style` group.",
               "properties": {
                 "avoid-abbreviations-in-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
@@ -443,6 +458,7 @@
             },
             "suspicious": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `suspicious` group.",
               "properties": {
                 "avoid-dynamic": {
                   "$ref": "#/definitions/ruleConfig"
@@ -520,6 +536,7 @@
       "type": "object"
     },
     "ruleConfig": {
+      "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -531,6 +548,7 @@
               "$ref": "#/definitions/ruleLevel"
             },
             "options": {
+              "description": "Rule-specific options (see the rule's documentation for supported keys).",
               "type": "object"
             }
           },
@@ -542,6 +560,7 @@
       ]
     },
     "ruleLevel": {
+      "description": "Severity level for a rule: `off` disables it; `on` reports at its default severity; `info`, `warn`, and `error` set an explicit severity.",
       "enum": [
         "off",
         "on",
@@ -554,19 +573,25 @@
   "description": "Configuration for the falcon Dart linter.",
   "properties": {
     "$schema": {
+      "description": "URL of the falcon.json JSON Schema, enabling rule autocomplete and level validation in editors.",
       "type": "string"
     },
     "cross-file": {
       "additionalProperties": false,
+      "description": "Cross-file (whole-project) analysis configuration. These rules scan every file and are slower than single-file rules.",
       "properties": {
         "enabled": {
+          "default": true,
+          "description": "Master switch for cross-file analysis. Set to false to disable all cross-file rules. Defaults to true.",
           "type": "boolean"
         },
         "rules": {
           "additionalProperties": false,
+          "description": "Rule severity levels grouped by category, plus the `recommended` preset toggle.",
           "properties": {
             "correctness": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
                 "unnecessary-nullable": {
                   "$ref": "#/definitions/ruleConfig"
@@ -581,6 +606,8 @@
               "type": "object"
             },
             "recommended": {
+              "default": true,
+              "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
               "type": "boolean"
             }
           },
@@ -591,8 +618,10 @@
     },
     "files": {
       "additionalProperties": false,
+      "description": "Which files falcon discovers and analyzes.",
       "properties": {
         "includes": {
+          "description": "Glob patterns for the files falcon analyzes. When omitted, every Dart file under the working directory is analyzed.",
           "items": {
             "type": "string"
           },
@@ -603,11 +632,14 @@
     },
     "linter": {
       "additionalProperties": false,
+      "description": "Single-file linter configuration.",
       "properties": {
         "domains": {
           "additionalProperties": false,
+          "description": "Per-domain gating for domain-scoped rules (for example Flutter rules).",
           "properties": {
             "flutter": {
+              "description": "Activation level for the `flutter` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
               "enum": [
                 "all",
                 "recommended",
@@ -618,13 +650,17 @@
           "type": "object"
         },
         "enabled": {
+          "default": true,
+          "description": "Master switch for the single-file linter. Set to false to disable all file rules. Defaults to true.",
           "type": "boolean"
         },
         "rules": {
           "additionalProperties": false,
+          "description": "Rule severity levels grouped by category, plus the `recommended` preset toggle.",
           "properties": {
             "complexity": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `complexity` group.",
               "properties": {
                 "avoid-function-literals-in-foreach-calls": {
                   "$ref": "#/definitions/ruleConfig"
@@ -715,6 +751,7 @@
             },
             "correctness": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
                 "avoid-global-state": {
                   "$ref": "#/definitions/ruleConfig"
@@ -775,6 +812,7 @@
             },
             "performance": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
                 "prefer-const-border-radius": {
                   "$ref": "#/definitions/ruleConfig"
@@ -795,10 +833,13 @@
               "type": "object"
             },
             "recommended": {
+              "default": true,
+              "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
               "type": "boolean"
             },
             "style": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `style` group.",
               "properties": {
                 "avoid-abbreviations-in-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
@@ -1021,6 +1062,7 @@
             },
             "suspicious": {
               "additionalProperties": false,
+              "description": "Per-rule severity levels for the `suspicious` group.",
               "properties": {
                 "avoid-dynamic": {
                   "$ref": "#/definitions/ruleConfig"
@@ -1098,6 +1140,8 @@
       "type": "object"
     },
     "max-errors": {
+      "default": null,
+      "description": "Stop after emitting this many diagnostics. Null (the default) means no limit.",
       "minimum": 0,
       "type": [
         "integer",
@@ -1105,13 +1149,16 @@
       ]
     },
     "overrides": {
+      "description": "Per-glob configuration overrides, applied in order to files matching their `includes`.",
       "items": {
         "additionalProperties": false,
+        "description": "A single override: an `includes` glob set plus the linter/cross-file settings to apply to the matched files.",
         "properties": {
           "cross-file": {
             "$ref": "#/definitions/overrideCrossFile"
           },
           "includes": {
+            "description": "Glob patterns selecting the files this override applies to.",
             "items": {
               "type": "string"
             },
