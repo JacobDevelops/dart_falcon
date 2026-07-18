@@ -3,9 +3,9 @@
 //! `FalconConfig` is the contract; every field and its default is documented
 //! here. File rules are grouped by category under `linter.rules`; enablement is
 //! resolved from an explicit per-rule level, the `recommended` preset, and
-//! per-domain gating (see [`LinterConfig::resolve_rule`]). Project-level
-//! (cross-file) rules are a separate feature under `project.rules`, resolved the
-//! same way minus domains (see [`ProjectConfig::resolve_rule`]).
+//! per-domain gating (see [`LinterConfig::resolve_rule`]). Cross-file rules are a
+//! separate feature under `cross_file.rules`, resolved the same way minus domains
+//! (see [`CrossFileConfig::resolve_rule`]).
 
 use glob::Pattern;
 use serde::de::{self, MapAccess, Visitor};
@@ -25,16 +25,20 @@ pub struct FalconConfig {
     pub files: FilesConfig,
     /// Linter enablement, rule levels, and domain gating.
     pub linter: LinterConfig,
-    /// Project-level (cross-file) rule enablement and levels. A separate feature
-    /// from `linter`: these rules reason across the whole file set (unused files,
-    /// unused code, call-site nullability) and run only in the CLI project pass.
-    pub project: ProjectConfig,
+    /// Cross-file rule enablement and levels. A separate feature from `linter`:
+    /// these rules reason across the whole file set (unused files, unused code,
+    /// call-site nullability) and run in the CLI and LSP cross-file passes.
+    /// Accepts the legacy key `project` as a deserialization alias.
+    #[serde(rename = "cross-file", alias = "project")]
+    pub cross_file: CrossFileConfig,
     /// Per-path rule re-configuration (biome `overrides`). Each entry re-patches
-    /// the base linter and/or project resolution for files its `includes` match;
+    /// the base linter and/or cross-file resolution for files its `includes` match;
     /// later entries win over earlier ones, and all win over the base config.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub overrides: Vec<Override>,
     /// Maximum number of errors before stopping. Defaults to None (unlimited).
+    /// Accepts the legacy key `max_errors` as a deserialization alias.
+    #[serde(rename = "max-errors", alias = "max_errors")]
     pub max_errors: Option<usize>,
 }
 
@@ -54,14 +58,19 @@ pub struct Override {
     /// [`FalconConfig::rule_options_for`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linter: Option<OverrideRules>,
-    /// Partial project (cross-file) rule configuration applied to matching files.
-    /// Same shape and semantics as `linter`, resolved against `project.rules`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project: Option<OverrideRules>,
+    /// Partial cross-file rule configuration applied to matching files. Same
+    /// shape and semantics as `linter`, resolved against `cross_file.rules`.
+    /// Accepts the legacy key `project` as a deserialization alias.
+    #[serde(
+        rename = "cross-file",
+        alias = "project",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cross_file: Option<OverrideRules>,
 }
 
 /// The partial rule block permitted inside an override: a master switch and
-/// per-group rule levels. Shared by the override's `linter` and `project`
+/// per-group rule levels. Shared by the override's `linter` and `cross_file`
 /// sections. Domains are intentionally omitted — overrides are rule-level only.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -159,21 +168,21 @@ impl Default for LinterConfig {
     }
 }
 
-/// `project`: master switch and rule levels for project-level (cross-file) rules.
+/// `cross_file`: master switch and rule levels for cross-file rules.
 ///
 /// A separate top-level feature from `linter`. Resolution mirrors the linter's
-/// per-rule/recommended logic but has **no domain gating** — project rules are
-/// not domain-scoped. When `enabled` is false, every project rule resolves off.
+/// per-rule/recommended logic but has **no domain gating** — cross-file rules are
+/// not domain-scoped. When `enabled` is false, every cross-file rule resolves off.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct ProjectConfig {
-    /// Master switch. When false, every project rule resolves to disabled.
+pub struct CrossFileConfig {
+    /// Master switch. When false, every cross-file rule resolves to disabled.
     pub enabled: bool,
     /// Rule levels grouped by category, plus the `recommended` preset.
     pub rules: Rules,
 }
 
-impl Default for ProjectConfig {
+impl Default for CrossFileConfig {
     fn default() -> Self {
         Self {
             enabled: true,
@@ -182,8 +191,8 @@ impl Default for ProjectConfig {
     }
 }
 
-impl ProjectConfig {
-    /// Resolve a project rule's effective severity, or `None` if disabled.
+impl CrossFileConfig {
+    /// Resolve a cross-file rule's effective severity, or `None` if disabled.
     ///
     /// Priority (mirrors [`LinterConfig::resolve_rule`] minus domains):
     /// 1. `enabled == false` → disabled.
@@ -456,62 +465,62 @@ impl FalconConfig {
         result
     }
 
-    /// Resolve a **project** rule's effective severity for a specific `path`: the
-    /// base project resolution ([`ProjectConfig::resolve_rule`]) patched by every
-    /// override whose `includes` match, applied in order (later wins). Mirrors
-    /// [`Self::resolve_rule_for`] but reads the override's `project` block and has
-    /// no domain dimension. `None` means the rule is disabled for this file.
-    pub fn resolve_project_rule_for(
+    /// Resolve a **cross-file** rule's effective severity for a specific `path`:
+    /// the base cross-file resolution ([`CrossFileConfig::resolve_rule`]) patched
+    /// by every override whose `includes` match, applied in order (later wins).
+    /// Mirrors [`Self::resolve_rule_for`] but reads the override's `cross_file`
+    /// block and has no domain dimension. `None` means the rule is disabled here.
+    pub fn resolve_cross_file_rule_for(
         &self,
         path: &str,
         group: &str,
         name: &str,
         recommended: bool,
     ) -> Option<ResolvedSeverity> {
-        // A globally-disabled project feature cannot be resurrected by an override.
-        if !self.project.enabled {
+        // A globally-disabled cross-file feature cannot be resurrected by an override.
+        if !self.cross_file.enabled {
             return None;
         }
-        let mut result = self.project.resolve_rule(group, name, recommended);
+        let mut result = self.cross_file.resolve_rule(group, name, recommended);
         for ov in &self.overrides {
             if !ov.matches(path) {
                 continue;
             }
-            let Some(project) = &ov.project else {
+            let Some(cross_file) = &ov.cross_file else {
                 continue;
             };
-            if project.enabled == Some(false) {
+            if cross_file.enabled == Some(false) {
                 result = None;
                 continue;
             }
-            if let Some(cfg) = project.rules.groups.get(group).and_then(|g| g.get(name)) {
+            if let Some(cfg) = cross_file.rules.groups.get(group).and_then(|g| g.get(name)) {
                 result = level_to_severity(cfg.level());
             }
         }
         result
     }
 
-    /// Whether a **project** rule is enabled for any path — the base project
-    /// config or any override turns it on. Drives project-rule registration,
+    /// Whether a **cross-file** rule is enabled for any path — the base cross-file
+    /// config or any override turns it on. Drives cross-file-rule registration,
     /// mirroring [`Self::is_rule_enabled_anywhere`].
-    pub fn is_project_rule_enabled_anywhere(
+    pub fn is_cross_file_rule_enabled_anywhere(
         &self,
         group: &str,
         name: &str,
         recommended: bool,
     ) -> bool {
-        if !self.project.enabled {
+        if !self.cross_file.enabled {
             return false;
         }
         if self
-            .project
+            .cross_file
             .resolve_rule(group, name, recommended)
             .is_some()
         {
             return true;
         }
         self.overrides.iter().any(|ov| {
-            ov.project.as_ref().is_some_and(|p| {
+            ov.cross_file.as_ref().is_some_and(|p| {
                 p.enabled != Some(false)
                     && p.rules
                         .groups

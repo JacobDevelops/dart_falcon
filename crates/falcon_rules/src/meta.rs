@@ -1,8 +1,8 @@
 //! Static metadata for every registered rule: its group, domains, whether it is
-//! part of the recommended preset, and whether it is a project-level rule. This
+//! part of the recommended preset, and whether it is a cross-file rule. This
 //! is the contract that ties each rule to the biome-style config schema —
-//! `linter.rules.<group>.<name>` for file rules, `project.rules.<group>.<name>`
-//! for project (cross-file) rules (`project: true`).
+//! `linter.rules.<group>.<name>` for file rules, `cross_file.rules.<group>.<name>`
+//! for cross-file rules (`cross_file: true`).
 //!
 //! Every rule in `all_rules()` must have exactly one entry here, and vice
 //! versa (enforced by `tests/meta_tests.rs`).
@@ -43,9 +43,9 @@ pub struct RuleMeta {
     pub group: &'static str,
     pub domains: &'static [&'static str],
     pub recommended: bool,
-    /// Whether this is a project-level (cross-file) rule, configured under the
-    /// top-level `project` block rather than `linter`. False for file rules.
-    pub project: bool,
+    /// Whether this is a cross-file rule, configured under the top-level
+    /// `cross_file` block rather than `linter`. False for file rules.
+    pub cross_file: bool,
     /// Upstream provenance (biome-style): which linter the rule was ported from,
     /// or `Falcon` for original rules.
     pub source: RuleSource,
@@ -63,7 +63,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-overrides",
@@ -71,7 +71,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-function-literals-in-foreach-calls",
@@ -79,7 +79,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: false,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-conditional-assignment",
@@ -87,7 +87,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-for-elements-to-map-from-iterable",
@@ -95,7 +95,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: false,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-if-null-operators",
@@ -103,7 +103,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-null-aware-operators",
@@ -111,7 +111,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-const",
@@ -119,7 +119,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: false,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-getters-setters",
@@ -127,7 +127,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-nested-conditional-expressions",
@@ -135,7 +135,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-redundant-async",
@@ -143,7 +143,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-unnecessary-type-assertions",
@@ -151,7 +151,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-unnecessary-type-casts",
@@ -159,7 +159,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-inverted-boolean-expressions",
@@ -167,7 +167,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-nested-if",
@@ -175,7 +175,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "max-lines-for-file",
@@ -183,7 +183,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "max-lines-for-function",
@@ -191,7 +191,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "max-parameters-for-function",
@@ -199,7 +199,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "max-switch-cases",
@@ -207,7 +207,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "cyclomatic-complexity",
@@ -215,7 +215,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "maximum-nesting-level",
@@ -223,7 +223,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     // In the recommended preset now that the type-resolution layer backs it: the
     // rule flags a boolean-literal comparison whose other operand is provably
@@ -237,7 +237,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-conditional-expressions",
@@ -245,7 +245,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-extracting-callbacks",
@@ -253,7 +253,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-immediate-return",
@@ -261,7 +261,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-moving-to-variable",
@@ -269,7 +269,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-iterable-any",
@@ -277,7 +277,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-iterable-every",
@@ -285,7 +285,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "complexity",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     // ── correctness ─────────────────────────────────────────────────────────
     RuleMeta {
@@ -294,7 +294,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "no-logic-in-create-state",
@@ -302,7 +302,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-relative-lib-imports",
@@ -310,7 +310,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "hash-and-equals",
@@ -318,7 +318,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "valid-regexps",
@@ -326,7 +326,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "implementation-imports",
@@ -334,7 +334,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-global-state",
@@ -342,7 +342,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-returning-widgets",
@@ -350,7 +350,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-unused-parameters",
@@ -358,7 +358,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-mutable-global-variables",
@@ -366,7 +366,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "correct-order-for-super-dispose",
@@ -374,7 +374,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-flutter-imports",
@@ -382,16 +382,16 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
-    // Project-level (cross-file) rules — CLI-only, run in the project pass.
+    // Cross-file rules — run in the CLI and LSP cross-file passes.
     RuleMeta {
         name: "unused-files",
         source: RuleSource::DartCodeLinter("check-unused-files"),
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: true,
+        cross_file: true,
     },
     RuleMeta {
         name: "unused-code",
@@ -399,7 +399,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: true,
+        cross_file: true,
     },
     RuleMeta {
         // In the recommended preset now that the type-resolution layer backs it:
@@ -413,7 +413,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: true,
+        cross_file: true,
     },
     RuleMeta {
         name: "unnecessary-nullable-return-type",
@@ -421,7 +421,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "use-once-constructors-once-provider",
@@ -429,7 +429,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     // ── performance ─────────────────────────────────────────────────────────
     RuleMeta {
@@ -438,7 +438,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "performance",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-to-list-in-spreads",
@@ -446,7 +446,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "performance",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-const-border-radius",
@@ -454,7 +454,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "performance",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-correct-edge-insets-constructor",
@@ -462,7 +462,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "performance",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-declaring-const-constructor",
@@ -470,7 +470,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "performance",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     // ── style ─────────────────────────────────────────────────────────────
     RuleMeta {
@@ -479,7 +479,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "use-full-hex-values-for-flutter-colors",
@@ -487,7 +487,47 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "camel-case-extensions",
+        source: RuleSource::Lints("camel_case_extensions"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "camel-case-types",
+        source: RuleSource::Lints("camel_case_types"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "curly-braces-in-flow-control-structures",
+        source: RuleSource::Lints("curly_braces_in_flow_control_structures"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "dangling-library-doc-comments",
+        source: RuleSource::Lints("dangling_library_doc_comments"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "non-constant-identifier-names",
+        source: RuleSource::Lints("non_constant_identifier_names"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-generic-function-type-aliases",
@@ -495,7 +535,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-is-empty",
@@ -503,7 +543,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: false,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-is-not-empty",
@@ -511,7 +551,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: false,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-iterable-where-type",
@@ -519,7 +559,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-typing-uninitialized-variables",
@@ -527,7 +567,95 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "provide-deprecation-message",
+        source: RuleSource::Lints("provide_deprecation_message"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "unintended-html-in-doc-comment",
+        source: RuleSource::Lints("unintended_html_in_doc_comment"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "use-string-in-part-of-directives",
+        source: RuleSource::Lints("use_string_in_part_of_directives"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "avoid-init-to-null",
+        source: RuleSource::Lints("avoid_init_to_null"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "avoid-return-types-on-setters",
+        source: RuleSource::Lints("avoid_return_types_on_setters"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "avoid-single-cascade-in-expression-statements",
+        source: RuleSource::Lints("avoid_single_cascade_in_expression_statements"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "constant-identifier-names",
+        source: RuleSource::Lints("constant_identifier_names"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "empty-constructor-bodies",
+        source: RuleSource::Lints("empty_constructor_bodies"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "library-prefixes",
+        source: RuleSource::Lints("library_prefixes"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "no-leading-underscores-for-library-prefixes",
+        source: RuleSource::Lints("no_leading_underscores_for_library_prefixes"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "no-leading-underscores-for-local-identifiers",
+        source: RuleSource::Lints("no_leading_underscores_for_local_identifiers"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-adjacent-string-concatenation",
@@ -535,7 +663,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-collection-literals",
@@ -543,7 +671,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: false,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-final-fields",
@@ -551,7 +679,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-function-declarations-over-variables",
@@ -559,7 +687,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-initializing-formals",
@@ -567,7 +695,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-inlined-adds",
@@ -575,7 +703,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-is-not-operator",
@@ -583,7 +711,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-spread-collections",
@@ -591,7 +719,23 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "slash-for-doc-comments",
+        source: RuleSource::Lints("slash_for_doc_comments"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "type-init-formals",
+        source: RuleSource::Lints("type_init_formals"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-brace-in-string-interps",
@@ -599,7 +743,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-constructor-name",
@@ -607,7 +751,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-late",
@@ -615,7 +759,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-library-name",
@@ -623,7 +767,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-new",
@@ -631,7 +775,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-nullable-for-final-variable-declarations",
@@ -639,7 +783,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: false,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-string-escapes",
@@ -647,7 +791,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-string-interpolations",
@@ -655,7 +799,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-this",
@@ -663,7 +807,23 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "use-function-type-syntax-for-parameters",
+        source: RuleSource::Lints("use_function_type_syntax_for_parameters"),
+        group: "style",
+        domains: NONE,
+        recommended: true,
+        cross_file: false,
+    },
+    RuleMeta {
+        name: "use-super-parameters",
+        source: RuleSource::Lints("use_super_parameters"),
+        group: "style",
+        domains: NONE,
+        recommended: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-late-keyword",
@@ -671,7 +831,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-non-null-assertion",
@@ -679,7 +839,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-top-level-member-access",
@@ -687,7 +847,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-abbreviations-in-doc-comments",
@@ -695,7 +855,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-positional-fields-in-records",
@@ -703,7 +863,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "binary-expression-operand-order",
@@ -711,7 +871,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "boolean-prefixes",
@@ -719,7 +879,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "class-members-ordering",
@@ -727,7 +887,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "double-literal-format",
@@ -735,7 +895,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "format-comment",
@@ -743,7 +903,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "member-ordering",
@@ -751,7 +911,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "newline-before-return",
@@ -759,7 +919,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "no-magic-number",
@@ -767,7 +927,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "no-object-declaration",
@@ -775,7 +935,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-async-await",
@@ -783,7 +943,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-correct-identifier-length",
@@ -791,7 +951,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-correct-type-name",
@@ -799,7 +959,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-first",
@@ -807,7 +967,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-iterable-of",
@@ -815,7 +975,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-last",
@@ -823,7 +983,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-trailing-comma",
@@ -831,7 +991,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-dedicated-media-query-methods",
@@ -839,7 +999,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-underscore-for-unused-callback-parameters",
@@ -847,7 +1007,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "use-design-system-item",
@@ -855,7 +1015,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "use-spacer-as-expanded-child",
@@ -863,7 +1023,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-single-child-column-or-row",
@@ -871,7 +1031,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "prefer-async-callback",
@@ -879,7 +1039,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-redundant-pattern-field-names",
@@ -887,7 +1047,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "style",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "proper-controller-dispose",
@@ -895,7 +1055,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "proper-expanded-and-flexible",
@@ -903,7 +1063,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "proper-from-environment",
@@ -911,7 +1071,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "proper-super-init-state",
@@ -919,7 +1079,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "correctness",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "no-self-comparisons",
@@ -927,7 +1087,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     // ── suspicious ──────────────────────────────────────────────────────────
     RuleMeta {
@@ -936,7 +1096,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: FLUTTER,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-empty-else",
@@ -944,7 +1104,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-shadowing-type-parameters",
@@ -952,7 +1112,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "empty-catches",
@@ -960,7 +1120,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "no-wildcard-variable-uses",
@@ -968,7 +1128,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-returning-null-for-void",
@@ -976,7 +1136,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "control-flow-in-finally",
@@ -984,7 +1144,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "empty-statements",
@@ -992,7 +1152,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "recursive-getters",
@@ -1000,7 +1160,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-null-aware-assignments",
@@ -1008,7 +1168,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "unnecessary-null-in-if-null-operators",
@@ -1016,7 +1176,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "use-rethrow-when-possible",
@@ -1024,7 +1184,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-dynamic",
@@ -1032,7 +1192,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         // In the recommended preset now that the type-resolution layer backs it:
@@ -1045,7 +1205,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-passing-async-when-sync-expected",
@@ -1053,7 +1213,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-throw-in-catch-block",
@@ -1061,7 +1221,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "avoid-unrelated-type-assertions",
@@ -1069,7 +1229,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "no-empty-block",
@@ -1077,7 +1237,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "no-equal-arguments",
@@ -1085,7 +1245,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "no-equal-then-else",
@@ -1093,7 +1253,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
     RuleMeta {
         name: "no-duplicate-case-values",
@@ -1101,7 +1261,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         group: "suspicious",
         domains: NONE,
         recommended: true,
-        project: false,
+        cross_file: false,
     },
 ];
 
@@ -1211,29 +1371,29 @@ pub fn meta_for(name: &str) -> Option<&'static RuleMeta> {
 }
 
 /// Suppression-path validation hook: maps a (possibly-legacy) rule name to its
-/// `(canonical_name, group, is_project)` so `falcon_analyze` can validate a
+/// `(canonical_name, group, is_cross_file)` so `falcon_analyze` can validate a
 /// `// falcon-ignore` path — and record the *canonical* id, so a suppression
 /// written with an old id still matches the diagnostic's canonical rule — without
 /// depending on this crate. Matches [`falcon_analyze::RuleLookup`].
 pub fn suppression_lookup(name: &str) -> Option<(&'static str, &'static str, bool)> {
-    meta_for(name).map(|m| (m.name, m.group, m.project))
+    meta_for(name).map(|m| (m.name, m.group, m.cross_file))
 }
 
 /// Rewrite legacy rule ids used as config keys to their canonical ids, across
-/// the base `linter`/`project` rule maps and every override. Applied once after
-/// a config is loaded so old `falcon.json` files keep resolving against the
+/// the base `linter`/`cross_file` rule maps and every override. Applied once
+/// after a config is loaded so old `falcon.json` files keep resolving against the
 /// canonical rule table. When a legacy id and its canonical id (or two legacy
 /// twins) collide in the same group, the more severe level is kept — matching
 /// the `falcon migrate` upgrade path.
 pub fn canonicalize_config(config: &mut FalconConfig) {
     canonicalize_rules(&mut config.linter.rules);
-    canonicalize_rules(&mut config.project.rules);
+    canonicalize_rules(&mut config.cross_file.rules);
     for ov in &mut config.overrides {
         if let Some(linter) = &mut ov.linter {
             canonicalize_rules(&mut linter.rules);
         }
-        if let Some(project) = &mut ov.project {
-            canonicalize_rules(&mut project.rules);
+        if let Some(cross_file) = &mut ov.cross_file {
+            canonicalize_rules(&mut cross_file.rules);
         }
     }
 }

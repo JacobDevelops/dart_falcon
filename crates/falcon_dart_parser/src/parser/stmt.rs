@@ -279,7 +279,8 @@ impl<'src> Parser<'src> {
 
         // var / final / const → definitely a decl
         if self.at_any(&[TokenKind::Var, TokenKind::Final, TokenKind::Const]) {
-            let is_final = !self.at(TokenKind::Var);
+            let is_const = self.at(TokenKind::Const);
+            let is_final = self.at(TokenKind::Final);
             self.advance();
             let var_type = self.try_parse_type_for_for_decl();
             let name = self.expect_ident();
@@ -288,7 +289,8 @@ impl<'src> Parser<'src> {
                 self.expect(TokenKind::RParen);
                 return (
                     Some(ForInit::ForIn {
-                        is_final,
+                        // `ForIn` has no `is_const`; `const` is invalid here anyway.
+                        is_final: is_final || is_const,
                         var_type,
                         name,
                         iterable: Box::new(iterable),
@@ -297,7 +299,8 @@ impl<'src> Parser<'src> {
                     Vec::new(),
                 );
             }
-            let (decl, cond, update) = self.finish_c_style_for(is_final, var_type, name, saved);
+            let (decl, cond, update) =
+                self.finish_c_style_for(is_final, is_const, var_type, name, saved);
             return (Some(ForInit::VarDecl(decl)), cond, update);
         }
 
@@ -305,12 +308,13 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::Late) {
             let is_late = true;
             self.advance();
-            let is_final = self.eat(TokenKind::Final).is_some();
+            let is_const = self.eat(TokenKind::Const).is_some();
+            let is_final = !is_const && self.eat(TokenKind::Final).is_some();
             let _ = self.eat(TokenKind::Var);
             let var_type = self.try_parse_type_for_for_decl();
             let name = self.expect_ident();
-            let (decl, cond, update) =
-                self.finish_c_style_for_with_late(is_late, is_final, var_type, name, saved);
+            let (decl, cond, update) = self
+                .finish_c_style_for_with_late(is_late, is_final, is_const, var_type, name, saved);
             return (Some(ForInit::VarDecl(decl)), cond, update);
         }
 
@@ -334,7 +338,8 @@ impl<'src> Parser<'src> {
                     );
                 }
                 // C-style with type+name
-                let (decl, cond, update) = self.finish_c_style_for(false, Some(ty), name, saved);
+                let (decl, cond, update) =
+                    self.finish_c_style_for(false, false, Some(ty), name, saved);
                 return (Some(ForInit::VarDecl(decl)), cond, update);
             }
             // Rollback — couldn't parse as decl
@@ -394,6 +399,7 @@ impl<'src> Parser<'src> {
     fn finish_c_style_for(
         &mut self,
         is_final: bool,
+        is_const: bool,
         var_type: Option<DartType>,
         first_name: Identifier,
         _saved: usize,
@@ -432,7 +438,7 @@ impl<'src> Parser<'src> {
         (
             LocalVarDecl {
                 is_final,
-                is_const: false,
+                is_const,
                 is_late: false,
                 var_type,
                 declarators,
@@ -447,6 +453,7 @@ impl<'src> Parser<'src> {
         &mut self,
         is_late: bool,
         is_final: bool,
+        is_const: bool,
         var_type: Option<DartType>,
         first_name: Identifier,
         _saved: usize,
@@ -485,7 +492,7 @@ impl<'src> Parser<'src> {
         (
             LocalVarDecl {
                 is_final,
-                is_const: false,
+                is_const,
                 is_late,
                 var_type,
                 declarators,

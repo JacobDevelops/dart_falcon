@@ -625,98 +625,134 @@ fn test_globally_disabled_linter_not_resurrected_by_override() {
     assert!(!cfg.is_rule_enabled_anywhere("suspicious", "avoid-dynamic", true, &[]));
 }
 
-// ── project (cross-file) rules ──────────────────────────────────────────────
+// ── cross-file rules ────────────────────────────────────────────────────────
 
 #[test]
-fn test_project_default_enabled_and_recommended() {
+fn test_cross_file_default_enabled_and_recommended() {
     let cfg = FalconConfig::default();
-    assert!(cfg.project.enabled);
-    // Recommended project rule → Warn by default.
+    assert!(cfg.cross_file.enabled);
+    // Recommended cross-file rule → Warn by default.
     assert_eq!(
-        cfg.project
+        cfg.cross_file
             .resolve_rule("correctness", "unused-files", true),
         Some(ResolvedSeverity::Warn)
     );
-    // Non-recommended project rule (e.g. unnecessary-nullable) → off by default.
+    // Non-recommended cross-file rule (e.g. unnecessary-nullable) → off by default.
     assert_eq!(
-        cfg.project
+        cfg.cross_file
             .resolve_rule("correctness", "unnecessary-nullable", false),
         None
     );
 }
 
 #[test]
-fn test_project_explicit_levels_and_disabled_switch() {
+fn test_cross_file_explicit_levels_and_disabled_switch() {
     let cfg = from_json(serde_json::json!({
-        "project": { "rules": { "correctness": {
+        "cross-file": { "rules": { "correctness": {
             "unused-files": "error",
             "unnecessary-nullable": "warn"
         } } }
     }));
     assert_eq!(
-        cfg.resolve_project_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        cfg.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
         Some(ResolvedSeverity::Error)
     );
     // Explicit entry beats the recommended=false gate.
     assert_eq!(
-        cfg.resolve_project_rule_for("lib/a.dart", "correctness", "unnecessary-nullable", false),
+        cfg.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unnecessary-nullable", false),
         Some(ResolvedSeverity::Warn)
     );
 
-    // project.enabled=false kills every project rule.
+    // cross_file.enabled=false kills every cross-file rule.
     let off = from_json(serde_json::json!({
-        "project": { "enabled": false, "rules": { "correctness": { "unused-files": "error" } } }
+        "cross-file": { "enabled": false, "rules": { "correctness": { "unused-files": "error" } } }
     }));
     assert_eq!(
-        off.resolve_project_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        off.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
         None
     );
-    assert!(!off.is_project_rule_enabled_anywhere("correctness", "unused-files", true));
+    assert!(!off.is_cross_file_rule_enabled_anywhere("correctness", "unused-files", true));
+}
+
+/// The legacy top-level `project` key is a deserialization alias for
+/// `cross_file` and must parse and resolve identically.
+#[test]
+fn test_legacy_project_alias_resolves_identically() {
+    let legacy = from_json(serde_json::json!({
+        "project": { "rules": { "correctness": { "unused-files": "error" } } }
+    }));
+    let canonical = from_json(serde_json::json!({
+        "cross-file": { "rules": { "correctness": { "unused-files": "error" } } }
+    }));
+    assert_eq!(
+        legacy.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        Some(ResolvedSeverity::Error)
+    );
+    assert_eq!(
+        legacy.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        canonical.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true)
+    );
+    // The alias also flows through an override's `project` block.
+    let legacy_override = from_json(serde_json::json!({
+        "overrides": [ {
+            "includes": ["gen/**"],
+            "project": { "enabled": false }
+        } ]
+    }));
+    assert_eq!(
+        legacy_override.resolve_cross_file_rule_for(
+            "gen/a.dart",
+            "correctness",
+            "unused-files",
+            true
+        ),
+        None
+    );
 }
 
 #[test]
-fn test_project_overrides_patch_per_path() {
+fn test_cross_file_overrides_patch_per_path() {
     let cfg = from_json(serde_json::json!({
         "overrides": [ {
             "includes": ["test/**"],
-            "project": { "rules": { "correctness": { "unused-files": "off" } } }
+            "cross-file": { "rules": { "correctness": { "unused-files": "off" } } }
         } ]
     }));
     // Base (recommended) resolution is on...
     assert_eq!(
-        cfg.resolve_project_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        cfg.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
         Some(ResolvedSeverity::Warn)
     );
     // ...but the override turns it off for matching paths.
     assert_eq!(
-        cfg.resolve_project_rule_for("test/a.dart", "correctness", "unused-files", true),
+        cfg.resolve_cross_file_rule_for("test/a.dart", "correctness", "unused-files", true),
         None
     );
 
     // Base off, override re-enables → registration must include it.
     let reenable = from_json(serde_json::json!({
-        "project": { "rules": { "correctness": { "unused-files": "off" } } },
+        "cross-file": { "rules": { "correctness": { "unused-files": "off" } } },
         "overrides": [ {
             "includes": ["test/**"],
-            "project": { "rules": { "correctness": { "unused-files": "error" } } }
+            "cross-file": { "rules": { "correctness": { "unused-files": "error" } } }
         } ]
     }));
     assert_eq!(
-        reenable.resolve_project_rule_for("test/a.dart", "correctness", "unused-files", true),
+        reenable.resolve_cross_file_rule_for("test/a.dart", "correctness", "unused-files", true),
         Some(ResolvedSeverity::Error)
     );
-    assert!(reenable.is_project_rule_enabled_anywhere("correctness", "unused-files", true));
+    assert!(reenable.is_cross_file_rule_enabled_anywhere("correctness", "unused-files", true));
 
-    // An override's project.enabled=false disables all project rules for the path.
+    // An override's cross_file.enabled=false disables all cross-file rules for the path.
     let disabled = from_json(serde_json::json!({
-        "overrides": [ { "includes": ["gen/**"], "project": { "enabled": false } } ]
+        "overrides": [ { "includes": ["gen/**"], "cross-file": { "enabled": false } } ]
     }));
     assert_eq!(
-        disabled.resolve_project_rule_for("gen/a.dart", "correctness", "unused-files", true),
+        disabled.resolve_cross_file_rule_for("gen/a.dart", "correctness", "unused-files", true),
         None
     );
     assert_eq!(
-        disabled.resolve_project_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        disabled.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
         Some(ResolvedSeverity::Warn)
     );
 }
@@ -734,7 +770,7 @@ fn test_options_in_override_load_ok() {
                 "linter": { "rules": { "complexity": {
                     "max_lines_for_file": { "level": "warn", "options": { "max_lines": 10 } }
                 } } },
-                "project": { "rules": { "correctness": {
+                "cross-file": { "rules": { "correctness": {
                     "unused-files": { "level": "warn", "options": { "k": 1 } }
                 } } }
             } ]

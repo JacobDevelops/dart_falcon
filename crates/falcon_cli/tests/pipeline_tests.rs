@@ -280,8 +280,8 @@ class S extends StatelessWidget {\n\
     );
 }
 
-/// linter.enabled=false disables every file rule. Project rules are a separate
-/// feature, so silencing everything requires disabling `project` too.
+/// linter.enabled=false disables every file rule. Cross-file rules are a separate
+/// feature, so silencing everything requires disabling `cross_file` too.
 #[test]
 fn test_config_both_features_disabled_yields_no_diagnostics() {
     let temp = tempdir().unwrap();
@@ -289,13 +289,13 @@ fn test_config_both_features_disabled_yields_no_diagnostics() {
     let config = temp.path().join("falcon.json");
     fs::write(
         &config,
-        r#"{ "linter": { "enabled": false }, "project": { "enabled": false } }"#,
+        r#"{ "linter": { "enabled": false }, "cross-file": { "enabled": false } }"#,
     )
     .unwrap();
     let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
     assert!(
         out.diagnostics.is_empty(),
-        "no rule should run when both linter and project are disabled"
+        "no rule should run when both linter and cross_file are disabled"
     );
 }
 

@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::resolve::ProgramSource;
-use falcon_analyze::{LocalTypes, ProjectFile, ProjectIndex, ProjectRule, StaticType};
+use falcon_analyze::{CrossFileRule, LocalTypes, ProjectFile, ProjectIndex, StaticType};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
@@ -20,7 +20,7 @@ pub struct UnnecessaryNullable;
 
 const NAME: &str = "unnecessary-nullable";
 
-impl ProjectRule for UnnecessaryNullable {
+impl CrossFileRule for UnnecessaryNullable {
     fn name(&self) -> &'static str {
         NAME
     }
