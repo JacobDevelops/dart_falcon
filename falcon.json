@@ -67,11 +67,27 @@
       "style": {
         "sort-child-properties-last": "warn",
         "use-full-hex-values-for-flutter-colors": "warn",
+        "camel-case-extensions": "warn",
+        "camel-case-types": "warn",
+        "curly-braces-in-flow-control-structures": "warn",
+        "dangling-library-doc-comments": "warn",
+        "non-constant-identifier-names": "warn",
         "prefer-generic-function-type-aliases": "warn",
         "prefer-is-empty": "warn",
         "prefer-is-not-empty": "warn",
         "prefer-iterable-where-type": "warn",
         "prefer-typing-uninitialized-variables": "warn",
+        "provide-deprecation-message": "warn",
+        "unintended-html-in-doc-comment": "warn",
+        "use-string-in-part-of-directives": "warn",
+        "avoid-init-to-null": "warn",
+        "avoid-return-types-on-setters": "warn",
+        "avoid-single-cascade-in-expression-statements": "warn",
+        "constant-identifier-names": "warn",
+        "empty-constructor-bodies": "warn",
+        "library-prefixes": "warn",
+        "no-leading-underscores-for-library-prefixes": "warn",
+        "no-leading-underscores-for-local-identifiers": "warn",
         "prefer-adjacent-string-concatenation": "warn",
         "prefer-collection-literals": "warn",
         "prefer-final-fields": "warn",
@@ -80,6 +96,8 @@
         "prefer-inlined-adds": "warn",
         "prefer-is-not-operator": "warn",
         "prefer-spread-collections": "warn",
+        "slash-for-doc-comments": "warn",
+        "type-init-formals": "warn",
         "unnecessary-brace-in-string-interps": "warn",
         "unnecessary-constructor-name": "warn",
         "unnecessary-late": "warn",
@@ -89,6 +107,8 @@
         "unnecessary-string-escapes": "warn",
         "unnecessary-string-interpolations": "warn",
         "unnecessary-this": "warn",
+        "use-function-type-syntax-for-parameters": "warn",
+        "use-super-parameters": "warn",
         "avoid-late-keyword": "warn",
         "avoid-non-null-assertion": "warn",
         "avoid-top-level-member-access": "warn",
@@ -144,7 +164,7 @@
       }
     }
   },
-  "project": {
+  "cross-file": {
     "enabled": true,
     "rules": {
       "correctness": {
@@ -154,5 +174,5 @@
       }
     }
   },
-  "max_errors": null
+  "max-errors": null
 }

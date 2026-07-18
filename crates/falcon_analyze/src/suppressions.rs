@@ -2,8 +2,9 @@
 //! `// falcon-ignore-all <path>: <reason>` comments, modelled on Biome's
 //! `// biome-ignore lint/<group>/<rule>: <explanation>` shape.
 //!
-//! `<path>` is `lint/<group>/<rule>` for file rules and `project/<group>/<rule>`
-//! for project (cross-file) rules. A reason is **required**; one rule per
+//! `<path>` is `lint/<group>/<rule>` for file rules and
+//! `cross-file/<group>/<rule>` for cross-file rules (the legacy `project/…`
+//! section is still accepted). A reason is **required**; one rule per
 //! comment; consecutive suppression-only comment lines stack and all apply to
 //! the next line of code (Biome semantics). Falcon does **not** read Dart's own
 //! `// ignore:` / `// ignore_for_file:` comments — those belong to the analyzer.
@@ -30,7 +31,7 @@ use falcon_syntax::token::{Token, TokenKind};
 pub const MALFORMED_SUPPRESSION: &str = "malformed-suppression";
 
 /// Maps a (possibly-legacy) rule name to its `(canonical_name, group,
-/// is_project)` metadata, used to validate a suppression path. Returning the
+/// is_cross_file)` metadata, used to validate a suppression path. Returning the
 /// canonical name lets a suppression written with an old rule id still match the
 /// diagnostic's canonical rule. Supplied by callers because `falcon_analyze`
 /// does not depend on `falcon_rules` (which owns the rule table).
@@ -199,17 +200,23 @@ fn validate(keyword: &str, rest: &str, lookup: RuleLookup) -> Result<String, Str
     }
 
     let parts: Vec<&str> = path.split('/').collect();
-    if parts.len() != 3 || !matches!(parts[0], "lint" | "project") {
+    if parts.len() != 3 || !matches!(parts[0], "lint" | "cross-file" | "project") {
         return Err(format!(
-            "malformed {keyword} path '{path}'; expected lint/<group>/<rule> or project/<group>/<rule>"
+            "malformed {keyword} path '{path}'; expected lint/<group>/<rule> or cross-file/<group>/<rule>"
         ));
     }
-    let (section, group, rule) = (parts[0], parts[1], parts[2]);
+    // Normalize the legacy `project/…` section to its canonical `cross-file/…`.
+    let section = if parts[0] == "project" {
+        "cross-file"
+    } else {
+        parts[0]
+    };
+    let (group, rule) = (parts[1], parts[2]);
 
     match lookup(rule) {
         None => Err(format!("unknown rule '{rule}' in {keyword} path '{path}'")),
-        Some((canonical, correct_group, is_project)) => {
-            let correct_section = if is_project { "project" } else { "lint" };
+        Some((canonical, correct_group, is_cross_file)) => {
+            let correct_section = if is_cross_file { "cross-file" } else { "lint" };
             if group != correct_group || section != correct_section {
                 Err(format!(
                     "suppression path is {correct_section}/{correct_group}/{canonical}"
@@ -258,9 +265,9 @@ mod tests {
     use super::*;
 
     /// Test lookup mirroring a slice of the real rule table: a file rule and a
-    /// project rule, enough to exercise group/section validation.
+    /// cross-file rule, enough to exercise group/section validation.
     fn lookup(name: &str) -> Option<(&'static str, &'static str, bool)> {
-        // (canonical_name, group, is_project). `no_empty_block` is a legacy
+        // (canonical_name, group, is_cross_file). `no_empty_block` is a legacy
         // alias that canonicalizes to `no-empty-block`, exercising the
         // alias-aware suppression path.
         match name {
@@ -316,7 +323,16 @@ mod tests {
     }
 
     #[test]
-    fn project_rule_path() {
+    fn cross_file_rule_path() {
+        let s = parse("// falcon-ignore-all cross-file/correctness/unused-files: generated\n");
+        assert!(s.is_suppressed("unused-files", 0));
+        assert!(s.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn legacy_project_section_still_suppresses() {
+        // The pre-rename `project/…` section is accepted as a deprecated alias
+        // for `cross-file/…` and must still suppress without a diagnostic.
         let s = parse("// falcon-ignore-all project/correctness/unused-files: generated\n");
         assert!(s.is_suppressed("unused-files", 0));
         assert!(s.diagnostics().is_empty());
@@ -361,13 +377,13 @@ mod tests {
 
     #[test]
     fn wrong_section_reports_correct_path() {
-        // Project rule referenced under `lint/` instead of `project/`.
+        // Cross-file rule referenced under `lint/` instead of `cross-file/`.
         let s = parse("// falcon-ignore-all lint/correctness/unused-files: x\n");
         assert!(!s.is_suppressed("unused-files", 0));
         assert!(
             s.diagnostics()[0]
                 .message
-                .contains("suppression path is project/correctness/unused-files")
+                .contains("suppression path is cross-file/correctness/unused-files")
         );
     }
 

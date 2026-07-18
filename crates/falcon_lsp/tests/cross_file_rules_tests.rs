@@ -1,6 +1,6 @@
-//! Project-rule (cross-file) LSP tests: a mock client drives the real server
+//! Cross-file LSP tests: a mock client drives the real server
 //! loop over `Connection::memory()`, with a temp workspace on disk so the
-//! project pass can walk `.dart` files. Mirrors the harness in `lsp_tests.rs`.
+//! cross-file pass can walk `.dart` files. Mirrors the harness in `lsp_tests.rs`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,13 +23,13 @@ const RECV_TIMEOUT: Duration = Duration::from_secs(5);
 /// Quiet window used to confirm no further publish arrives.
 const QUIET: Duration = Duration::from_millis(200);
 
-/// Only `unused-files` is enabled as a project rule (recommended preset off, so
+/// Only `unused-files` is enabled as a cross-file rule (recommended preset off, so
 /// `unused-code` stays quiet); the linter defaults remain on.
 const ENABLE_UNUSED_FILES: &str = r#"{
-    "project": { "rules": { "recommended": false, "correctness": { "unused-files": "warn" } } }
+    "cross-file": { "rules": { "recommended": false, "correctness": { "unused-files": "warn" } } }
 }"#;
-/// Master switch off: every project rule resolves disabled, so the pass is skipped.
-const DISABLE_PROJECT: &str = r#"{ "project": { "enabled": false } }"#;
+/// Master switch off: every cross-file rule resolves disabled, so the pass is skipped.
+const DISABLE_CROSS_FILE: &str = r#"{ "cross-file": { "enabled": false } }"#;
 
 struct TestClient {
     client: Connection,
@@ -40,7 +40,7 @@ struct TestClient {
 
 impl TestClient {
     /// Start the server over a memory connection with `falcon.json` written to a
-    /// fresh temp workspace; the workspace dir is the project-pass walk root.
+    /// fresh temp workspace; the workspace dir is the cross-file-pass walk root.
     fn start(config_json: &str) -> Self {
         let workspace = TempDir::new().unwrap();
         let config_path = workspace.path().join("falcon.json");
@@ -218,10 +218,10 @@ fn write_corpus(client: &TestClient) -> String {
     client.write_dart("orphan.dart", "class OrphanThing {}\n")
 }
 
-/// (1) didOpen a file that a project rule flags → the published diagnostics for
-/// that file include the project rule.
+/// (1) didOpen a file that a cross-file rule flags → the published diagnostics for
+/// that file include the cross-file rule.
 #[test]
-fn did_open_publishes_project_diagnostic() {
+fn did_open_publishes_cross_file_diagnostic() {
     let mut client = TestClient::start(ENABLE_UNUSED_FILES);
     let orphan_uri = write_corpus(&client);
 
@@ -234,11 +234,11 @@ fn did_open_publishes_project_diagnostic() {
     client.shutdown();
 }
 
-/// (2) A file with no per-file issues, flagged only by a project rule, still
-/// gets the project diagnostic. The first (per-file) publish is empty; a later
-/// publish carries `unused-files` — proving the project pass, not a file rule.
+/// (2) A file with no per-file issues, flagged only by a cross-file rule, still
+/// gets the cross-file diagnostic. The first (per-file) publish is empty; a later
+/// publish carries `unused-files` — proving the cross-file pass, not a file rule.
 #[test]
-fn clean_file_still_gets_project_diagnostic() {
+fn clean_file_still_gets_cross_file_diagnostic() {
     let mut client = TestClient::start(ENABLE_UNUSED_FILES);
     let orphan_uri = write_corpus(&client);
 
@@ -249,27 +249,27 @@ fn clean_file_still_gets_project_diagnostic() {
         per_file.diagnostics.is_empty(),
         "clean file must have no per-file diagnostics: {per_file:?}"
     );
-    let project = client.recv_publish();
+    let cross_file = client.recv_publish();
     assert!(
-        has_rule(&project, "unused-files"),
-        "project pass must add unused-files: {project:?}"
+        has_rule(&cross_file, "unused-files"),
+        "cross-file pass must add unused-files: {cross_file:?}"
     );
 
-    // didSave also re-runs the project pass and republishes the diagnostic.
+    // didSave also re-runs the cross-file pass and republishes the diagnostic.
     client.save(&orphan_uri);
     let after_save = client.drain_publishes();
     assert!(
         any_publish_has_rule(&after_save, &orphan_uri, "unused-files"),
-        "didSave must republish the project diagnostic: {after_save:?}"
+        "didSave must republish the cross-file diagnostic: {after_save:?}"
     );
     client.shutdown();
 }
 
-/// (3) With project rules disabled, no project diagnostics are published — only
+/// (3) With cross-file rules disabled, no cross-file diagnostics are published — only
 /// the single per-file publish for the opened document.
 #[test]
-fn disabled_project_rules_publish_nothing() {
-    let mut client = TestClient::start(DISABLE_PROJECT);
+fn disabled_cross_file_rules_publish_nothing() {
+    let mut client = TestClient::start(DISABLE_CROSS_FILE);
     let orphan_uri = write_corpus(&client);
 
     client.open(&orphan_uri, "class OrphanThing {}\n", 1);
@@ -277,11 +277,11 @@ fn disabled_project_rules_publish_nothing() {
     assert_eq!(
         publishes.len(),
         1,
-        "disabled project rules must yield exactly one (per-file) publish: {publishes:?}"
+        "disabled cross-file rules must yield exactly one (per-file) publish: {publishes:?}"
     );
     assert!(
         !has_rule(&publishes[0], "unused-files"),
-        "no project diagnostic when disabled: {publishes:?}"
+        "no cross-file diagnostic when disabled: {publishes:?}"
     );
     client.shutdown();
 }

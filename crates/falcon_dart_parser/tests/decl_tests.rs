@@ -552,3 +552,52 @@ fn test_arrow_switch_body_with_semicolon_ok() {
     let (_prog, errors) = parse("int f(Object a) => switch (a) { int x => 0, _ => 1 };");
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
+
+// ── `const` / `final` modifiers on a C-style `for` initializer ────────────────
+
+fn for_init_decl(src: &str) -> LocalVarDecl {
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let body = match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f.body.as_ref().expect("function body"),
+        other => panic!("expected function, got {other:?}"),
+    };
+    let stmts = match body {
+        FunctionBody::Block(b) => &b.stmts,
+        other => panic!("expected block body, got {other:?}"),
+    };
+    match &stmts[0] {
+        Stmt::For(f) => match f.init.as_ref().expect("for init") {
+            ForInit::VarDecl(lv) => lv.clone(),
+            other => panic!("expected var-decl init, got {other:?}"),
+        },
+        other => panic!("expected for statement, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_const_in_c_style_for_initializer_keeps_is_const() {
+    // The parser used to fold `const` into `is_final` and hardcode
+    // `is_const: false`, so no rule could see the constness.
+    let decl = for_init_decl("void f() { for (const kX = 1; kX < 2;) {} }");
+    assert!(decl.is_const, "const for-init must set is_const");
+    assert!(
+        !decl.is_final,
+        "const and final are mutually exclusive (matches parse_local_var_decl)"
+    );
+    assert_eq!(decl.declarators[0].name.name, "kX");
+}
+
+#[test]
+fn test_final_in_c_style_for_initializer_keeps_is_final() {
+    let decl = for_init_decl("void f() { for (final x = 1; x < 2;) {} }");
+    assert!(decl.is_final, "final for-init must set is_final");
+    assert!(!decl.is_const);
+}
+
+#[test]
+fn test_var_in_c_style_for_initializer_sets_neither() {
+    let decl = for_init_decl("void f() { for (var i = 0; i < 2; i++) {} }");
+    assert!(!decl.is_final);
+    assert!(!decl.is_const);
+}

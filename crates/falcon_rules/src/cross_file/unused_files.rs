@@ -1,7 +1,7 @@
 //! `unused-files` — flag `lib/` files that nothing else references and that are
 //! not entrypoints. Port of dart_code_linter's `check-unused-files`.
 
-use falcon_analyze::{ProjectFile, ProjectRule};
+use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::{Program, TopLevelDecl};
@@ -12,7 +12,7 @@ pub struct UnusedFiles;
 
 const NAME: &str = "unused-files";
 
-impl ProjectRule for UnusedFiles {
+impl CrossFileRule for UnusedFiles {
     fn name(&self) -> &'static str {
         NAME
     }

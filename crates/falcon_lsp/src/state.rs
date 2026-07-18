@@ -9,12 +9,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, FileSuppressions, ProjectFile, ProjectRuleRegistry, Rule};
+use falcon_analyze::{AnalyzeContext, CrossFileRuleRegistry, FileSuppressions, ProjectFile, Rule};
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::parse;
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
-    apply_severities, meta::suppression_lookup, resolve_project_rules, resolve_rules,
+    apply_severities, meta::suppression_lookup, resolve_cross_file_rules, resolve_rules,
 };
 use falcon_syntax::Program;
 use glob::Pattern;
@@ -26,16 +26,23 @@ pub struct DocumentState {
     pub text: String,
     pub version: Option<i32>,
     program: Program,
-    /// Whether the last parse produced errors — carried so the project pass
+    /// Whether the last parse produced errors — carried so the cross-file pass
     /// can populate [`ProjectFile::has_parse_errors`] without re-parsing.
     has_parse_errors: bool,
     /// Most recent published output (byte spans) — read by hover. May include
-    /// project-rule diagnostics after a project pass; never an input to analysis.
+    /// cross-file diagnostics after a cross-file pass; never an input to analysis.
     pub last_diagnostics: Vec<Diagnostic>,
-    /// Whether the last publish for this document carried project diagnostics.
-    /// Lets the project pass republish only docs whose project set changed
-    /// (adding new project diags, or clearing ones shown before).
-    had_project_diags: bool,
+    /// Whether the last *cross-file pass* published a set carrying cross-file
+    /// diagnostics. Lets the pass republish only docs whose cross-file set changed
+    /// (adding new cross-file diags, or clearing ones shown before).
+    ///
+    /// Write it only from the cross-file pass. It deliberately does not track what
+    /// the editor currently shows: a didChange republishes per-file diagnostics and
+    /// leaves this `true`, which costs at most one redundant publish of identical
+    /// content. Clearing it elsewhere would make a stale `false` reachable — the
+    /// pass would skip a doc whose cross-file squiggles are still on screen and
+    /// never clear them.
+    had_cross_file_diags: bool,
     /// Number of times this document has been parsed (incremental tests).
     pub parse_count: u64,
     /// Number of times this document has been analyzed (incremental tests).
@@ -48,10 +55,10 @@ pub struct LspState {
     config: FalconConfig,
     config_path: Option<PathBuf>,
     rules: Vec<Box<dyn Rule>>,
-    /// Cross-file rules; empty unless enabled by config. When empty the project
-    /// pass is skipped entirely (the whole-workspace walk is expensive).
-    project_rules: ProjectRuleRegistry,
-    /// Root under which the project pass walks `.dart` files: the config's
+    /// Cross-file rules; empty unless enabled by config. When empty the
+    /// cross-file pass is skipped entirely (the whole-workspace walk is expensive).
+    cross_file_rules: CrossFileRuleRegistry,
+    /// Root under which the cross-file pass walks `.dart` files: the config's
     /// directory, falling back to the current directory.
     workspace_root: PathBuf,
 }
@@ -63,14 +70,14 @@ impl LspState {
     pub fn new(config_path: Option<PathBuf>) -> Self {
         let config = load_from(config_path.as_deref());
         let resolved = resolve_rules(&config);
-        let project_rules = build_project_registry(&config);
+        let cross_file_rules = build_cross_file_registry(&config);
         let workspace_root = workspace_root_for(config_path.as_deref());
         Self {
             documents: HashMap::new(),
             config,
             config_path,
             rules: resolved.rules,
-            project_rules,
+            cross_file_rules,
             workspace_root,
         }
     }
@@ -100,7 +107,7 @@ impl LspState {
                 program,
                 has_parse_errors: !parse_errors.is_empty(),
                 last_diagnostics: Vec::new(),
-                had_project_diags: false,
+                had_cross_file_diags: false,
                 parse_count: 1,
                 analyze_count: 0,
             },
@@ -190,10 +197,10 @@ impl LspState {
         self.config = load_from(self.config_path.as_deref());
         let resolved = resolve_rules(&self.config);
         self.rules = resolved.rules;
-        self.project_rules = build_project_registry(&self.config);
+        self.cross_file_rules = build_cross_file_registry(&self.config);
         debug!(
             rule_count = self.rules.len(),
-            project_rule_count = self.project_rules.rules().len(),
+            cross_file_rule_count = self.cross_file_rules.rules().len(),
             "config reloaded"
         );
         self.open_uris()
@@ -206,46 +213,46 @@ impl LspState {
     }
 
     /// Whether any cross-file rule is enabled. When false the caller skips the
-    /// project pass, avoiding the whole-workspace walk.
-    pub fn project_rules_enabled(&self) -> bool {
-        !self.project_rules.is_empty()
+    /// cross-file pass, avoiding the whole-workspace walk.
+    pub fn cross_file_rules_enabled(&self) -> bool {
+        !self.cross_file_rules.is_empty()
     }
 
     /// Run the cross-file rules over the whole workspace and republish the
-    /// merged (per-file + project) diagnostics for every open document whose
-    /// project set changed. Returns the `(uri, merged)` pairs actually
+    /// merged (per-file + cross-file) diagnostics for every open document whose
+    /// cross-file set changed. Returns the `(uri, merged)` pairs actually
     /// published so the caller can send them and clear their dirty flags.
     ///
     /// Only open docs are republished: an editor shows diagnostics for open
     /// buffers, and republishing unchanged docs would be redundant traffic.
-    pub fn project_pass(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
-        if self.project_rules.is_empty() {
+    pub fn cross_file_pass(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
+        if self.cross_file_rules.is_empty() {
             return Vec::new();
         }
-        // Compute the project map first so its immutable borrow ends before the
+        // Compute the cross-file map first so its immutable borrow ends before the
         // per-document `analyze`/mutation loop below (avoids &self vs &mut self).
-        let project_map = self.project_diagnostics();
+        let cross_file_map = self.cross_file_diagnostics();
         let mut published = Vec::new();
         for uri in self.open_uris() {
             let path = uri_to_path(&uri).to_string_lossy().into_owned();
-            let project_diags = project_map.get(&path);
-            let has_now = project_diags.is_some_and(|d| !d.is_empty());
+            let cross_file_diags = cross_file_map.get(&path);
+            let has_now = cross_file_diags.is_some_and(|d| !d.is_empty());
             let had_before = self
                 .documents
                 .get(&uri)
-                .is_some_and(|d| d.had_project_diags);
+                .is_some_and(|d| d.had_cross_file_diags);
             // Nothing to add and nothing to clear: leave the last publish intact.
             if !has_now && !had_before {
                 continue;
             }
             let mut merged = self.analyze(&uri);
-            if let Some(diags) = project_diags {
+            if let Some(diags) = cross_file_diags {
                 merged.extend(diags.iter().cloned());
                 merged.sort_by(|a, b| a.span.start.cmp(&b.span.start).then(a.rule.cmp(b.rule)));
             }
             if let Some(doc) = self.documents.get_mut(&uri) {
                 doc.last_diagnostics = merged.clone();
-                doc.had_project_diags = has_now;
+                doc.had_cross_file_diags = has_now;
             }
             published.push((uri, merged));
         }
@@ -255,13 +262,13 @@ impl LspState {
     /// Build the cross-file diagnostics for the whole workspace, grouped by file
     /// path. Open buffers contribute their in-memory text and cached AST; every
     /// other `.dart` file under the workspace root is read and parsed from disk.
-    fn project_diagnostics(&self) -> HashMap<String, Vec<Diagnostic>> {
-        if self.project_rules.is_empty() {
+    fn cross_file_diagnostics(&self) -> HashMap<String, Vec<Diagnostic>> {
+        if self.cross_file_rules.is_empty() {
             return HashMap::new();
         }
-        let files = self.collect_project_files();
-        let mut diags = self.project_rules.run_all(&files, &self.config);
-        suppress_project_diags(&mut diags, &files);
+        let files = self.collect_cross_file_files();
+        let mut diags = self.cross_file_rules.run_all(&files, &self.config);
+        suppress_cross_file_diags(&mut diags, &files);
         apply_severities(&mut diags, &self.config);
         let mut grouped: HashMap<String, Vec<Diagnostic>> = HashMap::new();
         for diag in diags {
@@ -276,7 +283,7 @@ impl LspState {
     /// Assemble the [`ProjectFile`] set: every non-excluded `.dart` file under
     /// the workspace root, preferring an open buffer's text + cached AST over the
     /// on-disk copy so unsaved edits are reflected in cross-file analysis.
-    fn collect_project_files(&self) -> Vec<ProjectFile> {
+    fn collect_cross_file_files(&self) -> Vec<ProjectFile> {
         let exclude = compile_patterns(&self.config.files.exclude_patterns());
         let includes = compile_patterns(&self.config.files.include_patterns());
         let open_by_path: HashMap<PathBuf, &DocumentState> = self
@@ -331,17 +338,17 @@ impl LspState {
     }
 }
 
-/// Build a project-rule registry from `config` (empty unless a cross-file rule
-/// is enabled), mirroring the CLI's `build_project_registry`.
-fn build_project_registry(config: &FalconConfig) -> ProjectRuleRegistry {
-    let mut registry = ProjectRuleRegistry::new();
-    for rule in resolve_project_rules(config).rules {
+/// Build a cross-file-rule registry from `config` (empty unless a cross-file
+/// rule is enabled), mirroring the CLI's `build_cross_file_registry`.
+fn build_cross_file_registry(config: &FalconConfig) -> CrossFileRuleRegistry {
+    let mut registry = CrossFileRuleRegistry::new();
+    for rule in resolve_cross_file_rules(config).rules {
         registry.register(rule);
     }
     registry
 }
 
-/// The directory the project pass walks: the config file's parent, else the
+/// The directory the cross-file pass walks: the config file's parent, else the
 /// current directory (`.` if even that is unavailable).
 fn workspace_root_for(config_path: Option<&Path>) -> PathBuf {
     config_path
@@ -364,10 +371,10 @@ fn compile_patterns(patterns: &[String]) -> Vec<Pattern> {
         .collect()
 }
 
-/// Honor inline `// falcon-ignore` suppressions for project-rule diagnostics,
-/// mirroring `falcon_cli::analyze_pipeline::suppress_project_diags`. Only
+/// Honor inline `// falcon-ignore` suppressions for cross-file-rule diagnostics,
+/// mirroring `falcon_cli::analyze_pipeline::suppress_cross_file_diags`. Only
 /// filters; malformed-suppression diagnostics are reported by the per-file pass.
-fn suppress_project_diags(diags: &mut Vec<Diagnostic>, files: &[ProjectFile]) {
+fn suppress_cross_file_diags(diags: &mut Vec<Diagnostic>, files: &[ProjectFile]) {
     if diags.is_empty() {
         return;
     }
