@@ -29,8 +29,16 @@ use crate::output;
 /// extend this list as further resolver-dependent per-file rules are integrated.
 /// (Project rules such as `unnecessary-nullable` build their own index inside
 /// `analyze_project` and are not listed here.)
-const RESOLVER_DEPENDENT_RULES: &[&str] =
-    &["no-boolean-literal-compare", "avoid-ignoring-return-values"];
+const RESOLVER_DEPENDENT_RULES: &[&str] = &[
+    "no-boolean-literal-compare",
+    "avoid-ignoring-return-values",
+    "unnecessary-string-interpolations",
+    "prefer-is-empty",
+    "prefer-is-not-empty",
+    "prefer-iterable-where-type",
+    "prefer-collection-literals",
+    "prefer-final-fields",
+];
 
 /// Output format for diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

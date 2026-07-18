@@ -63,8 +63,11 @@
             fileset = lib.fileset.unions [
               ./Cargo.toml
               ./Cargo.lock
+              ./falcon.json
               ./src
+              ./benches
               ./crates
+              ./schema
               ./xtask
             ];
           };

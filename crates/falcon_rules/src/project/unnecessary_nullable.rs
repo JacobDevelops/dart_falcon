@@ -409,14 +409,30 @@ impl Visitor for CallCollector<'_> {
             } => {
                 self.visit_expr(object);
                 for section in sections {
-                    if let CascadeOp::Call(ident, _, args) = &section.op {
-                        self.calls
-                            .push(call_info(ident.name.clone(), args, &self.lt, self.index));
-                        for a in &args.positional {
-                            self.visit_expr(a);
-                        }
-                        for a in &args.named {
-                            self.visit_expr(&a.value);
+                    for op in &section.ops {
+                        match op {
+                            CascadeOp::Call(ident, _, args) => {
+                                self.calls.push(call_info(
+                                    ident.name.clone(),
+                                    args,
+                                    &self.lt,
+                                    self.index,
+                                ));
+                                for a in &args.positional {
+                                    self.visit_expr(a);
+                                }
+                                for a in &args.named {
+                                    self.visit_expr(&a.value);
+                                }
+                            }
+                            CascadeOp::Index(index, _) => {
+                                self.visit_expr(index);
+                            }
+                            CascadeOp::Assign(target, _, value) => {
+                                self.visit_expr(target);
+                                self.visit_expr(value);
+                            }
+                            CascadeOp::Field(..) => {}
                         }
                     }
                 }

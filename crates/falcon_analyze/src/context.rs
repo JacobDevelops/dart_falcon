@@ -1,6 +1,6 @@
 use falcon_config::FalconConfig;
 
-use crate::resolve::ProjectIndex;
+use crate::resolve::{LibraryUnit, ProjectIndex, TypeIndex};
 
 /// Per-file analysis context passed to every rule.
 ///
@@ -17,6 +17,12 @@ pub struct AnalyzeContext<'a> {
     /// Cross-file declaration index, when the driver has one. `None` for callers
     /// that have no project view (or have not opted into resolution).
     pub project: Option<&'a ProjectIndex>,
+    /// Cross-file *type* index (kinds, supertypes, members), when the driver has
+    /// one. Same opt-in and absence semantics as [`AnalyzeContext::project`].
+    pub types: Option<&'a TypeIndex>,
+    /// This file's library context — its part/owner siblings and the flag for an
+    /// unresolved part. `None` when resolution is off or the file stands alone.
+    pub library: Option<&'a LibraryUnit<'a>>,
 }
 
 impl<'a> AnalyzeContext<'a> {
@@ -28,12 +34,26 @@ impl<'a> AnalyzeContext<'a> {
             source,
             config,
             project: None,
+            types: None,
+            library: None,
         }
     }
 
     /// Attach a project index, enabling resolver-dependent rules to consult it.
     pub fn with_project(mut self, project: &'a ProjectIndex) -> Self {
         self.project = Some(project);
+        self
+    }
+
+    /// Attach a cross-file type index.
+    pub fn with_types(mut self, types: &'a TypeIndex) -> Self {
+        self.types = Some(types);
+        self
+    }
+
+    /// Attach this file's library context.
+    pub fn with_library(mut self, library: &'a LibraryUnit<'a>) -> Self {
+        self.library = Some(library);
         self
     }
 

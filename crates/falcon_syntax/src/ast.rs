@@ -42,6 +42,22 @@ pub struct StringLitNode {
     /// The decoded string value (without surrounding quotes, escapes resolved).
     pub value: String,
     pub span: Span,
+    /// The parsed interpolated expressions (`$id` / `${expr}`) embedded in the
+    /// literal, in source order. Empty for raw strings, non-interpolated
+    /// literals, and any interpolation whose inner expression failed to parse
+    /// cleanly (recorded conservatively as absent).
+    pub interpolations: Vec<StringInterpolation>,
+}
+
+/// A single interpolation embedded in a [`StringLitNode`].
+#[derive(Debug, Clone)]
+pub struct StringInterpolation {
+    /// The parsed interpolated expression.
+    pub expr: Expr,
+    /// Absolute byte range of the interpolated expression text in the original
+    /// source: for `${e}` the range of `e` inside the braces, for `$ident` the
+    /// range of `ident`.
+    pub span: Span,
 }
 
 // ── Top-level compilation unit ────────────────────────────────────────────────
@@ -83,23 +99,39 @@ pub struct PartDirective {
     pub span: Span,
 }
 
-/// `import 'uri' [as name] [show/hide ...];`
+/// `import 'uri' [if (name) 'uri' ...] [as name] [show/hide ...];`
 #[derive(Debug, Clone)]
 pub struct ImportDirective {
     pub annotations: Vec<Annotation>,
     pub uri: StringLitNode,
+    /// Configurable (conditional) URIs: `if (dart.library.io) 'io.dart'`.
+    pub configurable_uris: Vec<ConfigurableUri>,
     pub is_deferred: bool,
     pub as_name: Option<Identifier>,
     pub combinators: Vec<ImportCombinator>,
     pub span: Span,
 }
 
-/// `export 'uri' [show/hide ...];`
+/// `export 'uri' [if (name) 'uri' ...] [show/hide ...];`
 #[derive(Debug, Clone)]
 pub struct ExportDirective {
     pub annotations: Vec<Annotation>,
     pub uri: StringLitNode,
+    /// Configurable (conditional) URIs: `if (dart.library.io) 'io.dart'`.
+    pub configurable_uris: Vec<ConfigurableUri>,
     pub combinators: Vec<ImportCombinator>,
+    pub span: Span,
+}
+
+/// A configurable-URI clause on an import/export: `if (dotted.name [== 'value']) 'uri'`.
+#[derive(Debug, Clone)]
+pub struct ConfigurableUri {
+    /// The dotted environment constant tested, e.g. `dart.library.io`.
+    pub test: Vec<Identifier>,
+    /// The `== 'value'` comparison string, when present.
+    pub value: Option<StringLitNode>,
+    /// The URI selected when the test succeeds.
+    pub uri: StringLitNode,
     pub span: Span,
 }
 
@@ -114,6 +146,8 @@ pub enum ImportCombinator {
 #[derive(Debug, Clone)]
 pub enum TopLevelDecl {
     Class(ClassDecl),
+    /// Mixin-application class: `class MA = S with M [implements I];`
+    ClassTypeAlias(ClassTypeAliasDecl),
     Mixin(MixinDecl),
     MixinClass(MixinClassDecl),
     Enum(EnumDecl),
@@ -129,6 +163,7 @@ impl TopLevelDecl {
     pub fn span(&self) -> &Span {
         match self {
             TopLevelDecl::Class(x) => &x.span,
+            TopLevelDecl::ClassTypeAlias(x) => &x.span,
             TopLevelDecl::Mixin(x) => &x.span,
             TopLevelDecl::MixinClass(x) => &x.span,
             TopLevelDecl::Enum(x) => &x.span,
@@ -164,6 +199,22 @@ pub struct ClassDecl {
     pub with_clause: Vec<DartType>,
     pub implements: Vec<DartType>,
     pub members: Vec<ClassMember>,
+    pub span: Span,
+}
+
+/// `[modifiers] class Name<T> = Superclass with M1, M2 [implements I];`
+///
+/// A mixin-application ("class type alias") declaration: names a class formed by
+/// applying mixins to a superclass, with no body.
+#[derive(Debug, Clone)]
+pub struct ClassTypeAliasDecl {
+    pub annotations: Vec<Annotation>,
+    pub modifiers: ClassModifiers,
+    pub name: Identifier,
+    pub type_params: Vec<TypeParam>,
+    pub superclass: DartType,
+    pub with_clause: Vec<DartType>,
+    pub implements: Vec<DartType>,
     pub span: Span,
 }
 
@@ -224,7 +275,17 @@ pub struct ConstructorDecl {
     pub constructor_name: Option<Identifier>,
     pub params: FormalParamList,
     pub initializers: Vec<ConstructorInitializer>,
+    /// Redirecting factory target: `factory C() = D;` / `= D.named;` / `= D<int>;`.
+    pub redirect: Option<RedirectedConstructor>,
     pub body: Option<FunctionBody>,
+    pub span: Span,
+}
+
+/// The target of a redirecting factory constructor (`= Type[.name]`).
+#[derive(Debug, Clone)]
+pub struct RedirectedConstructor {
+    pub type_: DartType,
+    pub constructor_name: Option<Identifier>,
     pub span: Span,
 }
 
@@ -353,6 +414,9 @@ pub struct EnumVariant {
     pub annotations: Vec<Annotation>,
     pub name: Identifier,
     pub type_args: Vec<DartType>,
+    /// Named (or `.new`) constructor invoked by an enhanced-enum constant, e.g.
+    /// `a.foo(1)` — `Some(foo)`; `None` for an unnamed-constructor constant.
+    pub constructor_name: Option<Identifier>,
     pub args: Option<ArgList>,
     pub span: Span,
 }
@@ -372,6 +436,8 @@ pub struct ExtensionDecl {
 #[derive(Debug, Clone)]
 pub struct ExtensionTypeDecl {
     pub annotations: Vec<Annotation>,
+    /// `extension type const Name(...)` — the representation constructor is const.
+    pub is_const: bool,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,
     pub representation: ExtensionTypeRepresentation,
@@ -382,6 +448,8 @@ pub struct ExtensionTypeDecl {
 
 #[derive(Debug, Clone)]
 pub struct ExtensionTypeRepresentation {
+    /// Named representation constructor: `extension type Name._(int it)`.
+    pub constructor_name: Option<Identifier>,
     pub field_type: DartType,
     pub field_name: Identifier,
     pub span: Span,
@@ -504,6 +572,7 @@ pub struct NamedRecordField {
 
 #[derive(Debug, Clone)]
 pub struct TypeParam {
+    pub annotations: Vec<Annotation>,
     pub name: Identifier,
     pub bound: Option<DartType>,
     pub span: Span,
@@ -558,6 +627,8 @@ impl FunctionBody {
 #[derive(Debug, Clone)]
 pub struct Annotation {
     pub name: Vec<Identifier>,
+    /// Type arguments on the annotation: `@Native<int Function()>(...)`.
+    pub type_args: Vec<DartType>,
     pub constructor_name: Option<Identifier>,
     pub args: Option<ArgList>,
     pub span: Span,
@@ -589,6 +660,13 @@ pub enum Stmt {
     /// `var (x, :y) = expr;`, `final [a, b] = expr;`. Binds the identifiers in
     /// `pattern` (modeled as [`Pattern::Variable`]) to the destructured `init`.
     PatternDecl(PatternDeclaration),
+    /// Dart 3 pattern-assignment statement: `(a, b) = expr;`, `[a, b] = expr;`.
+    /// Assigns to already-declared variables via destructuring (no `var`/`final`
+    /// keyword), distinct from [`Stmt::PatternDecl`].
+    PatternAssign(PatternAssignStmt),
+    /// A labeled statement: `label: stmt`. One or more labels may nest, each
+    /// wrapping the labeled [`Stmt`] in its own `Labeled` node.
+    Labeled(LabeledStmt),
     LocalFunc(LocalFuncDecl),
     Assert(AssertStmt),
     Yield(YieldStmt),
@@ -612,6 +690,8 @@ impl Stmt {
             Stmt::Continue(x) => &x.span,
             Stmt::LocalVar(x) => &x.span,
             Stmt::PatternDecl(x) => &x.span,
+            Stmt::PatternAssign(x) => &x.span,
+            Stmt::Labeled(x) => &x.span,
             Stmt::LocalFunc(x) => &x.span,
             Stmt::Assert(x) => &x.span,
             Stmt::Yield(x) => &x.span,
@@ -632,7 +712,9 @@ pub struct IfStmt {
 #[derive(Debug, Clone)]
 pub enum IfCondition {
     Expr(Expr),
-    Case(Expr, Box<Pattern>),
+    /// `if (<expr> case <pattern> [when <guard>])` — used by if-case statements
+    /// and collection `if`-elements. The third field is the optional `when` guard.
+    Case(Expr, Box<Pattern>, Option<Box<Expr>>),
 }
 
 #[derive(Debug, Clone)]
@@ -687,6 +769,9 @@ pub struct SwitchStmt {
 
 #[derive(Debug, Clone)]
 pub struct SwitchCase {
+    /// Statement labels preceding this case (`label: case 2:`), retained as
+    /// `continue label;` targets.
+    pub labels: Vec<Identifier>,
     /// One or more `case pattern:` / `default:` labels sharing this body.
     pub cases: Vec<SwitchCaseKind>,
     pub body: Vec<Stmt>,
@@ -760,6 +845,22 @@ pub struct PatternDeclaration {
     pub is_final: bool,
     pub pattern: Pattern,
     pub init: Expr,
+    pub span: Span,
+}
+
+/// Dart 3 pattern-assignment statement: `<pattern> = <value>` (no `var`/`final`).
+#[derive(Debug, Clone)]
+pub struct PatternAssignStmt {
+    pub pattern: Pattern,
+    pub value: Expr,
+    pub span: Span,
+}
+
+/// A labeled statement: `label: stmt`.
+#[derive(Debug, Clone)]
+pub struct LabeledStmt {
+    pub label: Identifier,
+    pub stmt: Box<Stmt>,
     pub span: Span,
 }
 
@@ -894,6 +995,8 @@ pub enum Expr {
     Cascade {
         object: Box<Expr>,
         sections: Vec<CascadeSection>,
+        /// True for a leading null-aware cascade `?..`.
+        is_null_aware: bool,
         span: Span,
     },
 
@@ -923,6 +1026,8 @@ pub enum Expr {
 
     // Records
     Record {
+        /// `const ('', X)` — a const record literal.
+        is_const: bool,
         fields: Vec<RecordField>,
         span: Span,
     },
@@ -979,6 +1084,19 @@ pub enum Expr {
         span: Span,
     },
 
+    // Symbol literal: `#name`, `#foo.bar`, `#+`. `raw` includes the leading `#`.
+    SymbolLit {
+        raw: String,
+        span: Span,
+    },
+
+    // Bare generic tear-off instantiation: `identity<int>` (no call follows).
+    GenericInstantiation {
+        target: Box<Expr>,
+        type_args: Vec<DartType>,
+        span: Span,
+    },
+
     Error {
         span: Span,
     },
@@ -1017,7 +1135,9 @@ impl Expr {
             | Expr::Await { span, .. }
             | Expr::Throw { span, .. }
             | Expr::Switch { span, .. }
-            | Expr::NullAssert { span, .. } => span,
+            | Expr::NullAssert { span, .. }
+            | Expr::SymbolLit { span, .. }
+            | Expr::GenericInstantiation { span, .. } => span,
         }
     }
 }
@@ -1083,7 +1203,11 @@ pub enum AssignOp {
 
 #[derive(Debug, Clone)]
 pub struct CascadeSection {
-    pub op: CascadeOp,
+    /// The selector chain in one `..`/`?..` section, e.g. `a.b()` in `..a.b()`.
+    /// A plain single-selector section (`..a`) holds one op; chained selectors
+    /// (`..a.b()`, `..m().n()`) hold one op per link, in source order. Any
+    /// trailing assignment is the final `CascadeOp::Assign`.
+    pub ops: Vec<CascadeOp>,
     pub span: Span,
 }
 
@@ -1117,6 +1241,8 @@ pub enum CollectionElement {
         span: Span,
     },
     For {
+        /// `await for (...)` — an asynchronous for-in element in an async context.
+        is_await: bool,
         /// Simple loop variable (`for (final x in xs)`). `None` when the header
         /// uses a Dart 3 pattern instead, in which case `pattern` is set.
         variable: Option<Identifier>,
@@ -1165,6 +1291,8 @@ pub enum MapElement {
         span: Span,
     },
     For {
+        /// `await for (...)` — an asynchronous for-in entry in an async context.
+        is_await: bool,
         variable: Option<Identifier>,
         var_type: Option<DartType>,
         pattern: Option<Box<Pattern>>,
@@ -1215,7 +1343,12 @@ fn push_map_element_exprs<'a>(element: &'a MapElement, out: &mut Vec<&'a Expr>) 
         } => {
             match condition {
                 IfCondition::Expr(e) => out.push(e),
-                IfCondition::Case(e, _) => out.push(e),
+                IfCondition::Case(e, _, guard) => {
+                    out.push(e);
+                    if let Some(g) = guard {
+                        out.push(g);
+                    }
+                }
             }
             push_map_element_exprs(then_entry, out);
             if let Some(else_entry) = else_entry {
@@ -1391,6 +1524,10 @@ pub enum LiteralPatternValue {
 #[derive(Debug, Clone)]
 pub struct ConstPattern {
     pub name: Vec<Identifier>,
+    /// `None` for the dotted-name form (`const Foo.bar`); `Some` for a const
+    /// constructor / collection / parenthesized expression form
+    /// (`const Foo(1)`, `const [1, 2]`, `const (1 + 2)`).
+    pub expr: Option<Box<Expr>>,
     pub span: Span,
 }
 
@@ -1424,6 +1561,8 @@ pub struct RecordPatternField {
 pub struct MapPattern {
     pub type_args: Vec<DartType>,
     pub entries: Vec<MapPatternEntry>,
+    /// True when the map pattern contains a rest element (`...`).
+    pub has_rest: bool,
     pub span: Span,
 }
 

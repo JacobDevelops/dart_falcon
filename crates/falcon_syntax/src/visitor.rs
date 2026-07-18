@@ -16,7 +16,9 @@ pub trait Visitor: Sized {
         walk_import(self, node);
     }
 
-    fn visit_export(&mut self, node: &ExportDirective) {}
+    fn visit_export(&mut self, node: &ExportDirective) {
+        walk_export(self, node);
+    }
 
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         walk_top_level_decl(self, node);
@@ -82,7 +84,9 @@ pub trait Visitor: Sized {
         walk_pattern(self, node);
     }
 
-    fn visit_annotation(&mut self, node: &Annotation) {}
+    fn visit_annotation(&mut self, node: &Annotation) {
+        walk_annotation(self, node);
+    }
 
     fn visit_identifier(&mut self, node: &Identifier) {}
 
@@ -96,6 +100,15 @@ pub trait Visitor: Sized {
 // ── Walk helpers ──────────────────────────────────────────────────────────────
 
 pub fn walk_program<V: Visitor>(v: &mut V, node: &Program) {
+    if let Some(ref lib) = node.library_directive {
+        walk_library_directive(v, lib);
+    }
+    if let Some(ref part_of) = node.part_of_directive {
+        walk_part_of_directive(v, part_of);
+    }
+    for part in &node.part_directives {
+        walk_part_directive(v, part);
+    }
     for import in &node.imports {
         v.visit_import(import);
     }
@@ -107,16 +120,116 @@ pub fn walk_program<V: Visitor>(v: &mut V, node: &Program) {
     }
 }
 
-pub fn walk_import<V: Visitor>(v: &mut V, node: &ImportDirective) {
+fn walk_library_directive<V: Visitor>(v: &mut V, node: &LibraryDirective) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
+    for seg in &node.name {
+        v.visit_identifier(seg);
+    }
+}
+
+fn walk_part_of_directive<V: Visitor>(v: &mut V, node: &PartOfDirective) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
+    if let Some(ref uri) = node.uri {
+        v.visit_string_lit(uri);
+    }
+    for seg in &node.name {
+        v.visit_identifier(seg);
+    }
+}
+
+fn walk_part_directive<V: Visitor>(v: &mut V, node: &PartDirective) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
     v.visit_string_lit(&node.uri);
+}
+
+pub fn walk_import<V: Visitor>(v: &mut V, node: &ImportDirective) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
+    v.visit_string_lit(&node.uri);
+    for cu in &node.configurable_uris {
+        walk_configurable_uri(v, cu);
+    }
     if let Some(ref alias) = node.as_name {
         v.visit_identifier(alias);
+    }
+    for comb in &node.combinators {
+        walk_import_combinator(v, comb);
+    }
+}
+
+pub fn walk_export<V: Visitor>(v: &mut V, node: &ExportDirective) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
+    v.visit_string_lit(&node.uri);
+    for cu in &node.configurable_uris {
+        walk_configurable_uri(v, cu);
+    }
+    for comb in &node.combinators {
+        walk_import_combinator(v, comb);
+    }
+}
+
+fn walk_configurable_uri<V: Visitor>(v: &mut V, node: &ConfigurableUri) {
+    for seg in &node.test {
+        v.visit_identifier(seg);
+    }
+    if let Some(ref value) = node.value {
+        v.visit_string_lit(value);
+    }
+    v.visit_string_lit(&node.uri);
+}
+
+fn walk_import_combinator<V: Visitor>(v: &mut V, comb: &ImportCombinator) {
+    match comb {
+        ImportCombinator::Show(names, _) | ImportCombinator::Hide(names, _) => {
+            for name in names {
+                v.visit_identifier(name);
+            }
+        }
+    }
+}
+
+pub fn walk_annotation<V: Visitor>(v: &mut V, node: &Annotation) {
+    for seg in &node.name {
+        v.visit_identifier(seg);
+    }
+    for t in &node.type_args {
+        v.visit_dart_type(t);
+    }
+    if let Some(ref ctor) = node.constructor_name {
+        v.visit_identifier(ctor);
+    }
+    if let Some(ref args) = node.args {
+        walk_arg_list(v, args);
+    }
+}
+
+/// Visit the bound type of each type parameter. Type-parameter names are
+/// declaration sites and are left unvisited, matching the other declaration
+/// walkers.
+fn walk_type_params<V: Visitor>(v: &mut V, type_params: &[TypeParam]) {
+    for tp in type_params {
+        for ann in &tp.annotations {
+            v.visit_annotation(ann);
+        }
+        if let Some(ref bound) = tp.bound {
+            v.visit_dart_type(bound);
+        }
     }
 }
 
 pub fn walk_top_level_decl<V: Visitor>(v: &mut V, node: &TopLevelDecl) {
     match node {
         TopLevelDecl::Class(x) => v.visit_class_decl(x),
+        TopLevelDecl::ClassTypeAlias(x) => walk_class_type_alias(v, x),
         TopLevelDecl::Mixin(x) => v.visit_mixin_decl(x),
         TopLevelDecl::MixinClass(x) => walk_mixin_class(v, x),
         TopLevelDecl::Enum(x) => v.visit_enum_decl(x),
@@ -134,6 +247,7 @@ pub fn walk_class_decl<V: Visitor>(v: &mut V, node: &ClassDecl) {
         v.visit_annotation(ann);
     }
     v.visit_identifier(&node.name);
+    walk_type_params(v, &node.type_params);
     if let Some(ref sup) = node.extends {
         v.visit_dart_type(sup);
     }
@@ -148,11 +262,27 @@ pub fn walk_class_decl<V: Visitor>(v: &mut V, node: &ClassDecl) {
     }
 }
 
+fn walk_class_type_alias<V: Visitor>(v: &mut V, node: &ClassTypeAliasDecl) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
+    v.visit_identifier(&node.name);
+    walk_type_params(v, &node.type_params);
+    v.visit_dart_type(&node.superclass);
+    for t in &node.with_clause {
+        v.visit_dart_type(t);
+    }
+    for t in &node.implements {
+        v.visit_dart_type(t);
+    }
+}
+
 pub fn walk_mixin_decl<V: Visitor>(v: &mut V, node: &MixinDecl) {
     for ann in &node.annotations {
         v.visit_annotation(ann);
     }
     v.visit_identifier(&node.name);
+    walk_type_params(v, &node.type_params);
     for t in &node.on_clause {
         v.visit_dart_type(t);
     }
@@ -169,6 +299,16 @@ fn walk_mixin_class<V: Visitor>(v: &mut V, node: &MixinClassDecl) {
         v.visit_annotation(ann);
     }
     v.visit_identifier(&node.name);
+    walk_type_params(v, &node.type_params);
+    if let Some(ref sup) = node.extends {
+        v.visit_dart_type(sup);
+    }
+    for t in &node.with_clause {
+        v.visit_dart_type(t);
+    }
+    for t in &node.implements {
+        v.visit_dart_type(t);
+    }
     for member in &node.members {
         v.visit_class_member(member);
     }
@@ -179,8 +319,24 @@ pub fn walk_enum_decl<V: Visitor>(v: &mut V, node: &EnumDecl) {
         v.visit_annotation(ann);
     }
     v.visit_identifier(&node.name);
+    walk_type_params(v, &node.type_params);
+    for t in &node.with_clause {
+        v.visit_dart_type(t);
+    }
+    for t in &node.implements {
+        v.visit_dart_type(t);
+    }
     for variant in &node.variants {
+        for ann in &variant.annotations {
+            v.visit_annotation(ann);
+        }
         v.visit_identifier(&variant.name);
+        for t in &variant.type_args {
+            v.visit_dart_type(t);
+        }
+        if let Some(ref args) = variant.args {
+            walk_arg_list(v, args);
+        }
     }
     for member in &node.members {
         v.visit_class_member(member);
@@ -188,9 +344,13 @@ pub fn walk_enum_decl<V: Visitor>(v: &mut V, node: &EnumDecl) {
 }
 
 pub fn walk_extension_decl<V: Visitor>(v: &mut V, node: &ExtensionDecl) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
     if let Some(ref name) = node.name {
         v.visit_identifier(name);
     }
+    walk_type_params(v, &node.type_params);
     v.visit_dart_type(&node.on_type);
     for member in &node.members {
         v.visit_class_member(member);
@@ -198,7 +358,19 @@ pub fn walk_extension_decl<V: Visitor>(v: &mut V, node: &ExtensionDecl) {
 }
 
 fn walk_extension_type<V: Visitor>(v: &mut V, node: &ExtensionTypeDecl) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
     v.visit_identifier(&node.name);
+    walk_type_params(v, &node.type_params);
+    if let Some(ref ctor) = node.representation.constructor_name {
+        v.visit_identifier(ctor);
+    }
+    v.visit_dart_type(&node.representation.field_type);
+    v.visit_identifier(&node.representation.field_name);
+    for t in &node.implements {
+        v.visit_dart_type(t);
+    }
     for member in &node.members {
         v.visit_class_member(member);
     }
@@ -212,6 +384,7 @@ pub fn walk_function_decl<V: Visitor>(v: &mut V, node: &FunctionDecl) {
         v.visit_dart_type(ret);
     }
     v.visit_identifier(&node.name);
+    walk_type_params(v, &node.type_params);
     for param in node
         .params
         .positional
@@ -227,6 +400,9 @@ pub fn walk_function_decl<V: Visitor>(v: &mut V, node: &FunctionDecl) {
 }
 
 fn walk_top_level_var<V: Visitor>(v: &mut V, node: &TopLevelVarDecl) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
     if let Some(ref t) = node.var_type {
         v.visit_dart_type(t);
     }
@@ -239,7 +415,11 @@ fn walk_top_level_var<V: Visitor>(v: &mut V, node: &TopLevelVarDecl) {
 }
 
 fn walk_type_alias<V: Visitor>(v: &mut V, node: &TypeAliasDecl) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
     v.visit_identifier(&node.name);
+    walk_type_params(v, &node.type_params);
     v.visit_dart_type(&node.aliased);
 }
 
@@ -256,6 +436,9 @@ pub fn walk_class_member<V: Visitor>(v: &mut V, node: &ClassMember) {
 }
 
 pub fn walk_field_decl<V: Visitor>(v: &mut V, node: &FieldDecl) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
     if let Some(ref t) = node.field_type {
         v.visit_dart_type(t);
     }
@@ -281,8 +464,45 @@ pub fn walk_constructor_decl<V: Visitor>(v: &mut V, node: &ConstructorDecl) {
     {
         v.visit_formal_param(param);
     }
+    for init in &node.initializers {
+        walk_constructor_initializer(v, init);
+    }
+    if let Some(ref redirect) = node.redirect {
+        v.visit_dart_type(&redirect.type_);
+        if let Some(ref name) = redirect.constructor_name {
+            v.visit_identifier(name);
+        }
+    }
     if let Some(ref body) = node.body {
         walk_function_body(v, body);
+    }
+}
+
+fn walk_constructor_initializer<V: Visitor>(v: &mut V, init: &ConstructorInitializer) {
+    match init {
+        ConstructorInitializer::SuperCall {
+            call_name, args, ..
+        }
+        | ConstructorInitializer::ThisCall {
+            call_name, args, ..
+        } => {
+            if let Some(name) = call_name {
+                v.visit_identifier(name);
+            }
+            walk_arg_list(v, args);
+        }
+        ConstructorInitializer::FieldInit { field, value, .. } => {
+            v.visit_identifier(field);
+            v.visit_expr(value);
+        }
+        ConstructorInitializer::Assert {
+            condition, message, ..
+        } => {
+            v.visit_expr(condition);
+            if let Some(msg) = message {
+                v.visit_expr(msg);
+            }
+        }
     }
 }
 
@@ -294,6 +514,7 @@ pub fn walk_method_decl<V: Visitor>(v: &mut V, node: &MethodDecl) {
         v.visit_dart_type(ret);
     }
     v.visit_identifier(&node.name);
+    walk_type_params(v, &node.type_params);
     for param in node
         .params
         .positional
@@ -309,6 +530,9 @@ pub fn walk_method_decl<V: Visitor>(v: &mut V, node: &MethodDecl) {
 }
 
 pub fn walk_getter_decl<V: Visitor>(v: &mut V, node: &GetterDecl) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
     if let Some(ref ret) = node.return_type {
         v.visit_dart_type(ret);
     }
@@ -319,6 +543,9 @@ pub fn walk_getter_decl<V: Visitor>(v: &mut V, node: &GetterDecl) {
 }
 
 pub fn walk_setter_decl<V: Visitor>(v: &mut V, node: &SetterDecl) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
     if let Some(ref t) = node.param_type {
         v.visit_dart_type(t);
     }
@@ -329,8 +556,20 @@ pub fn walk_setter_decl<V: Visitor>(v: &mut V, node: &SetterDecl) {
 }
 
 fn walk_operator_decl<V: Visitor>(v: &mut V, node: &OperatorDecl) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
     if let Some(ref ret) = node.return_type {
         v.visit_dart_type(ret);
+    }
+    for param in node
+        .params
+        .positional
+        .iter()
+        .chain(&node.params.optional_positional)
+        .chain(&node.params.named)
+    {
+        v.visit_formal_param(param);
     }
     if let Some(ref body) = node.body {
         walk_function_body(v, body);
@@ -345,6 +584,7 @@ pub fn walk_dart_type<V: Visitor>(v: &mut V, node: &DartType) {
             }
         }
         DartType::Function(x) => {
+            walk_type_params(v, &x.type_params);
             if let Some(ref ret) = x.return_type {
                 v.visit_dart_type(ret);
             }
@@ -374,9 +614,12 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
         Stmt::If(x) => {
             match &x.condition {
                 IfCondition::Expr(e) => v.visit_expr(e),
-                IfCondition::Case(e, p) => {
+                IfCondition::Case(e, p, guard) => {
                     v.visit_expr(e);
                     v.visit_pattern(p);
+                    if let Some(g) = guard {
+                        v.visit_expr(g);
+                    }
                 }
             }
             v.visit_stmt(&x.then_branch);
@@ -430,6 +673,9 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
         Stmt::Switch(x) => {
             v.visit_expr(&x.subject);
             for case in &x.cases {
+                for label in &case.labels {
+                    v.visit_identifier(label);
+                }
                 for kind in &case.cases {
                     match kind {
                         SwitchCaseKind::Pattern(p, guard) => {
@@ -482,11 +728,29 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
             v.visit_pattern(&x.pattern);
             v.visit_expr(&x.init);
         }
+        Stmt::PatternAssign(x) => {
+            v.visit_pattern(&x.pattern);
+            v.visit_expr(&x.value);
+        }
+        Stmt::Labeled(x) => {
+            v.visit_identifier(&x.label);
+            v.visit_stmt(&x.stmt);
+        }
         Stmt::LocalFunc(x) => {
             if let Some(ref ret) = x.return_type {
                 v.visit_dart_type(ret);
             }
             v.visit_identifier(&x.name);
+            walk_type_params(v, &x.type_params);
+            for param in x
+                .params
+                .positional
+                .iter()
+                .chain(&x.params.optional_positional)
+                .chain(&x.params.named)
+            {
+                v.visit_formal_param(param);
+            }
             walk_function_body(v, &x.body);
         }
         Stmt::Assert(x) => {
@@ -510,9 +774,16 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
         | Expr::This { .. }
         | Expr::Super { .. }
         | Expr::DotShorthand { .. }
+        | Expr::SymbolLit { .. }
         | Expr::Error { .. } => {}
 
-        Expr::StringLit(x) => v.visit_string_lit(x),
+        Expr::StringLit(x) => {
+            v.visit_string_lit(x);
+            // Interpolated expressions are real, analyzable sub-expressions.
+            for interp in &x.interpolations {
+                v.visit_expr(&interp.expr);
+            }
+        }
         Expr::Ident(x) => v.visit_identifier(x),
 
         Expr::Unary { operand, .. } => v.visit_expr(operand),
@@ -549,8 +820,16 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
             v.visit_expr(object);
             v.visit_expr(index);
         }
-        Expr::Call { callee, args, .. } => {
+        Expr::Call {
+            callee,
+            type_args,
+            args,
+            ..
+        } => {
             v.visit_expr(callee);
+            for t in type_args {
+                v.visit_dart_type(t);
+            }
             walk_arg_list(v, args);
         }
         Expr::Cascade {
@@ -582,7 +861,13 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
                 v.visit_expr(&field.value);
             }
         }
-        Expr::FuncExpr { params, body, .. } => {
+        Expr::FuncExpr {
+            type_params,
+            params,
+            body,
+            ..
+        } => {
+            walk_type_params(v, type_params);
             for param in params
                 .positional
                 .iter()
@@ -598,6 +883,14 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
         } => {
             v.visit_dart_type(dart_type);
             walk_arg_list(v, args);
+        }
+        Expr::GenericInstantiation {
+            target, type_args, ..
+        } => {
+            v.visit_expr(target);
+            for t in type_args {
+                v.visit_dart_type(t);
+            }
         }
         Expr::Await { expr, .. }
         | Expr::Throw { expr, .. }
@@ -628,7 +921,17 @@ pub fn walk_pattern<V: Visitor>(v: &mut V, node: &Pattern) {
             }
             v.visit_identifier(name);
         }
-        Pattern::Literal(_) | Pattern::Const(_) | Pattern::Error { .. } => {}
+        Pattern::Literal(x) => {
+            if let LiteralPatternValue::String(s) = &x.value {
+                v.visit_string_lit(s);
+            }
+        }
+        Pattern::Const(x) => {
+            if let Some(ref e) = x.expr {
+                v.visit_expr(e);
+            }
+        }
+        Pattern::Error { .. } => {}
         Pattern::List(x) => {
             for elem in &x.elements {
                 match elem {
@@ -676,10 +979,23 @@ pub fn walk_pattern<V: Visitor>(v: &mut V, node: &Pattern) {
 }
 
 pub fn walk_formal_param<V: Visitor>(v: &mut V, node: &FormalParam) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
     if let Some(ref t) = node.param_type {
         v.visit_dart_type(t);
     }
     v.visit_identifier(&node.name);
+    if let Some(ref params) = node.function_params {
+        for param in params
+            .positional
+            .iter()
+            .chain(&params.optional_positional)
+            .chain(&params.named)
+        {
+            v.visit_formal_param(param);
+        }
+    }
     if let Some(ref def) = node.default_value {
         v.visit_expr(def);
     }
@@ -707,16 +1023,21 @@ fn walk_arg_list<V: Visitor>(v: &mut V, node: &ArgList) {
 }
 
 fn walk_cascade_section<V: Visitor>(v: &mut V, section: &CascadeSection) {
-    match &section.op {
-        CascadeOp::Field(ident, _) => v.visit_identifier(ident),
-        CascadeOp::Index(expr, _) => v.visit_expr(expr),
-        CascadeOp::Call(ident, _, args) => {
-            v.visit_identifier(ident);
-            walk_arg_list(v, args);
-        }
-        CascadeOp::Assign(target, _, value) => {
-            v.visit_expr(target);
-            v.visit_expr(value);
+    for op in &section.ops {
+        match op {
+            CascadeOp::Field(ident, _) => v.visit_identifier(ident),
+            CascadeOp::Index(expr, _) => v.visit_expr(expr),
+            CascadeOp::Call(ident, type_args, args) => {
+                v.visit_identifier(ident);
+                for t in type_args {
+                    v.visit_dart_type(t);
+                }
+                walk_arg_list(v, args);
+            }
+            CascadeOp::Assign(target, _, value) => {
+                v.visit_expr(target);
+                v.visit_expr(value);
+            }
         }
     }
 }
@@ -734,9 +1055,12 @@ fn walk_collection_element<V: Visitor>(v: &mut V, elem: &CollectionElement) {
         } => {
             match condition {
                 IfCondition::Expr(e) => v.visit_expr(e),
-                IfCondition::Case(e, p) => {
+                IfCondition::Case(e, p, guard) => {
                     v.visit_expr(e);
                     v.visit_pattern(p);
+                    if let Some(g) = guard {
+                        v.visit_expr(g);
+                    }
                 }
             }
             walk_collection_element(v, then_elem);
@@ -818,9 +1142,12 @@ fn walk_map_element<V: Visitor>(v: &mut V, element: &MapElement) {
         } => {
             match condition {
                 IfCondition::Expr(e) => v.visit_expr(e),
-                IfCondition::Case(e, p) => {
+                IfCondition::Case(e, p, guard) => {
                     v.visit_expr(e);
                     v.visit_pattern(p);
+                    if let Some(g) = guard {
+                        v.visit_expr(g);
+                    }
                 }
             }
             walk_map_element(v, then_entry);

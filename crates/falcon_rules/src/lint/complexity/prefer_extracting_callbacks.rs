@@ -336,7 +336,13 @@ fn scan_collection_elem(
             ..
         } => {
             match condition {
-                IfCondition::Expr(e) | IfCondition::Case(e, _) => scan_expr(e, diags, ctx, cfg),
+                IfCondition::Expr(e) => scan_expr(e, diags, ctx, cfg),
+                IfCondition::Case(e, _, guard) => {
+                    scan_expr(e, diags, ctx, cfg);
+                    if let Some(g) = guard {
+                        scan_expr(g, diags, ctx, cfg);
+                    }
+                }
             }
             scan_collection_elem(then_elem, diags, ctx, cfg);
             if let Some(ee) = else_elem {

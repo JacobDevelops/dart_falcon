@@ -86,21 +86,23 @@ fn check_expr(diags: &mut Vec<Diagnostic>, expr: &Expr, ctx: &AnalyzeContext) {
         } => {
             check_expr(diags, object, ctx);
             for section in sections {
-                match &section.op {
-                    CascadeOp::Index(idx, _) => check_expr(diags, idx, ctx),
-                    CascadeOp::Call(_, _, args) => {
-                        for a in &args.positional {
-                            check_expr(diags, a, ctx);
+                for op in &section.ops {
+                    match op {
+                        CascadeOp::Index(idx, _) => check_expr(diags, idx, ctx),
+                        CascadeOp::Call(_, _, args) => {
+                            for a in &args.positional {
+                                check_expr(diags, a, ctx);
+                            }
+                            for na in &args.named {
+                                check_expr(diags, &na.value, ctx);
+                            }
                         }
-                        for na in &args.named {
-                            check_expr(diags, &na.value, ctx);
+                        CascadeOp::Assign(tgt, _, val) => {
+                            check_expr(diags, tgt, ctx);
+                            check_expr(diags, val, ctx);
                         }
+                        CascadeOp::Field(_, _) => {}
                     }
-                    CascadeOp::Assign(tgt, _, val) => {
-                        check_expr(diags, tgt, ctx);
-                        check_expr(diags, val, ctx);
-                    }
-                    CascadeOp::Field(_, _) => {}
                 }
             }
         }

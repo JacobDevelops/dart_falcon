@@ -44,7 +44,12 @@ fn collect_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
         Stmt::If(if_stmt) => {
             match &if_stmt.condition {
                 IfCondition::Expr(expr) => collect_from_expr(expr, names),
-                IfCondition::Case(expr, _) => collect_from_expr(expr, names),
+                IfCondition::Case(expr, _, guard) => {
+                    collect_from_expr(expr, names);
+                    if let Some(g) = guard {
+                        collect_from_expr(g, names);
+                    }
+                }
             }
             collect_from_stmt(&if_stmt.then_branch, names);
             if let Some(else_stmt) = &if_stmt.else_branch {
@@ -224,20 +229,22 @@ fn collect_from_expr(expr: &Expr, names: &mut HashSet<String>) {
         } => {
             collect_from_expr(object, names);
             for section in sections {
-                match &section.op {
-                    CascadeOp::Field(_, _) => {}
-                    CascadeOp::Index(index, _) => collect_from_expr(index, names),
-                    CascadeOp::Call(_, _, args) => {
-                        for arg in &args.positional {
-                            collect_from_expr(arg, names);
+                for op in &section.ops {
+                    match op {
+                        CascadeOp::Field(_, _) => {}
+                        CascadeOp::Index(index, _) => collect_from_expr(index, names),
+                        CascadeOp::Call(_, _, args) => {
+                            for arg in &args.positional {
+                                collect_from_expr(arg, names);
+                            }
+                            for named_arg in &args.named {
+                                collect_from_expr(&named_arg.value, names);
+                            }
                         }
-                        for named_arg in &args.named {
-                            collect_from_expr(&named_arg.value, names);
+                        CascadeOp::Assign(target, _, value) => {
+                            collect_from_expr(target, names);
+                            collect_from_expr(value, names);
                         }
-                    }
-                    CascadeOp::Assign(target, _, value) => {
-                        collect_from_expr(target, names);
-                        collect_from_expr(value, names);
                     }
                 }
             }
@@ -493,7 +500,12 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Stmt::If(i) => {
             match &i.condition {
                 IfCondition::Expr(e) => scan_expr(e, diags, ctx),
-                IfCondition::Case(e, _) => scan_expr(e, diags, ctx),
+                IfCondition::Case(e, _, guard) => {
+                    scan_expr(e, diags, ctx);
+                    if let Some(g) = guard {
+                        scan_expr(g, diags, ctx);
+                    }
+                }
             }
             scan_stmt(&i.then_branch, diags, ctx);
             if let Some(eb) = &i.else_branch {

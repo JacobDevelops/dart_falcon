@@ -12,8 +12,8 @@ impl<'src> Parser<'src> {
         // void
         if self.at(TokenKind::Void) {
             self.advance();
-            // `void Function(...)` is a function type returning void
-            if self.at(TokenKind::Function) && self.peek(1).kind == TokenKind::LParen {
+            // `void Function(...)` / `void Function<T>(...)` returns void
+            if self.at_function_type_start() {
                 let ret = DartType::Void {
                     span: self.span_from(start),
                 };
@@ -37,6 +37,13 @@ impl<'src> Parser<'src> {
         // dynamic
         if self.at(TokenKind::Dynamic) {
             self.advance();
+            // `dynamic Function(...)` / `dynamic Function<T>(...)` returns dynamic
+            if self.at_function_type_start() {
+                let ret = DartType::Dynamic {
+                    span: self.span_from(start),
+                };
+                return self.parse_function_type(Some(ret), start);
+            }
             let is_nullable = self.eat_type_qmark();
             let span = self.span_from(start);
             return if is_nullable {
@@ -51,8 +58,8 @@ impl<'src> Parser<'src> {
             };
         }
 
-        // Function type starting with `Function(`
-        if self.at(TokenKind::Function) && self.peek(1).kind == TokenKind::LParen {
+        // Function type starting with `Function(` or `Function<T>(`
+        if self.at_function_type_start() {
             return self.parse_function_type(None, start);
         }
 
@@ -83,8 +90,9 @@ impl<'src> Parser<'src> {
             // `String? Function(...)`.
             let is_nullable = self.eat_type_qmark();
 
-            // Could be `Function(...)` after a (possibly nullable) return type.
-            if self.at(TokenKind::Function) && self.peek(1).kind == TokenKind::LParen {
+            // Could be `Function(...)` / `Function<T>(...)` after a (possibly
+            // nullable) return type.
+            if self.at_function_type_start() {
                 let ret = DartType::Named(NamedType {
                     segments,
                     type_args,
@@ -166,6 +174,13 @@ impl<'src> Parser<'src> {
         )
     }
 
+    /// `Function(` or `Function<` — the start of an (optionally generic)
+    /// inline function type, distinct from a bare type named `Function`.
+    fn at_function_type_start(&self) -> bool {
+        self.at(TokenKind::Function)
+            && matches!(self.peek(1).kind, TokenKind::LParen | TokenKind::Lt)
+    }
+
     fn parse_function_type(&mut self, return_type: Option<DartType>, start: usize) -> DartType {
         self.advance(); // Function keyword
         let type_params = if self.at(TokenKind::Lt) {
@@ -178,13 +193,21 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::RParen);
         let is_nullable = self.eat_type_qmark();
         let span = self.span_from(start);
-        DartType::Function(Box::new(FunctionType {
+        let fn_type = DartType::Function(Box::new(FunctionType {
             return_type: return_type.map(Box::new),
             type_params,
             params,
             is_nullable,
             span,
-        }))
+        }));
+        // Curried function type: the function type just parsed may itself be the
+        // return type of another, `int Function() Function()` being a function
+        // returning `int Function()`. Fold left-to-right so the inner type nests as
+        // the return type of the outer.
+        if self.at_function_type_start() {
+            return self.parse_function_type(Some(fn_type), start);
+        }
+        fn_type
     }
 
     fn parse_function_type_params(&mut self) -> Vec<FunctionTypeParam> {
@@ -275,12 +298,19 @@ impl<'src> Parser<'src> {
         }
         self.expect(TokenKind::RParen);
         let is_nullable = self.eat_type_qmark();
-        DartType::Record(RecordType {
+        let record = DartType::Record(RecordType {
             positional,
             named,
             is_nullable,
             span: self.span_from(start),
-        })
+        });
+        // A record type may itself be the return type of a function type, e.g.
+        // `(int, int) Function()` — check for the `Function(...)` suffix here so it
+        // parses in specialized type positions (typedef RHS, field/param types).
+        if self.at_function_type_start() {
+            return self.parse_function_type(Some(record), start);
+        }
+        record
     }
 
     // ── Type parameters <T extends Bound, U> ──────────────────────────────────
@@ -293,6 +323,7 @@ impl<'src> Parser<'src> {
         let mut params = Vec::new();
         while !self.at(TokenKind::Gt) && !self.at(TokenKind::GtGt) && !self.at(TokenKind::Eof) {
             let start = self.cur().offset;
+            let annotations = self.parse_annotations();
             let name = self.expect_ident();
             let bound = if self.eat(TokenKind::Extends).is_some() {
                 Some(self.parse_type())
@@ -300,6 +331,7 @@ impl<'src> Parser<'src> {
                 None
             };
             params.push(TypeParam {
+                annotations,
                 name,
                 bound,
                 span: self.span_from(start),
@@ -397,35 +429,57 @@ impl<'src> Parser<'src> {
         // identifier is read as the name rather than a type.
         let is_var = self.eat(TokenKind::Var).is_some();
 
-        // this.field or super.field
-        let is_field = self.at(TokenKind::This) && self.peek(1).kind == TokenKind::Dot;
-        let is_super = self.at(TokenKind::Super) && self.peek(1).kind == TokenKind::Dot;
-
-        let (param_type, name) = if is_field || is_super {
-            self.advance(); // this / super
-            self.advance(); // .
-            (None, self.expect_ident())
-        } else if is_var {
+        // A `this.field` / `super.field` formal may be preceded by a type
+        // (`C(int this.x)`, `C(int super.x)`), so parse an optional leading type
+        // before deciding.
+        let mut is_field = false;
+        let mut is_super = false;
+        let (param_type, name) = if is_var {
             // `var name` — untyped, the next token is the parameter name.
             (None, self.expect_ident())
         } else {
-            // Try to distinguish `Type name` from just `name`
-            // Heuristic: if next-next token is ident/comma/rparen/eq/lbracket, it's typed
             let saved_pos = self.pos;
-            if self.is_type_start() {
+            let leading = if !self.at(TokenKind::This)
+                && !self.at(TokenKind::Super)
+                && self.is_type_start()
+            {
                 let ty = self.parse_type();
-                if self.is_ident_like() {
-                    (Some(ty), self.expect_ident())
+                // Accept the type only if a name / `this` / `super` follows;
+                // otherwise it was actually the bare parameter name.
+                if self.is_ident_like() || self.at(TokenKind::This) || self.at(TokenKind::Super) {
+                    Some(ty)
                 } else {
-                    // rollback: treat what we parsed as the name
-                    self.pos = saved_pos;
-                    let n = self.expect_ident();
-                    (None, n)
+                    self.rewind_to(saved_pos);
+                    None
                 }
             } else {
-                (None, self.expect_ident())
+                None
+            };
+
+            if self.at(TokenKind::This) && self.peek(1).kind == TokenKind::Dot {
+                is_field = true;
+                self.advance(); // this
+                self.advance(); // .
+                (leading, self.expect_ident())
+            } else if self.at(TokenKind::Super) && self.peek(1).kind == TokenKind::Dot {
+                is_super = true;
+                self.advance(); // super
+                self.advance(); // .
+                (leading, self.expect_ident())
+            } else {
+                (leading, self.expect_ident())
             }
         };
+
+        // A named initializing/super formal with a private name
+        // (`{required this._x}`, `{super._y}`) needs the off-by-default
+        // `private-named-parameters` feature; the pinned front end rejects it as a
+        // syntactic error rather than accepting the looser grammar.
+        if is_named && (is_field || is_super) && name.name.starts_with('_') {
+            self.error(
+                "This requires the 'private-named-parameters' language feature to be enabled",
+            );
+        }
 
         // function-typed param: name(params)
         let function_params = if self.at(TokenKind::LParen) {
@@ -433,6 +487,10 @@ impl<'src> Parser<'src> {
         } else {
             None
         };
+        // Nullable old-style function-typed formal: `{int orElse()?}`.
+        if function_params.is_some() {
+            self.eat(TokenKind::Qmark);
+        }
 
         let default_value = if self.at_any(&[TokenKind::Eq, TokenKind::Colon]) {
             self.advance();

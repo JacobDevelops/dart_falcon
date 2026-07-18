@@ -65,6 +65,7 @@ fn visit_top_level_decl(
         }
         TopLevelDecl::ExtensionType(_) => {}
         TopLevelDecl::TypeAlias(_) => {}
+        TopLevelDecl::ClassTypeAlias(_) => {}
         TopLevelDecl::Error(_) => {}
     }
 }
@@ -272,21 +273,25 @@ fn visit_expr(
         } => {
             visit_expr(object, cond_ancestor, diagnostics, ctx);
             for section in sections {
-                match &section.op {
-                    CascadeOp::Index(idx, _) => visit_expr(idx, cond_ancestor, diagnostics, ctx),
-                    CascadeOp::Call(_, _, args) => {
-                        for a in &args.positional {
-                            visit_expr(a, cond_ancestor, diagnostics, ctx);
+                for op in &section.ops {
+                    match op {
+                        CascadeOp::Index(idx, _) => {
+                            visit_expr(idx, cond_ancestor, diagnostics, ctx)
                         }
-                        for na in &args.named {
-                            visit_expr(&na.value, cond_ancestor, diagnostics, ctx);
+                        CascadeOp::Call(_, _, args) => {
+                            for a in &args.positional {
+                                visit_expr(a, cond_ancestor, diagnostics, ctx);
+                            }
+                            for na in &args.named {
+                                visit_expr(&na.value, cond_ancestor, diagnostics, ctx);
+                            }
                         }
+                        CascadeOp::Assign(tgt, _, val) => {
+                            visit_expr(tgt, cond_ancestor, diagnostics, ctx);
+                            visit_expr(val, cond_ancestor, diagnostics, ctx);
+                        }
+                        CascadeOp::Field(_, _) => {}
                     }
-                    CascadeOp::Assign(tgt, _, val) => {
-                        visit_expr(tgt, cond_ancestor, diagnostics, ctx);
-                        visit_expr(val, cond_ancestor, diagnostics, ctx);
-                    }
-                    CascadeOp::Field(_, _) => {}
                 }
             }
         }
