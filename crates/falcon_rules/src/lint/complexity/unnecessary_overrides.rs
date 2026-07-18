@@ -1,12 +1,14 @@
-//! Flags `@override` members that do nothing but forward to `super` with the
-//! same arguments, ported from package:lints `unnecessary_overrides`. Such an
-//! override adds noise without changing behaviour and can just be deleted.
+//! Flags an `@override` member that does nothing but forward to `super` with
+//! the same arguments.
 //!
-//! Conservative by design: only members annotated `@override` are considered
-//! (the annotation stands in for element-model override resolution), and an
-//! override is left alone when it carries an extra annotation or declares
-//! parameter defaults / `covariant` — signals that it changes the contract.
-//! Operator overrides are not analysed.
+//! Such an override adds visual noise and a maintenance burden without changing
+//! behavior — delete it and the inherited implementation stays in force. The
+//! rule is deliberately conservative: it only considers members annotated
+//! `@override` (the annotation stands in for real override resolution), and it
+//! leaves an override alone when it carries an extra annotation or declares
+//! parameter defaults or `covariant`, since those signal an intentional
+//! contract change. Forwarding methods (`super.m(args)`), getters (`super.x`),
+//! and setters (`super.x = v`) are all checked; operator overrides are not.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

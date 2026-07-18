@@ -1,4 +1,20 @@
-//! Flags disallowed widget constructions in favor of design-system equivalents. Ported from dart_code_linter's `use-design-system-item`.
+//! Flags construction of a widget or type that should be replaced by its design-system equivalent.
+//!
+//! Teams building on a Flutter design system often want to steer away from raw
+//! framework widgets (a bare `Container`, `Text`, or `ElevatedButton`) toward
+//! their own wrappers, which enforce spacing, theming, and accessibility. This
+//! rule flags a construction whose class name matches a configured entry, in
+//! either constructor form — implicit `Foo(...)`, explicit `new`/`const`, and
+//! generic `Foo<T>(...)`. It deliberately ignores named-constructor access like
+//! `Foo.named(...)` so static getters and factory helpers are not mistaken for
+//! plain construction. The rule is entirely config-driven: with no configured
+//! items it is a no-op, so it flags nothing until a design system is described.
+//!
+//! ## Options
+//!
+//! `items` (list of objects, default: `[]`) — each entry maps a `class_name`
+//! (required) to steer away from, with an optional `use_instead` naming the
+//! design-system replacement to suggest in the message.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

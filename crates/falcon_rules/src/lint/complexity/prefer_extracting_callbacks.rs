@@ -1,4 +1,22 @@
-//! Flags inline callbacks that should be extracted to methods. Ported from dart_code_linter's `prefer-extracting-callbacks`.
+//! Flags an inline block-body callback passed to a widget constructor that
+//! should be extracted to a method.
+//!
+//! Large inline closures in a `build` method bloat the widget tree, hurt
+//! readability, and can defeat const-ness; moving them to a named widget method
+//! clarifies intent and eases reuse. The rule only inspects classes that
+//! syntactically extend a `Widget` or `State`, and flags block-body
+//! function-expression arguments to widget constructions. Arrow callbacks,
+//! empty blocks, and Flutter builders (whose first parameter is typed
+//! `BuildContext`) are never flagged.
+//!
+//! ## Options
+//!
+//! `allowed_line_count` (integer, default: none) — when set, only callbacks
+//! spanning more than this many lines are flagged; unset flags every qualifying
+//! callback.
+//!
+//! `ignored_named_arguments` (list of strings, default: empty) —
+//! named-argument labels whose callbacks are ignored.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

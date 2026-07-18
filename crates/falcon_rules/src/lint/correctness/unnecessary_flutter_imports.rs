@@ -1,4 +1,13 @@
-//! Flags redundant Flutter framework imports. Original to falcon.
+//! Disallow Flutter framework imports that the file does not use.
+//!
+//! Flags an `import` of `package:flutter/...` or `dart:async` when the file
+//! contains no reference to any Flutter or async symbol. Such an import
+//! contributes nothing but noise and a misleading dependency signal, usually a
+//! leftover after the code that needed it was deleted. Remove it. Detection is
+//! heuristic: usage is inferred from a curated list of framework identifiers —
+//! widgets, `BuildContext`, `Future`/`Stream`, `foundation` helpers such as
+//! `kDebugMode` and `ChangeNotifier`, and the `async`/`await` keywords — rather
+//! than from resolved imports.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

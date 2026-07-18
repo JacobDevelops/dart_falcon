@@ -1,11 +1,12 @@
-//! Flags `catch (e) { ... throw e; }` where the thrown value is exactly the caught
-//! exception. Ported from package:lints `use_rethrow_when_possible`: such a throw should
-//! be `rethrow`, which preserves the original stack trace.
+//! Flags `throw e` inside a `catch (e)` where `e` is exactly the caught
+//! exception.
 //!
-//! Conservative: a throw is only reported when `rethrow` would be syntactically valid and
-//! refer to the same exception — i.e. it sits in the catch body's own control flow. Throws
-//! inside a nested closure or a nested `try`/`catch` are skipped (there the exception is a
-//! different binding, or `rethrow` is not allowed).
+//! Re-throwing the caught object with `throw e` starts a fresh stack trace from
+//! the catch site, discarding the original point of failure and making the error
+//! far harder to trace. Use `rethrow`, which propagates the same exception with
+//! its trace intact. Reporting is conservative: a throw is flagged only where
+//! `rethrow` would be valid and refer to the same binding, so throws inside a
+//! nested closure or a nested `try`/`catch` are skipped.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

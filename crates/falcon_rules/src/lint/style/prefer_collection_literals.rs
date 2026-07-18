@@ -1,20 +1,30 @@
-//! Flags default `List()`/`Map()`/`Set()`/`LinkedHashMap()`/`LinkedHashSet()`
-//! constructor invocations that a collection literal (`[]`/`{}`) would express.
-//! Adopted from package:lints `prefer_collection_literals`.
+//! Flags no-argument collection constructor calls that a literal would express.
 //!
-//! Type knowledge only ever *suppresses*. Two positively-proven facts withhold a
-//! diagnostic that would otherwise change semantics:
+//! The empty `List()`, `Map()`, `Set()`, `LinkedHashMap()`, and `LinkedHashSet()`
+//! constructors are more verbose than the equivalent `[]` or `{}` literals, which
+//! are the idiomatic way to build a fresh collection and read more clearly. The
+//! rule matches the unnamed and `.new` constructors written as a plain call
+//! (`List()`, `Set.new()`), an explicit `new` expression (`new Map()`), or with
+//! type arguments (`Map<K, V>()`). It deliberately spares named constructors such
+//! as `List.filled` or `Map.of` and any invocation carrying arguments, since
+//! those have no literal form. Adopted from package:lints
+//! `prefer_collection_literals`.
+//!
+//! Two further facts withhold a diagnostic that would otherwise change semantics:
 //!
 //! * **Concrete context** — a `LinkedHashMap()` / `LinkedHashSet()` whose declared
 //!   context type (a variable/field/top-level/return annotation) *is* that concrete
 //!   type. A `{}` literal has static type `Map`/`Set`, which is not assignable back
-//!   to `LinkedHashMap`/`LinkedHashSet`, so the constructor is required.
+//!   to `LinkedHashMap`/`LinkedHashSet`, so the constructor is required. This check
+//!   is purely syntactic — a pre-pass over declared types — so it applies with or
+//!   without a type index.
 //! * **User-declared shadow** — a `List()`/`Map()`/`Set()`/… whose name is a
 //!   *user-declared* type in the [`TypeIndex`] (not `dart:core`). The literal would
-//!   construct the core collection, not the user's type.
+//!   construct the core collection, not the user's type. This one is type-index
+//!   driven: with no index attached, such a constructor keeps firing.
 //!
-//! Everything else — including every constructor when no type index is attached, and
-//! any `var`/unannotated context — keeps firing exactly as before.
+//! Everything else — including any `var`/unannotated context, and a concrete
+//! constructor reached only through a nested argument position — keeps firing.
 
 use std::collections::HashSet;
 

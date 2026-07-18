@@ -1,4 +1,13 @@
-//! Flags type names that violate naming conventions. Ported from dart_code_linter's `prefer-correct-type-name`.
+//! Flags type declarations whose name is not well-formed UpperCamelCase.
+//!
+//! Consistent UpperCamelCase type names are a core Dart convention that keeps
+//! types visually distinct from members and values. A name is accepted only when
+//! it starts with an uppercase ASCII letter, contains no `$`, and — after a
+//! single leading underscore is stripped — is between 3 and 40 characters long;
+//! anything else is reported. The check covers classes, mixins, mixin classes,
+//! enums, named extensions, extension types, and type aliases. It inspects the
+//! declared name's spelling only, so it does not enforce interior capitalization
+//! such as an acronym written in all caps.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

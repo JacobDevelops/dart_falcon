@@ -1,5 +1,10 @@
 //! Flags `x ?? null` and `null ?? x`, where the `null` operand is redundant.
-//! Ported from package:lints' `unnecessary_null_in_if_null_operators`.
+//!
+//! The `??` operator falls back to its right operand only when the left is null,
+//! so `x ?? null` always evaluates to `x` and `null ?? x` always evaluates to
+//! `x`. The literal `null` contributes nothing and typically marks an unfinished
+//! edit or a misunderstanding of the operator. Delete the `null` operand, and the
+//! `??` along with it.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

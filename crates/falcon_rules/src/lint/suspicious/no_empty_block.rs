@@ -1,9 +1,12 @@
-//! Flags empty blocks (`no-empty-block`). Originally ported from
-//! dart_code_linter; unifies the former pyramid_lint twins `no_empty_block` and
-//! `avoid_empty_blocks`. Reports at the closing brace and treats a block holding
-//! only a comment as intentional (dart_code_linter behavior); coverage spans the
-//! union of the merged rules — functions, class/mixin/enum/extension members
-//! (including operators), and switch-case bodies.
+//! Flags empty blocks (`{}`).
+//!
+//! An empty function, method, loop, or switch-case body is frequently an
+//! unfinished implementation or a leftover after code was deleted, and it hides
+//! whether the emptiness is deliberate. Fill in the intended behavior, or, if a
+//! no-op is genuinely correct, add a comment saying so. Coverage spans functions,
+//! class/mixin/enum/extension members (including operators), and switch-case
+//! bodies; a block containing only a comment is treated as intentional and left
+//! alone. The report lands on the closing brace.
 
 /// The `no-empty-block` rule.
 pub use dcl::NoEmptyBlock;

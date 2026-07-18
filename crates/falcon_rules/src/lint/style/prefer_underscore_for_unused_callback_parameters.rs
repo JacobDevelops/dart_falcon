@@ -1,4 +1,13 @@
-//! Flags unused callback parameters not named with underscores. Ported from pyramid_lint's `prefer_underscore_for_unused_callback_parameters`.
+//! Flags unused closure parameters that are not named with underscores.
+//!
+//! For each closure (function expression), collects every identifier referenced in
+//! its body — including those inside nested closures, cascades, collection literals,
+//! and string interpolations — and flags the first parameter that is never used and
+//! is not already an all-underscore name (`_`, `__`). Naming a deliberately ignored
+//! parameter `_` signals intent to the reader and avoids the impression that a real
+//! value was forgotten, which matters for the fixed-arity callbacks Flutter APIs
+//! demand (`builder: (context, _) => ...`). At most one diagnostic is reported per
+//! closure.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

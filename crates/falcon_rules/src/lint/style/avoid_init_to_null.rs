@@ -1,5 +1,11 @@
-//! Flags explicit `= null` initializers on declarations that already default to
-//! null. Ported from package:lints' `avoid_init_to_null`.
+//! Flags explicit `= null` initializers on declarations that already default to null.
+//!
+//! A non-`final`, non-`const`, non-`late` variable whose type is nullable,
+//! absent, or `dynamic` is already initialized to `null`, so writing `= null`
+//! adds noise without changing behavior. Drop the initializer and let the
+//! default stand. Declarations that are `final`, `const`, `late`, or have a
+//! non-nullable type are left alone, since for them the `null` is either
+//! required or meaningful.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

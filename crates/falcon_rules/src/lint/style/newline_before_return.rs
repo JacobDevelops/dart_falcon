@@ -1,4 +1,12 @@
-//! Flags `return` statements not preceded by a blank line. Ported from dart_code_linter's `newline-before-return`.
+//! Flags `return` statements that are not preceded by a blank line.
+//!
+//! Separating a `return` from the statements above it with a blank line makes
+//! the exit point of a block visually distinct, so readers can spot where
+//! control leaves the function without parsing the surrounding code. The rule
+//! only checks returns that follow another statement in the same block — the
+//! first statement of a block is never flagged, since there is nothing to
+//! separate it from. A blank line is any run of whitespace containing two or
+//! more newlines, so intervening spaces and tabs do not matter.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

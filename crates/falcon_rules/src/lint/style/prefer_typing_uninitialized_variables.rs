@@ -1,7 +1,12 @@
-//! Flags uninitialized variables declared without a type annotation
-//! (`prefer-typing-uninitialized-variables`, adopted from package:lints):
-//! `var x;` gives the reader and the analyzer nothing to work with, whereas
-//! `int x;` documents intent. Covers locals, fields, and top-level variables.
+//! Flags uninitialized variables declared without a type annotation.
+//!
+//! When a declaration has no initializer, there is no value for the analyzer to
+//! infer a type from, so `var x;` leaves the variable as `dynamic` — silently
+//! opting out of static checking on every later use. Writing `int x;` instead
+//! documents intent and restores type safety at no cost. The rule fires only on
+//! declarators that are both untyped and uninitialized; a declaration is exempt
+//! as soon as it carries a type annotation. It covers local variables, fields,
+//! and top-level variables.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

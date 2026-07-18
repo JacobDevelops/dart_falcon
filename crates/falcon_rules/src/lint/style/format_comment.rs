@@ -1,4 +1,20 @@
-//! Flags comments not formatted as proper sentences. Ported from dart_code_linter's `format-comment`.
+//! Flags comments that are not formatted as complete sentences.
+//!
+//! Sentence-cased, terminated comments read consistently and signal a finished
+//! thought rather than a scratch note. A comment should start with an uppercase
+//! letter and end with `.`, `!`, `?`, or `:`. Consecutive comment lines are
+//! joined into one block and split into sentences before checking, so a sentence
+//! that wraps across several `///` lines is judged as a whole and continuation
+//! lines are never flagged on their own. Both `//` line comments and `///` doc
+//! comments are checked by default.
+//!
+//! ## Options
+//!
+//! `only_doc_comments` (bool, default: `false`) — when `true`, only `///` doc
+//! comments are checked.
+//!
+//! `ignored_patterns` (list of regexes, default: `[]`) — a comment matching any
+//! of these patterns is skipped entirely; invalid patterns are ignored.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

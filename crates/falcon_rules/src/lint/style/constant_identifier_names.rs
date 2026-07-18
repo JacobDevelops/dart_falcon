@@ -1,6 +1,11 @@
-//! Flags constant identifiers that are not lowerCamelCase (e.g. SCREAMING_CAPS).
-//! Ported from package:lints `constant_identifier_names`. Covers `const`
-//! declarations (top-level, static/instance fields, locals) and enum values.
+//! Flags constant identifiers that are not lowerCamelCase.
+//!
+//! Dart names constants in `lowerCamelCase`, not the `SCREAMING_CAPS` common in
+//! other languages, so `maxCount` rather than `MAX_COUNT`. Following the
+//! convention keeps constants visually consistent with every other identifier.
+//! The rule covers `const` declarations at every scope — top-level, static and
+//! instance fields, and locals — as well as enum values. All-underscore
+//! wildcard names are permitted.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

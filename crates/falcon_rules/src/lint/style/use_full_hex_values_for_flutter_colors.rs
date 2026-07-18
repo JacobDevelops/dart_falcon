@@ -1,4 +1,13 @@
-//! Flags `Color(0x...)` with fewer than 8 hex digits. Ported from package:lints `use_full_hex_values_for_flutter_colors`.
+//! Flags a `Color` constructed from a hexadecimal literal with fewer than eight digits.
+//!
+//! Flutter's `Color` takes a 32-bit `0xAARRGGBB` value where the leading two
+//! digits are the alpha channel. A shorter literal such as `0xFFFFFF` silently
+//! drops the alpha byte to `0x00`, producing a fully transparent color rather
+//! than the opaque one the author almost certainly intended. Spelling out all
+//! eight digits makes the alpha channel explicit and the value unambiguous. The
+//! rule fires only on a `Color(...)` call with a single positional integer-literal
+//! argument in `0x`/`0X` form whose hex-digit count (ignoring `_` separators) is
+//! between one and seven.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

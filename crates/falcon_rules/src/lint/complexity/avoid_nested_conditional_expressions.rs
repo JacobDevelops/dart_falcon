@@ -1,4 +1,10 @@
-//! Flags nested ternary conditional expressions. Ported from dart_code_linter's `avoid-nested-conditional-expressions`.
+//! Flags a ternary conditional expression nested inside another ternary.
+//!
+//! Stacked conditionals like `a ? b : c ? d : e` are hard to read and easy to
+//! misparse; an `if`/`else` chain, a `switch` expression, or an extracted
+//! variable makes the branching explicit. The rule reports any conditional
+//! expression that has another conditional as an ancestor (nesting level two or
+//! deeper), matching dart_code_linter's default acceptable level of one.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

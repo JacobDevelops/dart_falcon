@@ -1,4 +1,13 @@
-//! Flags calls to the top-level `print` function. Ported from package:lints `avoid_print`.
+//! Flags calls to the top-level `print` function.
+//!
+//! `print` writes to the system console, which is invisible in released builds
+//! and can leak diagnostic detail or stall the UI isolate when it runs on a hot
+//! path. In application code a surviving `print` is almost always a debugging
+//! statement that was never removed. Route diagnostics through `debugPrint`,
+//! `dart:developer`'s `log`, or a real logging framework instead. A file that
+//! declares its own `print` (top-level, method, or local function) is left
+//! alone, since the call may resolve to that shadow rather than the SDK
+//! function.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,8 +1,12 @@
 //! Flags local variables and parameters whose names begin with an underscore.
-//! Ported from package:lints `no_leading_underscores_for_local_identifiers`.
-//! Leading underscores are meaningful for privacy only on top-level and class
-//! members, so those are out of scope. Wildcard names made solely of
-//! underscores (e.g. `_`, `__`) are exempt.
+//!
+//! A leading underscore marks a declaration as library-private, but that
+//! privacy only applies to top-level and class members — locals, parameters,
+//! closure parameters, for-in variables, and catch clause bindings are already
+//! confined to their scope. Prefixing them with an underscore implies a privacy
+//! that does not exist and misleads the reader, so drop it. Wildcard names made
+//! solely of underscores (e.g. `_`, `__`) are exempt, being the idiomatic way
+//! to name a deliberately unused binding.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

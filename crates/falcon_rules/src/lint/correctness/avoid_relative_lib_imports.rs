@@ -1,5 +1,13 @@
-//! Flags relative imports that reach into a `lib/` directory. Ported from
-//! package:lints `avoid_relative_lib_imports`.
+//! Disallow relative imports that reach into a `lib/` directory.
+//!
+//! Flags a relative `import` whose path contains a `lib` segment, such as
+//! `import '../lib/foo.dart'` or `import 'lib/foo.dart'`; `package:` and `dart:`
+//! imports are exempt. Dart treats a file reached by a relative path and the
+//! same file reached by its `package:` URI as two separate libraries, so
+//! importing into `lib/` relatively can create duplicate type identities,
+//! baffling "X is not a Y" errors, and `is` checks that fail against seemingly
+//! identical types. Import files under `lib/` through their `package:` URI
+//! instead.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

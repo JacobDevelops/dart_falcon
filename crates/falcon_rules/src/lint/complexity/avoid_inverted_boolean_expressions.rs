@@ -1,4 +1,11 @@
-//! Flags inverted boolean expressions that can be simplified. Ported from pyramid_lint's `avoid_inverted_boolean_expressions`.
+//! Flags a doubly-negated boolean expression such as `!!x`.
+//!
+//! Two `!` operators cancel out, so `!!x` is just `x`, and a longer run of
+//! leading bangs reduces to `x` or `!x` by parity. The redundant negation adds
+//! no meaning and obscures the value. The rule flags a `!` whose operand is
+//! itself a `!`, reporting once at the outer negation and skipping the inner
+//! bangs. Despite the rule's name, it targets only stacked negations — it does
+//! not rewrite `!(a == b)` into `a != b`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
