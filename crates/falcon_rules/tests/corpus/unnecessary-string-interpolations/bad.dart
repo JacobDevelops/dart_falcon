@@ -8,5 +8,6 @@ String examples(String name) {
   final e = '${'lit'}'; /* expect: unnecessary-string-interpolations */
   final f = 'a' + 'b';
   final g = '$f'; /* expect: unnecessary-string-interpolations */
-  return '$a$b$c$d$e$g';
+  final h = '${name.toUpperCase()}'; /* expect: unnecessary-string-interpolations */
+  return '$a$b$c$d$e$g$h';
 }

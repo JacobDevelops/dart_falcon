@@ -7,12 +7,11 @@ String examples(String name, Object value, int n, String? maybe) {
   final e = 'count: ${n}'; // leading text
   final f = 'plain'; // no interpolation
   final g = r'$name'; // raw string — literal `$name`, not an interpolation
-  final h = '${n + 1}'; // int expression, not a String
-  final i = '${value}'; // Object, not provably String
-  final j = '${name.toUpperCase()}'; // method call, unprovable
+  final h = '${n + 1}'; // int expression — the interpolation is what makes it a String
+  final i = '${value}'; // Object — the interpolation is what makes it a String
   final k = '$maybe'; // String? — nullable, must not fire
   final l = '$value'; // Object interpolation
-  return '$a$b$c$d$e$f$g$h$i$j$k$l';
+  return '$a$b$c$d$e$f$g$h$i$k$l';
 }
 
 class ShadowedField {

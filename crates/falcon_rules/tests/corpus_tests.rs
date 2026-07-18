@@ -72,8 +72,11 @@ fn parse_expectations(source: &str) -> Vec<Expectation> {
 /// the builtin table), mirroring what the CLI/LSP build so the in-process corpus
 /// exercises the same code path as production. Mirrors
 /// `analyze_pipeline::RESOLVER_DEPENDENT_RULES`.
-const RESOLVER_DEPENDENT_RULES: &[&str] =
-    &["no-boolean-literal-compare", "avoid-ignoring-return-values"];
+const RESOLVER_DEPENDENT_RULES: &[&str] = &[
+    "no-boolean-literal-compare",
+    "avoid-ignoring-return-values",
+    "unnecessary-string-interpolations",
+];
 
 /// Run a single rule over `source`; return (rule-id, line) per diagnostic.
 fn run_rule(

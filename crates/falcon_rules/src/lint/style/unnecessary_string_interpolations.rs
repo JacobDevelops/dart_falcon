@@ -3,13 +3,15 @@
 //! `'$x'` / `'${x}'` where the whole string is just one interpolated `String`
 //! expression is equivalent to writing that expression directly.
 //!
-//! The type proof is file-local ([`LocalTypes`]) and sound-over-precise: it fires
-//! only when the interpolated expression is *known* to be a non-nullable `String`
-//! (a string literal, a local/param declared `String`, `String + String`, …).
+//! The type proof is file-local ([`LocalTypes`]), widened by the project index's
+//! declared/builtin return types for member accesses and calls, and
+//! sound-over-precise: it fires only when the interpolated expression is *known*
+//! to be a non-nullable `String` (a string literal, a local/param declared
+//! `String`, `String + String`, a call returning `String`, …).
 //! `String?` and unknown types never fire — replacing `'${n + 1}'` (an `int`)
 //! with `n + 1` would silently change the value's type, the very bug this guards.
 
-use falcon_analyze::{AnalyzeContext, LocalTypes, Rule, StaticType};
+use falcon_analyze::{AnalyzeContext, LocalTypes, ProjectIndex, Rule, StaticType};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_program, walk_stmt};
@@ -26,6 +28,7 @@ impl Rule for UnnecessaryStringInterpolations {
             diags: Vec::new(),
             file: ctx.file_path.to_string_lossy().into_owned(),
             lt: LocalTypes::new(),
+            project: ctx.project,
         };
         collector.visit_program(program);
         collector.diags
@@ -99,13 +102,54 @@ fn is_whole_interpolation(content: &str) -> bool {
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
     file: String,
     lt: LocalTypes,
+    project: Option<&'a ProjectIndex>,
 }
 
-impl Collector {
+impl Collector<'_> {
+    /// Whether the interpolated expression is provably a non-nullable `String`.
+    ///
+    /// [`LocalTypes`] answers for literals, locals and params; it returns
+    /// `Unknown` for member accesses and calls, so those fall back to the
+    /// project index's declared/builtin return type keyed on the member name
+    /// (`toUpperCase` -> `String`). A null-aware access (`a?.b`) is never
+    /// proven — its result is nullable regardless of the member's own type.
+    fn is_non_nullable_string(&self, expr: &Expr) -> bool {
+        if matches!(
+            self.lt.of_expr(expr),
+            StaticType::String { nullable: false }
+        ) {
+            return true;
+        }
+        let Some(index) = self.project else {
+            return false;
+        };
+        let member = match expr {
+            Expr::Call { callee, .. } => match callee.as_ref() {
+                Expr::Field {
+                    field,
+                    is_null_safe: false,
+                    ..
+                } => &field.name,
+                Expr::Ident(id) => &id.name,
+                _ => return false,
+            },
+            Expr::Field {
+                field,
+                is_null_safe: false,
+                ..
+            } => &field.name,
+            _ => return false,
+        };
+        matches!(
+            index.return_type(member),
+            StaticType::String { nullable: false }
+        )
+    }
+
     /// Walk a function/method/getter/setter/closure body whose signature bindings
     /// already live in the current (innermost) scope.
     fn walk_body(&mut self, body: &FunctionBody) {
@@ -121,7 +165,7 @@ impl Collector {
     }
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_program(&mut self, node: &Program) {
         walk_program(self, node);
     }
@@ -275,10 +319,7 @@ impl Visitor for Collector {
         }
         // Fire only when the interpolated expression is provably a non-nullable
         // `String`; `String?` and unknown types are left alone.
-        if !matches!(
-            self.lt.of_expr(&node.interpolations[0].expr),
-            StaticType::String { nullable: false }
-        ) {
+        if !self.is_non_nullable_string(&node.interpolations[0].expr) {
             return;
         }
         self.diags.push(Diagnostic::new(
