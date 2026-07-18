@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, ProjectFile, Rule};
+use falcon_analyze::{AnalyzeContext, ProjectFile, ProjectIndex, Rule};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
 use falcon_rules::lint::style::class_members_ordering::ClassMembersOrdering;
@@ -67,6 +67,14 @@ fn parse_expectations(source: &str) -> Vec<Expectation> {
     exps
 }
 
+/// Per-file rules that consult `AnalyzeContext::project`. For these the harness
+/// attaches a degraded single-file `ProjectIndex` (this file's declarations plus
+/// the builtin table), mirroring what the CLI/LSP build so the in-process corpus
+/// exercises the same code path as production. Mirrors
+/// `analyze_pipeline::RESOLVER_DEPENDENT_RULES`.
+const RESOLVER_DEPENDENT_RULES: &[&str] =
+    &["no-boolean-literal-compare", "avoid-ignoring-return-values"];
+
 /// Run a single rule over `source`; return (rule-id, line) per diagnostic.
 fn run_rule(
     rule: &dyn Rule,
@@ -75,11 +83,14 @@ fn run_rule(
     config: &FalconConfig,
 ) -> Vec<(String, usize)> {
     let (program, _errors) = parse(source);
+    let index = RESOLVER_DEPENDENT_RULES
+        .contains(&rule.name())
+        .then(|| ProjectIndex::from_program(&program));
     let ctx = AnalyzeContext {
         file_path: file,
         source,
         config,
-        project: None,
+        project: index.as_ref(),
     };
     rule.analyze(&program, &ctx)
         .into_iter()

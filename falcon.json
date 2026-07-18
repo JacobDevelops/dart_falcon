@@ -1,13 +1,28 @@
 {
   "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json",
   "files": {
-    "includes": ["**", "!.dart_tool/**", "!build/**", "!**/*.g.dart", "!**/*.freezed.dart"]
+    "includes": [
+      "**",
+      "!.dart_tool/**",
+      "!build/**",
+      "!**/*.g.dart",
+      "!**/*.freezed.dart"
+    ]
   },
   "linter": {
     "enabled": true,
     "rules": {
       "recommended": false,
       "complexity": {
+        "avoid-unnecessary-containers": "warn",
+        "unnecessary-overrides": "warn",
+        "avoid-function-literals-in-foreach-calls": "warn",
+        "prefer-conditional-assignment": "warn",
+        "prefer-for-elements-to-map-from-iterable": "warn",
+        "prefer-if-null-operators": "warn",
+        "prefer-null-aware-operators": "warn",
+        "unnecessary-const": "warn",
+        "unnecessary-getters-setters": "warn",
         "avoid-nested-conditional-expressions": "warn",
         "avoid-redundant-async": "warn",
         "avoid-unnecessary-type-assertions": "warn",
@@ -29,6 +44,12 @@
         "prefer-iterable-every": "warn"
       },
       "correctness": {
+        "avoid-web-libraries-in-flutter": "warn",
+        "no-logic-in-create-state": "warn",
+        "avoid-relative-lib-imports": "warn",
+        "hash-and-equals": "warn",
+        "valid-regexps": "warn",
+        "implementation-imports": "warn",
         "avoid-global-state": "warn",
         "avoid-returning-widgets": "warn",
         "avoid-unused-parameters": "warn",
@@ -43,11 +64,15 @@
         "use-once-constructors-once-provider": "warn"
       },
       "performance": {
+        "sized-box-for-whitespace": "warn",
+        "unnecessary-to-list-in-spreads": "warn",
         "prefer-const-border-radius": "warn",
         "prefer-correct-edge-insets-constructor": "warn",
         "prefer-declaring-const-constructor": "warn"
       },
       "style": {
+        "sort-child-properties-last": "warn",
+        "use-full-hex-values-for-flutter-colors": "warn",
         "avoid-late-keyword": "warn",
         "avoid-non-null-assertion": "warn",
         "avoid-top-level-member-access": "warn",
@@ -78,6 +103,18 @@
         "use-spacer-as-expanded-child": "warn"
       },
       "suspicious": {
+        "avoid-print": "warn",
+        "avoid-empty-else": "warn",
+        "avoid-shadowing-type-parameters": "warn",
+        "empty-catches": "warn",
+        "no-wildcard-variable-uses": "warn",
+        "avoid-returning-null-for-void": "warn",
+        "control-flow-in-finally": "warn",
+        "empty-statements": "warn",
+        "recursive-getters": "warn",
+        "unnecessary-null-aware-assignments": "warn",
+        "unnecessary-null-in-if-null-operators": "warn",
+        "use-rethrow-when-possible": "warn",
         "avoid-dynamic": "warn",
         "avoid-ignoring-return-values": "warn",
         "avoid-passing-async-when-sync-expected": "warn",

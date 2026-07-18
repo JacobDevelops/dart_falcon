@@ -435,7 +435,7 @@ and steers you to the right section, and the misplaced entry does not take effec
 |--------------------------|--------------|-------------|-------------------------------|
 | `unused-files`           | correctness  | yes         | `check-unused-files`          |
 | `unused-code`            | correctness  | yes         | `check-unused-code`           |
-| `unnecessary-nullable`   | correctness  | no          | `check-unnecessary-nullable`  |
+| `unnecessary-nullable`   | correctness  | yes         | `check-unnecessary-nullable`  |
 
 Notes:
 
@@ -449,11 +449,16 @@ Notes:
   counting references from every analyzed file (including `test/`). Exclude
   generated code (`lib/gen/**`, `*.pb*.dart`, etc.) via `files.includes` the same
   way you would for any rule.
-- **`unnecessary-nullable` is heuristic** (hence off by the recommended preset).
-  Without type resolution it can only see `null` *literals* at call sites, so a
-  nullable value forwarded through a variable is not counted as "passes null".
-  Enable it deliberately and review its findings. Per-file exclusions (the old
-  `--exclude` flags) are expressible with `overrides`.
+- **`unnecessary-nullable` is resolver-backed** and on by the recommended preset.
+  It still restricts itself to `_`-prefixed private declarations (so every call
+  site is visible in-project), but falcon's type-resolution layer now decides
+  whether each argument can be null: local type inference recognizes structurally
+  non-null forms (literals, `new`, arithmetic), and a cross-file return-type index
+  resolves a callee's or getter's declared return type. An argument proven
+  non-null no longer counts as "passes null", which removed the false positives
+  that had kept the rule opt-in. It remains a project rule (CLI-only, whole-project
+  pass). Per-file exclusions (the old `--exclude` flags) are expressible with
+  `overrides`.
 
 ## Migrating from dart_code_linter / pyramid_lint
 

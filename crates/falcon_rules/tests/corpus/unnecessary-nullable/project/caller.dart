@@ -10,4 +10,6 @@ void driver() {
   s._ambiguous(3);
   _topNever('hello');
   Other()._ambiguous(4);
+  _viaProvenNonNull(nonNull());
+  _viaNullableReturn(maybeNull());
 }

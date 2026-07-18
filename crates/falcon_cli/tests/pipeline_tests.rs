@@ -22,7 +22,7 @@ fn test_run_check_with_clean_dart_file_returns_zero() {
     let temp = tempdir().unwrap();
     fs::write(
         temp.path().join("test.dart"),
-        "void main() {\n  print('ok');\n}\n",
+        "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
     let exit_code = run_check(CheckOptions {
@@ -53,7 +53,7 @@ fn test_run_check_json_format_no_panic() {
     let temp = tempdir().unwrap();
     fs::write(
         temp.path().join("test.dart"),
-        "void main() {\n  print('ok');\n}\n",
+        "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
     let exit_code = run_check(CheckOptions {
@@ -71,7 +71,7 @@ fn test_run_check_quiet_mode() {
     let temp = tempdir().unwrap();
     fs::write(
         temp.path().join("test.dart"),
-        "void main() {\n  print('ok');\n}\n",
+        "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
     let exit_code = run_check(CheckOptions {
@@ -105,7 +105,7 @@ fn test_run_check_parallel_flag_clean_returns_zero() {
     // rules (unused-files / unused-code) stay quiet alongside the per-file rules.
     fs::write(
         temp.path().join("a.dart"),
-        "import 'b.dart';\nvoid main() {\n  print(Foo());\n}\n",
+        "import 'b.dart';\nvoid main() {\n  final foo = Foo();\n  assert(foo.hashCode >= 0);\n}\n",
     )
     .unwrap();
     fs::write(temp.path().join("b.dart"), "class Foo {}\n").unwrap();
@@ -124,7 +124,7 @@ fn test_run_check_custom_exit_code_no_violations_returns_zero() {
     let temp = tempdir().unwrap();
     fs::write(
         temp.path().join("test.dart"),
-        "void main() {\n  print('ok');\n}\n",
+        "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
     let exit_code = run_check(CheckOptions {

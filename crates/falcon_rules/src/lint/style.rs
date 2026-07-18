@@ -26,5 +26,7 @@ pub mod prefer_iterable_of;
 pub mod prefer_last;
 pub mod prefer_trailing_comma;
 pub mod prefer_underscore_for_unused_callback_parameters;
+pub mod sort_child_properties_last;
 pub mod use_design_system_item;
+pub mod use_full_hex_values_for_flutter_colors;
 pub mod use_spacer_as_expanded_child;

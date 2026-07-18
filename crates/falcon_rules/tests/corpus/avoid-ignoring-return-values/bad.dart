@@ -24,3 +24,12 @@ class Counter {
     increment(); /* expect: avoid-ignoring-return-values */
   }
 }
+
+// `save` is on the receiver-less side-effect allowlist, but the project index
+// sees this declaration returns a value, so discarding it is now flagged — a
+// precision win the allowlist alone could not make.
+int save() => 42;
+
+void resolvedNonVoidDiscard() {
+  save(); /* expect: avoid-ignoring-return-values */
+}
