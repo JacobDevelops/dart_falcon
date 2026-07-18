@@ -9,7 +9,7 @@ pub struct ProperFromEnvironment;
 
 impl Rule for ProperFromEnvironment {
     fn name(&self) -> &'static str {
-        "proper_from_environment"
+        "proper-from-environment"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -51,7 +51,7 @@ impl Visitor for Collector {
             && !self.in_const
         {
             self.diags.push(Diagnostic::new(
-                "proper_from_environment",
+                "proper-from-environment",
                 Severity::Warning,
                 "*.fromEnvironment must be used in a const context, otherwise it returns the default at runtime.",
                 self.file.clone(),

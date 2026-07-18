@@ -5,7 +5,7 @@ use tracing::{debug, debug_span};
 /// Default rule lookup for a registry built without one: knows no rules, so
 /// every suppression path validates as "unknown rule". Real callers install a
 /// lookup backed by `falcon_rules` metadata via [`RuleRegistry::with_lookup`].
-fn no_lookup(_name: &str) -> Option<(&'static str, bool)> {
+fn no_lookup(_name: &str) -> Option<(&'static str, &'static str, bool)> {
     None
 }
 

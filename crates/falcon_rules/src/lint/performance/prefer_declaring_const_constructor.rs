@@ -8,7 +8,7 @@ pub struct PreferDeclaringConstConstructor;
 
 impl Rule for PreferDeclaringConstConstructor {
     fn name(&self) -> &'static str {
-        "prefer_declaring_const_constructor"
+        "prefer-declaring-const-constructor"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -24,7 +24,7 @@ impl Rule for PreferDeclaringConstConstructor {
 
 fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     diags.push(Diagnostic::new(
-        "prefer_declaring_const_constructor",
+        "prefer-declaring-const-constructor",
         Severity::Warning,
         "Constructor could be declared as const.",
         ctx.file_path.to_string_lossy().into_owned(),

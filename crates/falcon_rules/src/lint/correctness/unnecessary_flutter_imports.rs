@@ -8,7 +8,7 @@ pub struct UnnecessaryFlutterImports;
 
 impl Rule for UnnecessaryFlutterImports {
     fn name(&self) -> &'static str {
-        "unnecessary_flutter_imports"
+        "unnecessary-flutter-imports"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -21,7 +21,7 @@ impl Rule for UnnecessaryFlutterImports {
         for import in &program.imports {
             if is_unnecessary_import(&import.uri.value) && !has_flutter_usage {
                 diags.push(Diagnostic::new(
-                    "unnecessary_flutter_imports",
+                    "unnecessary-flutter-imports",
                     Severity::Warning,
                     "Unnecessary Flutter import. Remove unused imports.",
                     ctx.file_path.to_string_lossy().into_owned(),

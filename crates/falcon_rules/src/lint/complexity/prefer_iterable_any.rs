@@ -8,7 +8,7 @@ pub struct PreferIterableAny;
 
 impl Rule for PreferIterableAny {
     fn name(&self) -> &'static str {
-        "prefer_iterable_any"
+        "prefer-iterable-any"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -44,7 +44,7 @@ fn is_where_is_not_empty(expr: &Expr) -> Option<Span> {
 
 fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     diags.push(Diagnostic::new(
-        "prefer_iterable_any",
+        "prefer-iterable-any",
         Severity::Warning,
         "Use .any() instead of .where().isNotEmpty.",
         ctx.file_path.to_string_lossy().into_owned(),

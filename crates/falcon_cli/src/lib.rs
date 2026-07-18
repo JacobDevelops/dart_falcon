@@ -12,6 +12,6 @@ pub mod run;
 
 pub use analyze_pipeline::{CheckOptions, CheckOutput, OutputFormat, collect_check, run_check};
 pub use file_walker::walk_files;
-pub use migrate::{MigrationResult, migrate_yaml_to_config, run_migrate};
+pub use migrate::{MigrationResult, migrate_existing_config, migrate_yaml_to_config, run_migrate};
 pub use output::{format_json, format_text};
 pub use run::run_cli;

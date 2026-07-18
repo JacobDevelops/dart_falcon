@@ -15,7 +15,13 @@
             "complexity": {
               "additionalProperties": false,
               "properties": {
+                "avoid-inverted-boolean-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-nested-conditional-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-nested-if": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-redundant-async": {
@@ -27,28 +33,22 @@
                 "avoid-unnecessary-type-casts": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "avoid_inverted_boolean_expressions": {
+                "cyclomatic-complexity": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "avoid_nested_if": {
+                "max-lines-for-file": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "cyclomatic_complexity": {
+                "max-lines-for-function": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "max_lines_for_file": {
+                "max-parameters-for-function": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "max_lines_for_function": {
+                "max-switch-cases": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "max_parameters_for_function": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "max_switch_cases": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "maximum_nesting_level": {
+                "maximum-nesting-level": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-boolean-literal-compare": {
@@ -63,13 +63,13 @@
                 "prefer-immediate-return": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-iterable-any": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-iterable-every": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-moving-to-variable": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "prefer_iterable_any": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "prefer_iterable_every": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -81,40 +81,37 @@
                 "avoid-global-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-mutable-global-variables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-returning-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "avoid_mutable_global_variables": {
+                "correct-order-for-super-dispose": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "avoid_unused_parameters": {
+                "proper-controller-dispose": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "correct_order_for_super_dispose": {
+                "proper-expanded-and-flexible": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "proper_controller_dispose": {
+                "proper-from-environment": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "proper_expanded_and_flexible": {
+                "proper-super-init-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "proper_from_environment": {
+                "unnecessary-flutter-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "proper_super_init_state": {
+                "unnecessary-nullable-return-type": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "unnecessary_flutter_imports": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "unnecessary_nullable_return_type": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "use_once_constructors_once_provider": {
+                "use-once-constructors-once-provider": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -129,7 +126,7 @@
                 "prefer-correct-edge-insets-constructor": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "prefer_declaring_const_constructor": {
+                "prefer-declaring-const-constructor": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -386,7 +383,13 @@
             "complexity": {
               "additionalProperties": false,
               "properties": {
+                "avoid-inverted-boolean-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-nested-conditional-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-nested-if": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-redundant-async": {
@@ -398,28 +401,22 @@
                 "avoid-unnecessary-type-casts": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "avoid_inverted_boolean_expressions": {
+                "cyclomatic-complexity": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "avoid_nested_if": {
+                "max-lines-for-file": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "cyclomatic_complexity": {
+                "max-lines-for-function": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "max_lines_for_file": {
+                "max-parameters-for-function": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "max_lines_for_function": {
+                "max-switch-cases": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "max_parameters_for_function": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "max_switch_cases": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "maximum_nesting_level": {
+                "maximum-nesting-level": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-boolean-literal-compare": {
@@ -434,13 +431,13 @@
                 "prefer-immediate-return": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-iterable-any": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-iterable-every": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-moving-to-variable": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "prefer_iterable_any": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "prefer_iterable_every": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -452,40 +449,37 @@
                 "avoid-global-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-mutable-global-variables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-returning-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-unused-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "avoid_mutable_global_variables": {
+                "correct-order-for-super-dispose": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "avoid_unused_parameters": {
+                "proper-controller-dispose": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "correct_order_for_super_dispose": {
+                "proper-expanded-and-flexible": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "proper_controller_dispose": {
+                "proper-from-environment": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "proper_expanded_and_flexible": {
+                "proper-super-init-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "proper_from_environment": {
+                "unnecessary-flutter-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "proper_super_init_state": {
+                "unnecessary-nullable-return-type": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "unnecessary_flutter_imports": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "unnecessary_nullable_return_type": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "use_once_constructors_once_provider": {
+                "use-once-constructors-once-provider": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -500,7 +494,7 @@
                 "prefer-correct-edge-insets-constructor": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "prefer_declaring_const_constructor": {
+                "prefer-declaring-const-constructor": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
