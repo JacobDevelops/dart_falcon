@@ -1,3 +1,5 @@
+<img src="assets/logo/falcon-icon.svg" width="96" alt="falcon logo" align="right">
+
 # falcon
 
 [![CI](https://github.com/JacobDevelops/dart_falcon/actions/workflows/ci.yml/badge.svg)](https://github.com/JacobDevelops/dart_falcon/actions/workflows/ci.yml)
