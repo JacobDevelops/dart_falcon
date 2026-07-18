@@ -1,39 +1,9 @@
 # Roadmap
 
-falcon is pre-1.0. This is a direction sketch, not a commitment — items and order
-will shift. Grouped roughly from near-term to exploratory.
+falcon is pre-1.0. This lists what's *not* done yet — a direction sketch, not a
+commitment. Items and order will shift.
 
-## Near-term
-
-Most of the original near-term batch has shipped — `falcon migrate`, a published
-`falcon.json` JSON schema, per-path rule options in `overrides`, project rules in
-the LSP, and release-automation polish (tag/`Cargo.toml` version guard, flake
-version derived from `Cargo.toml`). A maintained CHANGELOG is deferred to the 1.0
-release. The first Toward-1.0 batch (below) has now shipped as well.
-
-## Toward 1.0 — shipped
-
-All four items in the first Toward-1.0 batch have shipped:
-
-- **Rule id normalization + twin-rule unification.** Every rule id is now
-  canonical kebab-case, and the duplicated twin rules (`no_empty_block` /
-  `avoid_empty_blocks`, `no_magic_number`, `avoid_unused_parameters`) collapsed
-  into one canonical rule each. Legacy `snake_case` and twin ids still resolve as
-  deprecated aliases, and `falcon migrate` rewrites existing configs (and
-  `falcon.json` files) to the canonical ids.
-- **Flutter domain buildout.** The official `package:lints` / `package:flutter_lints`
-  recommended rules (the class-A set) are implemented, bringing the rule count to
-  148. The `flutter` domain is complete for every Flutter-relevant rule those
-  presets can express without full type resolution.
-- **Type-resolution layer.** A minimal type-resolution layer now backs
-  `no-boolean-literal-compare`, `avoid-ignoring-return-values`, and the
-  `unnecessary-nullable` cross-file rule. Local type inference and a cross-file
-  return-type index removed the false positives that had kept them opt-in, so all
-  three are recommended and on by default.
-- **Dart language tracking.** The parser now tracks the language through Dart 3.9,
-  including dot-shorthand expressions and digit separators.
-
-## Toward 1.0 — the plan
+## Toward 1.0
 
 1.0 is a rule-catalog and readiness push. The full planned catalog — every rule,
 with falcon group, analysis type, and priority — lives in
@@ -49,24 +19,21 @@ rules shipped**; the plan adds **387 candidate rules** (104 must-have that block
     DCM's modern catalog is paywalled; these reimplement the high-value ones as
     open falcon rules.
   - **Cross-file rules — 11** (see below).
-  - By analysis type the work skews toward types: of the 25 preset must-haves,
-    all but `file_names` need type resolution (~18 full, 3 local-inference, 3
-    pubspec-driven). This drives the **resolver-expansion workstream** — growing
-    the minimal type-resolution layer (full type hierarchies, SDK-wide inference)
-    to unlock the ~18+ full-resolution rules; the 3 pubspec rules
-    (`depend_on_referenced_packages`, `secure_pubspec_urls`, `package_names`) can
-    ship independently of it.
+- **Resolver expansion.** Of the 25 preset must-haves, all but `file_names` need
+  type resolution (~18 full, 3 local-inference, 3 pubspec-driven). Growing the
+  minimal type-resolution layer (full type hierarchies, SDK-wide inference)
+  unlocks the ~18 full-resolution rules; the 3 pubspec rules
+  (`depend_on_referenced_packages`, `secure_pubspec_urls`, `package_names`) ship
+  independently of it.
 - **New domains.** Alongside `flutter`, add `test`, `bloc`, `riverpod`,
   `provider`, `flutter_hooks`, and `equatable` domains (from the DCM survey),
   activated per file/framework so framework users get targeted checks.
-- **Cross-file rules.** The top-level `project` config section has been renamed to
-  **`cross-file`** (breaking, pre-1.0) — shipped. `falcon migrate` rewrites old
-  configs; `project` remains a deprecated alias. Three cross-file rules ship today
-  (`unused-code`, `unused-files`, `unnecessary-nullable`); 11 more are planned —
-  Tier 1 must-haves `unused-dependencies`, `undeclared-dependencies`,
-  `no-import-cycles`, `banned-imports`; Tier 2 `unused-assets`, `unused-l10n`,
+- **Cross-file rules.** Three ship today (`unused-code`, `unused-files`,
+  `unnecessary-nullable`); 11 more are planned — Tier 1 must-haves
+  `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`,
+  `banned-imports`; Tier 2 `unused-assets`, `unused-l10n`,
   `unexported-public-api`; Tier 3 post-1.0.
-- **e2e OSS corpus.** A `cargo xtask e2e` harness runs falcon against pinned,
+- **e2e OSS corpus.** A `cargo xtask e2e` harness running falcon against pinned,
   shallow clones of large real-world Dart/Flutter repos (immich, AppFlowy,
   flutter/packages, flame, LocalSend, bloc, riverpod, Wonderous, flutter/samples,
   dart-lang/sdk `tests/language`). Gates: zero panics, zero parser/internal-error
@@ -74,10 +41,8 @@ rules shipped**; the plan adds **387 candidate rules** (104 must-have that block
   over vendored `analysis_options.yaml` fixtures (flutter_lints,
   very_good_analysis, DCM, custom_lint, strict modes). PR CI runs a fast subset;
   the full set runs nightly.
-- **Docs website + generated rule docs.** A TanStack Start site under `website/`,
-  with biome-style rule documentation generated from rule metadata and rustdoc.
-- **Logo / branding.** A falcon logo and brand, plus extension icons for the
-  editor integrations.
+- **Generated rule docs.** The docs site is live; rule documentation still needs
+  to be generated from rule metadata and rustdoc rather than hand-written.
 - **Fix `prefer-iterable-every` porting bug.** Our port detects the *negated*
   `!where(pred).isEmpty` (which is `any(pred)` semantics, overlapping
   `prefer-iterable-any`) and suggests `.every()` without inverting the predicate.
@@ -85,6 +50,7 @@ rules shipped**; the plan adds **387 candidate rules** (104 must-have that block
   `every(!pred)`. Change detection to bare `where(pred).isEmpty`, invert the
   predicate in the fix, and rewrite the corpus accordingly (keep the valid
   `where(pred).length == length` case). Behavior change — do it as its own PR.
+- **CHANGELOG.** A maintained changelog, starting at the 1.0 release.
 
 ## Post-1.0
 
