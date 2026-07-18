@@ -1,0 +1,30 @@
+[
+  {
+    "name": "flutter",
+    "rules": [
+      "avoid-print",
+      "avoid-returning-widgets",
+      "avoid-single-child-column-or-row",
+      "avoid-unnecessary-containers",
+      "avoid-web-libraries-in-flutter",
+      "correct-order-for-super-dispose",
+      "no-logic-in-create-state",
+      "prefer-async-callback",
+      "prefer-const-border-radius",
+      "prefer-correct-edge-insets-constructor",
+      "prefer-declaring-const-constructor",
+      "prefer-dedicated-media-query-methods",
+      "prefer-extracting-callbacks",
+      "proper-controller-dispose",
+      "proper-expanded-and-flexible",
+      "proper-super-init-state",
+      "sized-box-for-whitespace",
+      "sort-child-properties-last",
+      "unnecessary-flutter-imports",
+      "use-design-system-item",
+      "use-full-hex-values-for-flutter-colors",
+      "use-once-constructors-once-provider",
+      "use-spacer-as-expanded-child"
+    ]
+  }
+]
