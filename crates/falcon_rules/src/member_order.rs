@@ -11,7 +11,7 @@ use falcon_syntax::ast::*;
 /// Read a rule's option `key` as a list of lowercase category tokens.
 pub fn read_string_list(ctx: &AnalyzeContext, rule_name: &str, key: &str) -> Option<Vec<String>> {
     crate::meta::meta_for(rule_name)
-        .and_then(|m| ctx.config.rule_options(m.group, rule_name))
+        .and_then(|m| ctx.rule_options(m.group, rule_name))
         .and_then(|o| o.get(key))
         .and_then(|v| v.as_array())
         .map(|arr| {

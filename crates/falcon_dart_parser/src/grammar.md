@@ -462,6 +462,17 @@ primaryExpression
   | functionExpression
   | '(' expression ')'
   | switchExpression
+  | dotShorthand                         // [Phase 1] Dart 3.9
+  ;
+
+// Static access shorthand (Dart 3.9). A primary that begins with `.` resolves
+// its member against the expected context type. The `.` head is captured as a
+// `DotShorthand` node; any invocation or selector that follows (`(args)`,
+// `<T>(args)`, `.field`, `!`, `[i]`) is layered on by the postfix parser, so
+// `.parse<int>('42')` becomes `Call(DotShorthand(parse), <int>, ('42'))` and
+// `.red.value` becomes `Field(DotShorthand(red), value)`.
+dotShorthand                             // [Phase 1]
+  : 'const'? '.' ( identifier | 'new' )
   ;
 
 switchExpression                         // [Phase 1]
@@ -539,6 +550,12 @@ literal
   | setOrMapLiteral                      // { ... }
   | recordLiteral                        // ( a, b, )
   ;
+
+// numericLiteral admits digit separators (Dart 3.6): `_` may appear between
+// digits in the integer, fractional, exponent, and hex-digit runs, e.g.
+// `1_000_000`, `0xFF_EC`, `1_2.3_4e1_2`. The lexer does not reject a trailing
+// separator (`1_` lexes as a single numeric token); a leading `_` is an
+// identifier, not a number (`_1`).
 
 stringLiteral                            // [Phase 1]
   : ( singleLineString | multiLineString )+

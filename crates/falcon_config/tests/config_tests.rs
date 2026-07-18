@@ -722,30 +722,9 @@ fn test_project_overrides_patch_per_path() {
 }
 
 #[test]
-fn test_options_in_project_override_rejected_at_load() {
-    let path = temp_file_path("project_override_options.json");
-    fs::write(
-        &path,
-        r#"{
-            "overrides": [ {
-                "includes": ["test/**"],
-                "project": { "rules": { "correctness": {
-                    "unused-files": { "level": "warn", "options": { "k": 1 } }
-                } } }
-            } ]
-        }"#,
-    )
-    .expect("write config");
-    let err = load_config(&path).expect_err("options in project override must be rejected");
-    assert!(
-        format!("{err}").contains("options in overrides"),
-        "unexpected error: {err}"
-    );
-    cleanup(&path);
-}
-
-#[test]
-fn test_options_in_override_rejected_at_load() {
+fn test_options_in_override_load_ok() {
+    // Options inside an override used to be rejected at load; they are now a
+    // supported per-path feature and must load cleanly.
     let path = temp_file_path("override_options.json");
     fs::write(
         &path,
@@ -754,15 +733,64 @@ fn test_options_in_override_rejected_at_load() {
                 "includes": ["test/**"],
                 "linter": { "rules": { "complexity": {
                     "max_lines_for_file": { "level": "warn", "options": { "max_lines": 10 } }
+                } } },
+                "project": { "rules": { "correctness": {
+                    "unused-files": { "level": "warn", "options": { "k": 1 } }
                 } } }
             } ]
         }"#,
     )
     .expect("write config");
-    let err = load_config(&path).expect_err("options in override must be rejected");
-    assert!(
-        format!("{err}").contains("options in overrides"),
-        "unexpected error: {err}"
-    );
+    load_config(&path).expect("override with options must load");
     cleanup(&path);
+}
+
+#[test]
+fn test_override_options_replace_base_per_path() {
+    let cfg = from_json(serde_json::json!({
+        "linter": { "rules": { "complexity": {
+            "max_lines_for_file": { "level": "warn", "options": { "max_lines": 400 } }
+        } } },
+        "overrides": [ {
+            "includes": ["test/**"],
+            "linter": { "rules": { "complexity": {
+                "max_lines_for_file": { "level": "warn", "options": { "max_lines": 10 } }
+            } } }
+        } ]
+    }));
+
+    // Non-matching path: base options.
+    assert_eq!(
+        cfg.rule_options_for("lib/main.dart", "complexity", "max_lines_for_file")
+            .and_then(|o| o.get("max_lines"))
+            .and_then(|v| v.as_u64()),
+        Some(400)
+    );
+    // Matching path: override options replace the base wholesale.
+    assert_eq!(
+        cfg.rule_options_for("test/widget_test.dart", "complexity", "max_lines_for_file")
+            .and_then(|o| o.get("max_lines"))
+            .and_then(|v| v.as_u64()),
+        Some(10)
+    );
+}
+
+#[test]
+fn test_override_without_options_keeps_base_options() {
+    // An override that changes only the level leaves the base options intact.
+    let cfg = from_json(serde_json::json!({
+        "linter": { "rules": { "complexity": {
+            "max_lines_for_file": { "level": "warn", "options": { "max_lines": 400 } }
+        } } },
+        "overrides": [ {
+            "includes": ["test/**"],
+            "linter": { "rules": { "complexity": { "max_lines_for_file": "error" } } }
+        } ]
+    }));
+    assert_eq!(
+        cfg.rule_options_for("test/widget_test.dart", "complexity", "max_lines_for_file")
+            .and_then(|o| o.get("max_lines"))
+            .and_then(|v| v.as_u64()),
+        Some(400)
+    );
 }

@@ -946,6 +946,15 @@ pub enum Expr {
         span: Span,
     },
 
+    // Static access shorthand (Dart 3.9):  `.name` / `const .name` / `.new`.
+    // Only the head is captured here; any invocation or selector that follows
+    // is represented by the wrapping `Call`/`Field`/etc. node.
+    DotShorthand {
+        is_const: bool,
+        name: Identifier,
+        span: Span,
+    },
+
     // Await
     Await {
         expr: Box<Expr>,
@@ -1004,6 +1013,7 @@ impl Expr {
             | Expr::Record { span, .. }
             | Expr::FuncExpr { span, .. }
             | Expr::New { span, .. }
+            | Expr::DotShorthand { span, .. }
             | Expr::Await { span, .. }
             | Expr::Throw { span, .. }
             | Expr::Switch { span, .. }

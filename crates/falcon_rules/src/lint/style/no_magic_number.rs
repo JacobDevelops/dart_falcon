@@ -23,7 +23,7 @@ mod dcl {
 
     fn cfg(ctx: &AnalyzeContext) -> Cfg {
         let allowed = crate::meta::meta_for("no-magic-number")
-            .and_then(|m| ctx.config.rule_options(m.group, "no-magic-number"))
+            .and_then(|m| ctx.rule_options(m.group, "no-magic-number"))
             .and_then(|o| o.get("allowed"))
             .and_then(|v| v.as_array())
             .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<_>>())

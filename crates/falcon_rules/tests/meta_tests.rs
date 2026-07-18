@@ -82,6 +82,21 @@ fn metadata_count_matches_registered_rule_count() {
 }
 
 #[test]
+fn committed_schema_matches_generator() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../schema/falcon.schema.json"
+    );
+    let committed = std::fs::read_to_string(path)
+        .expect("schema/falcon.schema.json exists — run `cargo xtask schema`");
+    assert_eq!(
+        committed,
+        falcon_rules::schema::config_schema_string(),
+        "schema/falcon.schema.json is stale; run `cargo xtask schema`"
+    );
+}
+
+#[test]
 fn metadata_names_are_unique() {
     let mut seen = HashSet::new();
     for meta in RULE_METADATA {

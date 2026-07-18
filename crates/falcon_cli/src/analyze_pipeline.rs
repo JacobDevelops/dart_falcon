@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use clap::ValueEnum;
 use falcon_analyze::{
-    FileSuppressions, ProjectFile, ProjectRuleRegistry, RuleRegistry, analyze_parallel_collecting,
-    analyze_sequential_collecting,
+    FileSuppressions, ProjectFile, ProjectRuleRegistry, RuleRegistry,
+    analyze_parallel_collecting_resolving, analyze_sequential_collecting_resolving,
 };
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_diagnostics::Diagnostic;
@@ -20,6 +20,14 @@ use glob::Pattern;
 
 use crate::file_walker::walk_files;
 use crate::output;
+
+/// Per-file rules that consult [`falcon_analyze::AnalyzeContext::project`]. When
+/// any is enabled, the driver builds a per-file [`falcon_analyze::ProjectIndex`]
+/// so these rules can reason about declaration return types. Kept here (rather
+/// than a rule-trait flag) as a deliberately small, explicit seam; extend this
+/// list as further resolver-dependent rules are integrated.
+const RESOLVER_DEPENDENT_RULES: &[&str] =
+    &["no-boolean-literal-compare", "avoid-ignoring-return-values"];
 
 /// Output format for diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -193,16 +201,33 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     // only collect programs when at least one is enabled (they are memory-heavy).
     let project_registry = build_project_registry(resolve_project_rules(&config));
     let collect_programs = !project_registry.is_empty();
+    // Resolver seam: enable per-file type resolution only when a per-file rule
+    // that consumes it is active, so a default run pays nothing. Today this
+    // attaches a degraded single-file `ProjectIndex` (this file's declarations +
+    // builtins). A true cross-file index would be built once from all programs
+    // and shared; that requires a parse-then-analyze reorder and lands with the
+    // resolver-dependent rules' integration.
+    let resolve = registry
+        .rules()
+        .iter()
+        .any(|r| RESOLVER_DEPENDENT_RULES.contains(&r.name()));
     info!(
         file_count = files.len(),
         rule_count = registry.rules().len(),
         project_rule_count = project_registry.rules().len(),
+        resolve,
         "starting check"
     );
     let (mut diagnostics, project_files) = if options.parallel {
-        analyze_parallel_collecting(&registry, &files, &config, collect_programs)
+        analyze_parallel_collecting_resolving(&registry, &files, &config, collect_programs, resolve)
     } else {
-        analyze_sequential_collecting(&registry, &files, &config, collect_programs)
+        analyze_sequential_collecting_resolving(
+            &registry,
+            &files,
+            &config,
+            collect_programs,
+            resolve,
+        )
     };
 
     apply_severities(&mut diagnostics, &config);

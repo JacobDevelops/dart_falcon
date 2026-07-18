@@ -499,6 +499,7 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         Expr::NullAssert { operand, .. } => {
             visit_expr(operand, diagnostics, ctx);
         }
+        Expr::DotShorthand { .. } => {}
         Expr::Error { .. } => {}
     }
 }

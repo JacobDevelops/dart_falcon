@@ -17,6 +17,12 @@
   ],
   "main": "./extension.js",
   "contributes": {
+    "jsonValidation": [
+      {
+        "fileMatch": "falcon.json",
+        "url": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json"
+      }
+    ],
     "languages": [
       {
         "id": "dart",

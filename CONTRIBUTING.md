@@ -43,6 +43,15 @@ cargo test --workspace                              # unit + integration + contr
 cargo xtask validate-rules                          # golden corpus: every rule vs. its fixtures
 ```
 
+If you add, remove, or rename a rule, regenerate the config schema and commit it:
+
+```sh
+cargo xtask schema        # writes schema/falcon.schema.json
+```
+
+`cargo test --workspace` fails if the committed schema is stale (a contract test
+regenerates it and compares), so this isn't optional.
+
 Fix issues at the root cause — don't silence clippy, `#[allow]` around a real
 problem, or loosen a test to go green.
 
@@ -136,5 +145,18 @@ variant). The reason is mandatory; a malformed directive is itself reported.
   logical change per commit.
 - Run the four gates before pushing.
 - Keep PR descriptions concrete: what changed, why, and how you verified it.
+
+## Releasing (maintainers)
+
+falcon versions its workspace crates together. To cut a release:
+
+1. Bump `version` under `[workspace.package]` in `Cargo.toml` (all crates and the
+   flake derive from it — nothing else needs editing).
+2. Commit, then tag: `git tag vX.Y.Z && git push --tags`.
+
+The tag triggers `.github/workflows/release.yml`, which builds the four platform
+binaries, publishes a GitHub Release with auto-generated notes (failing if the tag
+and `Cargo.toml` version disagree), and commits the SRI-hash manifest
+(`nix/binaries.json`) back to `main` so the flake can fetch prebuilt binaries.
 
 Thanks for contributing!

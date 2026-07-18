@@ -7,17 +7,19 @@ pub mod context;
 pub mod parallel;
 pub mod project;
 pub mod registry;
+pub mod resolve;
 pub mod rule;
 pub mod suppressions;
 pub mod visitor;
 
 pub use context::AnalyzeContext;
 pub use parallel::{
-    analyze_parallel, analyze_parallel_collecting, analyze_sequential,
-    analyze_sequential_collecting,
+    analyze_parallel, analyze_parallel_collecting, analyze_parallel_collecting_resolving,
+    analyze_sequential, analyze_sequential_collecting, analyze_sequential_collecting_resolving,
 };
 pub use project::{ProjectFile, ProjectRule, ProjectRuleRegistry};
 pub use registry::RuleRegistry;
+pub use resolve::{LocalTypes, ProjectIndex, StaticType};
 pub use rule::Rule;
 pub use suppressions::{FileSuppressions, MALFORMED_SUPPRESSION, RuleLookup};
 pub use visitor::RuleVisitor;

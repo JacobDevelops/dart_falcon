@@ -27,6 +27,11 @@ pub fn run_cli() -> i32 {
             error_exit_code: exit_code,
             parallel,
         }),
+        crate::args::Command::Migrate {
+            input,
+            write,
+            output,
+        } => crate::migrate::run_migrate(input, write, output),
         crate::args::Command::Lsp => match falcon_lsp::run_server() {
             Ok(()) => 0,
             Err(e) => {

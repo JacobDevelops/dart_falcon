@@ -35,7 +35,7 @@ fn count_non_default_cases(switch_stmt: &SwitchStmt) -> usize {
 /// Read the `max_cases` option (default 10). Malformed/missing → default.
 fn max_cases_option(ctx: &AnalyzeContext) -> usize {
     crate::meta::meta_for("max_switch_cases")
-        .and_then(|m| ctx.config.rule_options(m.group, "max_switch_cases"))
+        .and_then(|m| ctx.rule_options(m.group, "max_switch_cases"))
         .and_then(|o| o.get("max_cases"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)

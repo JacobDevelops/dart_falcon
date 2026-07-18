@@ -40,6 +40,10 @@
         else
           null;
 
+      # Single source of truth for the version: the workspace Cargo.toml. Avoids
+      # a hardcoded string drifting from the crate/tag/manifest versions.
+      cargoVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+
       outputsFor =
         system:
         let
@@ -68,7 +72,7 @@
           commonArgs = {
             inherit src;
             pname = "falcon";
-            version = "0.3.0";
+            version = cargoVersion;
             strictDeps = true;
           };
 

@@ -23,7 +23,7 @@ impl Rule for CyclomaticComplexity {
 /// Read the `max_complexity` option (default 20). Malformed/missing → default.
 fn max_complexity_option(ctx: &AnalyzeContext) -> usize {
     crate::meta::meta_for("cyclomatic_complexity")
-        .and_then(|m| ctx.config.rule_options(m.group, "cyclomatic_complexity"))
+        .and_then(|m| ctx.rule_options(m.group, "cyclomatic_complexity"))
         .and_then(|o| o.get("max_complexity"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)

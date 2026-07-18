@@ -70,6 +70,7 @@ fn test_mock_rule_analyze_empty() {
         file_path: Path::new("test.dart"),
         source: "void main() {}",
         config: &config,
+        project: None,
     };
 
     let diagnostics = rule.analyze(&program, &ctx);
@@ -87,6 +88,7 @@ fn test_registry_register_and_run_all_empty() {
         file_path: Path::new("test.dart"),
         source: "void main() {}",
         config: &config,
+        project: None,
     };
 
     let diagnostics = registry.run_all(&program, &ctx);
@@ -104,6 +106,7 @@ fn test_registry_run_all_emits_diagnostic() {
         file_path: Path::new("test.dart"),
         source: "void main() {}",
         config: &config,
+        project: None,
     };
 
     let diagnostics = registry.run_all(&program, &ctx);
@@ -125,6 +128,7 @@ fn test_registry_multiple_rules() {
         file_path: Path::new("test.dart"),
         source: "void main() {}",
         config: &config,
+        project: None,
     };
 
     let diagnostics = registry.run_all(&program, &ctx);
@@ -142,6 +146,7 @@ fn test_analyze_context_fields() {
         file_path: path,
         source,
         config: &config,
+        project: None,
     };
 
     assert_eq!(ctx.file_path, path);
@@ -267,6 +272,7 @@ fn test_end_to_end_parse_analyze_serialize() {
         file_path: Path::new("foo.dart"),
         source,
         config: &config,
+        project: None,
     };
 
     let diagnostics = registry.run_all(&program, &ctx);

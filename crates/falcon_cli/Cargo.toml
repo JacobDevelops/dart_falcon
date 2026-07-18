@@ -12,6 +12,7 @@ falcon_rules = { path = "../falcon_rules" }
 falcon_lsp = { path = "../falcon_lsp" }
 clap.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 glob.workspace = true

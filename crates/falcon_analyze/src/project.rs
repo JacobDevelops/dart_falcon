@@ -3,8 +3,9 @@
 //! Unlike [`crate::Rule`], which sees one file at a time, a [`ProjectRule`]
 //! receives every analyzed file's parsed [`Program`] at once so it can reason
 //! about references that span files (unused files, unused public API, call-site
-//! nullability). Project rules are CLI-only: the LSP analyzes a single open
-//! buffer and has no whole-project view, so it never runs them.
+//! nullability). Both the CLI and the LSP run them: the CLI over its walked
+//! file set, the LSP over the workspace (open buffers overlaid on disk),
+//! triggered on didOpen/didSave/config-reload rather than on every keystroke.
 
 use std::path::PathBuf;
 

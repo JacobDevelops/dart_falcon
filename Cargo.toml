@@ -12,6 +12,7 @@ license = "MIT"
 # Diagnostics & reporting
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 
 # LSP
 lsp-server = "0.7"
