@@ -1,4 +1,12 @@
-//! Flags comparisons against boolean literals. Ported from dart_code_linter's `no-boolean-literal-compare`.
+//! Flags a comparison between a boolean value and a boolean literal, e.g. `x == true`.
+//!
+//! Comparing a known boolean to `true`/`false` is redundant: `x == true` is
+//! just `x`, and `x == false` is `!x`. The rule flags an `==`/`!=` where one
+//! side is a boolean literal and the other is provably a non-nullable boolean —
+//! either syntactically (a literal, `!`, an `is` check, or a comparison/logical
+//! operator) or a local or parameter whose inferred static type is a
+//! non-nullable `bool`. A `bool?` operand is deliberately left alone, because
+//! `x == true` is the correct null-safe way to test a nullable boolean.
 
 use falcon_analyze::{AnalyzeContext, LocalTypes, Rule, StaticType};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

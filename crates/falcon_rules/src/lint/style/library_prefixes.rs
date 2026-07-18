@@ -1,6 +1,10 @@
-//! Flags import prefixes that are not `lower_case_with_underscores`. Ported from
-//! package:lints `library_prefixes`. A valid prefix contains only lowercase
-//! letters, digits, underscores and `$` (leading underscores/`$` allowed).
+//! Flags import prefixes that are not `lower_case_with_underscores`.
+//!
+//! An import prefix (`import '...' as foo;`) is a library-style name and should
+//! use `lower_case_with_underscores` to match Dart's package and library
+//! naming, keeping qualified references uniform. Lowercase letters, digits,
+//! underscores, and `$` are all permitted; the presence of any uppercase letter
+//! is what makes a prefix invalid.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

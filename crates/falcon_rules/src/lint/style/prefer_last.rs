@@ -1,4 +1,11 @@
-//! Flags last-index access in favor of `.last`. Ported from dart_code_linter's `prefer-last`.
+//! Flags manual last-element indexing in favor of the `.last` getter.
+//!
+//! Catches the `xs[xs.length - 1]` idiom, where the receiver and the collection
+//! whose `length` is read are the same identifier. Iterables expose a dedicated
+//! `.last` getter that reads more clearly, avoids repeating the receiver, and
+//! removes the off-by-one arithmetic that manual indexing invites. The match is
+//! deliberately narrow: it requires a literal `- 1` subtracted from `<name>.length`
+//! indexing `<name>`, so unrelated index expressions are left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

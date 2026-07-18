@@ -1,6 +1,11 @@
-//! Flags `[a, b]..addAll(x)` cascades on a collection literal, which the spread
-//! operator (`[a, b, ...x]`) expresses directly. Adopted from package:lints
-//! `prefer_spread_collections`.
+//! Flags an `addAll` cascade on a collection literal that a spread would express.
+//!
+//! The spread operator (`[a, b, ...x]`) folds another collection's elements into
+//! a literal in one expression, so `[a, b]..addAll(x)` is unnecessarily verbose
+//! and reads as a construction followed by mutation rather than a single
+//! collection. The rule matches each `..addAll(...)` section cascaded onto a
+//! list, set, or map literal that takes exactly one positional argument and no
+//! named arguments; other shapes and non-literal receivers are ignored.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

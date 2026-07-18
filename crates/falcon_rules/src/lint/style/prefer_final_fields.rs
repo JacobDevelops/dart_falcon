@@ -1,17 +1,18 @@
-//! Flags a private field that is only ever initialized (at its declaration or
-//! in constructors) and never reassigned, so it could be `final`
-//! (`prefer-final-fields`, adopted from package:lints).
+//! Flags a private field that is initialized but never reassigned, so it could
+//! be `final` (`prefer-final-fields`, adopted from package:lints).
 //!
-//! Conservative. A whole-*library* scan collects every field name that is the
-//! target of an assignment, compound assignment, or increment/decrement
-//! expression — any such write disqualifies the name (matched by name across the
-//! library, so a shared name in another class also protects it). A candidate is
-//! flagged only when it is provably initialized through exactly one safe channel:
-//!   * declaration initializer, and never touched by a constructor; or
-//!   * no declaration initializer, but every non-redirecting generative
-//!     constructor initializes it (via `: _x = ...` or a `this._x` formal).
-//!
-//! Fields marked `late`, `external`, or `abstract` are skipped as ambiguous.
+//! Marking such fields `final` documents that they never change after
+//! construction and lets the compiler enforce it, preventing accidental
+//! mutation. The analysis is deliberately conservative to avoid false positives:
+//! a whole-*library* scan first records every name that is ever assigned,
+//! compound assigned, or incremented, and any such write disqualifies that name
+//! (matched by identifier across the library, so a like-named field in another
+//! class also protects it). A candidate is reported only when it is provably
+//! initialized through exactly one safe channel — a declaration initializer with
+//! no constructor ever touching it, or no initializer but every non-redirecting
+//! generative constructor setting it via `: _x = ...` or a `this._x` formal. Only
+//! private (underscore-prefixed) fields are considered, and those already
+//! `final`, `const`, `late`, `external`, or `abstract` are skipped.
 //!
 //! Library awareness (suppress-only): a private field can be written from a
 //! sibling part file, so write collection unions this file with every sibling in

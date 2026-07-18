@@ -1,4 +1,12 @@
-//! Flags direct access to top-level members of imported libraries. Original to falcon.
+//! Flags mutable global state: non-`const`, non-`final` top-level variables and
+//! static fields, plus every read of them.
+//!
+//! Mutable top-level and static members are shared, unscoped state that any
+//! code can read or write, which makes data flow hard to follow and tests hard
+//! to isolate. Prefer `const` or `final` values, or pass state explicitly
+//! through constructors and parameters. The rule reports each offending
+//! declaration and every reference to a mutable top-level variable from within
+//! a function body.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

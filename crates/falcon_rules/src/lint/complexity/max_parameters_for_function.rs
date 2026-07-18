@@ -1,4 +1,17 @@
-//! Flags functions with more than the configured number of parameters. Ported from pyramid_lint's `max_parameters_for_function`.
+//! Flags a function, method, or operator with more than the configured number
+//! of parameters.
+//!
+//! A long parameter list is hard to call correctly and usually signals that
+//! some arguments belong together in an object. The rule counts all positional,
+//! optional, and named parameters. Matching dart_code_linter's
+//! number-of-parameters metric, constructors are not counted — so wide
+//! named-parameter constructors, the dominant Flutter and DI pattern, are
+//! exempt — and `copyWith` methods are skipped.
+//!
+//! ## Options
+//!
+//! `max_parameters` (integer, default: 5) — flag when the parameter count
+//! exceeds this.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

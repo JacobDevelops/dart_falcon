@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "publisher": "jacobsanderson",
   "license": "MIT",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.75.0"
   },

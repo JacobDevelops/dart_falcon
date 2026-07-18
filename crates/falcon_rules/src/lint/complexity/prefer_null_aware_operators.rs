@@ -1,6 +1,10 @@
-//! Flags `x == null ? null : x.y` (and the inverted `x != null ? x.y : null`)
-//! conditional expressions that are better written with the `?.` operator.
-//! Ported from dart_code_linter's `prefer-null-aware-operators`.
+//! Flags `x == null ? null : x.y` (and the inverted `x != null ? x.y : null`).
+//!
+//! Guarding a member access with a null-check ternary is what the `?.`
+//! null-aware operator does: `x?.y`. It is shorter and evaluates the receiver
+//! only once. The rule fires when one branch is the `null` literal and the
+//! other is a field access, index, or method call whose receiver matches the
+//! checked operand (whitespace-insensitive).
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

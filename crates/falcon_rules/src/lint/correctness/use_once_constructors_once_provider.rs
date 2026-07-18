@@ -1,4 +1,12 @@
-//! Flags providers and constructors that should be instantiated once. Ported from pyramid_lint's `use_once_constructors_once_provider`.
+//! Require Riverpod once-providers to be created through `.once()`.
+//!
+//! Flags a direct invocation of `OnceProvider`, `FutureProvider`, or
+//! `StateProvider` — for example `OnceProvider(...)` — where the `.once()`
+//! factory should be used instead. The `.once()` form constructs the provider's
+//! value a single time rather than rebuilding it on each read, which is the
+//! intended lifecycle for these providers; calling the constructor directly
+//! opts out of it. Calls already written as `Provider.once(...)` are accepted,
+//! and explicit `new`/`const` constructions are left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

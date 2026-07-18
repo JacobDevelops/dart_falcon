@@ -1,4 +1,12 @@
-//! Flags `is`/`is!` checks whose result is statically known. Ported from dart_code_linter's `avoid-unnecessary-type-assertions`.
+//! Flags an `is` check whose result is already guaranteed by the declared type.
+//!
+//! Testing a variable against a type it is already known to have is always true,
+//! so the check is dead code — drop it, or fix the declaration that makes it
+//! redundant. Without full type resolution the rule tracks the declared types of
+//! non-nullable local variables and class fields, and reports `x is T` when
+//! `x`'s declared type and `T` name the same type with matching type arguments.
+//! It targets the affirmative `is` form; nullable declarations are skipped,
+//! since `x is T` there still meaningfully narrows away null.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

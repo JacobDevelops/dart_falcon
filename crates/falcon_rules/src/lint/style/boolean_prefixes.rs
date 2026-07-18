@@ -1,4 +1,19 @@
-//! Flags boolean identifiers lacking a conventional prefix. Ported from pyramid_lint's `boolean_prefixes`.
+//! Flags boolean identifiers that lack a conventional interrogative prefix.
+//!
+//! A boolean named `visible` reads as a value, whereas `isVisible` reads as the
+//! yes/no question it answers; a consistent prefix (`is`, `has`, `can`, ...)
+//! makes conditions self-documenting. Only variables and fields initialized
+//! with a boolean *literal*, and `bool`-returning methods, getters, and
+//! functions, are checked — parameters and uninitialized fields are not. A
+//! single leading underscore is stripped before matching, and `@override`
+//! members are exempt because they cannot rename an inherited declaration.
+//!
+//! ## Options
+//!
+//! `valid_prefixes` (list of strings, default: `["is", "are", "was", "were",
+//! "has", "have", "had", "can", "should", "will", "do", "does", "did"]`) —
+//! accepted boolean-name prefixes. User-provided entries extend the defaults
+//! rather than replacing them.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

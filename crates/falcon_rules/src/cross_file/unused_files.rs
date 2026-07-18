@@ -1,5 +1,13 @@
-//! `unused-files` — flag `lib/` files that nothing else references and that are
-//! not entrypoints. Port of dart_code_linter's `check-unused-files`.
+//! Report `lib/` files that nothing in the project references.
+//!
+//! Flags a file under `lib/` that no other file imports, exports, or includes as
+//! a `part`, and that is not itself an entrypoint. Such a file is typically dead
+//! code left behind after its callers were removed — it bloats the package and
+//! misleads readers into thinking it is live. Files that declare a top-level
+//! `main`, and `part of` files (which belong to their owning library), are never
+//! reported. This is a cross-file rule: it runs in the cross-file pass over the
+//! whole analyzed file set and is configured under the top-level `cross-file`
+//! section rather than `linter`.
 
 use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;

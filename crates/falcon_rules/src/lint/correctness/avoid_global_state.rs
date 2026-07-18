@@ -1,4 +1,13 @@
-//! Flags mutable global (top-level/static) state. Ported from dart_code_linter's `avoid-global-state`.
+//! Disallow mutable global and static state.
+//!
+//! Flags top-level variables and `static` fields that are mutable — anything not
+//! declared `const` or plain `final`, including `late final`, which can still be
+//! assigned once at an arbitrary point. Mutable global state is reachable and
+//! writable from anywhere, which makes data flow hard to trace, introduces
+//! initialization-order and concurrency hazards, and lets tests contaminate one
+//! another through leftover shared state. Prefer `const` or `final`
+//! declarations, and thread mutable state explicitly through constructors or
+//! parameters rather than hanging it off globals.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

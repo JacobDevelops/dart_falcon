@@ -1,4 +1,11 @@
-//! Flags a `Container` whose only argument is `child`. Ported from package:lints `avoid_unnecessary_containers`.
+//! Flags a `Container` whose only argument is a `child`.
+//!
+//! A `Container` that wraps nothing but a `child` adds a widget to the tree
+//! that neither paints, sizes, nor positions anything — it is pure overhead.
+//! Dropping it and using the child directly shrinks the widget tree, which
+//! helps rebuild performance and readability. The rule fires only when
+//! `Container` has exactly one named argument, `child`, and no positional
+//! arguments.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

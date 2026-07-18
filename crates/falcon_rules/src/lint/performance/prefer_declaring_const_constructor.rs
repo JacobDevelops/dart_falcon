@@ -1,4 +1,14 @@
-//! Flags classes that could declare a const constructor. Ported from pyramid_lint's `prefer_declaring_const_constructor`.
+//! Flags a constructor that could be declared `const` but is not.
+//!
+//! A const constructor lets callers create const instances, which Flutter
+//! canonicalizes and skips rebuilding — a real win for widgets. The rule fires
+//! when a class could support one: all fields are `final` (or `const`) with
+//! const-evaluable initializers, the class extends nothing but `Object` and
+//! applies no mixins (whose const-ness is unknowable without resolution), and
+//! the constructor is non-factory, non-external, has no body, and carries only
+//! const-evaluable field initializers. Super and redirecting initializers block
+//! the suggestion conservatively, since the target's const-ness cannot be
+//! proven.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

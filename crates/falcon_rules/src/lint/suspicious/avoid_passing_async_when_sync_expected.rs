@@ -1,4 +1,14 @@
-//! Flags async callbacks passed where a synchronous function is expected. Ported from dart_code_linter's `avoid-passing-async-when-sync-expected`.
+//! Flags an `async` function literal passed where a synchronous callback is
+//! expected.
+//!
+//! When a parameter's type is a function that does not return a `Future`,
+//! passing an `async` closure hands back a `Future` the caller never awaits: the
+//! body runs out of order, its exceptions escape as unhandled errors rather than
+//! being caught, and any value it produces is silently lost. Pass a synchronous
+//! closure, or widen the parameter to a `Future`-returning function if
+//! asynchronous work is genuinely intended. Detection matches positional call
+//! arguments against the parameter types of functions and methods declared in
+//! the same file.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

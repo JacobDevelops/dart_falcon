@@ -1,12 +1,15 @@
-//! Flags `RegExp('...')` whose literal pattern is structurally invalid. Ported from
-//! package:lints `valid_regexps`.
+//! Disallow `RegExp` patterns that are structurally invalid.
 //!
-//! ponytail: Dart's `RegExp` is JS-flavored (lookahead, backreferences, named groups),
-//! which the Rust `regex` crate rejects — so compiling with `regex` would false-positive on
-//! valid Dart patterns. Since this is a correctness rule, we instead run a conservative
-//! *structural* validator that only reports unambiguous breakage (unbalanced groups,
-//! unterminated character classes, trailing backslash). It does not model the full JS regex
-//! grammar, so some genuinely-invalid patterns pass silently — that is the intended ceiling.
+//! Flags a `RegExp` constructed from a string literal whose pattern is
+//! unmistakably broken — unbalanced `(`/`)` groups, an unterminated `[...]`
+//! character class, or a trailing backslash. Such a pattern throws a
+//! `FormatException` the moment the `RegExp` is built, so catching it statically
+//! turns a runtime crash into a lint. The check is deliberately conservative: it
+//! inspects only literal, non-interpolated patterns and applies a structural
+//! test rather than a full regex parse, so it never false-positives on the
+//! JavaScript-flavored constructs (lookahead, backreferences, named groups) that
+//! Dart's `RegExp` accepts. Interpolated patterns, and non-raw literals
+//! containing backslash escapes, are skipped.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

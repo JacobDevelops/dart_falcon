@@ -1,0 +1,11 @@
+name = "falcon-docs"
+compatibility_date = "2026-07-17"
+compatibility_flags = ["nodejs_compat"]
+main = "@tanstack/react-start/server-entry"
+
+routes = [
+  { pattern = "dart-falcon.jacobdevelops.com", custom_domain = true },
+]
+
+[observability]
+enabled = true

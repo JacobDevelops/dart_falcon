@@ -1,11 +1,20 @@
-//! Flags unnamed numeric literals (magic numbers) — `no-magic-number`.
-//! Originally ported from dart_code_linter and unifies the former pyramid_lint
-//! twin `no_magic_number`. The dart_code_linter behavior wins where the two
-//! conflicted: the allow-list is configurable (default `[-1, 0, 1]`), and
-//! variable/field initializers, collection literals, const contexts, and
-//! `DateTime` constructors are exempt. The pyramid variant's extra reach —
-//! cascades, records, switch expressions, and assert statements — is folded in
-//! additively so literals there are still caught.
+//! Flags unnamed numeric literals (magic numbers) used inline in expressions.
+//!
+//! A bare number buried in logic hides its meaning and invites duplication;
+//! extracting it to a named constant documents intent and gives the value a
+//! single point of change. To keep the rule practical it exempts contexts where
+//! a literal is self-explanatory or unavoidable: variable, field, and top-level
+//! initializers, direct elements of list/set literals, entries of const maps,
+//! literal array indices, any const context (const constructors, const
+//! collections), and `DateTime` constructor arguments. Detection also reaches
+//! through cascades, records, switch expressions, and assert statements so
+//! literals in those positions are still caught. Values on the allow-list are
+//! never treated as magic.
+//!
+//! ## Options
+//!
+//! `allowed` (list of numbers, default: `[-1, 0, 1]`) — numeric values never
+//! treated as magic numbers.
 
 /// The `no-magic-number` rule.
 pub use dcl::NoMagicNumber;

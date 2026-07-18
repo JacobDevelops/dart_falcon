@@ -1,4 +1,11 @@
-//! Flags index-zero access in favor of `.first`. Ported from dart_code_linter's `prefer-first`.
+//! Flags `[0]` index access that should use the `.first` getter.
+//!
+//! Reading the leading element as `xs.first` states the intent directly and is
+//! easier to read than the numeric `xs[0]`, which forces the reader to recognize
+//! that zero means "first". The rule matches an index expression whose subscript
+//! is the integer literal `0`; any other index, including a non-literal
+//! expression that evaluates to zero, is left alone. Matching is syntactic on the
+//! literal, so it does not confirm the receiver exposes a `first` getter.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

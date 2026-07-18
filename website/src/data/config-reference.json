@@ -1,0 +1,127 @@
+[
+  {
+    "description": "URL of the falcon.json JSON Schema, enabling rule autocomplete and level validation in editors.",
+    "path": "$schema",
+    "type": "string"
+  },
+  {
+    "default": true,
+    "description": "Master switch for cross-file analysis. Set to false to disable all cross-file rules. Defaults to true.",
+    "path": "cross-file.enabled",
+    "type": "boolean"
+  },
+  {
+    "default": true,
+    "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
+    "path": "cross-file.rules.recommended",
+    "type": "boolean"
+  },
+  {
+    "allowedValues": [
+      "off",
+      "on",
+      "info",
+      "warn",
+      "error"
+    ],
+    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`.",
+    "path": "cross-file.rules.<group>.<rule>",
+    "type": "rule level (or object with level + options)"
+  },
+  {
+    "description": "Glob patterns for the files falcon analyzes. When omitted, every Dart file under the working directory is analyzed.",
+    "path": "files.includes",
+    "type": "string[]"
+  },
+  {
+    "allowedValues": [
+      "all",
+      "recommended",
+      "none"
+    ],
+    "description": "Activation level for the `flutter` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them.",
+    "path": "linter.domains.flutter",
+    "type": "string"
+  },
+  {
+    "default": true,
+    "description": "Master switch for the single-file linter. Set to false to disable all file rules. Defaults to true.",
+    "path": "linter.enabled",
+    "type": "boolean"
+  },
+  {
+    "default": true,
+    "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
+    "path": "linter.rules.recommended",
+    "type": "boolean"
+  },
+  {
+    "allowedValues": [
+      "off",
+      "on",
+      "info",
+      "warn",
+      "error"
+    ],
+    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`.",
+    "path": "linter.rules.<group>.<rule>",
+    "type": "rule level (or object with level + options)"
+  },
+  {
+    "default": null,
+    "description": "Stop after emitting this many diagnostics. Null (the default) means no limit.",
+    "path": "max-errors",
+    "type": "integer | null"
+  },
+  {
+    "description": "Master switch for cross-file analysis within this override.",
+    "path": "overrides[].cross-file.enabled",
+    "type": "boolean"
+  },
+  {
+    "default": true,
+    "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
+    "path": "overrides[].cross-file.rules.recommended",
+    "type": "boolean"
+  },
+  {
+    "allowedValues": [
+      "off",
+      "on",
+      "info",
+      "warn",
+      "error"
+    ],
+    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`.",
+    "path": "overrides[].cross-file.rules.<group>.<rule>",
+    "type": "rule level (or object with level + options)"
+  },
+  {
+    "description": "Glob patterns selecting the files this override applies to.",
+    "path": "overrides[].includes",
+    "type": "string[]"
+  },
+  {
+    "description": "Master switch for the single-file linter within this override.",
+    "path": "overrides[].linter.enabled",
+    "type": "boolean"
+  },
+  {
+    "default": true,
+    "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
+    "path": "overrides[].linter.rules.recommended",
+    "type": "boolean"
+  },
+  {
+    "allowedValues": [
+      "off",
+      "on",
+      "info",
+      "warn",
+      "error"
+    ],
+    "description": "A rule's configuration: either a bare severity level, or an object with a `level` and rule-specific `options`.",
+    "path": "overrides[].linter.rules.<group>.<rule>",
+    "type": "rule level (or object with level + options)"
+  }
+]

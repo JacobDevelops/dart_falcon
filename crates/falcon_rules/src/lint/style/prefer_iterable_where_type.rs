@@ -1,6 +1,16 @@
 //! Flags `.where((e) => e is T)`, which `.whereType<T>()` expresses directly.
 //! Adopted from package:lints `prefer_iterable_whereType`.
 //!
+//! Filtering an iterable with an `is` test is exactly what `Iterable.whereType`
+//! does, but the getter also narrows the element type, yielding an
+//! `Iterable<T>` instead of leaving the original element type in place. Using
+//! `whereType<T>()` is shorter, avoids the throwaway closure, and removes the
+//! casts or checks that a bare `where` filter would still require downstream.
+//! The rule matches a `.where` call carrying exactly one positional argument and
+//! no named arguments, where that argument is a one-parameter arrow closure of
+//! the form `param is T` — the test must be non-negated and applied to the
+//! closure's own parameter.
+//!
 //! Type knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context
 //! and the receiver's static type is *positively proven* to be a concrete type
 //! that (a) is definitely not an `Iterable` (`is_subtype … ProvenNo`) and (b)
@@ -8,8 +18,7 @@
 //! `.whereType<T>()` does not exist on the receiver and rewriting would be wrong,
 //! so the diagnostic is withheld. A user type carrying its own `whereType` keeps
 //! firing (the rewrite is valid there), and an `Unknown` receiver — the common
-//! case, and every receiver when no type index is attached — behaves exactly as
-//! before: it keeps firing.
+//! case, and every receiver when no type index is attached — keeps firing.
 
 use falcon_analyze::{
     AnalyzeContext, LocalTypes, MemberResult, ReceiverTypes, Rule, StaticType, SubtypeResult,

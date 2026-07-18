@@ -1,7 +1,12 @@
-//! Flags a type parameter on a nested declaration (method, local function,
-//! function expression, or generic function type / typedef) that shadows a type
-//! parameter of an enclosing declaration. Ported from package:lints
-//! `avoid_shadowing_type_parameters`.
+//! Flags a type parameter that shadows a type parameter of an enclosing
+//! declaration.
+//!
+//! When a nested declaration — a method, local function, function expression, or
+//! generic function type or typedef — reuses the name of a type parameter from
+//! its surrounding class or function, the inner name hides the outer one. Code in
+//! the nested scope can no longer refer to the enclosing type, and a reader can
+//! easily mistake the two unrelated types for the same one, which invites subtle
+//! type errors. Rename the inner parameter to something distinct.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

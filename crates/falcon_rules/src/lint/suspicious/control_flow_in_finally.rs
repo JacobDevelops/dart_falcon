@@ -1,8 +1,12 @@
-//! Flags `return`/`break`/`continue` that escape a `finally` block, ported from
-//! package:lints `control_flow_in_finally`. Control flow leaving a finally
-//! silently discards any exception in flight. Breaks and continues that target
-//! a loop or switch *inside* the finally are fine — only flow escaping the
-//! finally is reported — and closures inside the finally are left alone.
+//! Flags `return`, `break`, or `continue` that escapes a `finally` block.
+//!
+//! Control flow leaving a finally overrides whatever the try or catch was doing,
+//! including silently discarding an exception that was still propagating — the
+//! error simply vanishes — and masking any value the try was about to return.
+//! Keep finally blocks limited to cleanup and let exceptions and returns flow
+//! through. A `break` or `continue` targeting a loop or switch declared *inside*
+//! the finally is fine and left alone, as are closures defined within it; only
+//! flow that escapes the finally itself is reported.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

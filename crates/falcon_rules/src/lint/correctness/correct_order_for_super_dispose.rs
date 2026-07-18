@@ -1,4 +1,12 @@
-//! Flags `super.dispose()` not called last in `dispose`. Ported from pyramid_lint's `correct_order_for_super_dispose`.
+//! Require `super.dispose()` to be the last call in `dispose`.
+//!
+//! Flags a `super.dispose()` invocation that is not the final statement of a
+//! `dispose` method. The base `State.dispose` tears down the framework's own
+//! bookkeeping for the object, after which touching the widget's fields is
+//! unsafe, so any cleanup your subclass performs must happen first. A
+//! `super.dispose()` in the middle of the method leaves the remaining cleanup
+//! running against a half-disposed object. Move the `super.dispose()` call to
+//! the end.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

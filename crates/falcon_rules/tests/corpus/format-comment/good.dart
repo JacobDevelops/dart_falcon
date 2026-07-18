@@ -21,3 +21,10 @@ void macro() {}
 /// A block whose first sentence ends early. And a second wrapped
 /// sentence that also terminates cleanly.
 void twoSentences() {}
+
+/// Guarded here and here and here and here and here and so on now: fine.
+void colonSingleLine() {}
+
+/// Guarded here and here and here and here and here and so on now:
+/// an unguarded throw would unwind to the zone handler here right now.
+void colonWrapped() {}

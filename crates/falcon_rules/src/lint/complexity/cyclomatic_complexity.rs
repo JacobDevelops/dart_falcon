@@ -1,4 +1,17 @@
-//! Flags functions exceeding the cyclomatic-complexity threshold. Ported from pyramid_lint's `cyclomatic_complexity`.
+//! Flags a function whose cyclomatic complexity exceeds the configured threshold.
+//!
+//! Cyclomatic complexity counts the independent paths through a function; a high
+//! value means many branches to understand and test. The rule computes
+//! complexity as one plus each decision point — `if`, ternary, `&&`, `||`, `??`,
+//! loops (`for`/`while`/`do`), `catch` clauses, non-default `case`s, and pattern
+//! `when` guards — counted across the whole body tree, so decision points inside
+//! nested closures and local functions count toward the enclosing function. It
+//! reports at the function name when the total exceeds the threshold.
+//!
+//! ## Options
+//!
+//! `max_complexity` (integer, default: 20) — flag when the computed complexity
+//! exceeds this.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,18 +1,55 @@
 # Installation
 
-falcon is distributed as a Nix flake. The default package is a **prebuilt static
-binary** fetched from GitHub Releases — no Rust toolchain, no compilation.
+falcon ships as a single self-contained binary — no Dart SDK, no analysis
+server, no runtime dependencies. Pick whichever channel fits your setup.
 
-## Supported systems
+## Supported platforms
 
-| System           | Binary                                   |
-| ---------------- | ---------------------------------------- |
-| `x86_64-linux`   | fully static (musl)                      |
-| `aarch64-linux`  | fully static (musl)                      |
-| `x86_64-darwin`  | native macOS (Intel)                     |
-| `aarch64-darwin` | native macOS (Apple Silicon)             |
+| Platform         | Binary                       |
+| ---------------- | ---------------------------- |
+| Linux x86_64     | fully static (musl)          |
+| Linux aarch64    | fully static (musl)          |
+| macOS Intel      | native                       |
+| macOS Apple Silicon | native                    |
 
-## Use it as a flake input
+Windows binaries are not published yet — Windows users can
+[build from source](#build-from-source) or use WSL.
+
+## Prebuilt binaries (recommended)
+
+Every release attaches platform tarballs to the
+[GitHub Release](https://github.com/JacobDevelops/dart_falcon/releases). Each
+tarball contains a single `falcon` executable.
+
+```sh
+# Substitute the latest version and your platform:
+#   x86_64-linux | aarch64-linux | x86_64-darwin | aarch64-darwin
+curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-0.3.0-x86_64-linux.tar.gz \
+  | tar -xz
+sudo mv falcon /usr/local/bin/   # or anywhere on your PATH
+
+falcon version
+```
+
+## Build from source
+
+With a stable Rust toolchain:
+
+```sh
+# straight from the repository
+cargo install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
+
+# or from a checkout
+cargo build --release
+./target/release/falcon check .
+```
+
+The package is named `dart_falcon`; the installed binary is `falcon`.
+
+## Nix
+
+The repository is also a Nix flake whose default package is the prebuilt static
+binary (a fixed-output fetch of the release tarball — no compilation):
 
 ```nix
 {
@@ -20,40 +57,28 @@ binary** fetched from GitHub Releases — no Rust toolchain, no compilation.
 }
 ```
 
-Then reference `falcon.packages.${system}.default` — for example in a devShell or
-a package list:
-
-```nix
-devShells.default = pkgs.mkShell {
-  packages = [ falcon.packages.${system}.default ];
-};
-```
-
-Or run it directly without installing:
+Reference `falcon.packages.${system}.default` in a devShell or package list, or
+run it directly:
 
 ```sh
-nix run github:JacobDevelops/dart_falcon
+nix run github:JacobDevelops/dart_falcon -- check .
 ```
 
-## Packages
+`packages.<system>.falcon` is the build-from-source escape hatch (crane + the
+pinned toolchain). When no release has been published yet, `default` falls back
+to the source build. The flake reads `nix/binaries.json`, which CI updates with
+each release's tarball hashes.
 
-- **`packages.<system>.default`** — the prebuilt static binary fetched from the
-  GitHub Release for the flake's pinned version. This is a fixed-output
-  `fetchurl` (the manifest pins each tarball's SRI hash), so it downloads the
-  exact published bytes and runs no build. Because it's a fixed-output fetch, it
-  is **immune to `inputs.nixpkgs.follows` overrides** — overriding a consumer's
-  nixpkgs cannot change or rebuild the binary you get.
-- **`packages.<system>.falcon`** — the build-from-source escape hatch (crane +
-  the pinned Rust toolchain). Use this if you need to build against a specific
-  nixpkgs, patch the source, or run on a system without a published binary.
+## Editor extensions
 
-When no release has been published yet, `default` transparently falls back to the
-source build.
+falcon speaks LSP (`falcon lsp`); first-party extensions live in
+[`extensions/`](../extensions):
 
-## Authentication
+- **VS Code** — `extensions/falcon-vscode`
+- **Zed** — `extensions/falcon-zed`
 
-`JacobDevelops/dart_falcon` is public, so fetching the flake and release assets
-needs no authentication or tokens.
+Both launch the `falcon` binary from your `PATH`, so install falcon with any
+channel above first.
 
 ## How releases work
 
@@ -63,9 +88,10 @@ needs no authentication or tokens.
 3. The binaries are packaged as `falcon-X.Y.Z-<system>.tar.gz` and attached to a
    GitHub Release.
 4. CI computes each tarball's SRI hash and commits `nix/binaries.json` back to
-   `main`. That manifest is what the flake reads to define the prebuilt packages.
+   `main` for the flake's prebuilt packages.
 
-## Configuring the linter
+## Next steps
 
-See [configuration.md](./configuration.md) for how to configure falcon's rules
-and options.
+See [configuration.md](./configuration.md) for configuring rules and options,
+or run `falcon check .` — with no `falcon.json` present, every recommended rule
+runs at its default severity.

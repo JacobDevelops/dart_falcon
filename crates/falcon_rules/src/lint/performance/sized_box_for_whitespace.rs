@@ -1,4 +1,10 @@
-//! Flags a `Container` used only for `width`/`height` whitespace. Ported from package:lints `sized_box_for_whitespace`.
+//! Flags a `Container` used only to add fixed `width`/`height` whitespace.
+//!
+//! A `Container` sized only by `width`/`height` (optionally with a `child` or
+//! `key`) does nothing a `SizedBox` cannot, and `SizedBox` has a const
+//! constructor, so it is cheaper and clearer for spacing. The rule fires when a
+//! `Container` has no positional arguments, at least one of `width`/`height`,
+//! and no named arguments other than `width`, `height`, `child`, or `key`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

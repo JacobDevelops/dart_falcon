@@ -1,4 +1,11 @@
-//! Flags the null-assertion operator `!`. Ported from dart_code_linter's `avoid-non-null-assertion`.
+//! Flags the null-assertion operator `!`.
+//!
+//! `x!` asserts at runtime that `x` is non-null and throws if it is not,
+//! trading a compile-time guarantee for a potential crash. Prefer explicit null
+//! handling — `?.`, `??`, an `if (x != null)` promotion, or restructuring so
+//! the value is non-nullable — over silencing the type system. An assertion on
+//! a map index (`map[key]!`) is exempt, since `Map`'s index operator returns a
+//! nullable value by design and the assertion is idiomatic there.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

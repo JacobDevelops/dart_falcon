@@ -1,6 +1,11 @@
-//! Flags import prefixes that begin with an underscore. Ported from
-//! package:lints `no_leading_underscores_for_library_prefixes`. A wildcard
-//! prefix consisting solely of underscores (e.g. `_`) is exempt.
+//! Flags import prefixes that begin with an underscore.
+//!
+//! In Dart a leading underscore signals library privacy, but an import prefix
+//! is only a local alias — it is never exported and cannot be made private, so
+//! the underscore is meaningless noise that only muddies the privacy
+//! convention. Rename the prefix without the leading underscore. A wildcard
+//! prefix composed solely of underscores (e.g. `_`) is exempt, since it is an
+//! intentional throwaway name rather than a misapplied privacy marker.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

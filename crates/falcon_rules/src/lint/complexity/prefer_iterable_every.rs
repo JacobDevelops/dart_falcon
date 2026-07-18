@@ -1,4 +1,9 @@
-//! Flags a negated `.any` in favor of `.every`. Ported from pyramid_lint's `prefer_iterable_every`.
+//! Flags `!iterable.where(...).isEmpty` and `iterable.where(...).length == other.length`.
+//!
+//! Both patterns ask whether every element satisfies a predicate;
+//! `iterable.every(...)` says so directly and short-circuits on the first
+//! failure. The rule matches a negated `.where(...).isEmpty` and a
+//! `.where(...).length` compared for equality against a `.length`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

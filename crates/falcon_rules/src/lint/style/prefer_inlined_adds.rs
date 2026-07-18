@@ -1,6 +1,11 @@
-//! Flags `[a]..add(b)` / `[]..add(a)..add(b)` cascades on a list literal, whose
-//! elements can be written inline (`[a, b]`). Adopted from package:lints
-//! `prefer_inlined_adds`.
+//! Flags an `add` cascade on a list literal whose element could be written inline.
+//!
+//! Building a list by literal-then-cascade (`[a]..add(b)`) is more verbose than
+//! placing the element directly in the literal (`[a, b]`), and the inline form
+//! reads as a single collection rather than a construction followed by mutation.
+//! The rule matches each `..add(...)` section cascaded onto a list literal that
+//! takes exactly one positional argument and no named arguments; multi-argument
+//! or named calls, and cascades on non-list receivers, are ignored.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
