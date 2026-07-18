@@ -2,6 +2,7 @@ use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
 
 use super::Parser;
+use crate::lexer::{Lexer, filter_trivia};
 
 impl<'src> Parser<'src> {
     // ── Directives ────────────────────────────────────────────────────────────
@@ -1402,15 +1403,181 @@ impl<'src> Parser<'src> {
         let tok = self.cur().clone();
         let raw = self.tok_text(&tok).to_string();
         let span = Self::tok_span(&tok);
-        if matches!(tok.kind, TokenKind::StringLit) {
+        let is_string_lit = matches!(tok.kind, TokenKind::StringLit);
+        if is_string_lit {
             self.advance();
         } else {
             self.error("expected string literal");
         }
         // Simple value extraction: strip outer quotes
         let value = strip_quotes(&raw);
-        StringLitNode { raw, value, span }
+        let interpolations = if is_string_lit {
+            scan_interpolations(self.src, tok.offset, &raw)
+        } else {
+            Vec::new()
+        };
+        StringLitNode {
+            raw,
+            value,
+            span,
+            interpolations,
+        }
     }
+}
+
+// ── String interpolation scanning ─────────────────────────────────────────────
+
+/// Scan a single string literal's raw text for interpolation regions and parse
+/// each into an expression with an absolute source span.
+///
+/// `lit_start` is the absolute byte offset of `raw` within `src`. Raw strings
+/// (`r'...'`) yield no interpolations. A `${expr}` whose inner slice fails to
+/// parse cleanly is dropped conservatively (no interpolation recorded), and its
+/// parse errors never reach the enclosing program.
+fn scan_interpolations(src: &str, lit_start: usize, raw: &str) -> Vec<StringInterpolation> {
+    let bytes = raw.as_bytes();
+    if bytes.first() == Some(&b'r') {
+        return Vec::new();
+    }
+    let dlen = if raw.starts_with("'''") || raw.starts_with("\"\"\"") {
+        3
+    } else if raw.starts_with('\'') || raw.starts_with('"') {
+        1
+    } else {
+        return Vec::new();
+    };
+    let content_start = dlen;
+    // A well-formed literal ends with the same delimiter; if it does not (e.g. a
+    // merged-adjacent fragment) scan to the end of the text instead.
+    let content_end = raw.len().saturating_sub(dlen).max(content_start);
+
+    let mut out = Vec::new();
+    let mut i = content_start;
+    while i < content_end {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'$' if i + 1 < content_end && bytes[i + 1] == b'{' => {
+                if let Some(close) = find_interp_close(bytes, i + 1, content_end) {
+                    let inner_start = i + 2;
+                    if let Some(interp) =
+                        parse_interp_expr(src, lit_start + inner_start, lit_start + close)
+                    {
+                        out.push(interp);
+                    }
+                    i = close + 1;
+                } else {
+                    i += 1;
+                }
+            }
+            b'$' if i + 1 < content_end && is_interp_ident_start(bytes[i + 1]) => {
+                let id_start = i + 1;
+                let mut k = id_start + 1;
+                while k < content_end && is_interp_ident_continue(bytes[k]) {
+                    k += 1;
+                }
+                let span = Span::new(lit_start + id_start, lit_start + k);
+                out.push(StringInterpolation {
+                    expr: Expr::Ident(Identifier::new(raw[id_start..k].to_string(), span.clone())),
+                    span,
+                });
+                i = k;
+            }
+            _ => i += 1,
+        }
+    }
+    out
+}
+
+/// Find the byte index of the `}` closing a `${...}` region that opens at
+/// `open_brace` (the `{`). Tracks brace depth, skips escapes, and steps over
+/// nested Dart strings so their braces do not throw off the count. Returns
+/// `None` when unbalanced within `end`.
+fn find_interp_close(bytes: &[u8], open_brace: usize, end: usize) -> Option<usize> {
+    let mut depth = 1usize;
+    let mut i = open_brace + 1;
+    while i < end {
+        match bytes[i] {
+            b'\\' => {
+                i += 2;
+                continue;
+            }
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            b'\'' | b'"' => {
+                i = skip_nested_string(bytes, i, end)?;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Given `open` at a quote byte, return the index just past the matching closing
+/// quote (handling triple quotes and escapes). `None` when unterminated.
+fn skip_nested_string(bytes: &[u8], open: usize, end: usize) -> Option<usize> {
+    let quote = bytes[open];
+    let triple = open + 2 < end && bytes[open + 1] == quote && bytes[open + 2] == quote;
+    let mut i = if triple { open + 3 } else { open + 1 };
+    while i < end {
+        let b = bytes[i];
+        if b == b'\\' {
+            i += 2;
+            continue;
+        }
+        if b == quote {
+            if triple {
+                if i + 2 < end && bytes[i + 1] == quote && bytes[i + 2] == quote {
+                    return Some(i + 3);
+                }
+                i += 1;
+            } else {
+                return Some(i + 1);
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// Lex and parse the source slice `src[start..end]` as a standalone expression,
+/// shifting token offsets so the resulting AST carries absolute spans. Returns
+/// `None` unless it parses to a single non-error expression consuming the whole
+/// slice; sub-parse errors are discarded rather than surfaced.
+fn parse_interp_expr(src: &str, start: usize, end: usize) -> Option<StringInterpolation> {
+    if start >= end {
+        return None;
+    }
+    let slice = &src[start..end];
+    let mut tokens = Lexer::new(slice).tokenize();
+    for tok in &mut tokens {
+        tok.offset += start;
+    }
+    let tokens = filter_trivia(tokens);
+    let mut sub = Parser::new(tokens, src);
+    let expr = sub.parse_expr();
+    if !sub.errors.is_empty() || !sub.at(TokenKind::Eof) || matches!(expr, Expr::Error { .. }) {
+        return None;
+    }
+    let span = expr.span().clone();
+    Some(StringInterpolation { expr, span })
+}
+
+// `$` is excluded so `$a$b` reads as two interpolations, and `.`/`(` end a
+// simple `$identifier` region (mirroring Dart's interpolation grammar).
+fn is_interp_ident_start(c: u8) -> bool {
+    c.is_ascii_alphabetic() || c == b'_'
+}
+
+fn is_interp_ident_continue(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
 }
 
 // Minimal quote-stripping for string literal values (not full escape handling).

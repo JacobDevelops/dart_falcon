@@ -260,8 +260,20 @@ impl LocalTypes {
                 | BinaryOp::GtEq
                 | BinaryOp::And
                 | BinaryOp::Or => StaticType::Bool { nullable: false },
-                BinaryOp::Add
-                | BinaryOp::Sub
+                // `String + String` is concatenation, yielding a non-nullable
+                // `String`; otherwise `+` is numeric.
+                BinaryOp::Add => {
+                    let l = self.of_expr(left);
+                    let r = self.of_expr(right);
+                    if matches!(l, StaticType::String { nullable: false })
+                        && matches!(r, StaticType::String { nullable: false })
+                    {
+                        StaticType::String { nullable: false }
+                    } else {
+                        numeric_result(l, r)
+                    }
+                }
+                BinaryOp::Sub
                 | BinaryOp::Mul
                 | BinaryOp::Mod
                 | BinaryOp::IntDiv
@@ -538,6 +550,29 @@ mod tests {
         assert_eq!(lt.lookup("c"), StaticType::Int { nullable: false });
         // `/` always yields double.
         assert_eq!(lt.lookup("d"), StaticType::Double { nullable: false });
+    }
+
+    #[test]
+    fn string_concatenation_is_string() {
+        // `String + String` is concatenation → non-nullable String; a `String + int`
+        // mismatch is not provable and falls back to Unknown.
+        let stmts = first_fn_stmts(
+            "void f(String a, int n) { var c = a + a; var d = a + n; var e = 'x' + 'y'; }",
+        );
+        let mut lt = LocalTypes::new();
+        let (program, _) = parse("void f(String a, int n) {}");
+        let TopLevelDecl::Function(func) = &program.declarations[0] else {
+            panic!()
+        };
+        lt.bind_params(&func.params);
+        for s in &stmts {
+            if let Stmt::LocalVar(lv) = s {
+                lt.declare_local(lv);
+            }
+        }
+        assert_eq!(lt.lookup("c"), StaticType::String { nullable: false });
+        assert_eq!(lt.lookup("d"), StaticType::Unknown);
+        assert_eq!(lt.lookup("e"), StaticType::String { nullable: false });
     }
 
     #[test]

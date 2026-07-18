@@ -1,6 +1,5 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
-assertion_line: 1368
 expression: "prog.declarations[0]"
 ---
 Function(
@@ -129,6 +128,7 @@ Function(
                                         start: 46,
                                         end: 51,
                                     },
+                                    interpolations: [],
                                 },
                             ),
                             span: Span {
@@ -157,6 +157,7 @@ Function(
                                         start: 58,
                                         end: 64,
                                     },
+                                    interpolations: [],
                                 },
                             ),
                             span: Span {
@@ -181,6 +182,7 @@ Function(
                                         start: 71,
                                         end: 76,
                                     },
+                                    interpolations: [],
                                 },
                             ),
                             span: Span {

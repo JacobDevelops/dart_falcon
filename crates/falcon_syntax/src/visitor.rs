@@ -512,7 +512,13 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
         | Expr::DotShorthand { .. }
         | Expr::Error { .. } => {}
 
-        Expr::StringLit(x) => v.visit_string_lit(x),
+        Expr::StringLit(x) => {
+            v.visit_string_lit(x);
+            // Interpolated expressions are real, analyzable sub-expressions.
+            for interp in &x.interpolations {
+                v.visit_expr(&interp.expr);
+            }
+        }
         Expr::Ident(x) => v.visit_identifier(x),
 
         Expr::Unary { operand, .. } => v.visit_expr(operand),

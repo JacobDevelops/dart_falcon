@@ -1,10 +1,12 @@
-// Bad: the whole string is a single interpolation, so the wrapping string adds nothing.
-String examples(String name, Object value, int n) {
+// Bad: the whole string is a single interpolation of a provably non-nullable String.
+String examples(String name) {
   final a = '$name'; /* expect: unnecessary-string-interpolations */
   final b = '${name}'; /* expect: unnecessary-string-interpolations */
-  final c = '${value}'; /* expect: unnecessary-string-interpolations */
-  final d = '${name.toUpperCase()}'; /* expect: unnecessary-string-interpolations */
-  final e = "$name"; /* expect: unnecessary-string-interpolations */
-  final f = '${n + 1}'; /* expect: unnecessary-string-interpolations */
-  return '$a$b$c$d$e$f';
+  final c = "$name"; /* expect: unnecessary-string-interpolations */
+  final s = 'x';
+  final d = '$s'; /* expect: unnecessary-string-interpolations */
+  final e = '${'lit'}'; /* expect: unnecessary-string-interpolations */
+  final f = 'a' + 'b';
+  final g = '$f'; /* expect: unnecessary-string-interpolations */
+  return '$a$b$c$d$e$g';
 }

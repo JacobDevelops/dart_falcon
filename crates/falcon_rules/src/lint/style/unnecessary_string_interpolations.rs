@@ -1,11 +1,18 @@
-//! Flags a string whose entire content is a single interpolation. Ported from package:lints
-//! `unnecessary_string_interpolations`. `'$x'` / `'${x}'` where the whole string is just one
-//! interpolated expression is equivalent to writing the expression directly.
+//! Flags a string whose entire content is a single interpolation of a provably
+//! non-nullable `String`. Ported from package:lints `unnecessary_string_interpolations`.
+//! `'$x'` / `'${x}'` where the whole string is just one interpolated `String`
+//! expression is equivalent to writing that expression directly.
+//!
+//! The type proof is file-local ([`LocalTypes`]) and sound-over-precise: it fires
+//! only when the interpolated expression is *known* to be a non-nullable `String`
+//! (a string literal, a local/param declared `String`, `String + String`, …).
+//! `String?` and unknown types never fire — replacing `'${n + 1}'` (an `int`)
+//! with `n + 1` would silently change the value's type, the very bug this guards.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, LocalTypes, Rule, StaticType};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_program, walk_stmt};
 
 pub struct UnnecessaryStringInterpolations;
 
@@ -18,6 +25,7 @@ impl Rule for UnnecessaryStringInterpolations {
         let mut collector = Collector {
             diags: Vec::new(),
             file: ctx.file_path.to_string_lossy().into_owned(),
+            lt: LocalTypes::new(),
         };
         collector.visit_program(program);
         collector.diags
@@ -94,6 +102,23 @@ fn is_whole_interpolation(content: &str) -> bool {
 struct Collector {
     diags: Vec<Diagnostic>,
     file: String,
+    lt: LocalTypes,
+}
+
+impl Collector {
+    /// Walk a function/method/getter/setter/closure body whose signature bindings
+    /// already live in the current (innermost) scope.
+    fn walk_body(&mut self, body: &FunctionBody) {
+        match body {
+            FunctionBody::Block(b) => {
+                for s in &b.stmts {
+                    self.visit_stmt(s);
+                }
+            }
+            FunctionBody::Arrow(e, _) => self.visit_expr(e),
+            FunctionBody::Native(_, _) => {}
+        }
+    }
 }
 
 impl Visitor for Collector {
@@ -101,11 +126,159 @@ impl Visitor for Collector {
         walk_program(self, node);
     }
 
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
+        self.lt.bind_params(&node.params);
+        if let Some(body) = &node.body {
+            self.walk_body(body);
+        }
+        self.lt = saved;
+    }
+
+    fn visit_method_decl(&mut self, node: &MethodDecl) {
+        let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
+        self.lt.bind_params(&node.params);
+        if let Some(body) = &node.body {
+            self.walk_body(body);
+        }
+        self.lt = saved;
+    }
+
+    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+        let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
+        self.lt.bind_params(&node.params);
+        if let Some(body) = &node.body {
+            self.walk_body(body);
+        }
+        self.lt = saved;
+    }
+
+    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+        let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
+        if let Some(body) = &node.body {
+            self.walk_body(body);
+        }
+        self.lt = saved;
+    }
+
+    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+        let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
+        let ty = node
+            .param_type
+            .as_ref()
+            .map(StaticType::from_dart_type)
+            .unwrap_or(StaticType::Unknown);
+        self.lt.declare(node.param.name.clone(), ty);
+        if let Some(body) = &node.body {
+            self.walk_body(body);
+        }
+        self.lt = saved;
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) {
+        match node {
+            Stmt::LocalVar(lv) => {
+                for d in &lv.declarators {
+                    if let Some(init) = &d.initializer {
+                        self.visit_expr(init);
+                    }
+                }
+                self.lt.declare_local(lv);
+            }
+            Stmt::PatternDecl(pd) => {
+                self.visit_expr(&pd.init);
+                self.lt.bind_pattern(&pd.pattern);
+            }
+            Stmt::Block(b) => {
+                self.lt.push_scope();
+                for s in &b.stmts {
+                    self.visit_stmt(s);
+                }
+                self.lt.pop_scope();
+            }
+            Stmt::For(f) => {
+                self.lt.push_scope();
+                if let Some(init) = &f.init {
+                    if let ForInit::VarDecl(lv) = init {
+                        for d in &lv.declarators {
+                            if let Some(e) = &d.initializer {
+                                self.visit_expr(e);
+                            }
+                        }
+                    }
+                    self.lt.bind_for_init(init);
+                }
+                if let Some(cond) = &f.condition {
+                    self.visit_expr(cond);
+                }
+                for u in &f.update {
+                    self.visit_expr(u);
+                }
+                self.visit_stmt(&f.body);
+                self.lt.pop_scope();
+            }
+            Stmt::TryCatch(tc) => {
+                self.lt.push_scope();
+                for s in &tc.body.stmts {
+                    self.visit_stmt(s);
+                }
+                self.lt.pop_scope();
+                for catch in &tc.catches {
+                    self.lt.push_scope();
+                    self.lt.bind_catch(catch);
+                    for s in &catch.body.stmts {
+                        self.visit_stmt(s);
+                    }
+                    self.lt.pop_scope();
+                }
+                if let Some(fin) = &tc.finally {
+                    self.lt.push_scope();
+                    for s in &fin.stmts {
+                        self.visit_stmt(s);
+                    }
+                    self.lt.pop_scope();
+                }
+            }
+            _ => walk_stmt(self, node),
+        }
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        match node {
+            Expr::FuncExpr { params, body, .. } => {
+                self.lt.push_scope();
+                self.lt.bind_params(params);
+                self.walk_body(body);
+                self.lt.pop_scope();
+            }
+            Expr::Assign { target, value, .. } => {
+                self.visit_expr(target);
+                self.visit_expr(value);
+                // Track the reassignment so a later string sees the current type.
+                if let Expr::Ident(id) = target.as_ref() {
+                    let ty = self.lt.of_expr(value);
+                    self.lt.reassign(&id.name, ty);
+                }
+            }
+            _ => walk_expr(self, node),
+        }
+    }
+
     fn visit_string_lit(&mut self, node: &StringLitNode) {
         let Some(lit) = parse_str_lit(&node.raw) else {
             return;
         };
-        if lit.is_raw || !is_whole_interpolation(lit.content) {
+        // The whole literal must be exactly one interpolation, and that
+        // interpolation must have parsed cleanly to a single expression.
+        if lit.is_raw || !is_whole_interpolation(lit.content) || node.interpolations.len() != 1 {
+            return;
+        }
+        // Fire only when the interpolated expression is provably a non-nullable
+        // `String`; `String?` and unknown types are left alone.
+        if !matches!(
+            self.lt.of_expr(&node.interpolations[0].expr),
+            StaticType::String { nullable: false }
+        ) {
             return;
         }
         self.diags.push(Diagnostic::new(

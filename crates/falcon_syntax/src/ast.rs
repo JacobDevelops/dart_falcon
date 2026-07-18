@@ -42,6 +42,22 @@ pub struct StringLitNode {
     /// The decoded string value (without surrounding quotes, escapes resolved).
     pub value: String,
     pub span: Span,
+    /// The parsed interpolated expressions (`$id` / `${expr}`) embedded in the
+    /// literal, in source order. Empty for raw strings, non-interpolated
+    /// literals, and any interpolation whose inner expression failed to parse
+    /// cleanly (recorded conservatively as absent).
+    pub interpolations: Vec<StringInterpolation>,
+}
+
+/// A single interpolation embedded in a [`StringLitNode`].
+#[derive(Debug, Clone)]
+pub struct StringInterpolation {
+    /// The parsed interpolated expression.
+    pub expr: Expr,
+    /// Absolute byte range of the interpolated expression text in the original
+    /// source: for `${e}` the range of `e` inside the braces, for `$ident` the
+    /// range of `ident`.
+    pub span: Span,
 }
 
 // ── Top-level compilation unit ────────────────────────────────────────────────

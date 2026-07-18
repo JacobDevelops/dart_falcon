@@ -732,10 +732,13 @@ impl<'src> Parser<'src> {
                 let mut node = self.parse_string_lit();
                 while self.at(TokenKind::StringLit) {
                     let next = self.parse_string_lit();
+                    let mut interpolations = node.interpolations;
+                    interpolations.extend(next.interpolations);
                     node = StringLitNode {
                         raw: node.raw + &next.raw,
                         value: node.value + &next.value,
                         span: next.span,
+                        interpolations,
                     };
                 }
                 Expr::StringLit(node)
