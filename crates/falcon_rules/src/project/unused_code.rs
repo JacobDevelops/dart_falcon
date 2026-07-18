@@ -139,6 +139,7 @@ fn candidates(program: &Program) -> Vec<Candidate> {
         let decl_span = decl.span();
         match decl {
             TopLevelDecl::Class(x) => push(&x.name, "class", &x.annotations, decl_span),
+            TopLevelDecl::ClassTypeAlias(x) => push(&x.name, "class", &x.annotations, decl_span),
             TopLevelDecl::Mixin(x) => push(&x.name, "mixin", &x.annotations, decl_span),
             TopLevelDecl::MixinClass(x) => push(&x.name, "mixin class", &x.annotations, decl_span),
             TopLevelDecl::Enum(x) => push(&x.name, "enum", &x.annotations, decl_span),

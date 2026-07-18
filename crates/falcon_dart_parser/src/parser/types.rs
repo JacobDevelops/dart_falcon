@@ -293,6 +293,7 @@ impl<'src> Parser<'src> {
         let mut params = Vec::new();
         while !self.at(TokenKind::Gt) && !self.at(TokenKind::GtGt) && !self.at(TokenKind::Eof) {
             let start = self.cur().offset;
+            let annotations = self.parse_annotations();
             let name = self.expect_ident();
             let bound = if self.eat(TokenKind::Extends).is_some() {
                 Some(self.parse_type())
@@ -300,6 +301,7 @@ impl<'src> Parser<'src> {
                 None
             };
             params.push(TypeParam {
+                annotations,
                 name,
                 bound,
                 span: self.span_from(start),
@@ -397,33 +399,45 @@ impl<'src> Parser<'src> {
         // identifier is read as the name rather than a type.
         let is_var = self.eat(TokenKind::Var).is_some();
 
-        // this.field or super.field
-        let is_field = self.at(TokenKind::This) && self.peek(1).kind == TokenKind::Dot;
-        let is_super = self.at(TokenKind::Super) && self.peek(1).kind == TokenKind::Dot;
-
-        let (param_type, name) = if is_field || is_super {
-            self.advance(); // this / super
-            self.advance(); // .
-            (None, self.expect_ident())
-        } else if is_var {
+        // A `this.field` / `super.field` formal may be preceded by a type
+        // (`C(int this.x)`, `C(int super.x)`), so parse an optional leading type
+        // before deciding.
+        let mut is_field = false;
+        let mut is_super = false;
+        let (param_type, name) = if is_var {
             // `var name` — untyped, the next token is the parameter name.
             (None, self.expect_ident())
         } else {
-            // Try to distinguish `Type name` from just `name`
-            // Heuristic: if next-next token is ident/comma/rparen/eq/lbracket, it's typed
             let saved_pos = self.pos;
-            if self.is_type_start() {
+            let leading = if !self.at(TokenKind::This)
+                && !self.at(TokenKind::Super)
+                && self.is_type_start()
+            {
                 let ty = self.parse_type();
-                if self.is_ident_like() {
-                    (Some(ty), self.expect_ident())
+                // Accept the type only if a name / `this` / `super` follows;
+                // otherwise it was actually the bare parameter name.
+                if self.is_ident_like() || self.at(TokenKind::This) || self.at(TokenKind::Super) {
+                    Some(ty)
                 } else {
-                    // rollback: treat what we parsed as the name
                     self.pos = saved_pos;
-                    let n = self.expect_ident();
-                    (None, n)
+                    None
                 }
             } else {
-                (None, self.expect_ident())
+                None
+            };
+
+            if self.at(TokenKind::This) && self.peek(1).kind == TokenKind::Dot {
+                is_field = true;
+                self.advance(); // this
+                self.advance(); // .
+                (leading, self.expect_ident())
+            } else if self.at(TokenKind::Super) && self.peek(1).kind == TokenKind::Dot {
+                is_super = true;
+                self.advance(); // super
+                self.advance(); // .
+                (leading, self.expect_ident())
+            } else {
+                (leading, self.expect_ident())
             }
         };
 
@@ -433,6 +447,10 @@ impl<'src> Parser<'src> {
         } else {
             None
         };
+        // Nullable old-style function-typed formal: `{int orElse()?}`.
+        if function_params.is_some() {
+            self.eat(TokenKind::Qmark);
+        }
 
         let default_value = if self.at_any(&[TokenKind::Eq, TokenKind::Colon]) {
             self.advance();

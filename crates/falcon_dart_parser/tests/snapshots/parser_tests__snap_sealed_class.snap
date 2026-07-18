@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1669
 expression: "prog.declarations[0]"
 ---
 Class(
@@ -21,6 +22,7 @@ Class(
         },
         type_params: [
             TypeParam {
+                annotations: [],
                 name: Identifier {
                     name: "T",
                     span: Span {

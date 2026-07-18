@@ -65,6 +65,7 @@ fn visit_top_level_decl(
         }
         TopLevelDecl::ExtensionType(_) => {}
         TopLevelDecl::TypeAlias(_) => {}
+        TopLevelDecl::ClassTypeAlias(_) => {}
         TopLevelDecl::Error(_) => {}
     }
 }

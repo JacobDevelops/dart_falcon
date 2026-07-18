@@ -267,6 +267,12 @@ impl<'src> Parser<'src> {
             while self.eat(TokenKind::Dot).is_some() {
                 name.push(self.expect_ident());
             }
+            // Type arguments: `@Native<int Function()>(...)`, `@Foo<int>.named()`.
+            let type_args = if self.at(TokenKind::Lt) {
+                self.parse_type_args()
+            } else {
+                Vec::new()
+            };
             let constructor_name = if self.eat(TokenKind::Dot).is_some() {
                 Some(self.expect_ident())
             } else {
@@ -280,6 +286,7 @@ impl<'src> Parser<'src> {
             let span = self.span_from(start);
             anns.push(Annotation {
                 name,
+                type_args,
                 constructor_name,
                 args,
                 span,

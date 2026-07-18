@@ -99,23 +99,39 @@ pub struct PartDirective {
     pub span: Span,
 }
 
-/// `import 'uri' [as name] [show/hide ...];`
+/// `import 'uri' [if (name) 'uri' ...] [as name] [show/hide ...];`
 #[derive(Debug, Clone)]
 pub struct ImportDirective {
     pub annotations: Vec<Annotation>,
     pub uri: StringLitNode,
+    /// Configurable (conditional) URIs: `if (dart.library.io) 'io.dart'`.
+    pub configurable_uris: Vec<ConfigurableUri>,
     pub is_deferred: bool,
     pub as_name: Option<Identifier>,
     pub combinators: Vec<ImportCombinator>,
     pub span: Span,
 }
 
-/// `export 'uri' [show/hide ...];`
+/// `export 'uri' [if (name) 'uri' ...] [show/hide ...];`
 #[derive(Debug, Clone)]
 pub struct ExportDirective {
     pub annotations: Vec<Annotation>,
     pub uri: StringLitNode,
+    /// Configurable (conditional) URIs: `if (dart.library.io) 'io.dart'`.
+    pub configurable_uris: Vec<ConfigurableUri>,
     pub combinators: Vec<ImportCombinator>,
+    pub span: Span,
+}
+
+/// A configurable-URI clause on an import/export: `if (dotted.name [== 'value']) 'uri'`.
+#[derive(Debug, Clone)]
+pub struct ConfigurableUri {
+    /// The dotted environment constant tested, e.g. `dart.library.io`.
+    pub test: Vec<Identifier>,
+    /// The `== 'value'` comparison string, when present.
+    pub value: Option<StringLitNode>,
+    /// The URI selected when the test succeeds.
+    pub uri: StringLitNode,
     pub span: Span,
 }
 
@@ -130,6 +146,8 @@ pub enum ImportCombinator {
 #[derive(Debug, Clone)]
 pub enum TopLevelDecl {
     Class(ClassDecl),
+    /// Mixin-application class: `class MA = S with M [implements I];`
+    ClassTypeAlias(ClassTypeAliasDecl),
     Mixin(MixinDecl),
     MixinClass(MixinClassDecl),
     Enum(EnumDecl),
@@ -145,6 +163,7 @@ impl TopLevelDecl {
     pub fn span(&self) -> &Span {
         match self {
             TopLevelDecl::Class(x) => &x.span,
+            TopLevelDecl::ClassTypeAlias(x) => &x.span,
             TopLevelDecl::Mixin(x) => &x.span,
             TopLevelDecl::MixinClass(x) => &x.span,
             TopLevelDecl::Enum(x) => &x.span,
@@ -180,6 +199,22 @@ pub struct ClassDecl {
     pub with_clause: Vec<DartType>,
     pub implements: Vec<DartType>,
     pub members: Vec<ClassMember>,
+    pub span: Span,
+}
+
+/// `[modifiers] class Name<T> = Superclass with M1, M2 [implements I];`
+///
+/// A mixin-application ("class type alias") declaration: names a class formed by
+/// applying mixins to a superclass, with no body.
+#[derive(Debug, Clone)]
+pub struct ClassTypeAliasDecl {
+    pub annotations: Vec<Annotation>,
+    pub modifiers: ClassModifiers,
+    pub name: Identifier,
+    pub type_params: Vec<TypeParam>,
+    pub superclass: DartType,
+    pub with_clause: Vec<DartType>,
+    pub implements: Vec<DartType>,
     pub span: Span,
 }
 
@@ -240,7 +275,17 @@ pub struct ConstructorDecl {
     pub constructor_name: Option<Identifier>,
     pub params: FormalParamList,
     pub initializers: Vec<ConstructorInitializer>,
+    /// Redirecting factory target: `factory C() = D;` / `= D.named;` / `= D<int>;`.
+    pub redirect: Option<RedirectedConstructor>,
     pub body: Option<FunctionBody>,
+    pub span: Span,
+}
+
+/// The target of a redirecting factory constructor (`= Type[.name]`).
+#[derive(Debug, Clone)]
+pub struct RedirectedConstructor {
+    pub type_: DartType,
+    pub constructor_name: Option<Identifier>,
     pub span: Span,
 }
 
@@ -388,6 +433,8 @@ pub struct ExtensionDecl {
 #[derive(Debug, Clone)]
 pub struct ExtensionTypeDecl {
     pub annotations: Vec<Annotation>,
+    /// `extension type const Name(...)` — the representation constructor is const.
+    pub is_const: bool,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,
     pub representation: ExtensionTypeRepresentation,
@@ -398,6 +445,8 @@ pub struct ExtensionTypeDecl {
 
 #[derive(Debug, Clone)]
 pub struct ExtensionTypeRepresentation {
+    /// Named representation constructor: `extension type Name._(int it)`.
+    pub constructor_name: Option<Identifier>,
     pub field_type: DartType,
     pub field_name: Identifier,
     pub span: Span,
@@ -520,6 +569,7 @@ pub struct NamedRecordField {
 
 #[derive(Debug, Clone)]
 pub struct TypeParam {
+    pub annotations: Vec<Annotation>,
     pub name: Identifier,
     pub bound: Option<DartType>,
     pub span: Span,
@@ -574,6 +624,8 @@ impl FunctionBody {
 #[derive(Debug, Clone)]
 pub struct Annotation {
     pub name: Vec<Identifier>,
+    /// Type arguments on the annotation: `@Native<int Function()>(...)`.
+    pub type_args: Vec<DartType>,
     pub constructor_name: Option<Identifier>,
     pub args: Option<ArgList>,
     pub span: Span,

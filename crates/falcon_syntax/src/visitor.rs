@@ -153,6 +153,9 @@ pub fn walk_import<V: Visitor>(v: &mut V, node: &ImportDirective) {
         v.visit_annotation(ann);
     }
     v.visit_string_lit(&node.uri);
+    for cu in &node.configurable_uris {
+        walk_configurable_uri(v, cu);
+    }
     if let Some(ref alias) = node.as_name {
         v.visit_identifier(alias);
     }
@@ -166,9 +169,22 @@ pub fn walk_export<V: Visitor>(v: &mut V, node: &ExportDirective) {
         v.visit_annotation(ann);
     }
     v.visit_string_lit(&node.uri);
+    for cu in &node.configurable_uris {
+        walk_configurable_uri(v, cu);
+    }
     for comb in &node.combinators {
         walk_import_combinator(v, comb);
     }
+}
+
+fn walk_configurable_uri<V: Visitor>(v: &mut V, node: &ConfigurableUri) {
+    for seg in &node.test {
+        v.visit_identifier(seg);
+    }
+    if let Some(ref value) = node.value {
+        v.visit_string_lit(value);
+    }
+    v.visit_string_lit(&node.uri);
 }
 
 fn walk_import_combinator<V: Visitor>(v: &mut V, comb: &ImportCombinator) {
@@ -185,6 +201,9 @@ pub fn walk_annotation<V: Visitor>(v: &mut V, node: &Annotation) {
     for seg in &node.name {
         v.visit_identifier(seg);
     }
+    for t in &node.type_args {
+        v.visit_dart_type(t);
+    }
     if let Some(ref ctor) = node.constructor_name {
         v.visit_identifier(ctor);
     }
@@ -198,6 +217,9 @@ pub fn walk_annotation<V: Visitor>(v: &mut V, node: &Annotation) {
 /// walkers.
 fn walk_type_params<V: Visitor>(v: &mut V, type_params: &[TypeParam]) {
     for tp in type_params {
+        for ann in &tp.annotations {
+            v.visit_annotation(ann);
+        }
         if let Some(ref bound) = tp.bound {
             v.visit_dart_type(bound);
         }
@@ -207,6 +229,7 @@ fn walk_type_params<V: Visitor>(v: &mut V, type_params: &[TypeParam]) {
 pub fn walk_top_level_decl<V: Visitor>(v: &mut V, node: &TopLevelDecl) {
     match node {
         TopLevelDecl::Class(x) => v.visit_class_decl(x),
+        TopLevelDecl::ClassTypeAlias(x) => walk_class_type_alias(v, x),
         TopLevelDecl::Mixin(x) => v.visit_mixin_decl(x),
         TopLevelDecl::MixinClass(x) => walk_mixin_class(v, x),
         TopLevelDecl::Enum(x) => v.visit_enum_decl(x),
@@ -236,6 +259,21 @@ pub fn walk_class_decl<V: Visitor>(v: &mut V, node: &ClassDecl) {
     }
     for member in &node.members {
         v.visit_class_member(member);
+    }
+}
+
+fn walk_class_type_alias<V: Visitor>(v: &mut V, node: &ClassTypeAliasDecl) {
+    for ann in &node.annotations {
+        v.visit_annotation(ann);
+    }
+    v.visit_identifier(&node.name);
+    walk_type_params(v, &node.type_params);
+    v.visit_dart_type(&node.superclass);
+    for t in &node.with_clause {
+        v.visit_dart_type(t);
+    }
+    for t in &node.implements {
+        v.visit_dart_type(t);
     }
 }
 
@@ -325,6 +363,9 @@ fn walk_extension_type<V: Visitor>(v: &mut V, node: &ExtensionTypeDecl) {
     }
     v.visit_identifier(&node.name);
     walk_type_params(v, &node.type_params);
+    if let Some(ref ctor) = node.representation.constructor_name {
+        v.visit_identifier(ctor);
+    }
     v.visit_dart_type(&node.representation.field_type);
     v.visit_identifier(&node.representation.field_name);
     for t in &node.implements {
@@ -425,6 +466,12 @@ pub fn walk_constructor_decl<V: Visitor>(v: &mut V, node: &ConstructorDecl) {
     }
     for init in &node.initializers {
         walk_constructor_initializer(v, init);
+    }
+    if let Some(ref redirect) = node.redirect {
+        v.visit_dart_type(&redirect.type_);
+        if let Some(ref name) = redirect.constructor_name {
+            v.visit_identifier(name);
+        }
     }
     if let Some(ref body) = node.body {
         walk_function_body(v, body);

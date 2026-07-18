@@ -81,6 +81,7 @@ impl<'src> Parser<'src> {
         let annotations = self.parse_annotations();
         self.expect(TokenKind::Import);
         let uri = self.parse_string_lit();
+        let configurable_uris = self.parse_configurable_uris();
         let is_deferred = self.eat(TokenKind::Deferred).is_some();
         let as_name = if self.eat(TokenKind::As).is_some() {
             Some(self.expect_ident())
@@ -92,6 +93,7 @@ impl<'src> Parser<'src> {
         ImportDirective {
             annotations,
             uri,
+            configurable_uris,
             is_deferred,
             as_name,
             combinators,
@@ -104,14 +106,45 @@ impl<'src> Parser<'src> {
         let annotations = self.parse_annotations();
         self.expect(TokenKind::Export);
         let uri = self.parse_string_lit();
+        let configurable_uris = self.parse_configurable_uris();
         let combinators = self.parse_import_combinators();
         self.expect(TokenKind::Semicolon);
         ExportDirective {
             annotations,
             uri,
+            configurable_uris,
             combinators,
             span: self.span_from(start),
         }
+    }
+
+    /// Parse zero or more configurable-URI clauses:
+    /// `if (dotted.name [== 'value']) 'uri'`.
+    fn parse_configurable_uris(&mut self) -> Vec<ConfigurableUri> {
+        let mut uris = Vec::new();
+        while self.at(TokenKind::If) {
+            let start = self.cur().offset;
+            self.advance(); // if
+            self.expect(TokenKind::LParen);
+            let mut test = vec![self.expect_ident()];
+            while self.eat(TokenKind::Dot).is_some() {
+                test.push(self.expect_ident());
+            }
+            let value = if self.eat(TokenKind::EqEq).is_some() {
+                Some(self.parse_string_lit())
+            } else {
+                None
+            };
+            self.expect(TokenKind::RParen);
+            let uri = self.parse_string_lit();
+            uris.push(ConfigurableUri {
+                test,
+                value,
+                uri,
+                span: self.span_from(start),
+            });
+        }
+        uris
     }
 
     fn parse_import_combinators(&mut self) -> Vec<ImportCombinator> {
@@ -192,17 +225,14 @@ impl<'src> Parser<'src> {
         };
 
         match self.cur().kind {
-            TokenKind::Class => Some(TopLevelDecl::Class(self.parse_class(
-                annotations,
-                modifiers,
-                start,
-            ))),
+            TokenKind::Class => Some(self.parse_class_or_type_alias(annotations, modifiers, start)),
             TokenKind::Mixin => {
                 // `mixin class` → MixinClass
                 if self.peek(1).kind == TokenKind::Class {
                     self.advance(); // mixin
                     Some(TopLevelDecl::MixinClass(self.parse_mixin_class(
                         annotations,
+                        is_abstract,
                         is_base,
                         start,
                     )))
@@ -239,15 +269,42 @@ impl<'src> Parser<'src> {
 
     // ── Class ─────────────────────────────────────────────────────────────────
 
-    fn parse_class(
+    fn parse_class_or_type_alias(
         &mut self,
         annotations: Vec<Annotation>,
         modifiers: ClassModifiers,
         start: usize,
-    ) -> ClassDecl {
+    ) -> TopLevelDecl {
         self.expect(TokenKind::Class);
         let name = self.expect_ident();
         let type_params = self.parse_type_params();
+
+        // Mixin-application class: `class MA = Super with M [implements I];`
+        if self.eat(TokenKind::Eq).is_some() {
+            let superclass = self.parse_type();
+            let with_clause = if self.eat(TokenKind::With).is_some() {
+                self.parse_type_list()
+            } else {
+                Vec::new()
+            };
+            let implements = if self.eat(TokenKind::Implements).is_some() {
+                self.parse_type_list()
+            } else {
+                Vec::new()
+            };
+            self.expect(TokenKind::Semicolon);
+            return TopLevelDecl::ClassTypeAlias(ClassTypeAliasDecl {
+                annotations,
+                modifiers,
+                name,
+                type_params,
+                superclass,
+                with_clause,
+                implements,
+                span: self.span_from(start),
+            });
+        }
+
         let extends = if self.eat(TokenKind::Extends).is_some() {
             Some(self.parse_type())
         } else {
@@ -266,7 +323,7 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::LBrace);
         let members = self.parse_class_body();
         self.expect(TokenKind::RBrace);
-        ClassDecl {
+        TopLevelDecl::Class(ClassDecl {
             annotations,
             modifiers,
             name,
@@ -276,7 +333,7 @@ impl<'src> Parser<'src> {
             implements,
             members,
             span: self.span_from(start),
-        }
+        })
     }
 
     fn parse_mixin(
@@ -316,10 +373,10 @@ impl<'src> Parser<'src> {
     fn parse_mixin_class(
         &mut self,
         annotations: Vec<Annotation>,
+        is_abstract: bool,
         is_base: bool,
         start: usize,
     ) -> MixinClassDecl {
-        let is_abstract = annotations.is_empty(); // placeholder; modifiers parsed above
         self.expect(TokenKind::Class);
         let name = self.expect_ident();
         let type_params = self.parse_type_params();
@@ -426,7 +483,15 @@ impl<'src> Parser<'src> {
                     is_const = true;
                     self.advance();
                 }
-                TokenKind::Async => {
+                // `async` is a body suffix, not a leading modifier; only treat it
+                // as one when it is not the member's own name (`async() {}`,
+                // `async<T>() {}`) or a field named `async`.
+                TokenKind::Async
+                    if !matches!(
+                        self.peek(1).kind,
+                        TokenKind::LParen | TokenKind::Lt | TokenKind::Semicolon | TokenKind::Eq
+                    ) =>
+                {
                     is_async = true;
                     self.advance();
                 }
@@ -643,8 +708,21 @@ impl<'src> Parser<'src> {
         start: usize,
     ) -> OperatorDecl {
         self.advance(); // operator
-        let op = self.cur_text().to_string();
-        self.advance();
+        // `[]` and `[]=` are lexed as separate bracket tokens; all other operators
+        // are a single token.
+        let op = if self.at(TokenKind::LBracket) {
+            self.advance(); // [
+            self.expect(TokenKind::RBracket); // ]
+            if self.eat(TokenKind::Eq).is_some() {
+                "[]=".to_string()
+            } else {
+                "[]".to_string()
+            }
+        } else {
+            let op = self.cur_text().to_string();
+            self.advance();
+            op
+        };
         let params = self.parse_formal_param_list();
         let body = self.parse_function_body();
         OperatorDecl {
@@ -672,7 +750,18 @@ impl<'src> Parser<'src> {
             None
         };
         let params = self.parse_formal_param_list();
-        let body = self.parse_function_body();
+        // Redirecting factory: `factory C() = D;` / `= D.named;` / `= D<int>;`.
+        let redirect = if self.at(TokenKind::Eq) {
+            Some(self.parse_redirected_constructor())
+        } else {
+            None
+        };
+        let body = if redirect.is_some() {
+            self.eat(TokenKind::Semicolon);
+            None
+        } else {
+            self.parse_function_body()
+        };
         ConstructorDecl {
             annotations,
             is_const: false,
@@ -682,7 +771,25 @@ impl<'src> Parser<'src> {
             constructor_name,
             params,
             initializers: Vec::new(),
+            redirect,
             body,
+            span: self.span_from(start),
+        }
+    }
+
+    /// Parse a redirecting-factory target after `=`: `Type[.name]`.
+    fn parse_redirected_constructor(&mut self) -> RedirectedConstructor {
+        let start = self.cur().offset;
+        self.expect(TokenKind::Eq);
+        let type_ = self.parse_type();
+        let constructor_name = if self.eat(TokenKind::Dot).is_some() {
+            Some(self.expect_ctor_name())
+        } else {
+            None
+        };
+        RedirectedConstructor {
+            type_,
+            constructor_name,
             span: self.span_from(start),
         }
     }
@@ -735,6 +842,7 @@ impl<'src> Parser<'src> {
                             constructor_name,
                             params,
                             initializers,
+                            redirect: None,
                             body,
                             span: self.span_from(start),
                         });
@@ -881,13 +989,15 @@ impl<'src> Parser<'src> {
             self.pos = saved;
         }
 
-        // No type prefix — might be `name(` constructor/method
+        // No type prefix — `name(...)`, `name.ctor(...)`, or `name<T>(...)`.
+        // With no return type this is a constructor, unless it takes type
+        // parameters or carries an `async`/`sync*` marker (neither of which a
+        // constructor may have), in which case it is an untyped method.
         if self.is_ident_like() {
             let name_tok = self.cur().clone();
             self.advance();
-            if self.at(TokenKind::LParen)
-                || (self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1))
-            {
+            let has_ctor_dot = self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1);
+            if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) || has_ctor_dot {
                 let name = Identifier::new(
                     self.tok_text(&name_tok).to_string(),
                     Self::tok_span(&name_tok),
@@ -897,8 +1007,30 @@ impl<'src> Parser<'src> {
                 } else {
                     None
                 };
+                let type_params = self.parse_type_params();
                 if self.at(TokenKind::LParen) {
                     let params = self.parse_formal_param_list();
+                    let has_type_params = !type_params.is_empty();
+                    let has_marker = matches!(self.cur().kind, TokenKind::Async | TokenKind::Sync);
+                    if constructor_name.is_none() && (has_type_params || has_marker) {
+                        let (async_from_marker, is_generator) = self.parse_async_marker();
+                        let body = self.parse_function_body();
+                        let is_method_abstract = is_abstract || body.is_none();
+                        return ClassMember::Method(MethodDecl {
+                            annotations,
+                            is_static,
+                            is_abstract: is_method_abstract,
+                            is_external,
+                            is_async: outer_is_async || async_from_marker,
+                            is_generator,
+                            return_type: None,
+                            name,
+                            type_params,
+                            params,
+                            body,
+                            span: self.span_from(start),
+                        });
+                    }
                     let initializers = self.parse_constructor_initializers();
                     let body = self.parse_function_body();
                     return ClassMember::Constructor(ConstructorDecl {
@@ -910,6 +1042,7 @@ impl<'src> Parser<'src> {
                         constructor_name,
                         params,
                         initializers,
+                        redirect: None,
                         body,
                         span: self.span_from(start),
                     });
@@ -1195,15 +1328,23 @@ impl<'src> Parser<'src> {
     ) -> ExtensionTypeDecl {
         self.expect(TokenKind::Extension);
         self.expect(TokenKind::Type);
+        let is_const = self.eat(TokenKind::Const).is_some();
         let name = self.expect_ident();
         let type_params = self.parse_type_params();
+        // Optional named representation constructor: `extension type Name._(int it)`.
+        let rep_start = self.cur().offset;
+        let constructor_name = if self.eat(TokenKind::Dot).is_some() {
+            Some(self.expect_ctor_name())
+        } else {
+            None
+        };
         // representation: (Type fieldName)
         self.expect(TokenKind::LParen);
-        let rep_start = self.cur().offset;
         let field_type = self.parse_type();
         let field_name = self.expect_ident();
         self.expect(TokenKind::RParen);
         let representation = ExtensionTypeRepresentation {
+            constructor_name,
             field_type,
             field_name,
             span: self.span_from(rep_start),
@@ -1218,6 +1359,7 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::RBrace);
         ExtensionTypeDecl {
             annotations,
+            is_const,
             name,
             type_params,
             representation,
@@ -1231,11 +1373,50 @@ impl<'src> Parser<'src> {
 
     fn parse_typedef(&mut self, annotations: Vec<Annotation>, start: usize) -> TypeAliasDecl {
         self.expect(TokenKind::Typedef);
-        let name = self.expect_ident();
-        let type_params = self.parse_type_params();
-        self.expect(TokenKind::Eq);
-        let aliased = self.parse_type();
+        let saved = self.pos;
+
+        // Modern form: `typedef Name<T> = Type;`
+        if self.is_ident_like() {
+            let name = self.expect_ident();
+            let type_params = self.parse_type_params();
+            if self.eat(TokenKind::Eq).is_some() {
+                let aliased = self.parse_type();
+                self.expect(TokenKind::Semicolon);
+                return TypeAliasDecl {
+                    annotations,
+                    name,
+                    type_params,
+                    aliased,
+                    span: self.span_from(start),
+                };
+            }
+            self.pos = saved;
+        }
+
+        // Legacy form: `typedef [returnType] Name<T>(params);` — synthesize a
+        // function type from the return type and parameter list.
+        let leading = self.parse_type();
+        let ty_start = leading.span().start;
+        let (return_type, name, type_params) = if self.is_ident_like() {
+            // `leading` was the return type; the name follows.
+            let name = self.expect_ident();
+            let type_params = self.parse_type_params();
+            (Some(leading), name, type_params)
+        } else {
+            // No return type; `leading` is the name (with type args as type params).
+            let (name, type_params) = Self::named_type_to_alias_head(leading);
+            (None, name, type_params)
+        };
+        let params = self.parse_formal_param_list();
         self.expect(TokenKind::Semicolon);
+        let fn_span = Span::new(ty_start, self.cur().offset);
+        let aliased = DartType::Function(Box::new(FunctionType {
+            return_type: return_type.map(Box::new),
+            type_params: Vec::new(),
+            params: Self::formals_to_function_type_params(&params),
+            is_nullable: false,
+            span: fn_span,
+        }));
         TypeAliasDecl {
             annotations,
             name,
@@ -1243,6 +1424,85 @@ impl<'src> Parser<'src> {
             aliased,
             span: self.span_from(start),
         }
+    }
+
+    /// Split a parsed named type into an alias head: its name and any type
+    /// arguments reinterpreted as type parameters (`Comparator<T>` → `Comparator`,
+    /// `[T]`). Used for legacy typedefs that lack a return type.
+    fn named_type_to_alias_head(ty: DartType) -> (Identifier, Vec<TypeParam>) {
+        match ty {
+            DartType::Named(n) => {
+                let span = n.span.clone();
+                let name = n
+                    .segments
+                    .into_iter()
+                    .next_back()
+                    .unwrap_or_else(|| Identifier::new("<error>", span.clone()));
+                let type_params = n
+                    .type_args
+                    .into_iter()
+                    .map(|arg| {
+                        let sp = arg.span().clone();
+                        let tp_name = match arg {
+                            DartType::Named(mut a) => a
+                                .segments
+                                .pop()
+                                .unwrap_or_else(|| Identifier::new("<error>", sp.clone())),
+                            other => Identifier::new("<error>", other.span().clone()),
+                        };
+                        TypeParam {
+                            annotations: Vec::new(),
+                            name: tp_name,
+                            bound: None,
+                            span: sp,
+                        }
+                    })
+                    .collect();
+                (name, type_params)
+            }
+            other => (Identifier::new("<error>", other.span().clone()), Vec::new()),
+        }
+    }
+
+    /// Convert a formal parameter list into function-type parameters for a
+    /// synthesized function type (legacy typedefs, etc.).
+    fn formals_to_function_type_params(params: &FormalParamList) -> Vec<FunctionTypeParam> {
+        let mut out = Vec::new();
+        let dynamic_type = |sp: Span| DartType::Dynamic { span: sp };
+        for p in &params.positional {
+            out.push(FunctionTypeParam {
+                name: Some(p.name.clone()),
+                param_type: p
+                    .param_type
+                    .clone()
+                    .unwrap_or_else(|| dynamic_type(p.span.clone())),
+                is_required: true,
+                is_named: false,
+            });
+        }
+        for p in &params.optional_positional {
+            out.push(FunctionTypeParam {
+                name: Some(p.name.clone()),
+                param_type: p
+                    .param_type
+                    .clone()
+                    .unwrap_or_else(|| dynamic_type(p.span.clone())),
+                is_required: false,
+                is_named: false,
+            });
+        }
+        for p in &params.named {
+            out.push(FunctionTypeParam {
+                name: Some(p.name.clone()),
+                param_type: p
+                    .param_type
+                    .clone()
+                    .unwrap_or_else(|| dynamic_type(p.span.clone())),
+                is_required: p.is_required,
+                is_named: true,
+            });
+        }
+        out
     }
 
     // ── Top-level function / variable ─────────────────────────────────────────

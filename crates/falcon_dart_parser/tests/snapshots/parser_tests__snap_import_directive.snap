@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1634
 expression: "prog.imports[0]"
 ---
 ImportDirective {
@@ -13,6 +14,7 @@ ImportDirective {
         },
         interpolations: [],
     },
+    configurable_uris: [],
     is_deferred: false,
     as_name: None,
     combinators: [
