@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, ProjectFile, ProjectIndex, Rule};
+use falcon_analyze::{AnalyzeContext, ProjectFile, ProjectIndex, Rule, TypeIndex};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
 use falcon_rules::lint::style::class_members_ordering::ClassMembersOrdering;
@@ -76,6 +76,11 @@ const RESOLVER_DEPENDENT_RULES: &[&str] = &[
     "no-boolean-literal-compare",
     "avoid-ignoring-return-values",
     "unnecessary-string-interpolations",
+    "prefer-is-empty",
+    "prefer-is-not-empty",
+    "prefer-iterable-where-type",
+    "prefer-collection-literals",
+    "prefer-final-fields",
 ];
 
 /// Run a single rule over `source`; return (rule-id, line) per diagnostic.
@@ -86,15 +91,16 @@ fn run_rule(
     config: &FalconConfig,
 ) -> Vec<(String, usize)> {
     let (program, _errors) = parse(source);
-    let index = RESOLVER_DEPENDENT_RULES
-        .contains(&rule.name())
-        .then(|| ProjectIndex::from_program(&program));
-    let ctx = AnalyzeContext {
-        file_path: file,
-        source,
-        config,
-        project: index.as_ref(),
-    };
+    let resolver_dependent = RESOLVER_DEPENDENT_RULES.contains(&rule.name());
+    let index = resolver_dependent.then(|| ProjectIndex::from_program(&program));
+    let types = resolver_dependent.then(|| TypeIndex::from_program(&program));
+    let mut ctx = AnalyzeContext::new(file, source, config);
+    if let Some(index) = index.as_ref() {
+        ctx = ctx.with_project(index);
+    }
+    if let Some(types) = types.as_ref() {
+        ctx = ctx.with_types(types);
+    }
     rule.analyze(&program, &ctx)
         .into_iter()
         .map(|d| {
@@ -243,6 +249,8 @@ Widget build(BuildContext context) {
         source: src,
         config: &default_cfg,
         project: None,
+        types: None,
+        library: None,
     };
     assert!(
         rule.analyze(&program, &ctx).is_empty(),
@@ -272,6 +280,8 @@ Widget build(BuildContext context) {
         source: src,
         config: &configured,
         project: None,
+        types: None,
+        library: None,
     };
     let diags = rule.analyze(&program, &ctx);
     assert_eq!(
@@ -295,6 +305,8 @@ Widget build(BuildContext context) {
         source: static_src,
         config: &configured,
         project: None,
+        types: None,
+        library: None,
     };
     assert!(
         rule.analyze(&static_program, &ctx).is_empty(),
@@ -330,6 +342,8 @@ class Bar {
         source: src,
         config: &default_cfg,
         project: None,
+        types: None,
+        library: None,
     };
     let default_diags = rule.analyze(&program, &ctx);
     assert!(
@@ -365,6 +379,8 @@ class Bar {
         source: src,
         config: &configured,
         project: None,
+        types: None,
+        library: None,
     };
     let diags = rule.analyze(&program, &ctx);
     assert_eq!(
@@ -507,6 +523,111 @@ fn project_corpus_matches_expectations() {
     );
 }
 
+/// Resolver-dependent *per-file* rules validated against multi-file
+/// `corpus/<rule>/project/` fixtures: run per file with the real library
+/// grouping attached (part siblings + unresolved flag), mirroring the
+/// resolving pipeline.
+#[test]
+fn resolver_dependent_per_file_project_corpus() {
+    use falcon_analyze::{LibrarySource, group_libraries, library_unit};
+    use falcon_syntax::ast::Program;
+
+    let rules = all_rules();
+    let by_name: HashMap<&str, &dyn Rule> = rules.iter().map(|r| (r.name(), r.as_ref())).collect();
+    let corpus = corpus_dir();
+    let config = FalconConfig::default();
+    let mut failures: Vec<String> = Vec::new();
+    let mut total_expectations = 0usize;
+
+    for rule_name in RESOLVER_DEPENDENT_RULES {
+        let dir = corpus.join(rule_name).join("project");
+        if !dir.is_dir() {
+            continue;
+        }
+        let Some(rule) = by_name.get(rule_name) else {
+            continue;
+        };
+
+        let paths = dart_files(&dir);
+        let sources: Vec<String> = paths
+            .iter()
+            .map(|p| fs::read_to_string(p).unwrap())
+            .collect();
+        let parsed: Vec<(Program, bool)> = sources
+            .iter()
+            .map(|s| {
+                let (p, e) = parse(s);
+                (p, !e.is_empty())
+            })
+            .collect();
+        let programs: Vec<&Program> = parsed.iter().map(|(p, _)| p).collect();
+        let path_prog: Vec<(PathBuf, &Program)> = paths
+            .iter()
+            .cloned()
+            .zip(programs.iter().copied())
+            .collect();
+        let grouping = group_libraries(&path_prog);
+        let type_index =
+            TypeIndex::from_library_files(parsed.iter().enumerate().map(|(i, (p, err))| {
+                LibrarySource {
+                    program: p,
+                    has_parse_errors: *err,
+                    has_unresolved_parts: grouping.is_unresolved(i),
+                }
+            }));
+
+        for (i, path) in paths.iter().enumerate() {
+            let unit = library_unit(&grouping, &programs, i);
+            let ctx = AnalyzeContext::new(path, &sources[i], &config)
+                .with_types(&type_index)
+                .with_library(&unit);
+            let mut diag_lines: Vec<usize> = rule
+                .analyze(programs[i], &ctx)
+                .into_iter()
+                .filter(|d| d.rule == *rule_name)
+                .map(|d| byte_offset_to_line(&sources[i], d.span.start))
+                .collect();
+
+            let expectations: Vec<usize> = parse_expectations(&sources[i])
+                .into_iter()
+                .filter(|e| e.rule == *rule_name)
+                .map(|e| e.line)
+                .collect();
+            total_expectations += expectations.len();
+            for line in &expectations {
+                if let Some(pos) = diag_lines.iter().position(|l| l == line) {
+                    diag_lines.remove(pos);
+                } else {
+                    failures.push(format!(
+                        "MISS  {}:{} — `{}`",
+                        path.display(),
+                        line,
+                        rule_name
+                    ));
+                }
+            }
+            for line in diag_lines {
+                failures.push(format!(
+                    "EXTRA {}:{} — `{}`",
+                    path.display(),
+                    line,
+                    rule_name
+                ));
+            }
+        }
+    }
+
+    assert!(
+        total_expectations > 0,
+        "no resolver-dependent per-file project expectations exercised"
+    );
+    assert!(
+        failures.is_empty(),
+        "resolver-dependent per-file project corpus failed:\n{}",
+        failures.join("\n")
+    );
+}
+
 #[test]
 fn all_rules_no_name_collisions() {
     let rules = all_rules();
@@ -544,6 +665,8 @@ fn all_rules_run_jfit_20_files_no_panic() {
             source: &source,
             config: &config,
             project: None,
+            types: None,
+            library: None,
         };
         for rule in &rules {
             let diags = rule.analyze(&program, &ctx);
@@ -584,6 +707,8 @@ class Foo {
         source: snippet,
         config: &config,
         project: None,
+        types: None,
+        library: None,
     };
 
     let rules = all_rules();

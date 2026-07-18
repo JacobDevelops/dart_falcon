@@ -14,12 +14,7 @@ fn run(source: &str) -> Vec<String> {
     registry.register(Box::new(AvoidDynamic));
     let (program, _) = parse(source);
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext {
-        file_path: Path::new("test.dart"),
-        source,
-        config: &config,
-        project: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config);
     registry
         .run_all(&program, &ctx)
         .into_iter()

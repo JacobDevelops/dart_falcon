@@ -33,6 +33,11 @@ const RESOLVER_DEPENDENT_RULES: &[&str] = &[
     "no-boolean-literal-compare",
     "avoid-ignoring-return-values",
     "unnecessary-string-interpolations",
+    "prefer-is-empty",
+    "prefer-is-not-empty",
+    "prefer-iterable-where-type",
+    "prefer-collection-literals",
+    "prefer-final-fields",
 ];
 
 /// Output format for diagnostics.
