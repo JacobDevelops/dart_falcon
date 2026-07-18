@@ -810,6 +810,8 @@ impl<'src> Parser<'src> {
             TokenKind::LBracket => self.parse_list_literal(false, None, start),
             // Map/set literal
             TokenKind::LBrace => self.parse_map_or_set_literal(false, Vec::new(), start),
+            // Dot shorthand (Dart 3.9): `.name` / `.new` in a context position.
+            TokenKind::Dot => self.parse_dot_shorthand(false, start),
             // const expression
             TokenKind::Const => {
                 self.advance();
@@ -1468,9 +1470,29 @@ impl<'src> Parser<'src> {
         }
     }
 
+    /// Parses a dot shorthand head: `.name` or `.new`. The caller has already
+    /// recorded `start`; the leading `.` is still current. Any trailing
+    /// invocation or selector is left for `parse_postfix`.
+    fn parse_dot_shorthand(&mut self, is_const: bool, start: usize) -> Expr {
+        self.advance(); // consume `.`
+        let name = if self.at(TokenKind::New) {
+            let tok = self.advance();
+            Identifier::new("new", Self::tok_span(&tok))
+        } else {
+            self.expect_ident()
+        };
+        Expr::DotShorthand {
+            is_const,
+            name,
+            span: self.span_from(start),
+        }
+    }
+
     fn parse_const_expr(&mut self, start: usize) -> Expr {
-        // const can prefix a constructor call or collection literal
+        // const can prefix a constructor call, collection literal, or (Dart 3.9)
+        // a dot shorthand: `const .fromLtrb(...)`.
         match self.cur().kind {
+            TokenKind::Dot => self.parse_dot_shorthand(true, start),
             TokenKind::LBracket => self.parse_list_literal(true, None, start),
             TokenKind::LBrace => self.parse_map_or_set_literal(true, Vec::new(), start),
             TokenKind::Lt => {

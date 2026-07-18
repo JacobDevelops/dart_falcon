@@ -9,11 +9,25 @@ falcon reads a biome 2.x-shaped `falcon.json`. Discovery order (first match wins
 If no config is found, falcon runs with defaults: every rule enabled at its
 default severity (warning).
 
+## Editor autocomplete (`$schema`)
+
+Point the top-level `$schema` at the published JSON schema to get rule-name
+autocomplete and validation in editors:
+
+```json
+"$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json"
+```
+
+The schema is generated from falcon's rule metadata (`cargo xtask schema`) and
+committed at [`schema/falcon.schema.json`](../schema/falcon.schema.json), so it
+always lists the current rule set. The VS Code extension wires this up
+automatically for any file named `falcon.json`.
+
 ## Full example
 
 ```json
 {
-  "$schema": "https://example.invalid/falcon-schema.json",
+  "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json",
   "files": {
     "includes": ["**", "!.dart_tool/**", "!build/**", "!**/*.g.dart", "!**/*.freezed.dart"]
   },
@@ -247,14 +261,17 @@ given.
 ### `overrides[].linter` and `overrides[].project`
 
 A partial rule block for file rules (`linter`) or project rules (`project`),
-respectively. Both have the same shape: only rule levels and an optional
-`enabled` master switch are honored — overrides are **rule-level only** (no
-`domains`, no nested `overrides`, no `files`). An override may carry either or
+respectively. Both have the same shape as `linter.rules`: rule levels, per-rule
+`options`, and an optional `enabled` master switch are honored — but no
+`domains`, no nested `overrides`, no `files`. An override may carry either or
 both sections; each patches the correspondingly-named base block.
 
 - Each explicit rule entry (under its group) **replaces** the base resolution
   for that rule on matching files: `off` disables it; `on`/`info`/`warn`/`error`
   enables it at that severity — even turning on a rule the base config disabled.
+- A rule entry's `options` block **replaces** the base rule's options on matching
+  files (options are not deep-merged). An override that sets only a level leaves
+  the base options intact.
 - `"enabled": false` disables every rule in that section for matching files (a
   later override may re-enable a specific one).
 
@@ -273,12 +290,29 @@ so `test/**` matches; passing an absolute path (or LSP, which resolves document
 URIs to absolute paths) walks absolute paths, so a glob must be absolute or use
 a leading `**/` (e.g. `**/theme.dart`) to match.
 
-### Options limitation
+### Per-path options
 
-Rule **options** in an override are **not yet supported** and are rejected at
-load with a clear error. Options remain global (configured under `linter.rules`);
-an override may re-scope a rule's level (on/off/severity) per path but not its
-options. Path-scoped options may be added later.
+An override may carry rule `options`, letting a rule run with different options on
+different paths — for example a stricter `max_lines_for_file` under `test/`:
+
+```jsonc
+"overrides": [
+  {
+    "includes": ["test/**"],
+    "linter": {
+      "rules": {
+        "complexity": {
+          "max_lines_for_file": { "level": "warn", "options": { "max_lines": 1000 } }
+        }
+      }
+    }
+  }
+]
+```
+
+A matching override's `options` **replace** the base rule's options wholesale
+(they are not deep-merged); the last matching override wins. An override that
+sets only a level leaves the base options intact.
 
 ## Suppressing diagnostics
 
@@ -413,6 +447,35 @@ Notes:
   nullable value forwarded through a variable is not counted as "passes null".
   Enable it deliberately and review its findings. Per-file exclusions (the old
   `--exclude` flags) are expressible with `overrides`.
+
+## Migrating from dart_code_linter / pyramid_lint
+
+falcon replaces the `dart_code_linter` and `pyramid_lint` linters, and can
+generate a `falcon.json` from an existing `analysis_options.yaml` — the same idea
+as `biome migrate eslint/prettier`:
+
+```sh
+# Print the generated config to stdout
+falcon migrate --input analysis_options.yaml
+
+# Write it to ./falcon.json
+falcon migrate --write
+```
+
+Rules under the `dart_code_linter:` block are matched against their upstream
+dart_code_linter ids; rules under `custom_lint:` (how pyramid_lint is configured)
+are matched against their pyramid_lint ids. Each mapped rule is emitted under its
+falcon group as `"warn"`; disabled entries (`- rule: false`) become `"off"`, and
+entries with options become `{ "level": "warn", "options": { ... } }`.
+
+The migration is **explicit**: `recommended` is set to `false` in the output so
+only the rules present in your `analysis_options.yaml` are active (like biome).
+Notes:
+
+- Option **key names are passed through verbatim** and may need manual review —
+  falcon's option schema is not guaranteed to match the upstream linter's.
+- Upstream rules with no falcon equivalent are reported as warnings on stderr and
+  omitted from the output.
 
 ## Migrating from the legacy flat schema
 

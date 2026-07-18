@@ -18,6 +18,7 @@ fn run(source: &str) -> Vec<String> {
         file_path: Path::new("test.dart"),
         source,
         config: &config,
+        project: None,
     };
     registry
         .run_all(&program, &ctx)

@@ -28,10 +28,7 @@ impl Rule for PreferMovingToVariable {
 /// occurrence can never be a duplicate).
 fn allowed_duplicated_chains(ctx: &AnalyzeContext) -> usize {
     crate::meta::meta_for("prefer-moving-to-variable")
-        .and_then(|m| {
-            ctx.config
-                .rule_options(m.group, "prefer-moving-to-variable")
-        })
+        .and_then(|m| ctx.rule_options(m.group, "prefer-moving-to-variable"))
         .and_then(|o| o.get("allowed_duplicated_chains"))
         .and_then(|v| v.as_u64())
         .map(|v| (v as usize).max(2))

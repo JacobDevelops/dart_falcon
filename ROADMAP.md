@@ -5,19 +5,11 @@ will shift. Grouped roughly from near-term to exploratory.
 
 ## Near-term
 
-- **`falcon migrate` command.** Biome-style migration (like its eslint/prettier
-  migrate): read a project's `analysis_options.yaml` blocks for the linters falcon
-  progressively replaces — `dart_code_linter` and `pyramid_lint` — and generate the
-  equivalent `falcon.json`.
-- **Published JSON schema for `falcon.json`.** Ship a real schema so editors give
-  autocomplete and validation instead of pointing `$schema` at a placeholder.
-- **Per-path rule options in overrides.** `overrides` currently accept only
-  severity / on-off; per-path option blocks are load-rejected today. Allow full
-  per-path option configuration.
-- **Project rules in the LSP.** Cross-file rules (`unused-files`, `unused-code`,
-  `unnecessary-nullable`) run from the CLI only; surface them in `falcon lsp` too.
-- **CHANGELOG + release automation polish.** A maintained changelog and tighter
-  tag → build → publish → manifest-commit release flow.
+Most of the original near-term batch has shipped — `falcon migrate`, a published
+`falcon.json` JSON schema, per-path rule options in `overrides`, project rules in
+the LSP, and release-automation polish (tag/`Cargo.toml` version guard, flake
+version derived from `Cargo.toml`). A maintained CHANGELOG is deferred to the 1.0
+release. Next up is the Toward 1.0 work below.
 
 ## Toward 1.0
 
