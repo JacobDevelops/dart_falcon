@@ -252,7 +252,6 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(lint::style::member_ordering::MemberOrdering),
         Box::new(lint::style::newline_before_return::NewlineBeforeReturn),
         Box::new(lint::style::no_magic_number::NoMagicNumber),
-        Box::new(lint::style::no_magic_number::NoMagicNumberPyramid),
         Box::new(lint::style::no_object_declaration::NoObjectDeclaration),
         Box::new(lint::style::prefer_async_await::PreferAsyncAwait),
         Box::new(lint::style::prefer_async_callback::PreferAsyncCallback),
@@ -268,14 +267,12 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(lint::style::use_spacer_as_expanded_child::UseSpacerAsExpandedChild),
         // ── suspicious ──
         Box::new(lint::suspicious::avoid_dynamic::AvoidDynamic),
-        Box::new(lint::suspicious::avoid_empty_blocks::AvoidEmptyBlocks),
         Box::new(lint::suspicious::avoid_ignoring_return_values::AvoidIgnoringReturnValues),
         Box::new(lint::suspicious::avoid_passing_async_when_sync_expected::AvoidPassingAsyncWhenSyncExpected),
         Box::new(lint::suspicious::avoid_throw_in_catch_block::AvoidThrowInCatchBlock),
         Box::new(lint::suspicious::avoid_unrelated_type_assertions::AvoidUnrelatedTypeAssertions),
         Box::new(lint::suspicious::no_duplicate_case_values::NoDuplicateCaseValues),
         Box::new(lint::suspicious::no_empty_block::NoEmptyBlock),
-        Box::new(lint::suspicious::no_empty_block::NoEmptyBlockPyramid),
         Box::new(lint::suspicious::no_equal_arguments::NoEqualArguments),
         Box::new(lint::suspicious::no_equal_then_else::NoEqualThenElse),
         Box::new(lint::suspicious::no_self_comparisons::NoSelfComparisons),
@@ -333,8 +330,8 @@ mod tests {
                 },
                 {
                     "includes": ["b/**"],
-                    // `no_magic_number` is a real rule, but it belongs to `style`.
-                    "linter": { "rules": { "complexity": { "no_magic_number": "warn" } } }
+                    // `no-magic-number` is a real rule, but it belongs to `style`.
+                    "linter": { "rules": { "complexity": { "no-magic-number": "warn" } } }
                 }
             ]
         }))
@@ -357,7 +354,7 @@ mod tests {
         );
         assert!(
             warnings.iter().any(|w| w.contains("overrides[1]")
-                && w.contains("`no_magic_number`")
+                && w.contains("`no-magic-number`")
                 && w.contains("belongs to `style`")),
             "overrides[1] wrong-group warning missing: {warnings:?}"
         );

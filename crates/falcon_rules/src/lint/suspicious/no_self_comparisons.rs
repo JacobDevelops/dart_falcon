@@ -9,7 +9,7 @@ pub struct NoSelfComparisons;
 
 impl Rule for NoSelfComparisons {
     fn name(&self) -> &'static str {
-        "no_self_comparisons"
+        "no-self-comparisons"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -43,7 +43,7 @@ impl Visitor for Collector<'_> {
             let r = strip_ws(&self.source[right.span().start..right.span().end]);
             if !l.is_empty() && l == r {
                 self.diags.push(Diagnostic::new(
-                    "no_self_comparisons",
+                    "no-self-comparisons",
                     Severity::Warning,
                     "Both operands of this comparison are identical.",
                     self.file.clone(),

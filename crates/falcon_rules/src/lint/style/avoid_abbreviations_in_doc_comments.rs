@@ -8,7 +8,7 @@ pub struct AvoidAbbreviationsInDocComments;
 
 impl Rule for AvoidAbbreviationsInDocComments {
     fn name(&self) -> &'static str {
-        "avoid_abbreviations_in_doc_comments"
+        "avoid-abbreviations-in-doc-comments"
     }
 
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -32,7 +32,7 @@ fn scan_source(source: &str, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
                 if let Some(index) = line.find(abbr) {
                     let start = byte_offset + index;
                     diags.push(Diagnostic::new(
-                        "avoid_abbreviations_in_doc_comments",
+                        "avoid-abbreviations-in-doc-comments",
                         Severity::Warning,
                         format!("Avoid abbreviation '{}' in doc comments", abbr),
                         ctx.file_path.to_string_lossy().into_owned(),

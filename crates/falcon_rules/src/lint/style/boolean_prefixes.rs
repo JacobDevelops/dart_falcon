@@ -8,7 +8,7 @@ pub struct BooleanPrefixes;
 
 impl Rule for BooleanPrefixes {
     fn name(&self) -> &'static str {
-        "boolean_prefixes"
+        "boolean-prefixes"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -31,8 +31,8 @@ const MESSAGE: &str = "Boolean should be named with a valid prefix.";
 
 fn resolve_prefixes(ctx: &AnalyzeContext) -> Vec<String> {
     let mut prefixes: Vec<String> = DEFAULT_PREFIXES.iter().map(|s| s.to_string()).collect();
-    if let Some(list) = crate::meta::meta_for("boolean_prefixes")
-        .and_then(|m| ctx.rule_options(m.group, "boolean_prefixes"))
+    if let Some(list) = crate::meta::meta_for("boolean-prefixes")
+        .and_then(|m| ctx.rule_options(m.group, "boolean-prefixes"))
         .and_then(|o| o.get("valid_prefixes"))
         .and_then(|v| v.as_array())
     {
@@ -45,7 +45,7 @@ fn resolve_prefixes(ctx: &AnalyzeContext) -> Vec<String> {
 
 fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     diags.push(Diagnostic::new(
-        "boolean_prefixes",
+        "boolean-prefixes",
         Severity::Warning,
         MESSAGE,
         ctx.file_path.to_string_lossy().into_owned(),
