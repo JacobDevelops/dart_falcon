@@ -126,9 +126,12 @@ impl<'src> Lexer<'src> {
                 }
                 self.make(TokenKind::LineComment, start)
             }
-            // Block comment: /* ... */ (nested depth tracked)
+            // Block comment: /* ... */ (nested depth tracked).
+            // `/** ... */` is a documentation comment; `/**/` is an *empty*
+            // block comment (the trailing `/` closes it), not a doc comment.
             Some('*') => {
                 self.advance(); // consume '*'
+                let is_doc = self.cur() == Some('*') && self.peek(1) != Some('/');
                 let mut depth: usize = 1;
                 loop {
                     match (self.cur(), self.peek(1)) {
@@ -151,10 +154,12 @@ impl<'src> Lexer<'src> {
                         }
                     }
                 }
-                if depth == 0 {
-                    self.make(TokenKind::BlockComment, start)
-                } else {
+                if depth != 0 {
                     self.make(TokenKind::Error, start)
+                } else if is_doc {
+                    self.make(TokenKind::DocComment, start)
+                } else {
+                    self.make(TokenKind::BlockComment, start)
                 }
             }
             // /=
@@ -212,6 +217,14 @@ impl<'src> Lexer<'src> {
                                         self.advance();
                                         self.advance();
                                     }
+                                    // A nested string in the interpolation body may
+                                    // hold braces (e.g. `"${ m['}'] }"`); skip it
+                                    // whole so they don't miscount `depth`.
+                                    Some('\'' | '"') => {
+                                        if !self.skip_nested_string() {
+                                            return self.make(TokenKind::Error, start);
+                                        }
+                                    }
                                     _ => {
                                         self.advance();
                                     }
@@ -238,10 +251,14 @@ impl<'src> Lexer<'src> {
         self.make(TokenKind::StringLit, start)
     }
 
-    fn lex_string_body_triple(&mut self, quote: char, _raw: bool, start: usize) -> Token {
+    fn lex_string_body_triple(&mut self, quote: char, raw: bool, start: usize) -> Token {
         loop {
             match self.cur() {
                 None => return self.make(TokenKind::Error, start),
+                Some('\\') if !raw => {
+                    self.advance(); // backslash
+                    self.advance(); // escaped char (e.g. an escaped quote)
+                }
                 Some(c) if c == quote => {
                     if self.peek(1) == Some(quote) && self.peek(2) == Some(quote) {
                         self.advance();
@@ -257,6 +274,52 @@ impl<'src> Lexer<'src> {
             }
         }
         self.make(TokenKind::StringLit, start)
+    }
+
+    /// Advance the cursor from an opening quote past the matching closing quote,
+    /// honoring triple quotes and backslash escapes. Used to skip a string that
+    /// is nested inside a `${ ... }` interpolation body so its braces don't
+    /// disturb interpolation depth. Returns `false` if the string is
+    /// unterminated. Mirrors `decl.rs::skip_nested_string`.
+    fn skip_nested_string(&mut self) -> bool {
+        let quote = match self.cur() {
+            Some(c) => c,
+            None => return false,
+        };
+        let triple = self.peek(1) == Some(quote) && self.peek(2) == Some(quote);
+        if triple {
+            self.advance();
+            self.advance();
+            self.advance();
+        } else {
+            self.advance();
+        }
+        loop {
+            match self.cur() {
+                None => return false,
+                Some('\\') => {
+                    self.advance();
+                    self.advance();
+                }
+                Some(c) if c == quote => {
+                    if triple {
+                        if self.peek(1) == Some(quote) && self.peek(2) == Some(quote) {
+                            self.advance();
+                            self.advance();
+                            self.advance();
+                            return true;
+                        }
+                        self.advance();
+                    } else {
+                        self.advance();
+                        return true;
+                    }
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
     }
 
     // ── Numbers ───────────────────────────────────────────────────────────────
@@ -337,6 +400,7 @@ impl<'src> Lexer<'src> {
             ';' => TokenKind::Semicolon,
             '@' => TokenKind::At,
             ':' => TokenKind::Colon,
+            '#' => TokenKind::Hash, // symbol-literal introducer (e.g. #foo)
 
             '+' => {
                 if self.eat_if('+') {

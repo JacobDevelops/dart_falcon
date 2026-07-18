@@ -50,6 +50,12 @@ pub(super) struct Parser<'src> {
     /// declaration or pattern for-in header, so a bare identifier is a binding
     /// ([`Pattern::Variable`]) rather than a constant reference.
     pub(super) pattern_binding: bool,
+    /// Name of the enclosing type whose body is currently being parsed, when that
+    /// type may declare constructors (classes, mixin classes, enums, extension
+    /// types). `None` outside a member body, or inside a mixin/extension body
+    /// where untyped members are always methods (no constructors permitted). An
+    /// untyped `name(...)` member is a constructor only when `name` equals this.
+    pub(super) enclosing_ctor_name: Option<String>,
 }
 
 impl<'src> Parser<'src> {
@@ -61,6 +67,7 @@ impl<'src> Parser<'src> {
             errors: Vec::new(),
             suppress_conditional_qmark: false,
             pattern_binding: false,
+            enclosing_ctor_name: None,
         }
     }
 
@@ -195,9 +202,15 @@ impl<'src> Parser<'src> {
 
     /// Accept a keyword token as an identifier (built-in identifiers, contextual).
     pub(super) fn is_ident_like(&self) -> bool {
+        Self::kind_is_ident_like(&self.cur().kind)
+    }
+
+    /// Whether a token kind can stand in for an identifier (built-in/contextual
+    /// keywords). Kind-based twin of [`is_ident_like`] for lookahead over `peek`.
+    pub(super) fn kind_is_ident_like(kind: &TokenKind) -> bool {
         use TokenKind::*;
         matches!(
-            self.cur().kind,
+            kind,
             Ident
                 | Abstract
                 | As

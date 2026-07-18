@@ -231,7 +231,12 @@ fn count_stmt(stmt: &Stmt, count: &mut usize) {
 fn count_if_condition(cond: &IfCondition, count: &mut usize) {
     match cond {
         IfCondition::Expr(e) => count_expr(e, count),
-        IfCondition::Case(e, _) => count_expr(e, count),
+        IfCondition::Case(e, _, guard) => {
+            count_expr(e, count);
+            if let Some(g) = guard {
+                count_expr(g, count);
+            }
+        }
     }
 }
 

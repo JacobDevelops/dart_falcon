@@ -78,11 +78,13 @@ impl FileSuppressions {
             let line = line_for_offset(&me.line_starts, token.offset);
 
             if token.is_trivia() {
-                // Only `//`-style line comments carry directives; block comments
-                // (`/* */`) do not.
-                if matches!(token.kind, TokenKind::LineComment | TokenKind::DocComment)
-                    && let Some((keyword, rest)) = classify(token.text(source))
-                {
+                // Only line-form comments carry directives: `//`/`///`. Block
+                // comments (`/* */`) and block doc comments (`/** */`) do not,
+                // even though the latter lexes as `DocComment`.
+                let is_line_directive = matches!(token.kind, TokenKind::LineComment)
+                    || (token.kind == TokenKind::DocComment
+                        && token.text(source).starts_with("///"));
+                if is_line_directive && let Some((keyword, rest)) = classify(token.text(source)) {
                     match validate(keyword, rest, lookup) {
                         Ok(rule) => {
                             if keyword == KW_ALL {
@@ -409,6 +411,24 @@ mod tests {
     fn block_comment_directive_does_not_count() {
         let s = parse("/* falcon-ignore lint/suspicious/avoid-dynamic: x */\ndynamic x;\n");
         assert!(s.is_empty());
+        assert!(s.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn block_doc_comment_directive_does_not_count() {
+        // `/** … */` lexes as DocComment but is a block form, so it must not
+        // carry a directive.
+        let s = parse("/** falcon-ignore lint/suspicious/avoid-dynamic: x */\ndynamic x;\n");
+        assert!(s.is_empty());
+        assert!(!s.is_suppressed("avoid-dynamic", 1));
+        assert!(s.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn line_doc_comment_directive_suppresses() {
+        // `///` is a line-form doc comment and does carry a directive.
+        let s = parse("/// falcon-ignore lint/suspicious/avoid-dynamic: legacy\ndynamic x;\n");
+        assert!(s.is_suppressed("avoid-dynamic", 1));
         assert!(s.diagnostics().is_empty());
     }
 

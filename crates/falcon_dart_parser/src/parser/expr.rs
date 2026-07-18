@@ -155,11 +155,12 @@ impl<'src> Parser<'src> {
 
     // ── Relational / type tests ───────────────────────────────────────────────
 
-    /// True when the `<` at the cursor opens a generic-invocation type-argument
-    /// list — a balanced `<...>` containing only type-ish tokens and closed
-    /// immediately before `(`, `.`, or `?.`. Distinguishes `f<T>()` from the
-    /// comparison operator in `a < b ? () => c() : null`.
-    fn is_generic_invocation(&self) -> bool {
+    /// Scan a balanced `<...>` starting at the cursor (which must be `<`),
+    /// returning the token index immediately *after* the closing `>` when the
+    /// span contains only type-ish tokens, or `None` when some token means the
+    /// `<` is really a comparison operator. Shared by generic-invocation and
+    /// generic-instantiation detection.
+    fn after_generic_type_args(&self) -> Option<usize> {
         use TokenKind::*;
         debug_assert_eq!(self.cur().kind, Lt);
         let mut depth = 0i32;
@@ -170,19 +171,19 @@ impl<'src> Parser<'src> {
                 Gt => {
                     depth -= 1;
                     if depth <= 0 {
-                        return self.after_type_args_is_call(i + 1);
+                        return Some(i + 1);
                     }
                 }
                 GtGt => {
                     depth -= 2;
                     if depth <= 0 {
-                        return self.after_type_args_is_call(i + 1);
+                        return Some(i + 1);
                     }
                 }
                 GtGtGt => {
                     depth -= 3;
                     if depth <= 0 {
-                        return self.after_type_args_is_call(i + 1);
+                        return Some(i + 1);
                     }
                 }
                 // Tokens that legitimately appear inside a type-argument list
@@ -192,20 +193,70 @@ impl<'src> Parser<'src> {
                 k if self.is_ident_like_kind(k) => {}
                 // Anything else (operators, literals, `=>`, `:`, `;`, …) means
                 // this `<` is a comparison, not type arguments.
-                _ => return false,
+                _ => return None,
             }
             i += 1;
             if i - self.pos > 512 {
-                return false;
+                return None;
             }
         }
-        false
+        None
+    }
+
+    /// True when the `<` at the cursor opens a generic-invocation type-argument
+    /// list — a balanced `<...>` closed immediately before `(`, `.`, or `?.`.
+    /// Distinguishes `f<T>()` from the comparison in `a < b ? () => c() : null`.
+    fn is_generic_invocation(&self) -> bool {
+        self.after_generic_type_args()
+            .is_some_and(|idx| self.after_type_args_is_call(idx))
+    }
+
+    /// True when the `<` at the cursor opens a bare generic-instantiation
+    /// tear-off (`identity<int>`) — a balanced `<...>` *not* followed by a call
+    /// token, whose following token cannot continue a `<` comparison (Dart's own
+    /// disambiguation rule, per the constructor-tearoffs spec).
+    fn is_generic_instantiation(&self) -> bool {
+        match self.after_generic_type_args() {
+            Some(idx) if !self.after_type_args_is_call(idx) => {
+                self.token_ends_generic_instantiation(idx)
+            }
+            _ => false,
+        }
     }
 
     fn after_type_args_is_call(&self, idx: usize) -> bool {
         matches!(
             self.tokens.get(idx).map(|t| &t.kind),
             Some(TokenKind::LParen | TokenKind::Dot | TokenKind::QmarkDot)
+        )
+    }
+
+    /// True when the token at `idx` (following a balanced `<...>`) cannot begin
+    /// or continue the right-hand side of a `<` comparison, so the `<...>` must
+    /// be a generic-instantiation type-argument list. `f(a < b, c > d)` stays a
+    /// comparison because an identifier follows `>`, which is *not* in this set.
+    fn token_ends_generic_instantiation(&self, idx: usize) -> bool {
+        use TokenKind::*;
+        matches!(
+            self.tokens.get(idx).map(|t| &t.kind),
+            Some(
+                RParen
+                    | RBracket
+                    | RBrace
+                    | Colon
+                    | Semicolon
+                    | Comma
+                    | Qmark
+                    | QmarkQmark
+                    | Eq
+                    | EqEq
+                    | BangEq
+                    | DotDot
+                    | DotDotQmark
+                    | AmpAmp
+                    | PipePipe
+                    | Eof
+            ) | None
         )
     }
 
@@ -290,7 +341,7 @@ impl<'src> Parser<'src> {
 
     // ── Bitwise OR/XOR/AND ────────────────────────────────────────────────────
 
-    fn parse_bitwise_or(&mut self) -> Expr {
+    pub(super) fn parse_bitwise_or(&mut self) -> Expr {
         let start = self.cur().offset;
         let mut lhs = self.parse_bitwise_xor();
         while self.eat(TokenKind::Pipe).is_some() {
@@ -551,46 +602,58 @@ impl<'src> Parser<'src> {
                         span: self.span_from(start),
                     };
                 }
-                // Generic call  <T>(args)
+                // Generic call  <T>(args)  or bare instantiation  identity<int>
                 TokenKind::Lt => {
-                    // Only a balanced `<...>` closed and immediately followed by
-                    // `(`, `.`, or `?.` is a generic invocation; otherwise `<` is
-                    // a comparison operator (`a < b ? () => c() : null`).
-                    if !self.is_generic_invocation() {
-                        break;
-                    }
-                    // Speculative: try to parse type args; restore errors on rollback
-                    // to avoid spurious "expected type" errors in relational expressions.
-                    let saved = self.pos;
-                    let saved_errors = self.errors.len();
-                    let type_args = self.parse_type_args();
-                    if self.at(TokenKind::LParen) {
-                        // Generic call: expr<T>(args)
-                        let args = self.parse_arg_list();
-                        expr = Expr::Call {
-                            callee: Box::new(expr),
+                    // A balanced `<...>` closed immediately before `(`, `.`, or
+                    // `?.` is a generic invocation; one followed by a token that
+                    // cannot continue a comparison is a bare tear-off
+                    // instantiation; otherwise `<` is a comparison operator
+                    // (`a < b ? () => c() : null`).
+                    if self.is_generic_invocation() {
+                        // Speculative: try to parse type args; restore errors on
+                        // rollback to avoid spurious "expected type" errors.
+                        let saved = self.pos;
+                        let saved_errors = self.errors.len();
+                        let type_args = self.parse_type_args();
+                        if self.at(TokenKind::LParen) {
+                            // Generic call: expr<T>(args)
+                            let args = self.parse_arg_list();
+                            expr = Expr::Call {
+                                callee: Box::new(expr),
+                                type_args,
+                                args,
+                                span: self.span_from(start),
+                            };
+                        } else if self.at(TokenKind::Dot) || self.at(TokenKind::QmarkDot) {
+                            // Type instantiation expression: Name<T>.method(args) — keep type args,
+                            // represent as Call with empty args; next iteration handles the `.`.
+                            let empty_args = ArgList {
+                                positional: Vec::new(),
+                                named: Vec::new(),
+                                span: self.span_from(start),
+                            };
+                            expr = Expr::Call {
+                                callee: Box::new(expr),
+                                type_args,
+                                args: empty_args,
+                                span: self.span_from(start),
+                            };
+                        } else {
+                            // Not a call or type instantiation — restore position and any spurious errors
+                            self.pos = saved;
+                            self.errors.truncate(saved_errors);
+                            break;
+                        }
+                    } else if self.is_generic_instantiation() {
+                        // Bare generic tear-off: `identity<int>` with no call/`.`
+                        // following. Preserve the target and its type arguments.
+                        let type_args = self.parse_type_args();
+                        expr = Expr::GenericInstantiation {
+                            target: Box::new(expr),
                             type_args,
-                            args,
-                            span: self.span_from(start),
-                        };
-                    } else if self.at(TokenKind::Dot) || self.at(TokenKind::QmarkDot) {
-                        // Type instantiation expression: Name<T>.method(args) — keep type args,
-                        // represent as Call with empty args; next iteration handles the `.`.
-                        let empty_args = ArgList {
-                            positional: Vec::new(),
-                            named: Vec::new(),
-                            span: self.span_from(start),
-                        };
-                        expr = Expr::Call {
-                            callee: Box::new(expr),
-                            type_args,
-                            args: empty_args,
                             span: self.span_from(start),
                         };
                     } else {
-                        // Not a call or type instantiation — restore position and any spurious errors
-                        self.pos = saved;
-                        self.errors.truncate(saved_errors);
                         break;
                     }
                 }
@@ -627,10 +690,13 @@ impl<'src> Parser<'src> {
                 }
                 // Cascade  ..  ?..
                 TokenKind::DotDot | TokenKind::DotDotQmark => {
+                    // A leading `?..` makes the whole cascade null-aware.
+                    let is_null_aware = self.at(TokenKind::DotDotQmark);
                     let sections = self.parse_cascade_sections();
                     expr = Expr::Cascade {
                         object: Box::new(expr),
                         sections,
+                        is_null_aware,
                         span: self.span_from(start),
                     };
                 }
@@ -644,8 +710,12 @@ impl<'src> Parser<'src> {
         let mut sections = Vec::new();
         while matches!(self.cur().kind, TokenKind::DotDot | TokenKind::DotDotQmark) {
             let start = self.cur().offset;
+            // A `?..` section is reached null-awarely; that shorting also covers a
+            // `?[` null-aware index selector within the section.
+            let section_null_aware = self.at(TokenKind::DotDotQmark);
             self.advance(); // .. or ?..
-            let op = if self.at(TokenKind::LBracket) {
+            let op = if self.at(TokenKind::LBracket) || self.at(TokenKind::QmarkLBracket) {
+                let index_null_aware = section_null_aware || self.at(TokenKind::QmarkLBracket);
                 self.advance();
                 let idx = self.parse_expr();
                 self.expect(TokenKind::RBracket);
@@ -654,7 +724,7 @@ impl<'src> Parser<'src> {
                     let rhs = self.parse_expr();
                     CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs))
                 } else {
-                    CascadeOp::Index(Box::new(idx), false)
+                    CascadeOp::Index(Box::new(idx), index_null_aware)
                 }
             } else if self.is_ident_like() {
                 let name = self.expect_ident();
@@ -671,7 +741,7 @@ impl<'src> Parser<'src> {
                     let field_expr = Expr::Ident(name);
                     CascadeOp::Assign(Box::new(field_expr), assign_op, Box::new(rhs))
                 } else {
-                    CascadeOp::Field(name, false)
+                    CascadeOp::Field(name, section_null_aware)
                 }
             } else {
                 break;
@@ -838,6 +908,8 @@ impl<'src> Parser<'src> {
                     span: self.span_from(start),
                 }
             }
+            // Symbol literal:  #name  #foo.bar  #+  #[]  #[]=
+            TokenKind::Hash => self.parse_symbol_literal(start),
             // function expression: (params) => / (params) {
             // handled by falling through to identifier parse then seeing no ident
             _ if self.is_ident_like() => {
@@ -1117,7 +1189,16 @@ impl<'src> Parser<'src> {
         self.advance(); // {
         if self.at(TokenKind::RBrace) {
             self.advance();
-            // Empty literal — default to map
+            // Empty braces: a single type arg (`<int>{}`) is a Set; no type args
+            // (`{}`) or two (`<K, V>{}`) is a Map.
+            if type_args.len() == 1 {
+                return Expr::Set {
+                    is_const,
+                    type_arg: type_args.into_iter().next(),
+                    elements: Vec::new(),
+                    span: self.span_from(start),
+                };
+            }
             return Expr::Map {
                 is_const,
                 type_args,
@@ -1126,10 +1207,13 @@ impl<'src> Parser<'src> {
                 span: self.span_from(start),
             };
         }
-        // Decide map vs set by looking at the first element's leaf: a `k: v` entry
-        // means a map, anything else a set. Works for plain, spread- and
-        // comprehension-led (`for`/`if`) literals alike.
-        if self.map_literal_lookahead() {
+        // Decide map vs set by looking for a `k: v` entry leaf: a colon means a
+        // map, a plain/spread element a set. Works for plain, spread- and
+        // comprehension-led (`for`/`if`) literals alike. A spread-only literal is
+        // ambiguous (`{...a}` could be either) — explicit type-arg arity decides,
+        // otherwise it defaults to a Set.
+        let is_map = self.map_literal_lookahead().unwrap_or(type_args.len() == 2);
+        if is_map {
             let mut elements = Vec::new();
             while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
                 elements.push(self.parse_map_element());
@@ -1183,29 +1267,43 @@ impl<'src> Parser<'src> {
         }
     }
 
-    /// Look ahead (without consuming) to classify a `{...}` literal as a map. The
-    /// leaf of a map element is a `k: v` entry; descend through leading `for`/`if`
-    /// comprehension headers to reach it. A spread leaf is treated as a set.
-    fn map_literal_lookahead(&mut self) -> bool {
+    /// Look ahead (without consuming) to classify a non-empty `{...}` literal:
+    /// `Some(true)` for a map (a `k: v` entry leaf), `Some(false)` for a set (a
+    /// plain element leaf), `None` when every element is a spread and no entry is
+    /// present (`{...a}` / `{...a, ...b}`) — genuinely ambiguous, so the caller
+    /// decides. Descends through leading `for`/`if` comprehension headers and
+    /// looks *past* leading spreads for a decisive `:` leaf.
+    fn map_literal_lookahead(&mut self) -> Option<bool> {
         let saved = self.pos;
         let saved_errors = self.errors.len();
-        while let TokenKind::For | TokenKind::If = self.cur().kind {
-            self.advance();
-            self.skip_balanced_parens();
-        }
-        let is_map = match self.cur().kind {
-            TokenKind::DotDotDot | TokenKind::DotDotDotQmark => false,
-            _ => {
-                // A null-aware key/element leads with `?`; skip it so `{?k: v}`
-                // (map) is told apart from `{?x}` (set).
-                let _ = self.eat(TokenKind::Qmark);
-                let _ = self.parse_expr();
-                self.at(TokenKind::Colon)
+        let result = loop {
+            while let TokenKind::For | TokenKind::If = self.cur().kind {
+                self.advance();
+                self.skip_balanced_parens();
+            }
+            match self.cur().kind {
+                TokenKind::DotDotDot | TokenKind::DotDotDotQmark => {
+                    // A spread is ambiguous on its own; skip it and inspect the
+                    // next element for a decisive `k: v` entry.
+                    self.advance();
+                    let _ = self.parse_expr();
+                    if self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RBrace) {
+                        continue;
+                    }
+                    break None;
+                }
+                _ => {
+                    // A null-aware key/element leads with `?`; skip it so `{?k: v}`
+                    // (map) is told apart from `{?x}` (set).
+                    let _ = self.eat(TokenKind::Qmark);
+                    let _ = self.parse_expr();
+                    break Some(self.at(TokenKind::Colon));
+                }
             }
         };
         self.pos = saved;
         self.errors.truncate(saved_errors);
-        is_map
+        result
     }
 
     /// Skip a balanced `( ... )` group starting at the current token. Used by
@@ -1399,16 +1497,18 @@ impl<'src> Parser<'src> {
 
     /// Parse a collection/comprehension `if (...)` condition (the `if` keyword is
     /// already consumed): `(expr)` or `(expr case pattern [when guard])`. The
-    /// `when` guard is parsed but not retained — `IfCondition` has no guard slot.
+    /// optional `when` guard is retained in [`IfCondition::Case`].
     fn parse_collection_if_condition(&mut self) -> IfCondition {
         self.expect(TokenKind::LParen);
         let scrutinee = self.parse_expr();
         let condition = if self.eat(TokenKind::Case).is_some() {
             let pattern = self.parse_pattern();
-            if self.eat(TokenKind::When).is_some() {
-                let _ = self.parse_expr();
-            }
-            IfCondition::Case(scrutinee, Box::new(pattern))
+            let guard = if self.eat(TokenKind::When).is_some() {
+                Some(Box::new(self.parse_expr()))
+            } else {
+                None
+            };
+            IfCondition::Case(scrutinee, Box::new(pattern), guard)
         } else {
             IfCondition::Expr(scrutinee)
         };
@@ -1491,6 +1591,68 @@ impl<'src> Parser<'src> {
         }
     }
 
+    /// Parse a symbol literal — the leading `#` is current. The body is either a
+    /// dotted identifier chain (`#foo`, `#foo.bar.baz`) or a user-definable
+    /// operator (`#+`, `#==`, `#[]`, `#[]=`, `#~`). `raw` is sliced verbatim from
+    /// source so it always includes the `#` and exact operator spelling.
+    fn parse_symbol_literal(&mut self, start: usize) -> Expr {
+        use TokenKind::*;
+        let hash = self.advance(); // #
+        let mut end = hash.offset + hash.len;
+        if self.is_ident_like() || self.at(Void) {
+            let tok = self.advance();
+            end = tok.offset + tok.len;
+            while self.at(Dot) {
+                let dot = self.advance();
+                end = dot.offset + dot.len;
+                if self.is_ident_like() || self.at(Void) {
+                    let id = self.advance();
+                    end = id.offset + id.len;
+                } else {
+                    self.error("expected identifier after '.' in symbol literal".to_string());
+                    break;
+                }
+            }
+        } else if self.at(LBracket) {
+            // Index operator `[]` or index-assign `[]=`.
+            self.advance();
+            let rb = self.expect(RBracket);
+            end = rb.offset + rb.len;
+            if let Some(eq) = self.eat(Eq) {
+                end = eq.offset + eq.len;
+            }
+        } else if matches!(
+            self.cur().kind,
+            Lt | Gt
+                | LtEq
+                | GtEq
+                | EqEq
+                | Minus
+                | Plus
+                | Slash
+                | TildeSlash
+                | Star
+                | Percent
+                | Pipe
+                | Caret
+                | Amp
+                | LtLt
+                | GtGt
+                | GtGtGt
+                | Tilde
+        ) {
+            let op = self.advance();
+            end = op.offset + op.len;
+        } else {
+            self.error("expected symbol name after '#'".to_string());
+        }
+        let raw = self.src[start..end].to_string();
+        Expr::SymbolLit {
+            raw,
+            span: Span::new(start, end),
+        }
+    }
+
     fn parse_const_expr(&mut self, start: usize) -> Expr {
         // const can prefix a constructor call, collection literal, or (Dart 3.9)
         // a dot shorthand: `const .fromLtrb(...)`.
@@ -1505,9 +1667,15 @@ impl<'src> Parser<'src> {
                         self.parse_list_literal(true, type_args.into_iter().next(), start)
                     }
                     TokenKind::LBrace => self.parse_map_or_set_literal(true, type_args, start),
-                    _ => Expr::Error {
-                        span: self.span_from(start),
-                    },
+                    _ => {
+                        self.error(
+                            "expected '[' or '{' after type arguments in collection literal"
+                                .to_string(),
+                        );
+                        Expr::Error {
+                            span: self.span_from(start),
+                        }
+                    }
                 }
             }
             _ => {

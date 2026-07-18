@@ -321,7 +321,7 @@ impl<'src> Parser<'src> {
             Vec::new()
         };
         self.expect(TokenKind::LBrace);
-        let members = self.parse_class_body();
+        let members = self.parse_class_body_in(Some(name.name.clone()));
         self.expect(TokenKind::RBrace);
         TopLevelDecl::Class(ClassDecl {
             annotations,
@@ -356,7 +356,7 @@ impl<'src> Parser<'src> {
             Vec::new()
         };
         self.expect(TokenKind::LBrace);
-        let members = self.parse_class_body();
+        let members = self.parse_class_body_in(None);
         self.expect(TokenKind::RBrace);
         MixinDecl {
             annotations,
@@ -396,7 +396,7 @@ impl<'src> Parser<'src> {
             Vec::new()
         };
         self.expect(TokenKind::LBrace);
-        let members = self.parse_class_body();
+        let members = self.parse_class_body_in(Some(name.name.clone()));
         self.expect(TokenKind::RBrace);
         MixinClassDecl {
             annotations,
@@ -438,6 +438,30 @@ impl<'src> Parser<'src> {
             members.push(self.parse_class_member());
         }
         members
+    }
+
+    /// Parse a class body with the enclosing-constructor-name context set (and
+    /// restored afterwards). `ctor_name` is `Some(type name)` when the enclosing
+    /// declaration may declare constructors, or `None` for mixins/extensions
+    /// whose untyped members are always methods.
+    fn parse_class_body_in(&mut self, ctor_name: Option<String>) -> Vec<ClassMember> {
+        let saved = self.enclosing_ctor_name.take();
+        self.enclosing_ctor_name = ctor_name;
+        let members = self.parse_class_body();
+        self.enclosing_ctor_name = saved;
+        members
+    }
+
+    /// True when the enclosing type admits constructors (class, mixin class,
+    /// enum, extension type) — i.e. an untyped `name(...)` member can be one.
+    fn enclosing_allows_ctor(&self) -> bool {
+        self.enclosing_ctor_name.is_some()
+    }
+
+    /// True when `text` names the enclosing type, so an untyped `text(...)`
+    /// member is that type's unnamed constructor rather than a method.
+    fn name_is_enclosing_type(&self, text: &str) -> bool {
+        self.enclosing_ctor_name.as_deref() == Some(text)
     }
 
     fn parse_class_member(&mut self) -> ClassMember {
@@ -811,11 +835,16 @@ impl<'src> Parser<'src> {
         let saved = self.pos;
 
         if is_final || is_const || is_late {
-            // Const constructor: `const ClassName(` or `const ClassName.name(`
-            if is_const && self.is_ident_like() {
+            // Const constructor: `const ClassName(` or `const ClassName.name(`.
+            // Only when the enclosing type admits constructors and the name is a
+            // dotted (named) form or matches the enclosing type — otherwise this
+            // is a const field and falls through below.
+            if is_const && self.is_ident_like() && self.enclosing_allows_ctor() {
+                let name_text = self.cur_text().to_string();
                 let p1 = self.peek(1).kind.clone();
-                let is_ctor = p1 == TokenKind::LParen
-                    || (p1 == TokenKind::Dot && self.is_ctor_name_at_offset(2));
+                let dotted = p1 == TokenKind::Dot && self.is_ctor_name_at_offset(2);
+                let is_ctor =
+                    dotted || (p1 == TokenKind::LParen && self.name_is_enclosing_type(&name_text));
                 if is_ctor {
                     let ctor_saved = self.pos;
                     let name_tok = self.cur().clone();
@@ -990,18 +1019,18 @@ impl<'src> Parser<'src> {
         }
 
         // No type prefix — `name(...)`, `name.ctor(...)`, or `name<T>(...)`.
-        // With no return type this is a constructor, unless it takes type
-        // parameters or carries an `async`/`sync*` marker (neither of which a
-        // constructor may have), in which case it is an untyped method.
+        // With no return type this is a constructor only when the enclosing type
+        // admits constructors AND the name is a dotted (named) form or equals the
+        // enclosing type name; type parameters or an `async`/`sync*` marker (which
+        // a constructor may not have) also force a method. Everything else — e.g.
+        // `foo() {}` in `class C` — is an untyped method with no return type.
         if self.is_ident_like() {
             let name_tok = self.cur().clone();
+            let name_text = self.tok_text(&name_tok).to_string();
             self.advance();
             let has_ctor_dot = self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1);
             if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) || has_ctor_dot {
-                let name = Identifier::new(
-                    self.tok_text(&name_tok).to_string(),
-                    Self::tok_span(&name_tok),
-                );
+                let name = Identifier::new(name_text.clone(), Self::tok_span(&name_tok));
                 let constructor_name = if self.eat(TokenKind::Dot).is_some() {
                     Some(self.expect_ctor_name())
                 } else {
@@ -1012,7 +1041,11 @@ impl<'src> Parser<'src> {
                     let params = self.parse_formal_param_list();
                     let has_type_params = !type_params.is_empty();
                     let has_marker = matches!(self.cur().kind, TokenKind::Async | TokenKind::Sync);
-                    if constructor_name.is_none() && (has_type_params || has_marker) {
+                    let is_constructor = self.enclosing_allows_ctor()
+                        && !has_type_params
+                        && !has_marker
+                        && (constructor_name.is_some() || self.name_is_enclosing_type(&name_text));
+                    if !is_constructor {
                         let (async_from_marker, is_generator) = self.parse_async_marker();
                         let body = self.parse_function_body();
                         let is_method_abstract = is_abstract || body.is_none();
@@ -1242,6 +1275,11 @@ impl<'src> Parser<'src> {
         let mut variants = Vec::new();
         let mut members = Vec::new();
 
+        // Enums admit constructors, so an untyped member named after the enum is
+        // one; every other untyped member is a method.
+        let saved_ctor_name = self.enclosing_ctor_name.take();
+        self.enclosing_ctor_name = Some(name.name.clone());
+
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let v_start = self.cur().offset;
             let v_annotations = self.parse_annotations();
@@ -1283,6 +1321,7 @@ impl<'src> Parser<'src> {
                 break;
             }
         }
+        self.enclosing_ctor_name = saved_ctor_name;
         self.expect(TokenKind::RBrace);
         EnumDecl {
             annotations,
@@ -1309,7 +1348,7 @@ impl<'src> Parser<'src> {
         self.eat(TokenKind::On);
         let on_type = self.parse_type();
         self.expect(TokenKind::LBrace);
-        let members = self.parse_class_body();
+        let members = self.parse_class_body_in(None);
         self.expect(TokenKind::RBrace);
         ExtensionDecl {
             annotations,
@@ -1355,7 +1394,7 @@ impl<'src> Parser<'src> {
             Vec::new()
         };
         self.expect(TokenKind::LBrace);
-        let members = self.parse_class_body();
+        let members = self.parse_class_body_in(Some(name.name.clone()));
         self.expect(TokenKind::RBrace);
         ExtensionTypeDecl {
             annotations,

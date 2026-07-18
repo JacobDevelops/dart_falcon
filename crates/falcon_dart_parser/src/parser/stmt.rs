@@ -20,6 +20,32 @@ impl<'src> Parser<'src> {
 
     pub(super) fn parse_stmt(&mut self) -> Stmt {
         let start = self.cur().offset;
+
+        // Labeled statement: `label: stmt`. A plain identifier directly followed
+        // by `:` at statement start is a label. This never collides with a
+        // ternary (`x ? a : b` — the `:` there follows `?`, not the leading
+        // identifier) nor with `case`/`default:` labels (keywords, handled in
+        // `parse_switch_stmt`). Labels nest, each wrapping its inner statement.
+        if self.at(TokenKind::Ident) && self.peek(1).kind == TokenKind::Colon {
+            let tok = self.advance(); // label identifier
+            let label = Identifier::new(self.tok_text(&tok).to_string(), Self::tok_span(&tok));
+            self.advance(); // :
+            let stmt = self.parse_stmt();
+            return Stmt::Labeled(LabeledStmt {
+                label,
+                stmt: Box::new(stmt),
+                span: self.span_from(start),
+            });
+        }
+
+        // `await for (...)` — an asynchronous for-in loop. The `await` precedes
+        // the `for` keyword (unlike the loop-variable `await`), so recognise it
+        // here and hand the `is_await` flag to the for-statement parser.
+        if self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For {
+            self.advance(); // await
+            return self.parse_for_stmt(true, start);
+        }
+
         match self.cur().kind {
             TokenKind::LBrace => {
                 // Disambiguate block vs map/set literal expression statement.
@@ -42,7 +68,7 @@ impl<'src> Parser<'src> {
                 }
             }
             TokenKind::If => self.parse_if_stmt(),
-            TokenKind::For => self.parse_for_stmt(),
+            TokenKind::For => self.parse_for_stmt(false, start),
             TokenKind::While => self.parse_while_stmt(),
             TokenKind::Do => self.parse_do_while_stmt(),
             TokenKind::Switch => self.parse_switch_stmt(),
@@ -117,7 +143,14 @@ impl<'src> Parser<'src> {
         let expr = self.parse_expr();
         let condition = if self.eat(TokenKind::Case).is_some() {
             let pattern = self.parse_pattern();
-            IfCondition::Case(expr, Box::new(pattern))
+            // Optional `when <guard>` (mirrors switch-case guard parsing). The
+            // pattern parser stops at the contextual `when` keyword on its own.
+            let guard = if self.eat(TokenKind::When).is_some() {
+                Some(Box::new(self.parse_expr()))
+            } else {
+                None
+            };
+            IfCondition::Case(expr, Box::new(pattern), guard)
         } else {
             IfCondition::Expr(expr)
         };
@@ -136,10 +169,8 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn parse_for_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset;
+    fn parse_for_stmt(&mut self, is_await: bool, start: usize) -> Stmt {
         self.advance(); // for
-        let is_await = self.eat(TokenKind::Await).is_some();
         self.expect(TokenKind::LParen);
         let (init, condition, update) = self.parse_for_clauses();
         let body = self.parse_stmt();
@@ -154,6 +185,28 @@ impl<'src> Parser<'src> {
     }
 
     /// Parses `init ; cond ; update )` or `pattern in expr )` — leaves `)` consumed.
+    /// Lookahead (positioned at `final`/`var`): does an ident-led object pattern
+    /// follow — a type name whose subpattern list opens with `(` before the loop
+    /// clause ends? Distinguishes `final MapEntry(:k, :v) in …` (object pattern)
+    /// from a plain typed decl `final Foo x in …` (no `(` before `in`).
+    fn ident_led_object_pattern_ahead(&self) -> bool {
+        if !Self::kind_is_ident_like(&self.peek(1).kind) {
+            return false;
+        }
+        let mut i = 2;
+        loop {
+            match self.peek(i).kind {
+                TokenKind::LParen => return true,
+                TokenKind::In
+                | TokenKind::Eq
+                | TokenKind::Semicolon
+                | TokenKind::RParen
+                | TokenKind::Eof => return false,
+                _ => i += 1,
+            }
+        }
+    }
+
     pub(super) fn parse_for_clauses(&mut self) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
         // Empty for (;;)
         if self.at(TokenKind::Semicolon) {
@@ -166,13 +219,15 @@ impl<'src> Parser<'src> {
         }
 
         // Dart 3 pattern for-in: `for (final (a, b) in xs)`. The keyword must be
-        // directly followed by a `(`/`[`/`{` opening a destructuring pattern, and
-        // the pattern by `in`.
+        // directly followed by a `(`/`[`/`{` opening a destructuring pattern, or
+        // by an ident-led object pattern (`final MapEntry(:key, :value) in ...`),
+        // with the pattern then followed by `in`. A plain typed `final Foo x in`
+        // has no `(` before the terminator, so it stays a typed ForIn (below).
         if self.at_any(&[TokenKind::Final, TokenKind::Var])
-            && matches!(
+            && (matches!(
                 self.peek(1).kind,
                 TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
-            )
+            ) || self.ident_led_object_pattern_ahead())
         {
             let saved_pat = self.pos;
             let saved_errs = self.errors.len();
@@ -662,6 +717,17 @@ impl<'src> Parser<'src> {
             return stmt;
         }
 
+        // Dart 3 pattern-assignment: `(a, b) = expr;`, `[a, b] = expr;` — a
+        // `(`/`[` destructuring pattern (no `var`/`final`) followed by `=`. The
+        // trailing single `=` distinguishes it from a record/list expression
+        // statement; without it we restore and fall through to expression parsing.
+        if annotations.is_empty()
+            && self.at_any(&[TokenKind::LParen, TokenKind::LBracket])
+            && let Some(stmt) = self.try_parse_pattern_assign(start)
+        {
+            return stmt;
+        }
+
         // late / final / var → definitely a var decl
         if self.at(TokenKind::Late) || self.at_any(&[TokenKind::Final, TokenKind::Var]) {
             return self.parse_local_var_decl(start);
@@ -769,6 +835,18 @@ impl<'src> Parser<'src> {
                 self.pos = saved;
                 self.errors.truncate(saved_errs);
             }
+        }
+
+        // Untyped local function: `name [<T>](params) [async] { .. }` / `=> e`
+        // (no return type). A balanced lookahead confirms a function body
+        // follows the parameter list before we commit — otherwise this is a
+        // call statement (`foo();`, `g((x) => x);`), parsed as an expression.
+        if self.at(TokenKind::Ident)
+            && matches!(self.peek(1).kind, TokenKind::LParen | TokenKind::Lt)
+            && self.untyped_local_func_ahead()
+            && let Some(stmt) = self.try_parse_untyped_local_func(start)
+        {
+            return stmt;
         }
 
         let expr = self.parse_expr();
@@ -896,5 +974,126 @@ impl<'src> Parser<'src> {
             expr,
             span: self.span_from(start),
         })
+    }
+
+    /// Speculatively parse a Dart 3 pattern-assignment `(<pattern>|[<pattern>]) = expr;`.
+    /// Returns `None` (restoring position and errors) when the `(`/`[` prefix is
+    /// not a pattern followed by `=` — i.e. it is a record/list expression.
+    fn try_parse_pattern_assign(&mut self, start: usize) -> Option<Stmt> {
+        let saved = self.pos;
+        let saved_errs = self.errors.len();
+        // Bare-identifier targets (`(a, b) = e;`) are assignable variable
+        // references, not constant references — bind them in pattern-binding
+        // mode so each parses as `Pattern::Variable` (which the visitor walks),
+        // matching the declaration twin `var (a, b) = e;`.
+        let pattern = self.parse_binding_pattern();
+        if self.at(TokenKind::Eq) {
+            self.advance(); // =
+            let value = self.parse_expr();
+            self.eat(TokenKind::Semicolon);
+            return Some(Stmt::PatternAssign(PatternAssignStmt {
+                pattern,
+                value,
+                span: self.span_from(start),
+            }));
+        }
+        self.pos = saved;
+        self.errors.truncate(saved_errs);
+        None
+    }
+
+    /// Balanced lookahead from a statement-leading identifier: does a function
+    /// body (`{`, `=>`, optionally after an `async`/`sync` marker) follow the
+    /// `[<type params>] (params)` header? This distinguishes an untyped local
+    /// function declaration from a call statement whose arguments may themselves
+    /// contain closures (`g((x) => x);`) that would otherwise desync a lenient
+    /// speculative parameter-list parse.
+    fn untyped_local_func_ahead(&self) -> bool {
+        let kind = |i: usize| self.tokens.get(i).map(|t| &t.kind);
+        let mut i = self.pos + 1;
+
+        // Optional `<type params>` — scan to the matching close angle bracket.
+        if matches!(kind(i), Some(TokenKind::Lt)) {
+            let mut depth = 0i32;
+            loop {
+                match kind(i) {
+                    Some(TokenKind::Lt) => depth += 1,
+                    Some(TokenKind::Gt) => depth -= 1,
+                    Some(TokenKind::GtGt) => depth -= 2,
+                    Some(TokenKind::GtGtGt) => depth -= 3,
+                    Some(TokenKind::Eof) | None => return false,
+                    _ => {}
+                }
+                i += 1;
+                if depth <= 0 {
+                    break;
+                }
+            }
+        }
+
+        // Parameter list — scan to its matching `)`.
+        if !matches!(kind(i), Some(TokenKind::LParen)) {
+            return false;
+        }
+        let mut depth = 0i32;
+        loop {
+            match kind(i) {
+                Some(TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace) => depth += 1,
+                Some(TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace) => depth -= 1,
+                Some(TokenKind::Eof) | None => return false,
+                _ => {}
+            }
+            i += 1;
+            if depth == 0 {
+                break;
+            }
+        }
+
+        // Optional `async` / `sync` [`*`] marker.
+        if matches!(kind(i), Some(TokenKind::Async | TokenKind::Sync)) {
+            i += 1;
+            if matches!(kind(i), Some(TokenKind::Star)) {
+                i += 1;
+            }
+        }
+
+        matches!(kind(i), Some(TokenKind::LBrace | TokenKind::Arrow))
+    }
+
+    /// Speculatively parse an untyped local function declaration
+    /// `name [<T>](params) [async|sync[*]] (block | => expr)`. Returns `None`
+    /// (restoring position and errors) when no function body follows the
+    /// parameter list — that is a plain call statement, parsed as an expression.
+    fn try_parse_untyped_local_func(&mut self, start: usize) -> Option<Stmt> {
+        let saved = self.pos;
+        let saved_errs = self.errors.len();
+        let name = self.expect_ident();
+        let type_params = if self.at(TokenKind::Lt) {
+            self.parse_type_params()
+        } else {
+            Vec::new()
+        };
+        if !self.at(TokenKind::LParen) {
+            self.pos = saved;
+            self.errors.truncate(saved_errs);
+            return None;
+        }
+        let params = self.parse_formal_param_list();
+        let (is_async, is_generator) = self.parse_async_marker();
+        if let Some(body) = self.parse_function_body() {
+            return Some(Stmt::LocalFunc(LocalFuncDecl {
+                is_async,
+                is_generator,
+                return_type: None,
+                name,
+                type_params,
+                params,
+                body,
+                span: self.span_from(start),
+            }));
+        }
+        self.pos = saved;
+        self.errors.truncate(saved_errs);
+        None
     }
 }

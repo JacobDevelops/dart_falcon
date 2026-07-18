@@ -44,7 +44,12 @@ fn collect_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
         Stmt::If(if_stmt) => {
             match &if_stmt.condition {
                 IfCondition::Expr(expr) => collect_from_expr(expr, names),
-                IfCondition::Case(expr, _) => collect_from_expr(expr, names),
+                IfCondition::Case(expr, _, guard) => {
+                    collect_from_expr(expr, names);
+                    if let Some(g) = guard {
+                        collect_from_expr(g, names);
+                    }
+                }
             }
             collect_from_stmt(&if_stmt.then_branch, names);
             if let Some(else_stmt) = &if_stmt.else_branch {
@@ -493,7 +498,12 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Stmt::If(i) => {
             match &i.condition {
                 IfCondition::Expr(e) => scan_expr(e, diags, ctx),
-                IfCondition::Case(e, _) => scan_expr(e, diags, ctx),
+                IfCondition::Case(e, _, guard) => {
+                    scan_expr(e, diags, ctx);
+                    if let Some(g) = guard {
+                        scan_expr(g, diags, ctx);
+                    }
+                }
             }
             scan_stmt(&i.then_branch, diags, ctx);
             if let Some(eb) = &i.else_branch {

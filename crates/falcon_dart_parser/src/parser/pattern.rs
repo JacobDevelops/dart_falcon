@@ -57,6 +57,11 @@ impl<'src> Parser<'src> {
 
     fn parse_relational_pattern(&mut self) -> Pattern {
         let start = self.cur().offset;
+        // A `<` that opens a typed collection pattern (`<int>[...]`, `<K, V>{...}`)
+        // is not the relational `<` operator — defer to the primary parser.
+        if self.at(TokenKind::Lt) && self.typed_collection_ahead() {
+            return self.parse_postfix_pattern();
+        }
         // Relational: == expr, != expr, < expr, > expr, <= expr, >= expr
         let op = match self.cur().kind {
             TokenKind::EqEq => Some(RelationalPatternOp::Eq),
@@ -69,7 +74,10 @@ impl<'src> Parser<'src> {
         };
         if let Some(op) = op {
             self.advance();
-            let value = self.parse_expr();
+            // The operand is a `bitwiseOrExpression`: parsing at this tier keeps
+            // `&&`/`||` at the pattern level so `> 3 && < 5` is a logical-and
+            // pattern rather than the operand swallowing the `&&`.
+            let value = self.parse_bitwise_or();
             return Pattern::Relational {
                 op,
                 value,
@@ -77,6 +85,49 @@ impl<'src> Parser<'src> {
             };
         }
         self.parse_postfix_pattern()
+    }
+
+    /// True when the `<` at the cursor opens the type-argument list of a typed
+    /// collection pattern — a balanced `<...>` immediately followed by `[` or
+    /// `{`. Distinguishes `<int>[a, b]` from the relational `< expr` operator.
+    fn typed_collection_ahead(&self) -> bool {
+        use TokenKind::*;
+        debug_assert_eq!(self.cur().kind, Lt);
+        let mut depth = 0i32;
+        let mut i = self.pos;
+        while let Some(tok) = self.tokens.get(i) {
+            let closed_at = match &tok.kind {
+                Lt => {
+                    depth += 1;
+                    None
+                }
+                Gt => {
+                    depth -= 1;
+                    (depth <= 0).then_some(i + 1)
+                }
+                GtGt => {
+                    depth -= 2;
+                    (depth <= 0).then_some(i + 1)
+                }
+                GtGtGt => {
+                    depth -= 3;
+                    (depth <= 0).then_some(i + 1)
+                }
+                Eof => return false,
+                _ => None,
+            };
+            if let Some(idx) = closed_at {
+                return matches!(
+                    self.tokens.get(idx).map(|t| &t.kind),
+                    Some(LBracket | LBrace)
+                );
+            }
+            i += 1;
+            if i - self.pos > 512 {
+                return false;
+            }
+        }
+        false
     }
 
     fn parse_postfix_pattern(&mut self) -> Pattern {
@@ -120,12 +171,30 @@ impl<'src> Parser<'src> {
 
         // List pattern: [elements]
         if self.at(TokenKind::LBracket) {
-            return self.parse_list_pattern(start);
+            return self.parse_list_pattern(start, None);
         }
 
         // Map pattern: {key: pattern, ...}
         if self.at(TokenKind::LBrace) {
-            return self.parse_map_pattern(start);
+            return self.parse_map_pattern(start, Vec::new());
+        }
+
+        // Typed collection pattern: `<int>[a, b]` or `<String, int>{...}`.
+        if self.at(TokenKind::Lt) {
+            let type_args = self.parse_type_args();
+            if self.at(TokenKind::LBracket) {
+                return self.parse_list_pattern(start, type_args.into_iter().next());
+            }
+            if self.at(TokenKind::LBrace) {
+                return self.parse_map_pattern(start, type_args);
+            }
+            self.error(format!(
+                "expected '[' or '{{' after type arguments in collection pattern, got {:?}",
+                self.cur().kind
+            ));
+            return Pattern::Error {
+                span: self.span_from(start),
+            };
         }
 
         // Null literal
@@ -368,9 +437,8 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_list_pattern(&mut self, start: usize) -> Pattern {
+    fn parse_list_pattern(&mut self, start: usize, type_arg: Option<DartType>) -> Pattern {
         self.advance(); // [
-        let type_arg = None; // Type args come via object pattern; bare list patterns have no explicit type arg
 
         let mut elements = Vec::new();
         while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
@@ -398,14 +466,15 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn parse_map_pattern(&mut self, start: usize) -> Pattern {
+    fn parse_map_pattern(&mut self, start: usize, type_args: Vec<DartType>) -> Pattern {
         self.advance(); // {
-        let type_args = Vec::new();
+        let mut has_rest = false;
         let mut entries = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             // Rest entry: ...
             if self.at(TokenKind::DotDotDot) {
                 self.advance();
+                has_rest = true;
                 if self.eat(TokenKind::Comma).is_none() {
                     break;
                 }
@@ -428,13 +497,59 @@ impl<'src> Parser<'src> {
         Pattern::Map(MapPattern {
             type_args,
             entries,
+            has_rest,
             span: self.span_from(start),
         })
     }
 
     fn parse_const_pattern(&mut self, start: usize) -> Pattern {
+        // Parenthesized constant expression: `const (1 + 2)`. Handled here rather
+        // than via `parse_primary`, which would read `(...)` as a record type.
+        if self.peek(1).kind == TokenKind::LParen {
+            self.advance(); // const
+            self.advance(); // (
+            let inner = self.parse_expr();
+            self.expect(TokenKind::RParen);
+            return Pattern::Const(ConstPattern {
+                name: Vec::new(),
+                expr: Some(Box::new(inner)),
+                span: self.span_from(start),
+            });
+        }
+
+        // Distinguish the expression forms (const constructor / collection
+        // literal — `const Foo(1)`, `const [1, 2]`, `const {1}`, `const <int>[1]`)
+        // from a bare dotted-name constant reference (`const Foo.bar`, the
+        // existing `expr: None` form).
+        let is_expr_form = match self.peek(1).kind {
+            TokenKind::LBracket | TokenKind::LBrace | TokenKind::Lt => true,
+            _ if self.is_ident_like_at(1) => {
+                // A const constructor has `(` / `<` after the (dotted) name; a
+                // bare constant reference does not.
+                let mut i = 2;
+                while self.peek(i).kind == TokenKind::Dot
+                    && self.is_ident_like_kind(&self.peek(i + 1).kind)
+                {
+                    i += 2;
+                }
+                matches!(self.peek(i).kind, TokenKind::LParen | TokenKind::Lt)
+            }
+            _ => false,
+        };
+
+        if is_expr_form {
+            // `parse_primary` consumes the `const` keyword itself and produces the
+            // const constructor / collection-literal expression.
+            let expr = self.parse_primary();
+            return Pattern::Const(ConstPattern {
+                name: Vec::new(),
+                expr: Some(Box::new(expr)),
+                span: self.span_from(start),
+            });
+        }
+
+        // Bare dotted-name constant reference: `const Foo`, `const Foo.bar`.
         self.advance(); // const
-        // const ident.ident... or const constructor(...)
         let mut name = Vec::new();
         if self.is_ident_like() {
             name.push(self.expect_ident());
@@ -445,6 +560,7 @@ impl<'src> Parser<'src> {
         }
         Pattern::Const(ConstPattern {
             name,
+            expr: None,
             span: self.span_from(start),
         })
     }
@@ -463,14 +579,18 @@ impl<'src> Parser<'src> {
             let mut fields = Vec::new();
             while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
                 let fs = self.cur().offset;
-                // Dart 3 colon-shorthand: `:var x` means `x: var x`, `:final x` means `x: final x`
+                // Dart 3 colon-shorthand: `:field` binds a variable whose getter
+                // name is the bound name (also `:var x` / `:final x`). Parse in
+                // binding mode so `field` becomes a variable, not a constant
+                // reference, in refutable contexts like `case Foo(:field)`.
                 if self.at(TokenKind::Colon) {
                     self.advance(); // :
+                    let prev = self.pattern_binding;
+                    self.pattern_binding = true;
                     let inner = self.parse_pattern();
-                    let field_name = match &inner {
-                        Pattern::Variable { name, .. } => name.clone(),
-                        _ => Identifier::new("<shorthand>", self.cur_span()),
-                    };
+                    self.pattern_binding = prev;
+                    let field_name = binding_pattern_name(&inner)
+                        .unwrap_or_else(|| Identifier::new("<shorthand>", self.cur_span()));
                     fields.push(ObjectPatternField {
                         name: field_name,
                         pattern: Some(inner),
@@ -522,8 +642,10 @@ impl<'src> Parser<'src> {
             };
         }
 
-        // Typed variable: Type name
-        if self.is_ident_like() {
+        // Typed variable: Type name. `when` here introduces a case guard
+        // (`case State.a when c`), not a variable name, so it must not be
+        // consumed as the binding.
+        if self.is_ident_like() && !self.at(TokenKind::When) {
             let name = self.expect_ident();
             return Pattern::Variable {
                 type_: Some(ty),
@@ -551,6 +673,7 @@ impl<'src> Parser<'src> {
                 } else {
                     Pattern::Const(ConstPattern {
                         name: nt.segments.clone(),
+                        expr: None,
                         span: self.span_from(start),
                     })
                 }

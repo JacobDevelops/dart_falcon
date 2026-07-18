@@ -657,6 +657,13 @@ pub enum Stmt {
     /// `var (x, :y) = expr;`, `final [a, b] = expr;`. Binds the identifiers in
     /// `pattern` (modeled as [`Pattern::Variable`]) to the destructured `init`.
     PatternDecl(PatternDeclaration),
+    /// Dart 3 pattern-assignment statement: `(a, b) = expr;`, `[a, b] = expr;`.
+    /// Assigns to already-declared variables via destructuring (no `var`/`final`
+    /// keyword), distinct from [`Stmt::PatternDecl`].
+    PatternAssign(PatternAssignStmt),
+    /// A labeled statement: `label: stmt`. One or more labels may nest, each
+    /// wrapping the labeled [`Stmt`] in its own `Labeled` node.
+    Labeled(LabeledStmt),
     LocalFunc(LocalFuncDecl),
     Assert(AssertStmt),
     Yield(YieldStmt),
@@ -680,6 +687,8 @@ impl Stmt {
             Stmt::Continue(x) => &x.span,
             Stmt::LocalVar(x) => &x.span,
             Stmt::PatternDecl(x) => &x.span,
+            Stmt::PatternAssign(x) => &x.span,
+            Stmt::Labeled(x) => &x.span,
             Stmt::LocalFunc(x) => &x.span,
             Stmt::Assert(x) => &x.span,
             Stmt::Yield(x) => &x.span,
@@ -700,7 +709,9 @@ pub struct IfStmt {
 #[derive(Debug, Clone)]
 pub enum IfCondition {
     Expr(Expr),
-    Case(Expr, Box<Pattern>),
+    /// `if (<expr> case <pattern> [when <guard>])` — used by if-case statements
+    /// and collection `if`-elements. The third field is the optional `when` guard.
+    Case(Expr, Box<Pattern>, Option<Box<Expr>>),
 }
 
 #[derive(Debug, Clone)]
@@ -828,6 +839,22 @@ pub struct PatternDeclaration {
     pub is_final: bool,
     pub pattern: Pattern,
     pub init: Expr,
+    pub span: Span,
+}
+
+/// Dart 3 pattern-assignment statement: `<pattern> = <value>` (no `var`/`final`).
+#[derive(Debug, Clone)]
+pub struct PatternAssignStmt {
+    pub pattern: Pattern,
+    pub value: Expr,
+    pub span: Span,
+}
+
+/// A labeled statement: `label: stmt`.
+#[derive(Debug, Clone)]
+pub struct LabeledStmt {
+    pub label: Identifier,
+    pub stmt: Box<Stmt>,
     pub span: Span,
 }
 
@@ -962,6 +989,8 @@ pub enum Expr {
     Cascade {
         object: Box<Expr>,
         sections: Vec<CascadeSection>,
+        /// True for a leading null-aware cascade `?..`.
+        is_null_aware: bool,
         span: Span,
     },
 
@@ -1047,6 +1076,19 @@ pub enum Expr {
         span: Span,
     },
 
+    // Symbol literal: `#name`, `#foo.bar`, `#+`. `raw` includes the leading `#`.
+    SymbolLit {
+        raw: String,
+        span: Span,
+    },
+
+    // Bare generic tear-off instantiation: `identity<int>` (no call follows).
+    GenericInstantiation {
+        target: Box<Expr>,
+        type_args: Vec<DartType>,
+        span: Span,
+    },
+
     Error {
         span: Span,
     },
@@ -1085,7 +1127,9 @@ impl Expr {
             | Expr::Await { span, .. }
             | Expr::Throw { span, .. }
             | Expr::Switch { span, .. }
-            | Expr::NullAssert { span, .. } => span,
+            | Expr::NullAssert { span, .. }
+            | Expr::SymbolLit { span, .. }
+            | Expr::GenericInstantiation { span, .. } => span,
         }
     }
 }
@@ -1283,7 +1327,12 @@ fn push_map_element_exprs<'a>(element: &'a MapElement, out: &mut Vec<&'a Expr>) 
         } => {
             match condition {
                 IfCondition::Expr(e) => out.push(e),
-                IfCondition::Case(e, _) => out.push(e),
+                IfCondition::Case(e, _, guard) => {
+                    out.push(e);
+                    if let Some(g) = guard {
+                        out.push(g);
+                    }
+                }
             }
             push_map_element_exprs(then_entry, out);
             if let Some(else_entry) = else_entry {
@@ -1459,6 +1508,10 @@ pub enum LiteralPatternValue {
 #[derive(Debug, Clone)]
 pub struct ConstPattern {
     pub name: Vec<Identifier>,
+    /// `None` for the dotted-name form (`const Foo.bar`); `Some` for a const
+    /// constructor / collection / parenthesized expression form
+    /// (`const Foo(1)`, `const [1, 2]`, `const (1 + 2)`).
+    pub expr: Option<Box<Expr>>,
     pub span: Span,
 }
 
@@ -1492,6 +1545,8 @@ pub struct RecordPatternField {
 pub struct MapPattern {
     pub type_args: Vec<DartType>,
     pub entries: Vec<MapPatternEntry>,
+    /// True when the map pattern contains a rest element (`...`).
+    pub has_rest: bool,
     pub span: Span,
 }
 

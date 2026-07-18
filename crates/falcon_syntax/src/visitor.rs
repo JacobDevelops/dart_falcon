@@ -614,9 +614,12 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
         Stmt::If(x) => {
             match &x.condition {
                 IfCondition::Expr(e) => v.visit_expr(e),
-                IfCondition::Case(e, p) => {
+                IfCondition::Case(e, p, guard) => {
                     v.visit_expr(e);
                     v.visit_pattern(p);
+                    if let Some(g) = guard {
+                        v.visit_expr(g);
+                    }
                 }
             }
             v.visit_stmt(&x.then_branch);
@@ -722,6 +725,14 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
             v.visit_pattern(&x.pattern);
             v.visit_expr(&x.init);
         }
+        Stmt::PatternAssign(x) => {
+            v.visit_pattern(&x.pattern);
+            v.visit_expr(&x.value);
+        }
+        Stmt::Labeled(x) => {
+            v.visit_identifier(&x.label);
+            v.visit_stmt(&x.stmt);
+        }
         Stmt::LocalFunc(x) => {
             if let Some(ref ret) = x.return_type {
                 v.visit_dart_type(ret);
@@ -760,6 +771,7 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
         | Expr::This { .. }
         | Expr::Super { .. }
         | Expr::DotShorthand { .. }
+        | Expr::SymbolLit { .. }
         | Expr::Error { .. } => {}
 
         Expr::StringLit(x) => {
@@ -869,6 +881,14 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
             v.visit_dart_type(dart_type);
             walk_arg_list(v, args);
         }
+        Expr::GenericInstantiation {
+            target, type_args, ..
+        } => {
+            v.visit_expr(target);
+            for t in type_args {
+                v.visit_dart_type(t);
+            }
+        }
         Expr::Await { expr, .. }
         | Expr::Throw { expr, .. }
         | Expr::NullAssert { operand: expr, .. } => v.visit_expr(expr),
@@ -903,7 +923,12 @@ pub fn walk_pattern<V: Visitor>(v: &mut V, node: &Pattern) {
                 v.visit_string_lit(s);
             }
         }
-        Pattern::Const(_) | Pattern::Error { .. } => {}
+        Pattern::Const(x) => {
+            if let Some(ref e) = x.expr {
+                v.visit_expr(e);
+            }
+        }
+        Pattern::Error { .. } => {}
         Pattern::List(x) => {
             for elem in &x.elements {
                 match elem {
@@ -1025,9 +1050,12 @@ fn walk_collection_element<V: Visitor>(v: &mut V, elem: &CollectionElement) {
         } => {
             match condition {
                 IfCondition::Expr(e) => v.visit_expr(e),
-                IfCondition::Case(e, p) => {
+                IfCondition::Case(e, p, guard) => {
                     v.visit_expr(e);
                     v.visit_pattern(p);
+                    if let Some(g) = guard {
+                        v.visit_expr(g);
+                    }
                 }
             }
             walk_collection_element(v, then_elem);
@@ -1109,9 +1137,12 @@ fn walk_map_element<V: Visitor>(v: &mut V, element: &MapElement) {
         } => {
             match condition {
                 IfCondition::Expr(e) => v.visit_expr(e),
-                IfCondition::Case(e, p) => {
+                IfCondition::Case(e, p, guard) => {
                     v.visit_expr(e);
                     v.visit_pattern(p);
+                    if let Some(g) = guard {
+                        v.visit_expr(g);
+                    }
                 }
             }
             walk_map_element(v, then_entry);

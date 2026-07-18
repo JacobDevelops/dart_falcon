@@ -160,8 +160,11 @@ fn analyze_statement(
                 IfCondition::Expr(expr) => {
                     analyze_expression(expr, scope_map, diags, ctx);
                 }
-                IfCondition::Case(expr, _) => {
+                IfCondition::Case(expr, _, guard) => {
                     analyze_expression(expr, scope_map, diags, ctx);
+                    if let Some(g) = guard {
+                        analyze_expression(g, scope_map, diags, ctx);
+                    }
                 }
             }
             analyze_statement(&if_stmt.then_branch, scope_map, diags, ctx);
@@ -216,6 +219,12 @@ fn analyze_statement(
         }
         Stmt::PatternDecl(pat_decl) => {
             analyze_expression(&pat_decl.init, scope_map, diags, ctx);
+        }
+        Stmt::PatternAssign(pat_assign) => {
+            analyze_expression(&pat_assign.value, scope_map, diags, ctx);
+        }
+        Stmt::Labeled(labeled) => {
+            analyze_statement(&labeled.stmt, scope_map, diags, ctx);
         }
         Stmt::Assert(assert_stmt) => {
             analyze_expression(&assert_stmt.condition, scope_map, diags, ctx);

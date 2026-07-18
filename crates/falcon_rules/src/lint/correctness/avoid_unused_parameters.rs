@@ -148,7 +148,12 @@ mod dcl {
                     Stmt::If(if_stmt) => {
                         match &if_stmt.condition {
                             IfCondition::Expr(expr) => collect_from_expr(expr, names),
-                            IfCondition::Case(expr, _) => collect_from_expr(expr, names),
+                            IfCondition::Case(expr, _, guard) => {
+                                collect_from_expr(expr, names);
+                                if let Some(g) = guard {
+                                    collect_from_expr(g, names);
+                                }
+                            }
                         }
                         collect_from_stmt(&if_stmt.then_branch, names);
                         if let Some(else_stmt) = &if_stmt.else_branch {

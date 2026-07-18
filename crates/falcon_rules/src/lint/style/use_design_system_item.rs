@@ -166,7 +166,12 @@ fn scan_stmt(
         Stmt::If(i) => {
             match &i.condition {
                 IfCondition::Expr(e) => scan_expr(e, diags, ctx, items),
-                IfCondition::Case(e, _) => scan_expr(e, diags, ctx, items),
+                IfCondition::Case(e, _, guard) => {
+                    scan_expr(e, diags, ctx, items);
+                    if let Some(g) = guard {
+                        scan_expr(g, diags, ctx, items);
+                    }
+                }
             }
             scan_stmt(&i.then_branch, diags, ctx, items);
             if let Some(eb) = &i.else_branch {
