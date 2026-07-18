@@ -36,7 +36,7 @@ automatically for any file named `falcon.json`.
     "rules": {
       "recommended": true,
       "complexity": {
-        "max_lines_for_file": "off"
+        "max-lines-for-file": "off"
       },
       "style": {
         "prefer-trailing-comma": { "level": "error", "options": {} }
@@ -88,6 +88,13 @@ A bare `**` (or `**/*`) entry disables positive filtering entirely.
 - Every other key is a **group** — one of `complexity`, `correctness`,
   `performance`, `style`, `suspicious` — mapping rule names to a configuration.
 
+> **Rule ids are kebab-case.** Every rule id uses dashes (e.g.
+> `max-lines-for-file`, `no-magic-number`). The pre-1.0 `snake_case` ids still
+> resolve as aliases — an old id in `falcon.json` or a `// falcon-ignore` comment
+> keeps working — but they are deprecated. Run `falcon migrate --input
+> falcon.json` to rewrite them to the canonical ids (see
+> [Migrating](#migrating-from-dart_code_linter--pyramid_lint)).
+
 A rule configuration is either a **level string** or an **object**:
 
 ```json
@@ -135,8 +142,8 @@ rule's default, and a bad option never aborts a run.
   "linter": {
     "rules": {
       "complexity": {
-        "max_lines_for_file": { "level": "warn", "options": { "max_lines": 400 } },
-        "cyclomatic_complexity": { "level": "warn", "options": { "max_complexity": 15 } }
+        "max-lines-for-file": { "level": "warn", "options": { "max_lines": 400 } },
+        "cyclomatic-complexity": { "level": "warn", "options": { "max_complexity": 15 } }
       }
     }
   }
@@ -149,12 +156,12 @@ Option names use `snake_case` inside the `options` object.
 
 | Rule | Option | Default | Meaning |
 |------|--------|---------|---------|
-| `max_lines_for_file` | `max_lines` | `200` | Flag files with more than this many lines. The message states the actual configured threshold. |
-| `max_lines_for_function` | `max_lines` | `100` | Flag functions/methods longer than this many lines. |
-| `max_parameters_for_function` | `max_parameters` | `5` | Flag functions/methods with more than this many parameters. Constructors are not counted (matching dart_code_linter's number-of-parameters metric), and `copyWith` methods are exempt. |
-| `max_switch_cases` | `max_cases` | `10` | Flag switch statements with more than this many non-default cases. |
-| `cyclomatic_complexity` | `max_complexity` | `20` | Flag functions whose cyclomatic complexity (1 + decision points: `if`, ternary, `&&`, `\|\|`, `??`, loops, `catch`, non-default `case`, pattern `when` guards) exceeds this value. |
-| `maximum_nesting_level` | `max_nesting` | `5` | Flag functions whose deepest nesting of control-flow blocks (`if`/`for`/`while`/`do`/`switch`/`try`) exceeds this value. |
+| `max-lines-for-file` | `max_lines` | `200` | Flag files with more than this many lines. The message states the actual configured threshold. |
+| `max-lines-for-function` | `max_lines` | `100` | Flag functions/methods longer than this many lines. |
+| `max-parameters-for-function` | `max_parameters` | `5` | Flag functions/methods with more than this many parameters. Constructors are not counted (matching dart_code_linter's number-of-parameters metric), and `copyWith` methods are exempt. |
+| `max-switch-cases` | `max_cases` | `10` | Flag switch statements with more than this many non-default cases. |
+| `cyclomatic-complexity` | `max_complexity` | `20` | Flag functions whose cyclomatic complexity (1 + decision points: `if`, ternary, `&&`, `\|\|`, `??`, loops, `catch`, non-default `case`, pattern `when` guards) exceeds this value. |
+| `maximum-nesting-level` | `max_nesting` | `5` | Flag functions whose deepest nesting of control-flow blocks (`if`/`for`/`while`/`do`/`switch`/`try`) exceeds this value. |
 
 ### Identifier and naming rules
 
@@ -237,7 +244,7 @@ resolution for the files its `includes` match.
       "includes": ["test/**", "!test/fixtures/**"],
       "linter": {
         "rules": {
-          "complexity": { "max_lines_for_function": "off" }
+          "complexity": { "max-lines-for-function": "off" }
         }
       }
     },
@@ -293,7 +300,7 @@ a leading `**/` (e.g. `**/theme.dart`) to match.
 ### Per-path options
 
 An override may carry rule `options`, letting a rule run with different options on
-different paths — for example a stricter `max_lines_for_file` under `test/`:
+different paths — for example a stricter `max-lines-for-file` under `test/`:
 
 ```jsonc
 "overrides": [
@@ -302,7 +309,7 @@ different paths — for example a stricter `max_lines_for_file` under `test/`:
     "linter": {
       "rules": {
         "complexity": {
-          "max_lines_for_file": { "level": "warn", "options": { "max_lines": 1000 } }
+          "max-lines-for-file": { "level": "warn", "options": { "max_lines": 1000 } }
         }
       }
     }
@@ -476,6 +483,17 @@ Notes:
   falcon's option schema is not guaranteed to match the upstream linter's.
 - Upstream rules with no falcon equivalent are reported as warnings on stderr and
   omitted from the output.
+
+### Upgrading an existing falcon.json
+
+`migrate` also upgrades a `falcon.json` written for an older falcon: pass it as
+the input and any legacy `snake_case` rule ids are rewritten to their canonical
+kebab-case form, preserving levels and options. The input kind is auto-detected.
+
+```sh
+# Rewrite legacy rule ids in place
+falcon migrate --input falcon.json --write
+```
 
 ## Migrating from the legacy flat schema
 

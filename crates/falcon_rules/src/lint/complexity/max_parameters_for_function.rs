@@ -8,7 +8,7 @@ pub struct MaxParametersForFunction;
 
 impl Rule for MaxParametersForFunction {
     fn name(&self) -> &'static str {
-        "max_parameters_for_function"
+        "max-parameters-for-function"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -26,8 +26,8 @@ fn count_parameters(params: &FormalParamList) -> usize {
 
 /// Read the `max_parameters` option (default 5). Malformed/missing → default.
 fn max_parameters_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("max_parameters_for_function")
-        .and_then(|m| ctx.rule_options(m.group, "max_parameters_for_function"))
+    crate::meta::meta_for("max-parameters-for-function")
+        .and_then(|m| ctx.rule_options(m.group, "max-parameters-for-function"))
         .and_then(|o| o.get("max_parameters"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
@@ -44,7 +44,7 @@ fn check_function_params(
     let threshold = max_parameters_option(ctx);
     if total > threshold {
         diags.push(Diagnostic::new(
-            "max_parameters_for_function",
+            "max-parameters-for-function",
             Severity::Warning,
             format!("Function has too many parameters (max {threshold})."),
             ctx.file_path.to_string_lossy().into_owned(),

@@ -8,7 +8,7 @@ pub struct UseOnceConstructorsOnceProvider;
 
 impl Rule for UseOnceConstructorsOnceProvider {
     fn name(&self) -> &'static str {
-        "use_once_constructors_once_provider"
+        "use-once-constructors-once-provider"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -263,7 +263,7 @@ fn is_once_provider_name(name: &str) -> bool {
 fn flag_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     let span = expr.span();
     diags.push(Diagnostic::new(
-        "use_once_constructors_once_provider",
+        "use-once-constructors-once-provider",
         Severity::Warning,
         "OnceProvider and similar Riverpod providers should use .once() factory method",
         ctx.file_path.to_string_lossy().into_owned(),

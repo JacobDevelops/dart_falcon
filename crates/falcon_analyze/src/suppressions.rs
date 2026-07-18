@@ -29,10 +29,12 @@ use falcon_syntax::token::{Token, TokenKind};
 /// itself suppressible.
 pub const MALFORMED_SUPPRESSION: &str = "malformed-suppression";
 
-/// Maps a rule name to its `(group, is_project)` metadata, used to validate a
-/// suppression path. Supplied by callers because `falcon_analyze` does not
-/// depend on `falcon_rules` (which owns the rule table).
-pub type RuleLookup = fn(&str) -> Option<(&'static str, bool)>;
+/// Maps a (possibly-legacy) rule name to its `(canonical_name, group,
+/// is_project)` metadata, used to validate a suppression path. Returning the
+/// canonical name lets a suppression written with an old rule id still match the
+/// diagnostic's canonical rule. Supplied by callers because `falcon_analyze`
+/// does not depend on `falcon_rules` (which owns the rule table).
+pub type RuleLookup = fn(&str) -> Option<(&'static str, &'static str, bool)>;
 
 /// Parsed suppression directives for a single source file.
 pub struct FileSuppressions {
@@ -204,14 +206,16 @@ fn validate(keyword: &str, rest: &str, lookup: RuleLookup) -> Result<String, Str
 
     match lookup(rule) {
         None => Err(format!("unknown rule '{rule}' in {keyword} path '{path}'")),
-        Some((correct_group, is_project)) => {
+        Some((canonical, correct_group, is_project)) => {
             let correct_section = if is_project { "project" } else { "lint" };
             if group != correct_group || section != correct_section {
                 Err(format!(
-                    "suppression path is {correct_section}/{correct_group}/{rule}"
+                    "suppression path is {correct_section}/{correct_group}/{canonical}"
                 ))
             } else {
-                Ok(rule.to_string())
+                // Record the canonical id so a suppression written with a legacy
+                // alias still matches the diagnostic's canonical rule name.
+                Ok(canonical.to_string())
             }
         }
     }
@@ -253,11 +257,15 @@ mod tests {
 
     /// Test lookup mirroring a slice of the real rule table: a file rule and a
     /// project rule, enough to exercise group/section validation.
-    fn lookup(name: &str) -> Option<(&'static str, bool)> {
+    fn lookup(name: &str) -> Option<(&'static str, &'static str, bool)> {
+        // (canonical_name, group, is_project). `no_empty_block` is a legacy
+        // alias that canonicalizes to `no-empty-block`, exercising the
+        // alias-aware suppression path.
         match name {
-            "avoid-dynamic" => Some(("suspicious", false)),
-            "no-equal-arguments" => Some(("suspicious", false)),
-            "unused-files" => Some(("correctness", true)),
+            "avoid-dynamic" => Some(("avoid-dynamic", "suspicious", false)),
+            "no-equal-arguments" => Some(("no-equal-arguments", "suspicious", false)),
+            "unused-files" => Some(("unused-files", "correctness", true)),
+            "no_empty_block" | "no-empty-block" => Some(("no-empty-block", "suspicious", false)),
             _ => None,
         }
     }
@@ -309,6 +317,16 @@ mod tests {
     fn project_rule_path() {
         let s = parse("// falcon-ignore-all project/correctness/unused-files: generated\n");
         assert!(s.is_suppressed("unused-files", 0));
+        assert!(s.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn legacy_alias_suppression_matches_canonical_rule() {
+        // A suppression written with the old `no_empty_block` id must suppress
+        // the canonical `no-empty-block` diagnostic.
+        let s = parse("void f() {} // falcon-ignore lint/suspicious/no_empty_block: legacy\n");
+        assert!(s.is_suppressed("no-empty-block", 0));
+        assert!(!s.is_suppressed("no_empty_block", 0));
         assert!(s.diagnostics().is_empty());
     }
 

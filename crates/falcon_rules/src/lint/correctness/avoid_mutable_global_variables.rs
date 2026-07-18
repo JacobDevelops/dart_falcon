@@ -8,7 +8,7 @@ pub struct AvoidMutableGlobalVariables;
 
 impl Rule for AvoidMutableGlobalVariables {
     fn name(&self) -> &'static str {
-        "avoid_mutable_global_variables"
+        "avoid-mutable-global-variables"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -20,7 +20,7 @@ impl Rule for AvoidMutableGlobalVariables {
                 // `const` nor `final` (`isConstOrFinal` skips the declaration).
                 if !var_decl.is_const && !var_decl.is_final {
                     diags.push(Diagnostic::new(
-                        "avoid_mutable_global_variables",
+                        "avoid-mutable-global-variables",
                         Severity::Warning,
                         "Avoid mutable global variables. Use const or final instead.",
                         ctx.file_path.to_string_lossy().into_owned(),

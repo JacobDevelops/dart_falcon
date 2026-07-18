@@ -7,6 +7,8 @@
 //! Every rule in `all_rules()` must have exactly one entry here, and vice
 //! versa (enforced by `tests/meta_tests.rs`).
 
+use falcon_config::{FalconConfig, RuleConfiguration, RulePlainConfiguration, Rules};
+
 /// Group categories a rule can belong to.
 pub const GROUPS: &[&str] = &[
     "complexity",
@@ -85,7 +87,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "avoid_inverted_boolean_expressions",
+        name: "avoid-inverted-boolean-expressions",
         source: RuleSource::PyramidLint("avoid_inverted_boolean_expressions"),
         group: "complexity",
         domains: NONE,
@@ -93,7 +95,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "avoid_nested_if",
+        name: "avoid-nested-if",
         source: RuleSource::PyramidLint("avoid_nested_if"),
         group: "complexity",
         domains: NONE,
@@ -101,7 +103,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "max_lines_for_file",
+        name: "max-lines-for-file",
         source: RuleSource::PyramidLint("max_lines_for_file"),
         group: "complexity",
         domains: NONE,
@@ -109,7 +111,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "max_lines_for_function",
+        name: "max-lines-for-function",
         source: RuleSource::PyramidLint("max_lines_for_function"),
         group: "complexity",
         domains: NONE,
@@ -117,7 +119,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "max_parameters_for_function",
+        name: "max-parameters-for-function",
         source: RuleSource::PyramidLint("max_parameters_for_function"),
         group: "complexity",
         domains: NONE,
@@ -125,7 +127,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "max_switch_cases",
+        name: "max-switch-cases",
         source: RuleSource::PyramidLint("max_switch_cases"),
         group: "complexity",
         domains: NONE,
@@ -133,7 +135,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "cyclomatic_complexity",
+        name: "cyclomatic-complexity",
         source: RuleSource::PyramidLint("cyclomatic_complexity"),
         group: "complexity",
         domains: NONE,
@@ -141,7 +143,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "maximum_nesting_level",
+        name: "maximum-nesting-level",
         source: RuleSource::PyramidLint("maximum_nesting_level"),
         group: "complexity",
         domains: NONE,
@@ -196,7 +198,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "prefer_iterable_any",
+        name: "prefer-iterable-any",
         source: RuleSource::PyramidLint("prefer_iterable_any"),
         group: "complexity",
         domains: NONE,
@@ -204,7 +206,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "prefer_iterable_every",
+        name: "prefer-iterable-every",
         source: RuleSource::PyramidLint("prefer_iterable_every"),
         group: "complexity",
         domains: NONE,
@@ -237,7 +239,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "avoid_mutable_global_variables",
+        name: "avoid-mutable-global-variables",
         source: RuleSource::PyramidLint("avoid_mutable_global_variables"),
         group: "correctness",
         domains: NONE,
@@ -245,15 +247,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "avoid_unused_parameters",
-        source: RuleSource::PyramidLint("avoid_unused_parameters"),
-        group: "correctness",
-        domains: NONE,
-        recommended: true,
-        project: false,
-    },
-    RuleMeta {
-        name: "correct_order_for_super_dispose",
+        name: "correct-order-for-super-dispose",
         source: RuleSource::PyramidLint("correct_order_for_super_dispose"),
         group: "correctness",
         domains: FLUTTER,
@@ -261,7 +255,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "unnecessary_flutter_imports",
+        name: "unnecessary-flutter-imports",
         source: RuleSource::Falcon,
         group: "correctness",
         domains: FLUTTER,
@@ -296,7 +290,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: true,
     },
     RuleMeta {
-        name: "unnecessary_nullable_return_type",
+        name: "unnecessary-nullable-return-type",
         source: RuleSource::PyramidLint("unnecessary_nullable_return_type"),
         group: "correctness",
         domains: NONE,
@@ -304,7 +298,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "use_once_constructors_once_provider",
+        name: "use-once-constructors-once-provider",
         source: RuleSource::PyramidLint("use_once_constructors_once_provider"),
         group: "correctness",
         domains: FLUTTER,
@@ -329,7 +323,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "prefer_declaring_const_constructor",
+        name: "prefer-declaring-const-constructor",
         source: RuleSource::PyramidLint("prefer_declaring_const_constructor"),
         group: "performance",
         domains: NONE,
@@ -442,16 +436,16 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "no-object-declaration",
-        source: RuleSource::DartCodeLinter("no-object-declaration"),
+        name: "no_magic_number",
+        source: RuleSource::PyramidLint("no_magic_number"),
         group: "style",
         domains: NONE,
         recommended: true,
         project: false,
     },
     RuleMeta {
-        name: "no_magic_number",
-        source: RuleSource::PyramidLint("no_magic_number"),
+        name: "no-object-declaration",
+        source: RuleSource::DartCodeLinter("no-object-declaration"),
         group: "style",
         domains: NONE,
         recommended: true,
@@ -570,7 +564,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "proper_controller_dispose",
+        name: "proper-controller-dispose",
         source: RuleSource::PyramidLint("proper_controller_dispose"),
         group: "correctness",
         domains: FLUTTER,
@@ -578,7 +572,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "proper_expanded_and_flexible",
+        name: "proper-expanded-and-flexible",
         source: RuleSource::PyramidLint("proper_expanded_and_flexible"),
         group: "correctness",
         domains: FLUTTER,
@@ -586,7 +580,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "proper_from_environment",
+        name: "proper-from-environment",
         source: RuleSource::PyramidLint("proper_from_environment"),
         group: "correctness",
         domains: NONE,
@@ -594,7 +588,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        name: "proper_super_init_state",
+        name: "proper-super-init-state",
         source: RuleSource::PyramidLint("proper_super_init_state"),
         group: "correctness",
         domains: FLUTTER,
@@ -703,14 +697,135 @@ pub const RULE_METADATA: &[RuleMeta] = &[
     },
 ];
 
-/// Look up metadata for a rule by its registered name.
-pub fn meta_for(name: &str) -> Option<&'static RuleMeta> {
-    RULE_METADATA.iter().find(|m| m.name == name)
+/// Legacy rule ids mapped to their canonical id. Covers the pre-1.0
+/// `snake_case` → `kebab-case` renames and the removed twin rules (whose
+/// pyramid_lint-derived variants were merged into the surviving dart_code_linter
+/// rule). Keeps old `falcon.json` rule keys and old `// falcon-ignore
+/// lint/<group>/<id>` suppression paths resolving after the id normalization.
+pub const RULE_ALIASES: &[(&str, &str)] = &[
+    // ── snake_case → kebab-case renames ──
+    (
+        "avoid_inverted_boolean_expressions",
+        "avoid-inverted-boolean-expressions",
+    ),
+    ("avoid_nested_if", "avoid-nested-if"),
+    ("max_lines_for_file", "max-lines-for-file"),
+    ("max_lines_for_function", "max-lines-for-function"),
+    ("max_parameters_for_function", "max-parameters-for-function"),
+    ("max_switch_cases", "max-switch-cases"),
+    ("cyclomatic_complexity", "cyclomatic-complexity"),
+    ("maximum_nesting_level", "maximum-nesting-level"),
+    ("prefer_iterable_any", "prefer-iterable-any"),
+    ("prefer_iterable_every", "prefer-iterable-every"),
+    (
+        "avoid_mutable_global_variables",
+        "avoid-mutable-global-variables",
+    ),
+    (
+        "correct_order_for_super_dispose",
+        "correct-order-for-super-dispose",
+    ),
+    ("unnecessary_flutter_imports", "unnecessary-flutter-imports"),
+    (
+        "unnecessary_nullable_return_type",
+        "unnecessary-nullable-return-type",
+    ),
+    (
+        "use_once_constructors_once_provider",
+        "use-once-constructors-once-provider",
+    ),
+    ("proper_controller_dispose", "proper-controller-dispose"),
+    (
+        "proper_expanded_and_flexible",
+        "proper-expanded-and-flexible",
+    ),
+    ("proper_from_environment", "proper-from-environment"),
+    ("proper_super_init_state", "proper-super-init-state"),
+    (
+        "prefer_declaring_const_constructor",
+        "prefer-declaring-const-constructor",
+    ),
+    // ── unified twins: pyramid_lint variant → surviving canonical rule ──
+    ("avoid_unused_parameters", "avoid-unused-parameters"),
+];
+
+/// Resolve a possibly-legacy rule id to its canonical id. Returns the input
+/// unchanged when it is already canonical (or simply unknown).
+pub fn canonical_rule_name(name: &str) -> &str {
+    RULE_ALIASES
+        .iter()
+        .find(|(old, _)| *old == name)
+        .map(|&(_, canonical)| canonical)
+        .unwrap_or(name)
 }
 
-/// Suppression-path validation hook: maps a rule name to its `(group,
-/// is_project)` so `falcon_analyze` can check `// falcon-ignore` paths without
+/// Look up metadata for a rule by its registered name, resolving legacy aliases
+/// first so an old id still finds its canonical rule.
+pub fn meta_for(name: &str) -> Option<&'static RuleMeta> {
+    let canonical = canonical_rule_name(name);
+    RULE_METADATA.iter().find(|m| m.name == canonical)
+}
+
+/// Suppression-path validation hook: maps a (possibly-legacy) rule name to its
+/// `(canonical_name, group, is_project)` so `falcon_analyze` can validate a
+/// `// falcon-ignore` path — and record the *canonical* id, so a suppression
+/// written with an old id still matches the diagnostic's canonical rule — without
 /// depending on this crate. Matches [`falcon_analyze::RuleLookup`].
-pub fn suppression_lookup(name: &str) -> Option<(&'static str, bool)> {
-    meta_for(name).map(|m| (m.group, m.project))
+pub fn suppression_lookup(name: &str) -> Option<(&'static str, &'static str, bool)> {
+    meta_for(name).map(|m| (m.name, m.group, m.project))
+}
+
+/// Rewrite legacy rule ids used as config keys to their canonical ids, across
+/// the base `linter`/`project` rule maps and every override. Applied once after
+/// a config is loaded so old `falcon.json` files keep resolving against the
+/// canonical rule table. When a legacy id and its canonical id (or two legacy
+/// twins) collide in the same group, the more severe level is kept — matching
+/// the `falcon migrate` upgrade path.
+pub fn canonicalize_config(config: &mut FalconConfig) {
+    canonicalize_rules(&mut config.linter.rules);
+    canonicalize_rules(&mut config.project.rules);
+    for ov in &mut config.overrides {
+        if let Some(linter) = &mut ov.linter {
+            canonicalize_rules(&mut linter.rules);
+        }
+        if let Some(project) = &mut ov.project {
+            canonicalize_rules(&mut project.rules);
+        }
+    }
+}
+
+fn canonicalize_rules(rules: &mut Rules) {
+    for group in rules.groups.values_mut() {
+        let renames: Vec<(String, String)> = group
+            .keys()
+            .filter_map(|key| {
+                let canonical = canonical_rule_name(key);
+                (canonical != key.as_str()).then(|| (key.clone(), canonical.to_string()))
+            })
+            .collect();
+        for (old, canonical) in renames {
+            let Some(cfg) = group.remove(&old) else {
+                continue;
+            };
+            match group.get(&canonical) {
+                // A more-or-equally severe entry already occupies the canonical
+                // slot — keep it. Otherwise this entry wins (more severe, or the
+                // slot is empty).
+                Some(existing) if severity_rank(existing) >= severity_rank(&cfg) => {}
+                _ => {
+                    group.insert(canonical, cfg);
+                }
+            }
+        }
+    }
+}
+
+/// Severity ordering used to merge colliding config entries: higher wins.
+fn severity_rank(cfg: &RuleConfiguration) -> u8 {
+    match cfg.level() {
+        RulePlainConfiguration::Off => 1,
+        RulePlainConfiguration::Info => 2,
+        RulePlainConfiguration::On | RulePlainConfiguration::Warn => 3,
+        RulePlainConfiguration::Error => 4,
+    }
 }

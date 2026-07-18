@@ -224,7 +224,6 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(lint::correctness::avoid_mutable_global_variables::AvoidMutableGlobalVariables),
         Box::new(lint::correctness::avoid_returning_widgets::AvoidReturningWidgets),
         Box::new(lint::correctness::avoid_unused_parameters::AvoidUnusedParameters),
-        Box::new(lint::correctness::avoid_unused_parameters::AvoidUnusedParametersPyramid),
         Box::new(lint::correctness::correct_order_for_super_dispose::CorrectOrderForSuperDispose),
         Box::new(lint::correctness::proper_controller_dispose::ProperControllerDispose),
         Box::new(lint::correctness::proper_expanded_and_flexible::ProperExpandedAndFlexible),
