@@ -1,4 +1,4 @@
-// This file stays within the max_lines_for_file threshold (under 500 lines)
+// This file stays within the max-lines-for-file threshold (under 60 lines)
 
 class ReasonablySizedFile {
   /// A normal sized file
@@ -43,6 +43,6 @@ class ReasonablySizedFile {
   }
 }
 
-// This file is well under the 500-line limit
+// This file is well under the 60-line limit
 // It demonstrates good file structure with reasonable number of methods
 // and is not overly complex or monolithic

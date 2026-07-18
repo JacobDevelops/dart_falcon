@@ -1,4 +1,4 @@
-/* expect: max-lines-for-file */ // Third variant exceeding max_lines_for_file threshold
+/* expect: max-lines-for-file */ // Third variant exceeding max-lines-for-file threshold
 
 class DataProcessor {
   void process() {}

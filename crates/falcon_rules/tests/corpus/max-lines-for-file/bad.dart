@@ -1,4 +1,4 @@
-/* expect: max-lines-for-file */ // File exceeds max_lines_for_file threshold (line count > 75)
+/* expect: max-lines-for-file */ // File exceeds max-lines-for-file threshold (line count > 60)
 
 class ExcessivelyLongFile {
   /// Line 5

@@ -25,6 +25,13 @@ release. Next up is the Toward 1.0 work below.
   off-by-default without a type resolver. A resolver would let them run reliably.
 - **Dart language tracking.** Keep pace with new syntax beyond Dart 3.4 (null-aware
   elements etc. already done); track the language as it evolves.
+- **Fix `prefer-iterable-every` porting bug.** Our port detects the *negated*
+  `!where(pred).isEmpty` (which is `any(pred)` semantics, overlapping
+  `prefer-iterable-any`) and suggests `.every()` without inverting the predicate.
+  Upstream pyramid_lint matches the *non-negated* `where(pred).isEmpty` → `every(!pred)`.
+  Change detection to bare `where(pred).isEmpty`, invert the predicate in the fix,
+  and rewrite the corpus accordingly (keep the valid `where(pred).length == length`
+  case). Behavior change — do it as its own PR.
 
 ## Exploratory
 

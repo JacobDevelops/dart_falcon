@@ -298,8 +298,9 @@ fn level_rank(value: &Value) -> u8 {
 }
 
 /// Read `input`, migrate it, print a summary to stderr, and either print the
-/// resulting falcon.json to stdout or write it to `output` (default
-/// `./falcon.json`). Returns 0 on success, 1 on any error.
+/// resulting falcon.json to stdout or write it to `output`. When `output` is
+/// omitted, an upgrade writes back to `input` in place while a YAML conversion
+/// defaults to `./falcon.json`. Returns 0 on success, 1 on any error.
 ///
 /// The input is auto-detected: an existing falcon.json is *upgraded* — legacy
 /// rule ids rewritten to their canonical form — while an upstream
@@ -360,7 +361,15 @@ pub fn run_migrate(input: Option<PathBuf>, write: bool, output: Option<PathBuf>)
     }
 
     if write {
-        let output_path = output.unwrap_or_else(|| PathBuf::from("falcon.json"));
+        // In-place by default for an upgrade (write back to the falcon.json we
+        // read); a YAML conversion has no falcon.json yet, so default to ./falcon.json.
+        let output_path = output.unwrap_or_else(|| {
+            if upgrade {
+                input_path.clone()
+            } else {
+                PathBuf::from("falcon.json")
+            }
+        });
         if let Err(e) = std::fs::write(&output_path, &result.json) {
             eprintln!("error: failed to write {}: {}", output_path.display(), e);
             return 1;
