@@ -129,7 +129,7 @@ fn check_members(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Ana
         if min_right[i] != u8::MAX && cat > min_right[i] {
             let span = member.span();
             diags.push(Diagnostic::new(
-                "class-members-ordering",
+                NAME,
                 Severity::Warning,
                 "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members",
                 ctx.file_path.to_string_lossy().into_owned(),
@@ -139,7 +139,7 @@ fn check_members(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Ana
         } else if i > 0 && cat < max_left[i] && i > 3 {
             let span = member.span();
             diags.push(Diagnostic::new(
-                "class-members-ordering",
+                NAME,
                 Severity::Warning,
                 "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members",
                 ctx.file_path.to_string_lossy().into_owned(),

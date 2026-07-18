@@ -15,7 +15,7 @@ class GoodOrdering {
   final int value;
 
   /// Instance var fields
-  String description = '';
+  String _description = '';
   int count = 0;
 
   /// Constructors: const first, then default, then named
@@ -39,7 +39,7 @@ class GoodOrdering {
   String get displayName => name;
 
   set description(String value) {
-    description = value;
+    _description = value;
   }
 
   /// Public methods
