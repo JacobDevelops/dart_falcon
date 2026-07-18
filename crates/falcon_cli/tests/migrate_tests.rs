@@ -2,7 +2,7 @@
 //! options passthrough, disabled entries, unrecognized rules, and round-trip
 //! back through `FalconConfig`.
 
-use falcon_cli::migrate_yaml_to_config;
+use falcon_cli::{migrate_existing_config, migrate_yaml_to_config};
 use serde_json::Value;
 
 /// Parse the emitted JSON so assertions target structure, not whitespace.
@@ -45,6 +45,35 @@ custom_lint:
     let cfg = &value["linter"]["rules"]["complexity"]["max-lines-for-file"];
     assert_eq!(cfg["level"], Value::String("warn".into()));
     assert_eq!(cfg["options"]["max_lines"], Value::from(200));
+}
+
+#[test]
+fn merged_twin_upstream_ids_map_to_surviving_rule() {
+    // pyramid_lint's `no_empty_block`, `avoid_empty_blocks`, `no_magic_number`,
+    // and `avoid_unused_parameters` were merged into their dart_code_linter
+    // counterparts; their upstream ids must still map to the surviving rule.
+    let yaml = "\
+custom_lint:
+  rules:
+    - avoid_empty_blocks
+    - no_magic_number
+    - avoid_unused_parameters
+";
+    let (value, unrecognized, count) = parse(yaml);
+    assert!(unrecognized.is_empty(), "unexpected: {unrecognized:?}");
+    assert_eq!(count, 3);
+    assert_eq!(
+        value["linter"]["rules"]["suspicious"]["no-empty-block"],
+        Value::String("warn".into())
+    );
+    assert_eq!(
+        value["linter"]["rules"]["style"]["no-magic-number"],
+        Value::String("warn".into())
+    );
+    assert_eq!(
+        value["linter"]["rules"]["correctness"]["avoid-unused-parameters"],
+        Value::String("warn".into())
+    );
 }
 
 #[test]
@@ -108,4 +137,74 @@ custom_lint:
         serde_json::from_str(&result.json).expect("emitted JSON is a valid FalconConfig");
     assert_eq!(config.linter.rules.recommended, Some(false));
     assert_eq!(config.project.rules.recommended, Some(false));
+}
+
+#[test]
+fn upgrade_rewrites_legacy_ids_in_existing_falcon_json() {
+    // A pre-1.0 falcon.json using snake_case ids is upgraded to canonical
+    // kebab-case ids, preserving levels and options.
+    let input = r#"{
+      "linter": {
+        "rules": {
+          "complexity": {
+            "max_lines_for_file": { "level": "error", "options": { "max_lines": 300 } }
+          },
+          "style": { "class_members_ordering": "warn" }
+        }
+      }
+    }"#;
+    let result = migrate_existing_config(input).expect("upgrade succeeds");
+    assert_eq!(result.migrated_count, 2);
+    let value: Value = serde_json::from_str(&result.json).expect("valid JSON");
+    let complexity = &value["linter"]["rules"]["complexity"];
+    assert!(complexity.get("max_lines_for_file").is_none());
+    assert_eq!(complexity["max-lines-for-file"]["level"], "error");
+    assert_eq!(
+        complexity["max-lines-for-file"]["options"]["max_lines"],
+        300
+    );
+    assert_eq!(
+        value["linter"]["rules"]["style"]["class-members-ordering"],
+        Value::String("warn".into())
+    );
+}
+
+#[test]
+fn upgrade_merges_duplicate_twins_keeping_more_severe_level() {
+    // A config that configured both twin variants collapses to the surviving
+    // rule; the more severe level wins.
+    let input = r#"{
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "no-empty-block": "warn",
+            "no_empty_block": "error",
+            "avoid_empty_blocks": "off"
+          }
+        }
+      }
+    }"#;
+    let result = migrate_existing_config(input).expect("upgrade succeeds");
+    let value: Value = serde_json::from_str(&result.json).expect("valid JSON");
+    let suspicious = value["linter"]["rules"]["suspicious"]
+        .as_object()
+        .expect("group object");
+    // All three collapse into the single canonical key at the most severe level.
+    assert_eq!(suspicious.len(), 1);
+    assert_eq!(suspicious["no-empty-block"], Value::String("error".into()));
+}
+
+#[test]
+fn upgrade_leaves_canonical_config_unchanged() {
+    let input = r#"{
+      "linter": { "rules": { "style": { "no-magic-number": "warn" } } }
+    }"#;
+    let result = migrate_existing_config(input).expect("upgrade succeeds");
+    assert_eq!(result.migrated_count, 0);
+    assert!(result.unrecognized.is_empty());
+    let value: Value = serde_json::from_str(&result.json).expect("valid JSON");
+    assert_eq!(
+        value["linter"]["rules"]["style"]["no-magic-number"],
+        Value::String("warn".into())
+    );
 }

@@ -335,7 +335,7 @@ class Bar {
         "linter": {
             "rules": {
                 "style": {
-                    "class_members_ordering": {
+                    "class-members-ordering": {
                         "level": "warn",
                         "options": {
                             "order": ["public-methods", "constructors", "public-fields", "private-methods"]
@@ -358,7 +358,7 @@ class Bar {
         1,
         "custom order should flag exactly Bar.run, got {diags:?}"
     );
-    assert_eq!(diags[0].rule, "class_members_ordering");
+    assert_eq!(diags[0].rule, "class-members-ordering");
     assert!(
         diags[0].message.contains("configured order"),
         "order path should use the configured-order message: {}",
