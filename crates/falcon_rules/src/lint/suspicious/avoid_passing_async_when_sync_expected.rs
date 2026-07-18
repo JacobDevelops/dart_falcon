@@ -129,22 +129,24 @@ impl AvoidPassingAsyncWhenSyncExpected {
             } => {
                 Self::visit_exprs(object, f);
                 for section in sections {
-                    match &section.op {
-                        CascadeOp::Call(_, _, args) => {
-                            for arg in &args.positional {
-                                Self::visit_exprs(arg, f);
+                    for op in &section.ops {
+                        match op {
+                            CascadeOp::Call(_, _, args) => {
+                                for arg in &args.positional {
+                                    Self::visit_exprs(arg, f);
+                                }
+                                for named_arg in &args.named {
+                                    Self::visit_exprs(&named_arg.value, f);
+                                }
                             }
-                            for named_arg in &args.named {
-                                Self::visit_exprs(&named_arg.value, f);
+                            CascadeOp::Index(index, _) => {
+                                Self::visit_exprs(index, f);
                             }
+                            CascadeOp::Assign(_, _, value) => {
+                                Self::visit_exprs(value, f);
+                            }
+                            _ => {}
                         }
-                        CascadeOp::Index(index, _) => {
-                            Self::visit_exprs(index, f);
-                        }
-                        CascadeOp::Assign(_, _, value) => {
-                            Self::visit_exprs(value, f);
-                        }
-                        _ => {}
                     }
                 }
             }

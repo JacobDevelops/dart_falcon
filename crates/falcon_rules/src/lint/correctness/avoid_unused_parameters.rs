@@ -346,20 +346,22 @@ mod dcl {
                     } => {
                         collect_from_expr(object, names);
                         for section in sections {
-                            match &section.op {
-                                CascadeOp::Field(_, _) => {}
-                                CascadeOp::Index(index, _) => collect_from_expr(index, names),
-                                CascadeOp::Call(_, _, args) => {
-                                    for arg in &args.positional {
-                                        collect_from_expr(arg, names);
+                            for op in &section.ops {
+                                match op {
+                                    CascadeOp::Field(_, _) => {}
+                                    CascadeOp::Index(index, _) => collect_from_expr(index, names),
+                                    CascadeOp::Call(_, _, args) => {
+                                        for arg in &args.positional {
+                                            collect_from_expr(arg, names);
+                                        }
+                                        for named_arg in &args.named {
+                                            collect_from_expr(&named_arg.value, names);
+                                        }
                                     }
-                                    for named_arg in &args.named {
-                                        collect_from_expr(&named_arg.value, names);
+                                    CascadeOp::Assign(target, _, value) => {
+                                        collect_from_expr(target, names);
+                                        collect_from_expr(value, names);
                                     }
-                                }
-                                CascadeOp::Assign(target, _, value) => {
-                                    collect_from_expr(target, names);
-                                    collect_from_expr(value, names);
                                 }
                             }
                         }

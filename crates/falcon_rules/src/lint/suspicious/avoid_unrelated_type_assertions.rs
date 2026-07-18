@@ -196,21 +196,23 @@ impl AvoidUnrelatedTypeAssertions {
             } => {
                 self.visit_exprs(object, f);
                 for section in sections {
-                    match &section.op {
-                        CascadeOp::Call(_, _, args) => {
-                            for arg in &args.positional {
-                                self.visit_exprs(arg, f);
+                    for op in &section.ops {
+                        match op {
+                            CascadeOp::Call(_, _, args) => {
+                                for arg in &args.positional {
+                                    self.visit_exprs(arg, f);
+                                }
+                                for named_arg in &args.named {
+                                    self.visit_exprs(&named_arg.value, f);
+                                }
                             }
-                            for named_arg in &args.named {
-                                self.visit_exprs(&named_arg.value, f);
+                            CascadeOp::Index(index, _) => self.visit_exprs(index, f),
+                            CascadeOp::Assign(target, _, value) => {
+                                self.visit_exprs(target, f);
+                                self.visit_exprs(value, f);
                             }
+                            CascadeOp::Field(_, _) => {}
                         }
-                        CascadeOp::Index(index, _) => self.visit_exprs(index, f),
-                        CascadeOp::Assign(target, _, value) => {
-                            self.visit_exprs(target, f);
-                            self.visit_exprs(value, f);
-                        }
-                        CascadeOp::Field(_, _) => {}
                     }
                 }
             }

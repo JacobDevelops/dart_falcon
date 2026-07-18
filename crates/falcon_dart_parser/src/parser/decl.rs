@@ -434,6 +434,48 @@ impl<'src> Parser<'src> {
             )
     }
 
+    /// With a `(` at `self.peek(offset)`, scan to its matching `)` and decide
+    /// whether that parenthesized group is a record *type* prefixing a member —
+    /// i.e. its `)` (with an optional trailing `?`) is followed by a member name,
+    /// a `Function` return-type suffix, or a `get`/`set`/`operator` keyword. This
+    /// distinguishes `static (int, int) m()` (record return type) from a member
+    /// named after the keyword such as `external()`.
+    fn record_type_prefixes_member(&self, offset: usize) -> bool {
+        use TokenKind::*;
+        let mut i = self.pos + offset;
+        if self.tokens.get(i).map(|t| &t.kind) != Some(&LParen) {
+            return false;
+        }
+        let mut depth = 0usize;
+        let cap = i + 512;
+        while let Some(tok) = self.tokens.get(i) {
+            if i > cap {
+                return false;
+            }
+            match tok.kind {
+                LParen => depth += 1,
+                RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let mut j = i + 1;
+                        if self.tokens.get(j).map(|t| &t.kind) == Some(&Qmark) {
+                            j += 1;
+                        }
+                        return match self.tokens.get(j).map(|t| &t.kind) {
+                            Some(Function | Get | Set | Operator) => true,
+                            Some(k) => Self::kind_is_ident_like(k),
+                            None => false,
+                        };
+                    }
+                }
+                Eof | Semicolon => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+        false
+    }
+
     // ── Class body ────────────────────────────────────────────────────────────
 
     fn parse_class_body(&mut self) -> Vec<ClassMember> {
@@ -487,6 +529,8 @@ impl<'src> Parser<'src> {
             // member's own name, not a modifier — e.g. the field named `static` in
             // `static const static = 1;`, or a method `external()`. A real modifier
             // is always followed by another modifier, a type, or the member name.
+            // The `(` case is refined: a following record *type* (`static (int, int)
+            // m()`, `late (int, int) r;`) keeps the keyword as a modifier.
             if matches!(
                 self.cur().kind,
                 TokenKind::Static
@@ -494,11 +538,15 @@ impl<'src> Parser<'src> {
                     | TokenKind::External
                     | TokenKind::Covariant
                     | TokenKind::Late
-            ) && matches!(
-                self.peek(1).kind,
-                TokenKind::Eq | TokenKind::Semicolon | TokenKind::Comma | TokenKind::LParen
             ) {
-                break;
+                let keyword_is_name = match self.peek(1).kind {
+                    TokenKind::Eq | TokenKind::Semicolon | TokenKind::Comma => true,
+                    TokenKind::LParen => !self.record_type_prefixes_member(1),
+                    _ => false,
+                };
+                if keyword_is_name {
+                    break;
+                }
             }
             match self.cur().kind {
                 TokenKind::Static => {
@@ -541,8 +589,21 @@ impl<'src> Parser<'src> {
                     is_async = true;
                     self.advance();
                 }
-                // @override is handled via annotations, but 'override' as builtin identifier
-                _ if self.is_ident_like() && self.cur_text() == "override" => {
+                // @override is handled via annotations, but 'override' as a built-in
+                // identifier can lead a member. When it is immediately followed by
+                // `=`/`;`/`,`/`(`/`<` it is the member's own name (`const override = 1;`,
+                // `override() {}`), not a modifier.
+                _ if self.is_ident_like()
+                    && self.cur_text() == "override"
+                    && !matches!(
+                        self.peek(1).kind,
+                        TokenKind::Eq
+                            | TokenKind::Semicolon
+                            | TokenKind::Comma
+                            | TokenKind::LParen
+                            | TokenKind::Lt
+                    ) =>
+                {
                     is_override = true;
                     self.advance();
                 }

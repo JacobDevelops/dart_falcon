@@ -52,12 +52,14 @@ impl Visitor for Collector {
             && matches!(&**object, Expr::List { .. })
         {
             for section in sections {
-                if let CascadeOp::Call(ident, _, args) = &section.op
-                    && ident.name == "add"
-                    && args.positional.len() == 1
-                    && args.named.is_empty()
-                {
-                    self.push(&section.span);
+                for op in &section.ops {
+                    if let CascadeOp::Call(ident, _, args) = op
+                        && ident.name == "add"
+                        && args.positional.len() == 1
+                        && args.named.is_empty()
+                    {
+                        self.push(&section.span);
+                    }
                 }
             }
         }

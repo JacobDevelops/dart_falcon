@@ -359,14 +359,16 @@ fn count_args(args: &ArgList, count: &mut usize) {
 }
 
 fn count_cascade(section: &CascadeSection, count: &mut usize) {
-    match &section.op {
-        CascadeOp::Index(e, _) => count_expr(e, count),
-        CascadeOp::Call(_, _, args) => count_args(args, count),
-        CascadeOp::Assign(target, _, value) => {
-            count_expr(target, count);
-            count_expr(value, count);
+    for op in &section.ops {
+        match op {
+            CascadeOp::Index(e, _) => count_expr(e, count),
+            CascadeOp::Call(_, _, args) => count_args(args, count),
+            CascadeOp::Assign(target, _, value) => {
+                count_expr(target, count);
+                count_expr(value, count);
+            }
+            CascadeOp::Field(_, _) => {}
         }
-        CascadeOp::Field(_, _) => {}
     }
 }
 

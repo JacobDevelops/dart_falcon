@@ -327,14 +327,17 @@ impl<'src> Parser<'src> {
             };
             // A `(` here is the annotation's argument list — but only if it parses
             // cleanly as one. Bare metadata directly followed by a record-type
-            // member return (`@override ({int a, int b})? m()`) would otherwise be
-            // misread as a set/map-literal argument; speculatively parse and, on
-            // failure, roll back so the `(` stays for the return type.
+            // member return (`@override ({int a, int b})? m()`, `@override ()? m()`)
+            // would otherwise be misread as a set/map-literal argument or empty
+            // args; speculatively parse and roll back so the `(` stays for the
+            // return type. A `?` right after the `)` is the giveaway that the parens
+            // were a nullable record type, since an argument list is never followed
+            // by `?`.
             let args = if self.at(TokenKind::LParen) {
                 let saved = self.pos;
                 let saved_errors = self.errors.len();
                 let arg_list = self.parse_arg_list();
-                if self.errors.len() > saved_errors {
+                if self.errors.len() > saved_errors || self.at(TokenKind::Qmark) {
                     self.errors.truncate(saved_errors);
                     self.rewind_to(saved);
                     None

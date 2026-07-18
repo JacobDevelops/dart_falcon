@@ -452,18 +452,20 @@ fn scan_expr(
         } => {
             scan_expr(object, diags, ctx, items);
             for section in sections {
-                match &section.op {
-                    CascadeOp::Field(_, _) => {}
-                    CascadeOp::Index(e, _) => scan_expr(e, diags, ctx, items),
-                    CascadeOp::Call(_, _, args) => {
-                        for arg in &args.positional {
-                            scan_expr(arg, diags, ctx, items);
+                for op in &section.ops {
+                    match op {
+                        CascadeOp::Field(_, _) => {}
+                        CascadeOp::Index(e, _) => scan_expr(e, diags, ctx, items),
+                        CascadeOp::Call(_, _, args) => {
+                            for arg in &args.positional {
+                                scan_expr(arg, diags, ctx, items);
+                            }
+                            for named in &args.named {
+                                scan_expr(&named.value, diags, ctx, items);
+                            }
                         }
-                        for named in &args.named {
-                            scan_expr(&named.value, diags, ctx, items);
-                        }
+                        CascadeOp::Assign(_, _, value) => scan_expr(value, diags, ctx, items),
                     }
-                    CascadeOp::Assign(_, _, value) => scan_expr(value, diags, ctx, items),
                 }
             }
         }

@@ -1200,7 +1200,11 @@ pub enum AssignOp {
 
 #[derive(Debug, Clone)]
 pub struct CascadeSection {
-    pub op: CascadeOp,
+    /// The selector chain in one `..`/`?..` section, e.g. `a.b()` in `..a.b()`.
+    /// A plain single-selector section (`..a`) holds one op; chained selectors
+    /// (`..a.b()`, `..m().n()`) hold one op per link, in source order. Any
+    /// trailing assignment is the final `CascadeOp::Assign`.
+    pub ops: Vec<CascadeOp>,
     pub span: Span,
 }
 

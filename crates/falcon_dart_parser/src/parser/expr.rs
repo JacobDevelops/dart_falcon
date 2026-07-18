@@ -716,47 +716,115 @@ impl<'src> Parser<'src> {
         while matches!(self.cur().kind, TokenKind::DotDot | TokenKind::DotDotQmark) {
             let start = self.cur().offset;
             // A `?..` section is reached null-awarely; that shorting also covers a
-            // `?[` null-aware index selector within the section.
+            // `?[` null-aware index selector on the section's first selector.
             let section_null_aware = self.at(TokenKind::DotDotQmark);
             self.advance(); // .. or ?..
-            let op = if self.at(TokenKind::LBracket) || self.at(TokenKind::QmarkLBracket) {
-                let index_null_aware = section_null_aware || self.at(TokenKind::QmarkLBracket);
-                self.advance();
-                let idx = self.parse_expr();
-                self.expect(TokenKind::RBracket);
-                // optional assignment
-                if let Some(assign_op) = self.try_parse_assign_op() {
-                    let rhs = self.parse_expr();
-                    CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs))
-                } else {
-                    CascadeOp::Index(Box::new(idx), index_null_aware)
-                }
-            } else if self.is_ident_like() {
-                let name = self.expect_ident();
-                if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
-                    let type_args = if self.at(TokenKind::Lt) {
-                        self.parse_type_args()
-                    } else {
-                        Vec::new()
-                    };
-                    let args = self.parse_arg_list();
-                    CascadeOp::Call(name, type_args, args)
-                } else if let Some(assign_op) = self.try_parse_assign_op() {
-                    let rhs = self.parse_expr();
-                    let field_expr = Expr::Ident(name);
-                    CascadeOp::Assign(Box::new(field_expr), assign_op, Box::new(rhs))
-                } else {
-                    CascadeOp::Field(name, section_null_aware)
-                }
-            } else {
+            let ops = self.parse_cascade_section_ops(section_null_aware);
+            if ops.is_empty() {
                 break;
-            };
+            }
             sections.push(CascadeSection {
-                op,
+                ops,
                 span: self.span_from(start),
             });
         }
         sections
+    }
+
+    /// Parse the selector chain of a single cascade section (everything after the
+    /// `..`/`?..`). Dart allows a full assignable-selector chain here — `..a.b()`,
+    /// `..m().n()`, `..a[i]=x`, `..a?.b()` — not just one selector, so this mirrors
+    /// the `parse_postfix` selector loop but seeds the first selector as a bare
+    /// identifier or `[index]` (no leading dot) and stops at a terminal assignment.
+    fn parse_cascade_section_ops(&mut self, section_null_aware: bool) -> Vec<CascadeOp> {
+        let mut ops = Vec::new();
+        // First selector after `..`: bare identifier or `[index]`, no leading dot.
+        let first = if self.at(TokenKind::LBracket) || self.at(TokenKind::QmarkLBracket) {
+            let index_null_aware = section_null_aware || self.at(TokenKind::QmarkLBracket);
+            self.advance();
+            let idx = self.parse_expr();
+            self.expect(TokenKind::RBracket);
+            if let Some(assign_op) = self.try_parse_assign_op() {
+                let rhs = self.parse_expr();
+                ops.push(CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs)));
+                return ops; // assignment terminates the section
+            }
+            CascadeOp::Index(Box::new(idx), index_null_aware)
+        } else if self.is_ident_like() {
+            let name = self.expect_ident();
+            if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
+                let type_args = if self.at(TokenKind::Lt) {
+                    self.parse_type_args()
+                } else {
+                    Vec::new()
+                };
+                let args = self.parse_arg_list();
+                CascadeOp::Call(name, type_args, args)
+            } else if let Some(assign_op) = self.try_parse_assign_op() {
+                let rhs = self.parse_expr();
+                ops.push(CascadeOp::Assign(
+                    Box::new(Expr::Ident(name)),
+                    assign_op,
+                    Box::new(rhs),
+                ));
+                return ops;
+            } else {
+                CascadeOp::Field(name, section_null_aware)
+            }
+        } else {
+            return ops; // empty section
+        };
+        ops.push(first);
+        // Subsequent selectors use a leading `.`/`?.` or `[`/`?[`, each optionally
+        // invoked, with an optional terminal assignment.
+        loop {
+            match self.cur().kind {
+                TokenKind::Dot | TokenKind::QmarkDot => {
+                    let is_null_safe = self.at(TokenKind::QmarkDot);
+                    self.advance();
+                    // `.new` is a valid constructor tear-off in Dart 3.
+                    let name = if self.at(TokenKind::New) {
+                        let tok = self.advance();
+                        Identifier::new("new", Self::tok_span(&tok))
+                    } else {
+                        self.expect_ident()
+                    };
+                    if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
+                        let type_args = if self.at(TokenKind::Lt) {
+                            self.parse_type_args()
+                        } else {
+                            Vec::new()
+                        };
+                        let args = self.parse_arg_list();
+                        ops.push(CascadeOp::Call(name, type_args, args));
+                    } else if let Some(assign_op) = self.try_parse_assign_op() {
+                        let rhs = self.parse_expr();
+                        ops.push(CascadeOp::Assign(
+                            Box::new(Expr::Ident(name)),
+                            assign_op,
+                            Box::new(rhs),
+                        ));
+                        break;
+                    } else {
+                        ops.push(CascadeOp::Field(name, is_null_safe));
+                    }
+                }
+                TokenKind::LBracket | TokenKind::QmarkLBracket => {
+                    let is_null_safe = self.at(TokenKind::QmarkLBracket);
+                    self.advance();
+                    let idx = self.parse_expr();
+                    self.expect(TokenKind::RBracket);
+                    if let Some(assign_op) = self.try_parse_assign_op() {
+                        let rhs = self.parse_expr();
+                        ops.push(CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs)));
+                        break;
+                    }
+                    ops.push(CascadeOp::Index(Box::new(idx), is_null_safe));
+                }
+                _ => break,
+            }
+        }
+        ops
     }
 
     fn try_parse_assign_op(&mut self) -> Option<AssignOp> {
@@ -855,7 +923,21 @@ impl<'src> Parser<'src> {
             // Parenthesised / record / function expression
             TokenKind::LParen => {
                 if self.looks_like_function_expr() {
-                    self.parse_function_expr_with_type_params(Vec::new(), start)
+                    // `(...)` followed by `{` is ambiguous: a lambda `(params) {body}`,
+                    // or a parenthesized expression whose trailing `{` opens an
+                    // *enclosing* block (e.g. a constructor body in `C(): g = (e) {}`).
+                    // Speculatively parse the lambda; if its parameter list doesn't
+                    // parse cleanly, roll back and treat it as a paren/record.
+                    let saved = self.pos;
+                    let saved_errors = self.errors.len();
+                    let expr = self.parse_function_expr_with_type_params(Vec::new(), start);
+                    if self.errors.len() > saved_errors {
+                        self.rewind_to(saved);
+                        self.errors.truncate(saved_errors);
+                        self.parse_paren_or_record(false, start)
+                    } else {
+                        expr
+                    }
                 } else {
                     self.parse_paren_or_record(false, start)
                 }

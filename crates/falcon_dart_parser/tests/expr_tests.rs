@@ -251,11 +251,11 @@ fn test_null_aware_cascade_marks_first_section_only() {
         } => {
             assert!(is_null_aware);
             assert_eq!(sections.len(), 2);
-            match &sections[0].op {
+            match &sections[0].ops[0] {
                 CascadeOp::Field(_, na) => assert!(*na, "first section should be null-aware"),
                 other => panic!("expected Field, got {other:?}"),
             }
-            match &sections[1].op {
+            match &sections[1].ops[0] {
                 CascadeOp::Field(_, na) => assert!(!*na, "second section is plain `..`"),
                 other => panic!("expected Field, got {other:?}"),
             }
@@ -268,7 +268,7 @@ fn test_null_aware_cascade_marks_first_section_only() {
 fn test_null_aware_cascade_index_section() {
     let expr = parse_ok("a?..[0]");
     match expr {
-        Expr::Cascade { sections, .. } => match &sections[0].op {
+        Expr::Cascade { sections, .. } => match &sections[0].ops[0] {
             CascadeOp::Index(_, na) => assert!(*na, "index section should be null-aware"),
             other => panic!("expected Index, got {other:?}"),
         },
@@ -280,7 +280,7 @@ fn test_null_aware_cascade_index_section() {
 fn test_plain_cascade_index_section_not_null_aware() {
     let expr = parse_ok("a..[0]");
     match expr {
-        Expr::Cascade { sections, .. } => match &sections[0].op {
+        Expr::Cascade { sections, .. } => match &sections[0].ops[0] {
             CascadeOp::Index(_, na) => assert!(!*na),
             other => panic!("expected Index, got {other:?}"),
         },
@@ -293,7 +293,7 @@ fn test_null_aware_index_selector_cascade_section() {
     // `..?[0]` — the `?[` null-aware index selector must be accepted and marked.
     let expr = parse_ok("a..?[0]");
     match expr {
-        Expr::Cascade { sections, .. } => match &sections[0].op {
+        Expr::Cascade { sections, .. } => match &sections[0].ops[0] {
             CascadeOp::Index(_, na) => assert!(*na, "`?[` index should be null-aware"),
             other => panic!("expected Index, got {other:?}"),
         },
@@ -568,4 +568,97 @@ fn const_generic_typed_local_decl_still_parses() {
     let (stmts, e) = parse_body("const List<int> xs = [];");
     assert_eq!(e, 0);
     assert!(matches!(&stmts[0], Stmt::LocalVar(v) if v.is_const));
+}
+
+// ── Residual parse gaps: cascade selector chains and paren-vs-lambda ───────────
+
+#[test]
+fn cascade_section_parses_full_selector_chain() {
+    // A cascade section is a whole selector chain, not just its first selector:
+    // `..b.c()` is one section holding a Field then a Call. The chain tail used to
+    // be dropped, so this only "worked" at statement level by mis-splitting into a
+    // separate dot-shorthand statement.
+    let expr = parse_ok("a..b.c()");
+    match expr {
+        Expr::Cascade { sections, .. } => {
+            assert_eq!(sections.len(), 1);
+            assert!(
+                matches!(
+                    sections[0].ops.as_slice(),
+                    [CascadeOp::Field(f, _), CascadeOp::Call(c, _, _)]
+                        if f.name == "b" && c.name == "c"
+                ),
+                "ops: {:?}",
+                sections[0].ops
+            );
+        }
+        other => panic!("expected Cascade, got {other:?}"),
+    }
+}
+
+#[test]
+fn cascade_selector_chain_parses_in_nested_positions() {
+    // The chain must parse identically inside parentheses, call arguments, and
+    // collection literals — the nested positions where the restricted cascade
+    // grammar used to error with "expected RParen, got Dot".
+    assert_eq!(errs("void f() { (x..a.b()); }"), 0);
+    assert_eq!(errs("void f() { g(x..a.b()); }"), 0);
+    assert_eq!(errs("void f() { var l = [x..a.b()]; }"), 0);
+    assert_eq!(errs("void f() { (x..m().n()); }"), 0);
+    assert_eq!(errs("void f() { (x..a[i] = 1); }"), 0);
+}
+
+#[test]
+fn cascade_null_aware_selector_within_chain() {
+    // `?.`/`?[` selectors are allowed *within* a cascade section chain, distinct
+    // from a leading `?..`. The null-aware field selector is marked.
+    assert_eq!(errs("void f() { x..a?.b(); }"), 0);
+    let expr = parse_ok("a..b?.c");
+    match expr {
+        Expr::Cascade { sections, .. } => assert!(
+            matches!(
+                sections[0].ops.as_slice(),
+                [CascadeOp::Field(b, false), CascadeOp::Field(c, true)]
+                    if b.name == "b" && c.name == "c"
+            ),
+            "ops: {:?}",
+            sections[0].ops
+        ),
+        other => panic!("expected Cascade, got {other:?}"),
+    }
+}
+
+#[test]
+fn paren_expr_initializer_before_block_body_is_not_a_lambda() {
+    // `C(): g = (() => b) {}` — the trailing `{}` is the constructor body, so the
+    // `(...)` is a parenthesized expression, not a lambda parameter list. The
+    // `(...) {` shape used to be mis-detected as a function literal.
+    let (prog, errors) = parse("class C { var g; C(): g = (() => b) {} }");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let class = match &prog.declarations[0] {
+        TopLevelDecl::Class(c) => c,
+        other => panic!("expected class, got {other:?}"),
+    };
+    let ctor = class
+        .members
+        .iter()
+        .find_map(|m| match m {
+            ClassMember::Constructor(c) => Some(c),
+            _ => None,
+        })
+        .expect("constructor present");
+    assert!(matches!(ctor.body, Some(FunctionBody::Block(_))));
+    match &ctor.initializers[0] {
+        ConstructorInitializer::FieldInit { value, .. } => {
+            assert!(matches!(value, Expr::FuncExpr { .. }), "value: {value:?}");
+        }
+        other => panic!("expected field initializer, got {other:?}"),
+    }
+}
+
+#[test]
+fn nested_paren_arithmetic_initializer_before_block_body() {
+    // The same rollback must cover a plain parenthesized arithmetic expression.
+    let (_prog, errors) = parse("class C { var g; C(): g = (((o + 1) << 8) | 1) {} }");
+    assert!(errors.is_empty(), "errors: {errors:?}");
 }

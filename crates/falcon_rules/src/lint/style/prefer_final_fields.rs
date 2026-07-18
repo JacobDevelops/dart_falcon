@@ -170,8 +170,10 @@ impl Visitor for Written {
             } => self.record_target(operand),
             Expr::Cascade { sections, .. } => {
                 for s in sections {
-                    if let CascadeOp::Assign(target, _, _) = &s.op {
-                        self.record_target(target);
+                    for op in &s.ops {
+                        if let CascadeOp::Assign(target, _, _) = op {
+                            self.record_target(target);
+                        }
                     }
                 }
             }

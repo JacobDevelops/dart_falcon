@@ -361,21 +361,23 @@ mod dcl {
             } => {
                 scan_expr(object, in_const, diags, ctx, cfg);
                 for section in sections {
-                    match &section.op {
-                        CascadeOp::Index(e, _) => scan_expr(e, in_const, diags, ctx, cfg),
-                        CascadeOp::Call(_, _, args) => {
-                            for a in &args.positional {
-                                scan_expr(a, in_const, diags, ctx, cfg);
+                    for op in &section.ops {
+                        match op {
+                            CascadeOp::Index(e, _) => scan_expr(e, in_const, diags, ctx, cfg),
+                            CascadeOp::Call(_, _, args) => {
+                                for a in &args.positional {
+                                    scan_expr(a, in_const, diags, ctx, cfg);
+                                }
+                                for named in &args.named {
+                                    scan_expr(&named.value, in_const, diags, ctx, cfg);
+                                }
                             }
-                            for named in &args.named {
-                                scan_expr(&named.value, in_const, diags, ctx, cfg);
+                            CascadeOp::Assign(target, _, value) => {
+                                scan_expr(target, in_const, diags, ctx, cfg);
+                                scan_expr(value, in_const, diags, ctx, cfg);
                             }
+                            CascadeOp::Field(_, _) => {}
                         }
-                        CascadeOp::Assign(target, _, value) => {
-                            scan_expr(target, in_const, diags, ctx, cfg);
-                            scan_expr(value, in_const, diags, ctx, cfg);
-                        }
-                        CascadeOp::Field(_, _) => {}
                     }
                 }
             }

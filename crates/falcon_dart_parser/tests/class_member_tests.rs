@@ -370,3 +370,96 @@ fn operator_overload_still_parses() {
 fn modifier_keyword_static_used_as_field_name() {
     assert_eq!(errs("class C { static const static = 1; }"), 0);
 }
+
+// ── Residual parse gaps: record types after a modifier/annotation, built-ins ───
+
+#[test]
+fn static_record_return_type_with_generic_args() {
+    // `static (A<int>, B<int>) m()` — a record return type carrying generic args,
+    // reached through the modifier-prefixed member path.
+    let (prog, errors) = parse("class C { static (A<int>, B<int>) m() => x; }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Method(m) => {
+            assert!(m.is_static);
+            assert_eq!(m.name.name, "m");
+            assert!(
+                matches!(m.return_type, Some(DartType::Record(_))),
+                "return_type: {:?}",
+                m.return_type
+            );
+        }
+        other => panic!("expected method, got {other:?}"),
+    }
+}
+
+#[test]
+fn static_nullable_named_record_return_type() {
+    // `static ({int a})? m()` — a nullable named-field record return type.
+    let (prog, errors) = parse("class C { static ({int a})? m() => x; }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Method(m) => {
+            assert!(m.is_static);
+            assert!(matches!(m.return_type, Some(DartType::Record(_))));
+        }
+        other => panic!("expected method, got {other:?}"),
+    }
+}
+
+#[test]
+fn late_record_typed_field() {
+    // `late (int, int) r;` — `late` must stay a modifier, not be read as the
+    // member's own name when a record type follows.
+    let (prog, errors) = parse("class C { late (int, int) r; }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Field(f) => {
+            assert!(f.is_late);
+            assert!(matches!(f.field_type, Some(DartType::Record(_))));
+            assert_eq!(f.declarators[0].name.name, "r");
+        }
+        other => panic!("expected field, got {other:?}"),
+    }
+}
+
+#[test]
+fn annotation_before_nullable_record_return_type() {
+    // `@override ()? m()` — the `()?` is the nullable empty-record return type, not
+    // the annotation's argument list.
+    let (prog, errors) = parse("class C { @override ()? m() => x; }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Method(m) => {
+            assert_eq!(m.name.name, "m");
+            assert!(
+                m.annotations
+                    .iter()
+                    .any(|a| a.name.last().map(|i| i.name.as_str()) == Some("override")),
+                "annotations: {:?}",
+                m.annotations
+            );
+            assert!(
+                m.annotations.iter().all(|a| a.args.is_none()),
+                "annotation must carry no args"
+            );
+            assert!(matches!(m.return_type, Some(DartType::Record(_))));
+        }
+        other => panic!("expected method, got {other:?}"),
+    }
+}
+
+#[test]
+fn builtin_override_identifier_as_field_name() {
+    // `const override = 1;` — `override` is the field's own name here, not a
+    // modifier to be silently consumed.
+    let (prog, errors) = parse("class C { const override = 1; }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Field(f) => {
+            assert!(f.is_const);
+            assert_eq!(f.declarators[0].name.name, "override");
+        }
+        other => panic!("expected field, got {other:?}"),
+    }
+}

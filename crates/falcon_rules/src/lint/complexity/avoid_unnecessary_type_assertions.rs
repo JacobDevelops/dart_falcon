@@ -326,22 +326,24 @@ fn analyze_expression(
         } => {
             analyze_expression(object, scope_map, diags, ctx);
             for section in sections {
-                match &section.op {
-                    CascadeOp::Index(index, _) => {
-                        analyze_expression(index, scope_map, diags, ctx);
-                    }
-                    CascadeOp::Call(_, _, args) => {
-                        for arg in &args.positional {
-                            analyze_expression(arg, scope_map, diags, ctx);
+                for op in &section.ops {
+                    match op {
+                        CascadeOp::Index(index, _) => {
+                            analyze_expression(index, scope_map, diags, ctx);
                         }
-                        for named_arg in &args.named {
-                            analyze_expression(&named_arg.value, scope_map, diags, ctx);
+                        CascadeOp::Call(_, _, args) => {
+                            for arg in &args.positional {
+                                analyze_expression(arg, scope_map, diags, ctx);
+                            }
+                            for named_arg in &args.named {
+                                analyze_expression(&named_arg.value, scope_map, diags, ctx);
+                            }
                         }
+                        CascadeOp::Assign(_, _, value) => {
+                            analyze_expression(value, scope_map, diags, ctx);
+                        }
+                        _ => {}
                     }
-                    CascadeOp::Assign(_, _, value) => {
-                        analyze_expression(value, scope_map, diags, ctx);
-                    }
-                    _ => {}
                 }
             }
         }

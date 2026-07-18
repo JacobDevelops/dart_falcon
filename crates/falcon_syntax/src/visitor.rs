@@ -1020,19 +1020,21 @@ fn walk_arg_list<V: Visitor>(v: &mut V, node: &ArgList) {
 }
 
 fn walk_cascade_section<V: Visitor>(v: &mut V, section: &CascadeSection) {
-    match &section.op {
-        CascadeOp::Field(ident, _) => v.visit_identifier(ident),
-        CascadeOp::Index(expr, _) => v.visit_expr(expr),
-        CascadeOp::Call(ident, type_args, args) => {
-            v.visit_identifier(ident);
-            for t in type_args {
-                v.visit_dart_type(t);
+    for op in &section.ops {
+        match op {
+            CascadeOp::Field(ident, _) => v.visit_identifier(ident),
+            CascadeOp::Index(expr, _) => v.visit_expr(expr),
+            CascadeOp::Call(ident, type_args, args) => {
+                v.visit_identifier(ident);
+                for t in type_args {
+                    v.visit_dart_type(t);
+                }
+                walk_arg_list(v, args);
             }
-            walk_arg_list(v, args);
-        }
-        CascadeOp::Assign(target, _, value) => {
-            v.visit_expr(target);
-            v.visit_expr(value);
+            CascadeOp::Assign(target, _, value) => {
+                v.visit_expr(target);
+                v.visit_expr(value);
+            }
         }
     }
 }

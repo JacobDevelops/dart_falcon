@@ -412,25 +412,27 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         } => {
             visit_expr(object, diagnostics, ctx);
             for section in sections {
-                match &section.op {
-                    CascadeOp::Call(_, type_args, args) => {
-                        for type_arg in type_args {
-                            check_dart_type(type_arg, diagnostics, ctx);
+                for op in &section.ops {
+                    match op {
+                        CascadeOp::Call(_, type_args, args) => {
+                            for type_arg in type_args {
+                                check_dart_type(type_arg, diagnostics, ctx);
+                            }
+                            for expr in &args.positional {
+                                visit_expr(expr, diagnostics, ctx);
+                            }
+                            for named_arg in &args.named {
+                                visit_expr(&named_arg.value, diagnostics, ctx);
+                            }
                         }
-                        for expr in &args.positional {
-                            visit_expr(expr, diagnostics, ctx);
+                        CascadeOp::Index(index, _) => {
+                            visit_expr(index, diagnostics, ctx);
                         }
-                        for named_arg in &args.named {
-                            visit_expr(&named_arg.value, diagnostics, ctx);
+                        CascadeOp::Field(_, _) => {}
+                        CascadeOp::Assign(target, _, value) => {
+                            visit_expr(target, diagnostics, ctx);
+                            visit_expr(value, diagnostics, ctx);
                         }
-                    }
-                    CascadeOp::Index(index, _) => {
-                        visit_expr(index, diagnostics, ctx);
-                    }
-                    CascadeOp::Field(_, _) => {}
-                    CascadeOp::Assign(target, _, value) => {
-                        visit_expr(target, diagnostics, ctx);
-                        visit_expr(value, diagnostics, ctx);
                     }
                 }
             }
