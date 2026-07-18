@@ -8,7 +8,7 @@ pub struct CorrectOrderForSuperDispose;
 
 impl Rule for CorrectOrderForSuperDispose {
     fn name(&self) -> &'static str {
-        "correct_order_for_super_dispose"
+        "correct-order-for-super-dispose"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -71,7 +71,7 @@ fn check_dispose_method(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &Analyz
         {
             // super.dispose() is not the last statement
             diags.push(Diagnostic::new(
-                "correct_order_for_super_dispose",
+                "correct-order-for-super-dispose",
                 Severity::Warning,
                 "super.dispose() should be called last in the dispose method.",
                 ctx.file_path.to_string_lossy().into_owned(),

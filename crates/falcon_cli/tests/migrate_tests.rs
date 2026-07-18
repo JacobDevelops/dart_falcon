@@ -41,7 +41,8 @@ custom_lint:
     let (value, unrecognized, count) = parse(yaml);
     assert!(unrecognized.is_empty());
     assert_eq!(count, 1);
-    let cfg = &value["linter"]["rules"]["complexity"]["max_lines_for_file"];
+    // The upstream pyramid id keeps working; it maps to the canonical falcon id.
+    let cfg = &value["linter"]["rules"]["complexity"]["max-lines-for-file"];
     assert_eq!(cfg["level"], Value::String("warn".into()));
     assert_eq!(cfg["options"]["max_lines"], Value::from(200));
 }

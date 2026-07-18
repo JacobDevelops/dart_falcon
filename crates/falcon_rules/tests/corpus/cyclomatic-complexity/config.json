@@ -1,0 +1,14 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "cyclomatic-complexity": {
+          "level": "warn",
+          "options": {
+            "max_complexity": 3
+          }
+        }
+      }
+    }
+  }
+}

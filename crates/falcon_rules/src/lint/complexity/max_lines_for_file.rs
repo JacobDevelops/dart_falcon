@@ -8,8 +8,8 @@ pub struct MaxLinesForFile;
 
 /// Read the `max_lines` option (default 200). Malformed/missing → default.
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("max_lines_for_file")
-        .and_then(|m| ctx.rule_options(m.group, "max_lines_for_file"))
+    crate::meta::meta_for("max-lines-for-file")
+        .and_then(|m| ctx.rule_options(m.group, "max-lines-for-file"))
         .and_then(|o| o.get("max_lines"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
@@ -18,7 +18,7 @@ fn max_lines_option(ctx: &AnalyzeContext) -> usize {
 
 impl Rule for MaxLinesForFile {
     fn name(&self) -> &'static str {
-        "max_lines_for_file"
+        "max-lines-for-file"
     }
 
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -31,7 +31,7 @@ impl Rule for MaxLinesForFile {
         if line_count > threshold {
             // Report on line 1 (byte offset 0). Message states the actual threshold.
             diags.push(Diagnostic::new(
-                "max_lines_for_file",
+                "max-lines-for-file",
                 Severity::Warning,
                 format!("File exceeds the maximum number of lines ({threshold})."),
                 ctx.file_path.to_string_lossy().into_owned(),

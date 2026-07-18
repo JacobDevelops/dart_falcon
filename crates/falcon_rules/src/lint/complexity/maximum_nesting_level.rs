@@ -8,7 +8,7 @@ pub struct MaximumNestingLevel;
 
 impl Rule for MaximumNestingLevel {
     fn name(&self) -> &'static str {
-        "maximum_nesting_level"
+        "maximum-nesting-level"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -22,8 +22,8 @@ impl Rule for MaximumNestingLevel {
 
 /// Read the `max_nesting` option (default 5). Malformed/missing → default.
 fn max_nesting_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("maximum_nesting_level")
-        .and_then(|m| ctx.rule_options(m.group, "maximum_nesting_level"))
+    crate::meta::meta_for("maximum-nesting-level")
+        .and_then(|m| ctx.rule_options(m.group, "maximum-nesting-level"))
         .and_then(|o| o.get("max_nesting"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
@@ -46,7 +46,7 @@ fn check_function(
     walk_body(body, 0, &mut max);
     if max > threshold {
         diags.push(Diagnostic::new(
-            "maximum_nesting_level",
+            "maximum-nesting-level",
             Severity::Warning,
             format!("Function has a nesting level of {max} (max {threshold})."),
             ctx.file_path.to_string_lossy().into_owned(),

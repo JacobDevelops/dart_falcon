@@ -9,7 +9,7 @@ pub struct ProperExpandedAndFlexible;
 
 impl Rule for ProperExpandedAndFlexible {
     fn name(&self) -> &'static str {
-        "proper_expanded_and_flexible"
+        "proper-expanded-and-flexible"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -42,7 +42,7 @@ impl Visitor for Collector {
                     && matches!(child, "Expanded" | "Flexible")
                 {
                     self.diags.push(Diagnostic::new(
-                        "proper_expanded_and_flexible",
+                        "proper-expanded-and-flexible",
                         Severity::Warning,
                         "Expanded and Flexible must be direct children of a Row, Column, or Flex.",
                         self.file.clone(),

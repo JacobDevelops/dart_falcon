@@ -8,7 +8,7 @@ pub struct MaxLinesForFunction;
 
 impl Rule for MaxLinesForFunction {
     fn name(&self) -> &'static str {
-        "max_lines_for_function"
+        "max-lines-for-function"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -27,8 +27,8 @@ fn line_of(source: &str, offset: usize) -> usize {
 
 /// Read the `max_lines` option (default 100). Malformed/missing → default.
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("max_lines_for_function")
-        .and_then(|m| ctx.rule_options(m.group, "max_lines_for_function"))
+    crate::meta::meta_for("max-lines-for-function")
+        .and_then(|m| ctx.rule_options(m.group, "max-lines-for-function"))
         .and_then(|o| o.get("max_lines"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
@@ -52,7 +52,7 @@ fn check_function_lines(
 
     if lines > threshold {
         diags.push(Diagnostic::new(
-            "max_lines_for_function",
+            "max-lines-for-function",
             Severity::Warning,
             format!("Function exceeds the maximum number of lines ({threshold})."),
             ctx.file_path.to_string_lossy().into_owned(),

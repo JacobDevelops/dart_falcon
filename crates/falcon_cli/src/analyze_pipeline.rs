@@ -172,7 +172,7 @@ fn apply_includes(files: &mut Vec<(PathBuf, String)>, includes: &[String]) {
 /// Returns an error message if the explicit `--config` file cannot be loaded
 /// or the current directory is inaccessible.
 pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
-    let config = match &options.config_path {
+    let mut config = match &options.config_path {
         Some(path) => load_config(path).map_err(|e| e.to_string())?,
         None => {
             let cwd = std::env::current_dir()
@@ -180,6 +180,9 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
             load_or_default(&cwd)
         }
     };
+    // Rewrite any legacy rule ids in the config to their canonical ids so old
+    // falcon.json files keep resolving.
+    falcon_rules::meta::canonicalize_config(&mut config);
 
     // Config exclude patterns and CLI --exclude patterns are unioned.
     let mut exclude_patterns = config.files.exclude_patterns();
