@@ -1,14 +1,25 @@
-//! Flags `.length` comparisons equivalent to `.isEmpty` (`length == 0`,
-//! `length < 1`, `length <= 0`, and their mirrors). Adopted from package:lints
+//! Flags `.length` comparisons equivalent to a `.isEmpty` check.
+//!
+//! Collections and strings expose an `isEmpty` getter that states intent
+//! directly and, for lazy iterables, can be cheaper than computing the full
+//! `length`. Comparing `length` against a constant forces the reader to decode
+//! the boundary, so `list.isEmpty` should replace forms such as `length == 0`,
+//! `length < 1`, and `length <= 0`, together with their operand-swapped mirrors
+//! (`0 == length`, `1 > length`, `0 >= length`). Adopted from package:lints
 //! `prefer_is_empty`.
+//!
+//! Only a plain `.length` property access matches against the relevant integer
+//! literal. A null-aware `receiver?.length` is deliberately left alone: that
+//! comparison also has to account for a `null` receiver, so `isEmpty` is not a
+//! drop-in replacement.
 //!
 //! Type knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context
 //! and the receiver's static type is *positively proven* to be a concrete type
-//! that (a) definitely has no `isEmpty` member and (b) is definitely not a core
-//! collection/string (`is_subtype … ProvenNo` for `Iterable`, `String`, `Map`),
-//! suggesting `isEmpty` would be wrong, so the diagnostic is withheld. An
-//! `Unknown` receiver — the common case, and every receiver when no type index is
-//! attached — behaves exactly as before: it keeps firing.
+//! that (a) definitely has no `isEmpty` member (`member_lookup … ProvenAbsent`)
+//! and (b) is definitely not a core collection/string (`is_subtype … ProvenNo`
+//! for `Iterable`, `String`, `Map`), suggesting `isEmpty` would be wrong, so the
+//! diagnostic is withheld. An `Unknown` receiver — the common case, and every
+//! receiver when no type index is attached — keeps firing.
 
 use falcon_analyze::{
     AnalyzeContext, LocalTypes, MemberResult, ReceiverTypes, Rule, StaticType, SubtypeResult,

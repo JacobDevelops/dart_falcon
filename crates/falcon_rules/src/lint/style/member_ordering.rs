@@ -1,4 +1,25 @@
-//! Flags class members declared out of the configured order. Ported from dart_code_linter's `member-ordering`.
+//! Flags class members declared out of the configured order.
+//!
+//! A predictable member layout makes classes easier to navigate. Without
+//! options the built-in order applies: static constants, static fields, instance
+//! fields, constructors, static methods, then instance methods. Members are
+//! ranked by category and any pair out of sequence is reported. For Flutter
+//! `State` subclasses, a separate lifecycle ordering can be enforced with
+//! `widgets_order`.
+//!
+//! ## Options
+//!
+//! `order` (list of category tokens, default: the built-in order above) — the
+//! required member sequence. Supported tokens are `public-fields`,
+//! `private-fields`, `fields`, `static-fields`, `constructors`,
+//! `named-constructors`, `static-methods`, `private-methods`, `public-methods`,
+//! `methods`, `getters`, and `setters`. A member is ranked by the earliest
+//! token it qualifies for; members matching no token are ignored.
+//!
+//! `widgets_order` (list of lifecycle tokens, default: none) — for a class that
+//! `extends State`, orders lifecycle members by this list. Supported tokens:
+//! `constructor`, `init-state`, `did-change-dependencies`, `did-update-widget`,
+//! `dispose`, `build`, and `overridden-methods`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

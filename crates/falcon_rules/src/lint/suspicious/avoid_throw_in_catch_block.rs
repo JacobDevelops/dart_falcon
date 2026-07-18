@@ -1,4 +1,11 @@
-//! Flags throwing a new object inside a catch block. Ported from dart_code_linter's `avoid-throw-in-catch-block`.
+//! Flags a `throw` of a new object inside a `catch` block.
+//!
+//! Throwing a fresh exception from a catch replaces the error in flight along
+//! with its original stack trace, so the root cause is lost and the failure
+//! becomes much harder to diagnose. Prefer `rethrow` to propagate the caught
+//! exception unchanged, or wrap it in an error that keeps the original as a
+//! cause. Only a `throw` statement raising a new value is reported; a `rethrow`
+//! is always exempt.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

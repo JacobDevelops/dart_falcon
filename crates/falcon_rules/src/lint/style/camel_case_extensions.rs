@@ -1,5 +1,10 @@
-//! Flags named extensions whose name is not UpperCamelCase. Ported from
-//! package:lints `camel_case_extensions`. Unnamed extensions are ignored.
+//! Flags named extensions whose name is not UpperCamelCase.
+//!
+//! Extensions are types and should follow the same naming convention as classes
+//! and enums so that tooling and readers treat them consistently. Leading
+//! underscores are ignored for the check; the remainder must be one or more
+//! words, each starting with an uppercase letter or `$`. Unnamed extensions have
+//! no identifier to check and are skipped.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

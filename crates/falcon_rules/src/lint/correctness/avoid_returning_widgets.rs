@@ -1,4 +1,15 @@
-//! Flags methods and functions that return a `Widget` instead of composing one. Ported from dart_code_linter's `avoid-returning-widgets`.
+//! Disallow functions and methods that return a `Widget`.
+//!
+//! Flags a function, method, or getter whose return type is `Widget`,
+//! `StatelessWidget`, or `StatefulWidget` (or a `Future`, `Stream`, or
+//! `Completer` of one). Returning a widget from a helper instead of defining a
+//! real widget class defeats Flutter's element tree: the returned subtree cannot
+//! hold its own state, is rebuilt wholesale whenever the enclosing `build` runs,
+//! and never appears as a distinct node in the widget inspector. Extract the
+//! subtree into its own `StatelessWidget` or `StatefulWidget` so Flutter can
+//! cache and rebuild it independently. The `build` method and `@override`
+//! members are exempt, as is any return type naming a concrete widget subclass
+//! such as `Container`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

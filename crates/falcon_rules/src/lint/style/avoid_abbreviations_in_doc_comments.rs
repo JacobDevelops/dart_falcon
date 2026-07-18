@@ -1,4 +1,11 @@
-//! Flags abbreviations in doc comments. Ported from pyramid_lint's `avoid_abbreviations_in_doc_comments`.
+//! Flags Latin abbreviations in doc comments.
+//!
+//! Doc comments are read by API consumers who may not share the author's first
+//! language, and abbreviations like `e.g.`, `i.e.`, `etc.`, and `et al.` are
+//! easy to misread or mistranslate. Spelling them out ("for example", "that
+//! is", "and so on") keeps generated documentation unambiguous. Only `///`
+//! doc-comment lines are scanned, and the first occurrence of each abbreviation
+//! on a line is reported.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,14 +1,13 @@
-//! Flags a type annotation on an initializing formal or super parameter
-//! (`type-init-formals`, adopted from package:lints): in `C(int this.x)` /
-//! `C(int super.x)` the type is always redundant with the field's declared type.
+//! Flags a redundant type annotation on an initializing formal or super parameter.
 //!
-//! The parser cannot represent a typed initializing formal (it only marks a
-//! parameter as a field/super formal when the token is literally `this`/`super`,
-//! i.e. with no preceding type), so detection is done over the raw source. In
-//! valid Dart a `this.`/`super.` preceded by a bare type identifier only occurs
-//! in a constructor parameter list; expression-context `this`/`super` is always
-//! preceded by punctuation or a statement keyword. To stay conservative the rule
-//! flags only that unambiguous shape.
+//! In `C(int this.x)` or `C(int super.x)` the parameter's type is already fixed by
+//! the field (or super-parameter) it initializes, so restating it is redundant and
+//! risks drifting out of sync with the field's declared type. Detection runs over the
+//! raw source because the parser only records a field/super formal when the token is
+//! literally `this`/`super` with no preceding type. To stay conservative the rule
+//! flags only a `this.`/`super.` immediately preceded by a bare type identifier — a
+//! shape that in valid Dart occurs solely in a constructor parameter list — and skips
+//! non-type words such as `final`, `covariant`, `return`, and `await`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,4 +1,11 @@
-//! Flags binary expressions with a literal on the left-hand side. Ported from dart_code_linter's `binary-expression-operand-order`.
+//! Flags comparison expressions with a literal on the left-hand side.
+//!
+//! Writing the constant first — `if (0 == count)` — is the "Yoda condition"
+//! style that reads backwards; putting the variable first (`count == 0`) matches
+//! how the comparison is spoken and scanned. The check covers the equality and
+//! relational operators (`==`, `!=`, `<`, `>`, `<=`, `>=`) whenever the left
+//! operand is a literal, with one exception: a `null` on the left compared
+//! against another literal (as in `null == null`) is left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

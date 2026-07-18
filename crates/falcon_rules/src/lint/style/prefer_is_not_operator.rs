@@ -1,5 +1,10 @@
-//! Flags `!(x is T)`, which is better written as `x is! T`. Ported from
-//! package:lints' `prefer_is_not_operator`.
+//! Flags a negated type test `!(x is T)` that should use the `is!` operator.
+//!
+//! Dart provides the `is!` operator precisely so negated type checks read
+//! directly as `x is! T` instead of wrapping the test in parentheses and negating
+//! it, which is easier to misread and to accidentally mis-parenthesize. The rule
+//! fires on a logical-not applied to a non-negated `is` expression; a test that
+//! already uses `is!` produces no negation to flag.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

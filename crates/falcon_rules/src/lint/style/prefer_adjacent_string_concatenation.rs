@@ -1,6 +1,11 @@
-//! Flags `'a' + 'b'` where both operands are string literals. Ported from package:lints
-//! `prefer_adjacent_string_concatenation`. Two string literals should be written adjacent
-//! (`'a' 'b'`) rather than joined with `+`.
+//! Flags two string literals joined with the `+` operator.
+//!
+//! Dart concatenates adjacent string literals at compile time, so `'a' 'b'` is
+//! equivalent to `'a' + 'b'` but without the runtime operator or the visual
+//! noise. The rule fires only when both operands of an `Add` expression are
+//! string literals; a literal added to any other expression is left alone, since
+//! adjacency cannot express that. Prefer writing the pieces side by side, which
+//! also reads naturally when splitting a long string across lines.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

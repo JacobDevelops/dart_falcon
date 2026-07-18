@@ -1,4 +1,12 @@
-//! Flags improper use of `Expanded`/`Flexible` outside a flex parent. Ported from pyramid_lint's `proper_expanded_and_flexible`.
+//! Require `Expanded` and `Flexible` to sit directly inside a flex widget.
+//!
+//! Flags an `Expanded` or `Flexible` passed as the `child:` of a widget that is
+//! not a `Row`, `Column`, or `Flex`. These widgets report their flex factor to a
+//! surrounding flex container through the render tree; under any other parent
+//! they have no flex parent to negotiate with and throw a layout error at
+//! runtime. Put them in the `children:` of a `Row`, `Column`, or `Flex`, or
+//! remove the wrapper. The rule reports only when the illegal parent is directly
+//! visible at the construction site.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,11 +1,14 @@
-//! Flags old-style function-typed parameters (`use-function-type-syntax-for-parameters`,
-//! adopted from package:lints): `void f(int g(int x))` should be written with
-//! the generic function type syntax `void f(int Function(int) g)`.
+//! Flags an old-style function-typed parameter written with inline parameter syntax.
 //!
-//! The parser records the old form as a [`FormalParam`] carrying nested
-//! `function_params`; the modern form parses as a plain parameter whose type is
-//! a `DartType::Function`. So a non-empty `function_params` is exactly the
-//! old-style signature.
+//! Dart lets you declare a function-typed parameter two ways. The legacy form
+//! inlines the callee's own parameter list — `void f(int g(int x))` — while the
+//! modern generic function type syntax writes the type up front:
+//! `void f(int Function(int) g)`. The modern form is preferred because it reads
+//! as an ordinary typed parameter, composes with nullability (`Function(int)?`),
+//! and keeps the parameter name in its usual place. The rule detects the old form
+//! by the nested parameter list the parser attaches to it; the modern form parses
+//! as a plain parameter with a function type and is not flagged. Rewrite using
+//! `Function` type syntax.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

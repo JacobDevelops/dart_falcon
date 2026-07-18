@@ -1,4 +1,13 @@
-//! Flags explicit `dynamic` type annotations. Ported from dart_code_linter's `avoid-dynamic`.
+//! Flags explicit `dynamic` type annotations.
+//!
+//! `dynamic` opts an expression out of static type checking, so member accesses
+//! and calls on it are resolved at runtime and any mistake surfaces as a crash
+//! rather than a compile error. Reaching for it is usually a shortcut where a
+//! concrete type, a generic, or `Object?` plus explicit checks would be safer.
+//! Prefer a precise type. `dynamic` used directly as a `Map` type argument — the
+//! documented JSON escape hatch, `Map<String, dynamic>` — is exempt, but a
+//! `dynamic` nested more deeply (such as `Map<String, List<dynamic>>`) is still
+//! flagged.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

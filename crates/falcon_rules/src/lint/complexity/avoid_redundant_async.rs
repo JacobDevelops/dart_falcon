@@ -1,4 +1,10 @@
-//! Flags `async` functions that never `await`. Ported from dart_code_linter's `avoid-redundant-async`.
+//! Flags an `async` function whose body is a single `return await ...;`.
+//!
+//! When a function does nothing with the awaited value but return it, the
+//! `async`/`await` round-trip is redundant: returning the `Future` directly is
+//! equivalent and skips an extra microtask hop and stack frame. The rule fires
+//! on a function or method marked `async` whose block body is exactly one
+//! statement of the form `return await <expr>;`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

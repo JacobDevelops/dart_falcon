@@ -1,7 +1,12 @@
-//! Flags uses of a wildcard variable or parameter (a name made solely of
-//! underscores, e.g. `_`, `__`). Ported from package:lints
-//! `no_wildcard_variable_uses`. Declaring a wildcard is fine; referencing it is
-//! not, so only identifiers in expression position are reported.
+//! Flags references to a wildcard variable or parameter (a name made solely of
+//! underscores, such as `_` or `__`).
+//!
+//! An all-underscore name marks a binding as intentionally unused, and under
+//! Dart's wildcard-variable semantics such names are non-binding — reading one
+//! back does not retrieve the value you expect. Referencing it is therefore
+//! either a mistake or a reliance on behavior that is changing. Declaring a
+//! wildcard is fine; only uses in expression position are reported. Give the
+//! binding a real name if you actually need its value.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

@@ -1,13 +1,13 @@
-//! Flags a redundant `this.` qualifier on member access (`unnecessary-this`,
-//! adopted from package:lints). `this.x` / `this.m()` is only needed when a
-//! parameter or local in scope shadows the member name; otherwise the `this.`
-//! is noise.
+//! Flags a redundant `this.` qualifier on member access.
 //!
-//! Conservative: the shadow set is over-approximated (every parameter, local
-//! variable, loop/catch/pattern binding, and closure parameter anywhere in the
-//! member is treated as an in-scope shadow), so a name that could plausibly be
-//! shadowed is never flagged. Constructor initializer lists are not visited, so
-//! the `this.` required there is never touched.
+//! Writing `this.x` or `this.m()` is only necessary when a parameter or local
+//! variable in scope shadows the member name; otherwise the qualifier is noise
+//! that most Dart style guides ask you to drop. The analysis is deliberately
+//! conservative: it over-approximates the shadow set, treating every parameter,
+//! local variable, loop/catch/pattern binding, and closure parameter anywhere in
+//! the member as a potential shadow, so a name that could plausibly be shadowed
+//! is never flagged. Constructor initializer lists — where `this.` genuinely
+//! disambiguates a field from a parameter — are not visited. Remove the `this.`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

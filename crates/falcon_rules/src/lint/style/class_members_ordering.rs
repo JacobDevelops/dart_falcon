@@ -1,4 +1,20 @@
-//! Flags class members declared out of the configured order. Ported from pyramid_lint's `class_members_ordering`.
+//! Flags class members declared out of a canonical order.
+//!
+//! A consistent member layout lets readers find fields, constructors, and
+//! methods in the same place across every class. Without options the built-in
+//! order applies: static constants, static fields, instance `final` fields,
+//! instance mutable fields, constructors, public getters and setters, public
+//! methods, then private members. Members are ranked by category and any pair
+//! found out of sequence is reported.
+//!
+//! ## Options
+//!
+//! `order` (list of category tokens, default: the built-in order above) — the
+//! required member sequence. Supported tokens are `public-fields`,
+//! `private-fields`, `fields`, `static-fields`, `constructors`,
+//! `named-constructors`, `static-methods`, `private-methods`, `public-methods`,
+//! `methods`, `getters`, and `setters`. A member is ranked by the earliest
+//! token it qualifies for; members matching no token are ignored.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

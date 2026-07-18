@@ -1,5 +1,13 @@
-//! Flags `@deprecated` / `@Deprecated()` annotations that carry no message.
-//! Ported from package:lints `provide_deprecation_message`.
+//! Flags `@deprecated` and `@Deprecated()` annotations that carry no message.
+//!
+//! A deprecation is only useful if it tells callers what to do instead — which
+//! replacement to adopt, or since when the API is going away. The bare
+//! `@deprecated` constant can never carry that guidance, and `@Deprecated()`
+//! with no argument (or an empty/whitespace-only string) is just as unhelpful,
+//! so both should be replaced with `@Deprecated("message")`. A `@Deprecated`
+//! whose positional argument is any non-empty expression is accepted. The rule
+//! also inspects field-level annotations, which the generic AST walk would
+//! otherwise skip.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

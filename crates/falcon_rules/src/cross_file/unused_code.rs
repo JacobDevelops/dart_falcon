@@ -1,11 +1,16 @@
-//! `unused-code` — flag public top-level declarations in `lib/` whose name is
-//! never referenced anywhere in the project. Port of dart_code_linter's
-//! `check-unused-code`: a symbol referenced within its *own* file counts as used
-//! (dcl records same-file references too), so only genuinely unreferenced public
-//! declarations are flagged. Tuned to be low-false-positive by construction: when
-//! in doubt (any same-name identifier in another file, any same-file reference
-//! outside the declaration, any annotation, any export of the file) the
-//! declaration is left unflagged.
+//! Report public top-level declarations that nothing references.
+//!
+//! Flags a public top-level declaration in `lib/` — a class, mixin, enum,
+//! typedef, extension type, function, or variable — whose name appears nowhere
+//! else in the project, neither in another file nor elsewhere in its own file.
+//! An unreferenced public API is usually dead code that outlived its callers,
+//! but removing something still in use is worse than missing one, so the rule is
+//! tuned to avoid false positives: it exempts `main`, annotated declarations,
+//! members of re-exported files, and unnamed extensions, treats any same-name
+//! identifier anywhere as usage, and skips files that failed to parse. Private
+//! (`_`-prefixed) declarations are out of scope. This is a cross-file rule: it
+//! runs in the cross-file pass over the whole analyzed file set and is
+//! configured under the top-level `cross-file` section rather than `linter`.
 
 use std::collections::{HashMap, HashSet};
 

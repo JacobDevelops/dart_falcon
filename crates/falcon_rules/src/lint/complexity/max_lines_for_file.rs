@@ -1,4 +1,15 @@
-//! Flags files longer than the configured line limit. Ported from pyramid_lint's `max_lines_for_file`.
+//! Flags a file longer than the configured line limit.
+//!
+//! Very long files are hard to navigate and usually mix unrelated
+//! responsibilities; splitting them improves readability and review. The rule
+//! counts the total lines in the file and reports once, at the top, when the
+//! count exceeds the threshold. The diagnostic message states the configured
+//! limit.
+//!
+//! ## Options
+//!
+//! `max_lines` (integer, default: 200) — flag files with more than this many
+//! lines.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

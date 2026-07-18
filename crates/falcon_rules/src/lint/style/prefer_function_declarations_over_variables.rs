@@ -1,12 +1,13 @@
-//! Flags local variables bound to a function literal that should instead be a
-//! local function declaration (`prefer-function-declarations-over-variables`,
-//! adopted from package:lints).
+//! Flags a local variable bound to a function literal that should be a local
+//! function declaration.
 //!
-//! ponytail: reassignment analysis is intentionally skipped — only `final`/
-//! `const` local bindings (which provably can never be reassigned) are flagged.
-//! A plain `var f = () {...}` never reassigned would also qualify upstream, but
-//! proving non-reassignment needs dataflow this syntax-only pass does not do, so
-//! those are left alone to stay conservative.
+//! Binding a closure to a variable (`final f = () {...};`) hides that it is a
+//! named function; a proper declaration (`void f() {...}`) reads more clearly,
+//! supports recursion and generic type parameters, and gives a return type a
+//! natural home. The rule only reports `final` or `const` local bindings, which
+//! provably can never be reassigned. A plain `var f = () {...}` is left alone,
+//! since proving it is never reassigned requires dataflow this syntax-only pass
+//! does not perform.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

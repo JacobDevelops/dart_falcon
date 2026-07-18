@@ -1,4 +1,14 @@
-//! Flags controllers that are created but never disposed. Ported from pyramid_lint's `proper_controller_dispose`.
+//! Require controllers owned by a `State` to be disposed.
+//!
+//! Flags a controller field of a `State` class — a field whose type name ends in
+//! `Controller`, such as `TextEditingController` or `AnimationController` — that
+//! the `State` creates but never disposes. Controllers hold listeners, tickers,
+//! and native resources that leak if they outlive the widget, so each one the
+//! `State` owns must be released in its `dispose` method. The rule tracks fields
+//! constructed in an initializer or assigned within the class, and checks that
+//! each is `dispose()`-d (directly or via a cascade) inside `dispose`.
+//! Controllers sourced from `widget.` are treated as owned by the parent widget
+//! and are exempt.
 
 use std::collections::HashSet;
 

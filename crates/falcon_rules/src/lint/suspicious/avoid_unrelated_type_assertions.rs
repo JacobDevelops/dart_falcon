@@ -1,4 +1,13 @@
-//! Flags `is` checks against an unrelated type. Ported from dart_code_linter's `avoid-unrelated-type-assertions`.
+//! Flags an `is` check that can never succeed because the operand's type is
+//! unrelated to the tested type.
+//!
+//! A test like `'text' is int` or `42 is String` is always false, so the guarded
+//! branch is dead code — usually a leftover from a refactor or a paste that
+//! carried the wrong type. Detection works from literal operands and locally
+//! declared variables initialized from literals, comparing the operand's category
+//! (`String`, `int`, `double`, `bool`, `List`, `Map`, `Set`) against the tested
+//! type and reporting known-incompatible pairings. Correct the test to the type
+//! you actually mean, or remove the unreachable branch.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

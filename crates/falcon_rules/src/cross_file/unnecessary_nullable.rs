@@ -1,11 +1,18 @@
-//! `unnecessary-nullable` — flag nullable parameters of private functions and
-//! private methods that are never actually passed (or assigned) null anywhere
-//! in the project. Conservative port of dart_code_linter's
-//! `check-unnecessary-nullable`. Restricting to `_`-prefixed declarations
-//! guarantees all call sites are visible in-project; the type-resolution layer
-//! then proves each argument non-null (local inference of literals/`new`/
-//! arithmetic plus a cross-file return-type index), which removed the false
-//! positives that had kept the rule opt-in — it is now recommended.
+//! Report nullable parameters of private declarations that never receive null.
+//!
+//! Flags a nullable parameter (`T?`) of a private (`_`-prefixed) function or
+//! method when no call site anywhere in the project passes it null, and its body
+//! never assigns null to it either. Because the declaration is private, every
+//! one of its call sites is visible in the analyzed set, which is what makes the
+//! conclusion sound; the `?` then widens the type for a value that is always
+//! non-null, so callers and the body carry null handling that can never trigger.
+//! An argument counts as non-null only when proven so — a literal, a `new` or
+//! arithmetic expression, or a call whose declared return type the cross-file
+//! index resolves as non-nullable. Anything uncertain (an ambiguous name shared
+//! by multiple declarations, a tear-off reference, an argument that might be
+//! null) suppresses the report. This is a cross-file rule: it runs in the
+//! cross-file pass over the whole analyzed file set and is configured under the
+//! top-level `cross-file` section rather than `linter`.
 
 use std::collections::{HashMap, HashSet};
 

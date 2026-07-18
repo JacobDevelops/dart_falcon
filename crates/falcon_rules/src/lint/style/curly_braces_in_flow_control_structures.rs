@@ -1,9 +1,12 @@
-//! Requires braces around flow-control bodies, ported from package:lints
-//! `curly_braces_in_flow_control_structures`. `for`, `while` and `do` bodies
-//! must always be blocks. `if`/`else` branches must be blocks too, with two
-//! carve-outs matching the official lint: an `if` without an `else` whose
-//! statement sits on the same line as its condition is allowed to omit braces,
-//! and an `else if` chain does not require the intermediate `if` to be a block.
+//! Requires curly braces around the bodies of flow-control statements.
+//!
+//! A brace-less body invites the "goto fail" class of bug, where a later edit
+//! adds a second statement that silently falls outside the branch. Requiring
+//! blocks around `for`, `while`, `do`, and `if`/`else` bodies keeps the scope
+//! explicit and edits safe. Two carve-outs match the official lint: an `if`
+//! with no `else` whose body sits on the same line as its condition may omit
+//! braces, and an `else if` chain need not wrap the intermediate `if` in a
+//! block.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

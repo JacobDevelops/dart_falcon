@@ -1,4 +1,11 @@
-//! Flags `Column`/`Row` widgets with a single child. Ported from pyramid_lint's `avoid_single_child_column_or_row`.
+//! Flags a `Column`, `Row`, or `Flex` widget built with a single child.
+//!
+//! A multi-child layout widget that wraps exactly one child adds a layout node
+//! and an allocation without changing what is rendered; the child can be used
+//! directly, or swapped for `Align`, `Center`, or `Padding` if the axis
+//! behavior actually mattered. The rule fires only when the `children` list
+//! holds exactly one expression element, and it tolerates partially-parsed Dart
+//! 3 collection elements by requiring a complete, `)`-terminated construction.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

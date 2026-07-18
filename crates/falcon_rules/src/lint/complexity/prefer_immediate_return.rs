@@ -1,4 +1,10 @@
-//! Flags variables returned immediately after assignment. Ported from dart_code_linter's `prefer-immediate-return`.
+//! Flags a local variable that is returned on the immediately following statement.
+//!
+//! Assigning a value to a variable only to return it on the next line adds an
+//! intermediate name that carries no information; return the expression
+//! directly. The rule fires when a single-declarator local variable declaration
+//! is immediately followed by a `return` of that same variable, and it descends
+//! into blocks and `if`, loop, and try/catch bodies to check nested statements.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

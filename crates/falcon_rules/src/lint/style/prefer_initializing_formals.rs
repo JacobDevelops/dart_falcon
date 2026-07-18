@@ -1,13 +1,19 @@
-//! Flags constructors that copy a plain parameter straight into a field
-//! (`prefer-initializing-formals`, adopted from package:lints). Both the
-//! initializer-list form `: x = x` and the body form `this.x = x;` should be
-//! replaced by an initializing formal `this.x`.
+//! Flags a constructor that copies a plain parameter straight into a field
+//! (`prefer-initializing-formals`, adopted from package:lints).
 //!
-//! Conservative: only exact `field = param` / `this.field = param` where the
-//! parameter is a plain (non-field, non-super) constructor parameter. A named
-//! parameter must already carry the field's name — renaming it would break
-//! callers — while a positional one may be named anything. A parameter copied
-//! into more than one field is skipped: it cannot become an initializing formal.
+//! Dart's initializing formals (`this.x`) declare the parameter and assign the
+//! field in one step, so the manual copy — whether an initializer-list entry
+//! `: x = x` or a body statement `this.x = x;` — is redundant boilerplate. The
+//! rule is intentionally narrow: it matches only an exact `field = param` /
+//! `this.field = param` copy of a plain constructor parameter, never an existing
+//! initializing (`this.`) or super (`super.`) formal, so cases that already use
+//! the idiom or that transform the value are left untouched.
+//!
+//! A *named* parameter must already carry the field's name — renaming it would
+//! break callers — while a *positional* one may be named anything, since
+//! promoting it to `this.field` does not change the call-site API. A parameter
+//! copied into more than one field is skipped: it cannot become an initializing
+//! formal.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

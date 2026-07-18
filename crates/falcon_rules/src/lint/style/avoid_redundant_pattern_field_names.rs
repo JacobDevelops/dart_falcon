@@ -1,4 +1,10 @@
-//! Flags redundant field names in object patterns. Ported from pyramid_lint's `avoid_redundant_pattern_field_names`.
+//! Flags redundant field names in object and record patterns.
+//!
+//! When a pattern binds a field to a variable of the same name — `Point(x: x)`
+//! or `(name: name)` — the explicit label merely repeats the getter name for no
+//! benefit. The shorthand `Point(:x)` / `(:name)` is shorter and equivalent.
+//! Only a field whose label matches its bound variable is flagged; a genuine
+//! rename such as `Point(x: px)` is left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

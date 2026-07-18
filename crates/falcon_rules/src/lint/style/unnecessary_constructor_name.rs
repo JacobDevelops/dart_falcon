@@ -1,6 +1,10 @@
-//! Flags redundant `.new` on constructor invocations. Ported from package:lints `unnecessary_constructor_name`.
-//! `X.new()` is equivalent to `X()`, so the explicit `.new` can be dropped. A bare `X.new`
-//! tear-off expression (not invoked) is left alone — there the `.new` is required.
+//! Flags a redundant `.new` on constructor invocations.
+//!
+//! `X.new(...)` names the default (unnamed) constructor explicitly, which is exactly
+//! equivalent to the shorter `X(...)`, so the `.new` is noise. The rule catches both
+//! the plain call form (`X.new(...)`) and the `new`/`const` form (`const X.new(...)`).
+//! A bare `X.new` constructor tear-off that is not invoked is deliberately left alone:
+//! there the `.new` is required to reference the constructor as a value.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

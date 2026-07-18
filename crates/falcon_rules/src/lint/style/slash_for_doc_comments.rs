@@ -1,5 +1,11 @@
-//! Flags `/** ... */` documentation comments, which should use the `///`
-//! end-of-line form. Ported from package:lints `slash_for_doc_comments`.
+//! Flags `/** ... */` block documentation comments in favor of the `///` form.
+//!
+//! Dart supports two doc-comment syntaxes, but the community style guide standardizes
+//! on the end-of-line `///` form; the `/** ... */` block form is discouraged. Using a
+//! single style keeps doc comments consistent and easy to scan. Detection scans the
+//! raw source with a small state machine so `/**` sequences inside strings, line
+//! comments, or ordinary block comments are ignored, and the empty `/**/` comment is
+//! not mistaken for a doc comment.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
