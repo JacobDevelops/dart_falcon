@@ -8,7 +8,7 @@ pub struct MaxSwitchCases;
 
 impl Rule for MaxSwitchCases {
     fn name(&self) -> &'static str {
-        "max_switch_cases"
+        "max-switch-cases"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -34,8 +34,8 @@ fn count_non_default_cases(switch_stmt: &SwitchStmt) -> usize {
 
 /// Read the `max_cases` option (default 10). Malformed/missing → default.
 fn max_cases_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("max_switch_cases")
-        .and_then(|m| ctx.rule_options(m.group, "max_switch_cases"))
+    crate::meta::meta_for("max-switch-cases")
+        .and_then(|m| ctx.rule_options(m.group, "max-switch-cases"))
         .and_then(|o| o.get("max_cases"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
@@ -47,7 +47,7 @@ fn check_switch_cases(switch_stmt: &SwitchStmt, diags: &mut Vec<Diagnostic>, ctx
     let threshold = max_cases_option(ctx);
     if case_count > threshold {
         diags.push(Diagnostic::new(
-            "max_switch_cases",
+            "max-switch-cases",
             Severity::Warning,
             format!("Switch statement has too many cases (max {threshold})."),
             ctx.file_path.to_string_lossy().into_owned(),

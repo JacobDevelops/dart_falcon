@@ -11,7 +11,7 @@ pub struct ProperControllerDispose;
 
 impl Rule for ProperControllerDispose {
     fn name(&self) -> &'static str {
-        "proper_controller_dispose"
+        "proper-controller-dispose"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -65,7 +65,7 @@ fn check_class(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Analy
             };
             if owned && !disposed.contains(&d.name.name) {
                 diags.push(Diagnostic::new(
-                    "proper_controller_dispose",
+                    "proper-controller-dispose",
                     Severity::Warning,
                     "This controller is never disposed; dispose it in the State's dispose() method.",
                     ctx.file_path.to_string_lossy().into_owned(),

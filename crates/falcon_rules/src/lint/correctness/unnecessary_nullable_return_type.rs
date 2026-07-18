@@ -8,7 +8,7 @@ pub struct UnnecessaryNullableReturnType;
 
 impl Rule for UnnecessaryNullableReturnType {
     fn name(&self) -> &'static str {
-        "unnecessary_nullable_return_type"
+        "unnecessary-nullable-return-type"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -142,7 +142,7 @@ fn is_provably_non_null(expr: &Expr) -> bool {
 fn flag_return_type(ty: &DartType, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     let span = ty.span();
     diags.push(Diagnostic::new(
-        "unnecessary_nullable_return_type",
+        "unnecessary-nullable-return-type",
         Severity::Warning,
         "Function return type is unnecessarily nullable",
         ctx.file_path.to_string_lossy().into_owned(),

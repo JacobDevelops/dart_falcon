@@ -12,7 +12,7 @@ const MAX_NESTING_LEVEL: usize = 2;
 
 impl Rule for AvoidNestedIf {
     fn name(&self) -> &'static str {
-        "avoid_nested_if"
+        "avoid-nested-if"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -116,7 +116,7 @@ fn walk(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Stmt::If(if_stmt) => {
             if if_descendants_of_then(&if_stmt.then_branch) >= MAX_NESTING_LEVEL {
                 diags.push(Diagnostic::new(
-                    "avoid_nested_if",
+                    "avoid-nested-if",
                     Severity::Warning,
                     "Avoid nesting if statements. Consider combining conditions or using early returns.",
                     ctx.file_path.to_string_lossy().into_owned(),

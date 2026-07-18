@@ -8,7 +8,7 @@ pub struct PreferIterableEvery;
 
 impl Rule for PreferIterableEvery {
     fn name(&self) -> &'static str {
-        "prefer_iterable_every"
+        "prefer-iterable-every"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -88,7 +88,7 @@ fn is_where_length_eq_length(expr: &Expr) -> Option<Span> {
 
 fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     diags.push(Diagnostic::new(
-        "prefer_iterable_every",
+        "prefer-iterable-every",
         Severity::Warning,
         "Use .every() instead of .where().isEmpty or .where().length comparison.",
         ctx.file_path.to_string_lossy().into_owned(),

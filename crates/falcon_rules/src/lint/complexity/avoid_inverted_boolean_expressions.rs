@@ -8,7 +8,7 @@ pub struct AvoidInvertedBooleanExpressions;
 
 impl Rule for AvoidInvertedBooleanExpressions {
     fn name(&self) -> &'static str {
-        "avoid_inverted_boolean_expressions"
+        "avoid-inverted-boolean-expressions"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -168,7 +168,7 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             if is_bang_unary(operand) {
                 // Double negation (or more): emit one diagnostic at this outer bang
                 diags.push(Diagnostic::new(
-                    "avoid_inverted_boolean_expressions",
+                    "avoid-inverted-boolean-expressions",
                     Severity::Warning,
                     "Avoid inverted boolean expressions. Simplify the double negation.",
                     ctx.file_path.to_string_lossy().into_owned(),

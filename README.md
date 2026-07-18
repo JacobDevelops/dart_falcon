@@ -77,7 +77,7 @@ severity string or `{ "level": ..., "options": { ... } }`:
   "linter": {
     "rules": {
       "recommended": true,
-      "complexity": { "max_lines_for_file": "off" },
+      "complexity": { "max-lines-for-file": "off" },
       "style": { "prefer-trailing-comma": { "level": "error", "options": {} } }
     },
     "domains": { "flutter": "recommended" }

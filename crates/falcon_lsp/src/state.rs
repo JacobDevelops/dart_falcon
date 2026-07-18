@@ -392,7 +392,7 @@ fn suppress_project_diags(diags: &mut Vec<Diagnostic>, files: &[ProjectFile]) {
 }
 
 fn load_from(path: Option<&Path>) -> FalconConfig {
-    match path {
+    let mut config = match path {
         Some(p) => load_config(p).unwrap_or_else(|e| {
             warn!(
                 "failed to load config from {}: {} — using defaults",
@@ -405,7 +405,11 @@ fn load_from(path: Option<&Path>) -> FalconConfig {
             Ok(cwd) => load_or_default(&cwd),
             Err(_) => FalconConfig::default(),
         },
-    }
+    };
+    // Rewrite any legacy rule ids in the config to their canonical ids so old
+    // falcon.json files keep resolving.
+    falcon_rules::meta::canonicalize_config(&mut config);
+    config
 }
 
 /// Best-effort conversion of a `file://` URI to a filesystem path for

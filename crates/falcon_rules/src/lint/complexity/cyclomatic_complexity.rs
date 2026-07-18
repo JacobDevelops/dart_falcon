@@ -8,7 +8,7 @@ pub struct CyclomaticComplexity;
 
 impl Rule for CyclomaticComplexity {
     fn name(&self) -> &'static str {
-        "cyclomatic_complexity"
+        "cyclomatic-complexity"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -22,8 +22,8 @@ impl Rule for CyclomaticComplexity {
 
 /// Read the `max_complexity` option (default 20). Malformed/missing → default.
 fn max_complexity_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("cyclomatic_complexity")
-        .and_then(|m| ctx.rule_options(m.group, "cyclomatic_complexity"))
+    crate::meta::meta_for("cyclomatic-complexity")
+        .and_then(|m| ctx.rule_options(m.group, "cyclomatic-complexity"))
         .and_then(|o| o.get("max_complexity"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
@@ -49,7 +49,7 @@ fn check_function(
     let complexity = count + 1;
     if complexity > threshold {
         diags.push(Diagnostic::new(
-            "cyclomatic_complexity",
+            "cyclomatic-complexity",
             Severity::Warning,
             format!("Function has a cyclomatic complexity of {complexity} (max {threshold})."),
             ctx.file_path.to_string_lossy().into_owned(),

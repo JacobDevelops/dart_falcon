@@ -1,0 +1,14 @@
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "maximum-nesting-level": {
+          "level": "warn",
+          "options": {
+            "max_nesting": 2
+          }
+        }
+      }
+    }
+  }
+}

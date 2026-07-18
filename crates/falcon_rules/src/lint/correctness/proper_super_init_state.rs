@@ -8,7 +8,7 @@ pub struct ProperSuperInitState;
 
 impl Rule for ProperSuperInitState {
     fn name(&self) -> &'static str {
-        "proper_super_init_state"
+        "proper-super-init-state"
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -73,7 +73,7 @@ fn check_init_state(
         .unwrap_or(name_span);
 
     diags.push(Diagnostic::new(
-        "proper_super_init_state",
+        "proper-super-init-state",
         Severity::Warning,
         "super.initState() should be called first in initState().",
         ctx.file_path.to_string_lossy().into_owned(),
