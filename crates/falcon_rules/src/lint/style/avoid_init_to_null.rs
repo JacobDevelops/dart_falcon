@@ -4,7 +4,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_stmt, walk_top_level_decl};
+use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_stmt, walk_top_level_decl};
 
 pub struct AvoidInitToNull;
 
@@ -89,6 +89,7 @@ impl Visitor for Collector {
             &node.field_type,
             &node.declarators,
         );
+        walk_field_decl(self, node);
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {

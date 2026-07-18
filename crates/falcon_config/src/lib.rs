@@ -61,7 +61,11 @@ pub struct Override {
     /// Partial cross-file rule configuration applied to matching files. Same
     /// shape and semantics as `linter`, resolved against `cross_file.rules`.
     /// Accepts the legacy key `project` as a deserialization alias.
-    #[serde(rename = "cross-file", alias = "project", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "cross-file",
+        alias = "project",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cross_file: Option<OverrideRules>,
 }
 

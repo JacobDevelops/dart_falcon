@@ -25,3 +25,13 @@ class D {
   bool flag;
   D(bool this.flag); /* expect: type-init-formals */
 }
+
+// Named super parameter whose super constructor states the type outright.
+class NamedBase {
+  final String label;
+  NamedBase({required this.label});
+}
+
+class NamedDerived extends NamedBase {
+  NamedDerived({required String super.label}); /* expect: type-init-formals */
+}

@@ -27,7 +27,7 @@ All four items in the first Toward-1.0 batch have shipped:
   presets can express without full type resolution.
 - **Type-resolution layer.** A minimal type-resolution layer now backs
   `no-boolean-literal-compare`, `avoid-ignoring-return-values`, and the
-  `unnecessary-nullable` project rule. Local type inference and a cross-file
+  `unnecessary-nullable` cross-file rule. Local type inference and a cross-file
   return-type index removed the false positives that had kept them opt-in, so all
   three are recommended and on by default.
 - **Dart language tracking.** The parser now tracks the language through Dart 3.9,
@@ -38,14 +38,14 @@ All four items in the first Toward-1.0 batch have shipped:
 1.0 is a rule-catalog and readiness push. The full planned catalog — every rule,
 with falcon group, analysis type, and priority — lives in
 [`docs/rule-catalog-1.0.md`](docs/rule-catalog-1.0.md). Baseline today is **148
-rules shipped**; the plan adds **310 candidate rules** (93 must-have that block
-1.0, 186 nice-to-have stretch, 31 explicitly post-1.0).
+rules shipped**; the plan adds **387 candidate rules** (104 must-have that block
+1.0, 255 nice-to-have stretch, 28 explicitly post-1.0).
 
 - **Rule-catalog expansion.** Three sources feed 1.0:
   - **Remaining official lints — 145.** Every live `dart-lang/linter` rule falcon
     doesn't yet implement: 25 are preset members (`core`/`recommended`/`flutter`)
     and are must-have; 120 are non-preset/Effective-Dart and are nice-to-have.
-  - **DCM-inspired rules — 154** (64 must-have, 63 nice-to-have, 27 post-1.0).
+  - **DCM-inspired rules — 231** (75 must-have, 132 nice-to-have, 24 post-1.0).
     DCM's modern catalog is paywalled; these reimplement the high-value ones as
     open falcon rules.
   - **Cross-file rules — 11** (see below).
@@ -59,9 +59,9 @@ rules shipped**; the plan adds **310 candidate rules** (93 must-have that block
 - **New domains.** Alongside `flutter`, add `test`, `bloc`, `riverpod`,
   `provider`, `flutter_hooks`, and `equatable` domains (from the DCM survey),
   activated per file/framework so framework users get targeted checks.
-- **Cross-file rename + new rules.** Rename the top-level `project` config section
-  to **`cross-file`** (breaking, pre-1.0). `falcon migrate` rewrites old configs;
-  `project` remains a deprecated alias. Three cross-file rules ship today
+- **Cross-file rules.** The top-level `project` config section has been renamed to
+  **`cross-file`** (breaking, pre-1.0) — shipped. `falcon migrate` rewrites old
+  configs; `project` remains a deprecated alias. Three cross-file rules ship today
   (`unused-code`, `unused-files`, `unnecessary-nullable`); 11 more are planned —
   Tier 1 must-haves `unused-dependencies`, `undeclared-dependencies`,
   `no-import-cycles`, `banned-imports`; Tier 2 `unused-assets`, `unused-l10n`,

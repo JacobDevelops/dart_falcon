@@ -63,11 +63,48 @@ fn setter_has_return_type(setter: &SetterDecl, source: &str) -> bool {
         Some(r) => r,
         None => return false,
     };
-    let remaining: Vec<&str> = region
+    let stripped = strip_comments(region);
+    let remaining: Vec<&str> = stripped
         .split_whitespace()
         .filter(|w| !matches!(*w, "static" | "external" | "set"))
         .collect();
     !remaining.is_empty()
+}
+
+// Comments in the modifier region are not return types. Mirrors the comment arms
+// of `skip_trivia` in `type_init_formals.rs` (kept local rather than shared).
+fn strip_comments(region: &str) -> String {
+    let bytes = region.as_bytes();
+    let mut out = String::with_capacity(region.len());
+    let (mut i, mut kept_from) = (0, 0);
+    while i < bytes.len() {
+        let end = match bytes[i] {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                let mut j = i + 2;
+                while j < bytes.len() && bytes[j] != b'\n' {
+                    j += 1;
+                }
+                j
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                let mut j = i + 2;
+                while j < bytes.len() && !(bytes[j] == b'*' && bytes.get(j + 1) == Some(&b'/')) {
+                    j += 1;
+                }
+                (j + 2).min(bytes.len())
+            }
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        out.push_str(&region[kept_from..i]);
+        out.push(' ');
+        i = end;
+        kept_from = end;
+    }
+    out.push_str(&region[kept_from..]);
+    out
 }
 
 fn push(diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, span: &Span) {

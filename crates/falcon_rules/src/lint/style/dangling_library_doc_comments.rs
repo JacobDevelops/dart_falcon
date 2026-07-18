@@ -35,12 +35,15 @@ impl Rule for DanglingLibraryDocComments {
 /// Byte offset of the `///` that opens a dangling top-of-file doc block, if
 /// any. Only the first significant construct in the file is considered.
 fn dangling_doc_start(source: &str) -> Option<usize> {
-    let lines: Vec<&str> = source.lines().collect();
-    let mut offsets = Vec::with_capacity(lines.len());
+    // Offsets come from `split_inclusive` chunks: `lines()` drops a full `\r\n`
+    // but only one byte would be added back, drifting every span in a CRLF file.
+    let mut lines: Vec<&str> = Vec::new();
+    let mut offsets: Vec<usize> = Vec::new();
     let mut acc = 0;
-    for l in &lines {
+    for chunk in source.split_inclusive('\n') {
         offsets.push(acc);
-        acc += l.len() + 1;
+        lines.push(chunk.trim_end_matches(['\r', '\n']));
+        acc += chunk.len();
     }
 
     // Skip leading blanks, ordinary `//` line comments, and `#!` shebangs.
@@ -95,5 +98,51 @@ fn dangling_doc_start(source: &str) -> Option<usize> {
         Some(offsets[doc_line] + indent)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::PathBuf;
+
+    fn diags(source: &str) -> Vec<Diagnostic> {
+        let program = parse(source).0;
+        let config = FalconConfig::default();
+        let path = PathBuf::from("t.dart");
+        let ctx = AnalyzeContext::new(&path, source, &config);
+        DanglingLibraryDocComments.analyze(&program, &ctx)
+    }
+
+    #[test]
+    fn crlf_span_does_not_drift() {
+        // Three lines precede the doc comment, so a `lines()`-derived offset
+        // would land three bytes early and no longer point at the `///`.
+        let crlf = "// header\r\n\
+                    // more\r\n\
+                    // still more\r\n\
+                    /// Dangling doc.\r\n\
+                    \r\n\
+                    import 'dart:async';\r\n";
+        let d = diags(crlf);
+        assert_eq!(d.len(), 1);
+        assert_eq!(&crlf[d[0].span.start..d[0].span.end], "///");
+
+        let lf = crlf.replace("\r\n", "\n");
+        let d = diags(&lf);
+        assert_eq!(d.len(), 1);
+        assert_eq!(&lf[d[0].span.start..d[0].span.end], "///");
+    }
+
+    #[test]
+    fn crlf_span_accounts_for_indentation() {
+        let crlf = "// a\r\n\
+                    // b\r\n\
+                    \t/// Indented dangling doc.\r\n";
+        let d = diags(crlf);
+        assert_eq!(d.len(), 1);
+        assert_eq!(&crlf[d[0].span.start..d[0].span.end], "///");
     }
 }

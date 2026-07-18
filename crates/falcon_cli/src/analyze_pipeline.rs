@@ -245,7 +245,12 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     apply_severities(&mut diagnostics, &config);
 
     if collect_programs {
-        run_cross_file_pass(&cross_file_registry, &project_files, &config, &mut diagnostics);
+        run_cross_file_pass(
+            &cross_file_registry,
+            &project_files,
+            &config,
+            &mut diagnostics,
+        );
     }
 
     // Parallel analysis collects in nondeterministic file order; sort so

@@ -19,9 +19,12 @@ impl Rule for UnintendedHtmlInDocComment {
 
         let mut byte_offset = 0;
         let mut in_fence = false;
-        for line in ctx.source.lines() {
-            let line_len = line.len();
-            let indent = line_len - line.trim_start().len();
+        // Iterate with `split_inclusive` so the offset advances by the real chunk
+        // length: `lines()` drops a full `\r\n` but only one byte would be added
+        // back, drifting every span in a CRLF file.
+        for chunk in ctx.source.split_inclusive('\n') {
+            let line = chunk.trim_end_matches(['\r', '\n']);
+            let indent = line.len() - line.trim_start().len();
             let trimmed = &line[indent..];
 
             if let Some(content) = trimmed.strip_prefix("///") {
@@ -33,26 +36,34 @@ impl Rule for UnintendedHtmlInDocComment {
                 }
             }
 
-            byte_offset += line_len + 1;
+            byte_offset += chunk.len();
         }
         diags
     }
 }
 
 /// Report each `<tag` in `content` that resembles a generic type rather than a
-/// known HTML tag, skipping regions inside inline code spans (backticks).
+/// known HTML tag, skipping regions inside inline code spans (backticks) and
+/// inside `[...]` spans (Dartdoc source links, which may carry type arguments
+/// such as `[List<int>]`).
 fn scan_content(content: &str, base: usize, file: &str, diags: &mut Vec<Diagnostic>) {
     let bytes = content.as_bytes();
     let mut in_code = false;
+    let mut in_ref = false;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        if b == b'`' {
+        if b == b'`' && !in_ref {
             in_code = !in_code;
             i += 1;
             continue;
         }
-        if in_code || b != b'<' {
+        if !in_code && (b == b'[' || b == b']') {
+            in_ref = b == b'[';
+            i += 1;
+            continue;
+        }
+        if in_code || in_ref || b != b'<' {
             i += 1;
             continue;
         }
@@ -145,6 +156,7 @@ const HTML_TAGS: &[&str] = &[
     "input",
     "ins",
     "kbd",
+    "keygen",
     "label",
     "legend",
     "li",
@@ -201,3 +213,57 @@ const HTML_TAGS: &[&str] = &[
     "video",
     "wbr",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::PathBuf;
+
+    /// Text each diagnostic actually spans, sliced back out of the source. A
+    /// wrong byte offset yields wrong text, so this checks spans, not just count.
+    fn spanned(source: &str) -> Vec<&str> {
+        let program = parse(source).0;
+        let config = FalconConfig::default();
+        let path = PathBuf::from("t.dart");
+        let ctx = AnalyzeContext::new(&path, source, &config);
+        UnintendedHtmlInDocComment
+            .analyze(&program, &ctx)
+            .into_iter()
+            .map(|d| &source[d.span.start..d.span.end])
+            .collect()
+    }
+
+    #[test]
+    fn crlf_spans_do_not_drift() {
+        // Every line after the first would drift by one byte per preceding line
+        // if offsets were derived from `lines()` (which eats both CRLF bytes).
+        let crlf = "/// Returns a List<int>.\r\n\
+                    /// Wraps a Future<void>.\r\n\
+                    /// Builds a Map<String, int>.\r\n\
+                    /// Emits a Stream<Event>.\r\n\
+                    class Api {}\r\n";
+        assert_eq!(spanned(crlf), ["<int", "<void", "<String", "<Event"]);
+
+        // Same content with LF endings must yield the same spanned text.
+        let lf = crlf.replace("\r\n", "\n");
+        assert_eq!(spanned(&lf), ["<int", "<void", "<String", "<Event"]);
+    }
+
+    #[test]
+    fn dartdoc_square_bracket_references_are_not_html() {
+        assert!(spanned("/// See [List<int>] for details.\nclass A {}").is_empty());
+        assert!(spanned("/// The [Map<String, int>] result.\nclass A {}").is_empty());
+        // The carve-out ends at the closing bracket.
+        assert_eq!(
+            spanned("/// See [List<int>] then Future<void>.\nclass A {}"),
+            ["<void"]
+        );
+    }
+
+    #[test]
+    fn keygen_is_a_known_html_tag() {
+        assert!(spanned("/// Renders a <keygen> control.\nclass A {}").is_empty());
+    }
+}

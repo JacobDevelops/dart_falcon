@@ -16,3 +16,9 @@ void f() {
   const localConst = 1;
   print(localConst);
 }
+
+void g() {
+  for (const forLimit = 3; forLimit > 0;) {
+    print(forLimit);
+  }
+}

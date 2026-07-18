@@ -29,3 +29,8 @@ void k() {
   final fn = (int _p) => 0; /* expect: no-leading-underscores-for-local-identifiers */
   print(fn(1));
 }
+
+class Mixed {
+  final String _token;
+  Mixed(this._token, int _other); /* expect: no-leading-underscores-for-local-identifiers */
+}

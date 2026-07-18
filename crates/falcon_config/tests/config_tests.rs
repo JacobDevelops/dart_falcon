@@ -700,7 +700,12 @@ fn test_legacy_project_alias_resolves_identically() {
         } ]
     }));
     assert_eq!(
-        legacy_override.resolve_cross_file_rule_for("gen/a.dart", "correctness", "unused-files", true),
+        legacy_override.resolve_cross_file_rule_for(
+            "gen/a.dart",
+            "correctness",
+            "unused-files",
+            true
+        ),
         None
     );
 }

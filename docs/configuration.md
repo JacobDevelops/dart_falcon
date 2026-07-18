@@ -399,7 +399,9 @@ does not appear in `falcon.json`, and cannot itself be suppressed.
 
 - Only `//`-style line comments count; a directive inside a string literal or a
   `/* block comment */` is not treated as a suppression.
-- Rule names are matched **exactly** against falcon rule names as registered.
+- The path structure (`<section>/<group>/<rule>`) is matched **exactly**. Rule
+  names themselves are canonicalized first, so a legacy id still matches its
+  current rule and the suppression is recorded against the canonical name.
 
 ## `cross-file` — cross-file rules
 
@@ -460,7 +462,7 @@ Notes:
   non-null forms (literals, `new`, arithmetic), and a cross-file return-type index
   resolves a callee's or getter's declared return type. An argument proven
   non-null no longer counts as "passes null", which removed the false positives
-  that had kept the rule opt-in. It remains a cross-file rule (whole-project
+  that had kept the rule opt-in. It remains a cross-file rule (cross-file
   pass). Per-file exclusions (the old `--exclude` flags) are expressible with
   `overrides`.
 

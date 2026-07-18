@@ -6,6 +6,11 @@ class A {
   set width(int v) => _w = v;
   static set flag(bool v) {}
   external set ext(int v);
+  // Comments between modifiers are not return types.
+  static /* cached */ set cached(int v) {}
+  set /* note */ noted(int v) {}
+  static // trailing note
+      set commented(int v) {}
 }
 
 mixin M {

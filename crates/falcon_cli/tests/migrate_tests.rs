@@ -191,7 +191,10 @@ fn upgrade_rewrites_legacy_project_section_to_cross_file() {
     );
     // The override's block is renamed too.
     assert!(value["overrides"][0].get("project").is_none());
-    assert_eq!(value["overrides"][0]["cross-file"]["enabled"], Value::Bool(false));
+    assert_eq!(
+        value["overrides"][0]["cross-file"]["enabled"],
+        Value::Bool(false)
+    );
     // The upgraded config deserializes cleanly under the new key.
     let config: falcon_config::FalconConfig =
         serde_json::from_str(&result.json).expect("upgraded JSON is a valid FalconConfig");

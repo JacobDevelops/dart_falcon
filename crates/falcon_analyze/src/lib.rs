@@ -13,11 +13,11 @@ pub mod suppressions;
 pub mod visitor;
 
 pub use context::AnalyzeContext;
+pub use cross_file::{CrossFileRule, CrossFileRuleRegistry, ProjectFile};
 pub use parallel::{
     analyze_parallel, analyze_parallel_collecting, analyze_parallel_collecting_resolving,
     analyze_sequential, analyze_sequential_collecting, analyze_sequential_collecting_resolving,
 };
-pub use cross_file::{CrossFileRule, CrossFileRuleRegistry, ProjectFile};
 pub use registry::RuleRegistry;
 pub use resolve::{
     LibraryGrouping, LibrarySource, LibraryUnit, LocalTypes, MemberKind, MemberResult,

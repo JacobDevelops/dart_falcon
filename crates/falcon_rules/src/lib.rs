@@ -184,10 +184,10 @@ fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut 
             match (section, meta.cross_file) {
                 (Section::Linter, true) => warnings.push(format!(
                     "warning: {ctx} configures `{name}` under `linter.rules`, but it is a \
-                     cross-file rule; configure it under `cross_file.rules`"
+                     cross-file rule; configure it under `cross-file.rules`"
                 )),
                 (Section::CrossFile, false) => warnings.push(format!(
-                    "warning: {ctx} configures `{name}` under `cross_file.rules`, but it is a \
+                    "warning: {ctx} configures `{name}` under `cross-file.rules`, but it is a \
                      file-level rule; configure it under `linter.rules`"
                 )),
                 _ => {}
@@ -455,7 +455,7 @@ mod tests {
         assert!(
             warnings.iter().any(|w| w.contains("`unused-files`")
                 && w.contains("cross-file rule")
-                && w.contains("cross_file.rules")),
+                && w.contains("cross-file.rules")),
             "missing cross-file-rule-under-linter warning: {warnings:?}"
         );
         assert!(

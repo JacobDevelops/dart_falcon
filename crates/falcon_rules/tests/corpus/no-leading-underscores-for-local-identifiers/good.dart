@@ -21,3 +21,19 @@ void i() {
   var __ = 1;
   print(__);
 }
+
+// Initializing formals and super formals are not local identifiers: the
+// underscore denotes the field's privacy and the spelling is forced.
+class Provider {
+  final String _token;
+  Provider(this._token);
+}
+
+class NamedProvider {
+  final String _token;
+  NamedProvider({required this._token});
+}
+
+class SubProvider extends Provider {
+  SubProvider(super._token);
+}

@@ -110,7 +110,8 @@ fn metadata_names_are_unique() {
 
 #[test]
 fn cross_file_flag_matches_the_cross_file_rule_set() {
-    let cross_file_rule_names: HashSet<&str> = all_cross_file_rules().iter().map(|r| r.name()).collect();
+    let cross_file_rule_names: HashSet<&str> =
+        all_cross_file_rules().iter().map(|r| r.name()).collect();
     let file_rule_names: HashSet<&str> = all_rules().iter().map(|r| r.name()).collect();
 
     for meta in RULE_METADATA {

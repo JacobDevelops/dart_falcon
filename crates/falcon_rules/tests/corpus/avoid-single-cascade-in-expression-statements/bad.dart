@@ -21,3 +21,19 @@ void f5(Foo d) {
 void f6(StringBuffer e) {
   e..clear(); /* expect: avoid-single-cascade-in-expression-statements */
 }
+
+// Closure argument of a constructor invocation (`Expr::New`).
+Widget f7(StringBuffer a) {
+  return new ElevatedButton(onPressed: () {
+    a..write('x'); /* expect: avoid-single-cascade-in-expression-statements */
+  });
+}
+
+// Closure nested inside a collection literal.
+List<VoidCallback> f8(StringBuffer a) {
+  return [
+    () {
+      a..clear(); /* expect: avoid-single-cascade-in-expression-statements */
+    },
+  ];
+}

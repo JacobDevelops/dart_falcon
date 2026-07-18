@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::resolve::ProgramSource;
-use falcon_analyze::{LocalTypes, ProjectFile, ProjectIndex, CrossFileRule, StaticType};
+use falcon_analyze::{CrossFileRule, LocalTypes, ProjectFile, ProjectIndex, StaticType};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;

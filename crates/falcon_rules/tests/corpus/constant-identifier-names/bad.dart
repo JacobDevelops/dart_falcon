@@ -16,3 +16,9 @@ void f() {
   const LOCAL_CONST = 1; /* expect: constant-identifier-names */
   print(LOCAL_CONST);
 }
+
+void g() {
+  for (const FOR_LIMIT = 3; FOR_LIMIT > 0;) { /* expect: constant-identifier-names */
+    print(FOR_LIMIT);
+  }
+}

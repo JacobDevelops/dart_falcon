@@ -26,3 +26,20 @@ void f5(bool a) {
 void f6(bool a, List<int> xs) {
   for (final x in xs) print(x); /* expect: curly-braces-in-flow-control-structures */
 }
+
+// Closure argument of a constructor invocation (`Expr::New`).
+Widget f7(bool x) {
+  return new ElevatedButton(onPressed: () {
+    while (x) doThing(); /* expect: curly-braces-in-flow-control-structures */
+  });
+}
+
+// Closure nested inside a collection literal.
+List<VoidCallback> f8(bool x) {
+  return [
+    () {
+      if (x)
+        doThing(); /* expect: curly-braces-in-flow-control-structures */
+    },
+  ];
+}

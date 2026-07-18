@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, FileSuppressions, ProjectFile, CrossFileRuleRegistry, Rule};
+use falcon_analyze::{AnalyzeContext, CrossFileRuleRegistry, FileSuppressions, ProjectFile, Rule};
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::parse;
 use falcon_diagnostics::Diagnostic;
@@ -32,9 +32,16 @@ pub struct DocumentState {
     /// Most recent published output (byte spans) — read by hover. May include
     /// cross-file diagnostics after a cross-file pass; never an input to analysis.
     pub last_diagnostics: Vec<Diagnostic>,
-    /// Whether the last publish for this document carried cross-file diagnostics.
-    /// Lets the cross-file pass republish only docs whose cross-file set changed
+    /// Whether the last *cross-file pass* published a set carrying cross-file
+    /// diagnostics. Lets the pass republish only docs whose cross-file set changed
     /// (adding new cross-file diags, or clearing ones shown before).
+    ///
+    /// Write it only from the cross-file pass. It deliberately does not track what
+    /// the editor currently shows: a didChange republishes per-file diagnostics and
+    /// leaves this `true`, which costs at most one redundant publish of identical
+    /// content. Clearing it elsewhere would make a stale `false` reachable — the
+    /// pass would skip a doc whose cross-file squiggles are still on screen and
+    /// never clear them.
     had_cross_file_diags: bool,
     /// Number of times this document has been parsed (incremental tests).
     pub parse_count: u64,

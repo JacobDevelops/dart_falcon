@@ -5,6 +5,9 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_enum_decl, walk_field_decl, walk_stmt, walk_top_level_decl,
+};
 
 pub struct ConstantIdentifierNames;
 
@@ -14,11 +17,12 @@ impl Rule for ConstantIdentifierNames {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
-        diags
+        let mut collector = Collector {
+            diags: Vec::new(),
+            file: ctx.file_path.to_string_lossy().into_owned(),
+        };
+        collector.visit_program(program);
+        collector.diags
     }
 }
 
@@ -44,104 +48,116 @@ fn is_lower_camel_case(name: &str) -> bool {
     rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '$')
 }
 
-fn check(name: &Identifier, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if !is_lower_camel_case(&name.name) {
-        diags.push(Diagnostic::new(
-            "constant-identifier-names",
-            Severity::Warning,
-            MESSAGE,
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: name.span.start,
-                end: name.span.end,
-            },
-        ));
+struct Collector {
+    diags: Vec<Diagnostic>,
+    file: String,
+}
+
+impl Collector {
+    fn check(&mut self, name: &Identifier) {
+        if !is_lower_camel_case(&name.name) {
+            self.diags.push(Diagnostic::new(
+                "constant-identifier-names",
+                Severity::Warning,
+                MESSAGE,
+                self.file.clone(),
+                DiagSpan {
+                    start: name.span.start,
+                    end: name.span.end,
+                },
+            ));
+        }
+    }
+
+    fn check_declarators(&mut self, declarators: &[VarDeclarator]) {
+        for d in declarators {
+            self.check(&d.name);
+        }
     }
 }
 
-fn check_const_declarators(
-    declarators: &[VarDeclarator],
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
-    for d in declarators {
-        check(&d.name, diags, ctx);
+impl Visitor for Collector {
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        if let TopLevelDecl::Variable(v) = node
+            && v.is_const
+        {
+            self.check_declarators(&v.declarators);
+        }
+        walk_top_level_decl(self, node);
+    }
+
+    fn visit_field_decl(&mut self, node: &FieldDecl) {
+        if node.is_const {
+            self.check_declarators(&node.declarators);
+        }
+        walk_field_decl(self, node);
+    }
+
+    fn visit_enum_decl(&mut self, node: &EnumDecl) {
+        for variant in &node.variants {
+            self.check(&variant.name);
+        }
+        walk_enum_decl(self, node);
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::LocalVar(lv) = node
+            && lv.is_const
+        {
+            self.check_declarators(&lv.declarators);
+        }
+        walk_stmt(self, node);
     }
 }
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Variable(v) if v.is_const => {
-            check_const_declarators(&v.declarators, diags, ctx);
-        }
-        TopLevelDecl::Function(f) => scan_opt_body(&f.body, diags, ctx),
-        TopLevelDecl::Class(c) => c.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::MixinClass(c) => c.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::Mixin(m) => m.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::Extension(ext) => ext.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::ExtensionType(x) => x.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::Enum(e) => {
-            for variant in &e.variants {
-                check(&variant.name, diags, ctx);
-            }
-            e.members.iter().for_each(|m| scan_member(m, diags, ctx));
-        }
-        _ => {}
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::PathBuf;
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match member {
-        ClassMember::Field(f) if f.is_const => {
-            check_const_declarators(&f.declarators, diags, ctx);
-        }
-        ClassMember::Method(m) => scan_opt_body(&m.body, diags, ctx),
-        ClassMember::Constructor(c) => scan_opt_body(&c.body, diags, ctx),
-        ClassMember::Getter(g) => scan_opt_body(&g.body, diags, ctx),
-        ClassMember::Setter(s) => scan_opt_body(&s.body, diags, ctx),
-        _ => {}
+    fn run(source: &str) -> usize {
+        let program = parse(source).0;
+        let config = FalconConfig::default();
+        let path = PathBuf::from("t.dart");
+        let ctx = AnalyzeContext::new(&path, source, &config);
+        ConstantIdentifierNames.analyze(&program, &ctx).len()
     }
-}
 
-fn scan_opt_body(body: &Option<FunctionBody>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if let Some(FunctionBody::Block(b)) = body {
-        scan_stmts(&b.stmts, diags, ctx);
+    #[test]
+    fn const_inside_closure_body_is_reported() {
+        // Closures live in expression position — only expression descent reaches
+        // this declaration.
+        let src = "void f() { final g = () { const MAX_LEN = 3; return MAX_LEN; }; }";
+        assert_eq!(run(src), 1, "const in closure body must fire");
     }
-}
 
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for s in stmts {
-        scan_stmt(s, diags, ctx);
+    #[test]
+    fn const_in_c_style_for_initializer_is_reported() {
+        // The initializer decl is only visited via `ForInit::VarDecl`.
+        let src = "void f() { for (const MAX_LEN = 3;;) {} }";
+        assert_eq!(run(src), 1, "const in for initializer must fire");
     }
-}
 
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::LocalVar(lv) if lv.is_const => check_const_declarators(&lv.declarators, diags, ctx),
-        Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx),
-        Stmt::If(i) => {
-            scan_stmt(&i.then_branch, diags, ctx);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx);
-            }
-        }
-        Stmt::For(f) => scan_stmt(&f.body, diags, ctx),
-        Stmt::While(w) => scan_stmt(&w.body, diags, ctx),
-        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx),
-        Stmt::TryCatch(tc) => {
-            scan_stmts(&tc.body.stmts, diags, ctx);
-            for catch in &tc.catches {
-                scan_stmts(&catch.body.stmts, diags, ctx);
-            }
-            if let Some(fin) = &tc.finally {
-                scan_stmts(&fin.stmts, diags, ctx);
-            }
-        }
-        Stmt::LocalFunc(lf) => {
-            if let FunctionBody::Block(b) = &lf.body {
-                scan_stmts(&b.stmts, diags, ctx);
-            }
-        }
-        _ => {}
+    #[test]
+    fn const_reached_through_return_and_expression_statements_is_reported() {
+        // One closure behind a `return`, one behind an expression statement.
+        let src = "Function f() => () { const A_B = 1; return A_B; };\n\
+                   void g() { run(() { const C_D = 2; }); }";
+        assert_eq!(run(src), 2, "return and expr-stmt paths must fire");
+    }
+
+    #[test]
+    fn non_const_locals_are_ignored() {
+        let src = "void f() { var MAX_LEN = 3; final OTHER = 4; }";
+        assert_eq!(run(src), 0, "only const declarations are checked");
+    }
+
+    #[test]
+    fn lower_camel_case_constants_are_clean() {
+        let src =
+            "const maxLen = 3;\nclass A { static const otherLen = 4; }\nenum E { first, second }";
+        assert_eq!(run(src), 0, "lowerCamelCase constants must not fire");
     }
 }

@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{ProjectFile, CrossFileRule};
+use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};

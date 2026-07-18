@@ -33,14 +33,14 @@ suspicious`.
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
 | Official lints (gaps) | 25 | 120 | 0 | 145 |
-| DCM-inspired | 64 | 63 | 27 | 154 |
+| DCM-inspired | 75 | 132 | 24 | 231 |
 | Cross-file | 4 | 3 | 4 | 11 |
-| **Total (new for 1.0)** | **93** | **186** | **31** | **310** |
+| **Total (new for 1.0)** | **104** | **255** | **28** | **387** |
 
 Shipped baseline (not counted above): **148**. Full projected 1.0 registry if
-every must-have + nice-to-have lands: **148 + 93 + 186 = 427**.
+every must-have + nice-to-have lands: **148 + 104 + 255 = 507**.
 
-Six DCM rows were deduped against the official-lints and cross-file lists (see
+Six DCM rows were deduplicated against the official-lints and cross-file lists (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 ---
@@ -135,7 +135,7 @@ workstream.
 | `avoid_void_async` | style | none | needs-full-type-resolution | style | Avoid async functions that return void. |
 | `cancel_subscriptions` | correctness | none | needs-full-type-resolution | errors | Cancel instances of `dart.async.StreamSubscription`. |
 | `cascade_invocations` | complexity | none | needs-full-type-resolution | style | Cascade consecutive method invocations on the same reference. |
-| `cast_nullable_to_non_nullable` | style | none | needs-local-type-inference | style | Don't cast a nullable value to a non nullable type. |
+| `cast_nullable_to_non_nullable` | style | none | needs-local-type-inference | style | Don't cast a nullable value to a non-nullable type. |
 | `close_sinks` | correctness | none | needs-full-type-resolution | errors | Close instances of `dart.core.Sink`. |
 | `combinators_ordering` | style | none | syntax-only | style | Sort combinator names alphabetically. |
 | `comment_references` | correctness | none | needs-full-type-resolution | errors | Only reference in scope identifiers in doc comments. |
@@ -145,7 +145,7 @@ workstream.
 | `diagnostic_describe_all_properties` | correctness | flutter | needs-full-type-resolution | errors | DO reference all public properties in debug methods. |
 | `directives_ordering` | style | none | syntax-only | style | Adhere to Effective Dart directives sorting conventions. |
 | `discarded_futures` | correctness | none | needs-full-type-resolution | errors | Don't invoke asynchronous functions in non-async blocks. |
-| `do_not_use_environment` | style | none | needs-cross-file/project | style | Do not use environment declared variables. |
+| `do_not_use_environment` | style | none | needs-cross-file/project | style | Do not use environment-declared variables. |
 | `eol_at_end_of_file` | style | none | syntax-only | style | Put a single newline at end of file. |
 | `flutter_style_todos` | style | none | syntax-only | style | Use Flutter TODO format: `// TODO(username): message, https://URL`. |
 | `implicit_reopen` | correctness | none | needs-full-type-resolution | errors | Don't implicitly reopen classes. _(experimental — defer)_ |
@@ -358,7 +358,6 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `prefer-single-declaration-per-file` | style | S | paid | One public type per file. | post-1.0 |
 | `prefer-single-widget-per-file` | style | S | paid | One widget per file. | post-1.0 |
 | `prefer-prefixed-global-constants` | style | S | paid | Global const naming convention. | post-1.0 |
-| `format-test-name` | style | S | paid | Test description formatting. | post-1.0 |
 | `match-class-name-pattern` | style | S | paid | Class names must match a configured regex. | post-1.0 |
 
 ## 2d. core — complexity

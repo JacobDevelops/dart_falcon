@@ -259,9 +259,17 @@ fn looks_like_falcon_json(content: &str) -> bool {
             // `project` and the underscore `cross_file` are legacy spellings of
             // `cross-file`; all flag a falcon.json so a pre-rename config is still
             // detected for upgrade.
-            ["linter", "cross-file", "cross_file", "project", "files", "overrides", "$schema"]
-                .iter()
-                .any(|k| obj.contains_key(*k))
+            [
+                "linter",
+                "cross-file",
+                "cross_file",
+                "project",
+                "files",
+                "overrides",
+                "$schema",
+            ]
+            .iter()
+            .any(|k| obj.contains_key(*k))
         })
 }
 
