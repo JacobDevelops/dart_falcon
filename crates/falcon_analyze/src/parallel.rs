@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 use tracing::{info, info_span};
@@ -6,47 +6,106 @@ use tracing::{info, info_span};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;
 use falcon_diagnostics::Diagnostic;
+use falcon_syntax::ast::Program;
 
-use crate::resolve::ProjectIndex;
+use crate::resolve::{ProgramSource, ProjectIndex};
 use crate::{AnalyzeContext, ProjectFile, RuleRegistry};
 
-/// Parse `source`, run every per-file rule, and optionally keep the parsed
-/// program for the project pass. Returns the file's diagnostics plus the
-/// retained [`ProjectFile`] when `collect_programs` is set.
-///
-/// When `resolve` is set, a degraded single-file [`ProjectIndex`] is built from
-/// this file's own program and attached to the context, so resolver-dependent
-/// rules can consult declaration return types (this file's declarations plus the
-/// builtin table). A true cross-file index would require building one index from
-/// all programs before the per-file pass; that reorder is left to the rule
-/// integration phase — see `crate::resolve` and the CLI pipeline notes.
+/// Parse `source`, run every per-file rule (with no project index), and
+/// optionally keep the parsed program for the project pass. This is the fast
+/// path: resolver-dependent rules are not enabled, so no cross-file index is
+/// built and each file is parsed and analyzed in one step.
 fn analyze_file(
     registry: &RuleRegistry,
-    path: &PathBuf,
+    path: &Path,
     source: &str,
     config: &FalconConfig,
     collect_programs: bool,
-    resolve: bool,
 ) -> (Vec<Diagnostic>, Option<ProjectFile>) {
     let span = info_span!("analyze_file", file = %path.display());
     let _enter = span.enter();
     let (program, parse_errors) = parse(source);
-    let local_index = resolve.then(|| ProjectIndex::from_program(&program));
-    let ctx = AnalyzeContext {
-        file_path: path,
-        source,
-        config,
-        project: local_index.as_ref(),
-    };
+    let ctx = AnalyzeContext::new(path, source, config);
     let diagnostics = registry.run_all(&program, &ctx);
     info!(file = %path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
     let retained = collect_programs.then(|| ProjectFile {
-        path: path.clone(),
+        path: path.to_path_buf(),
         source: source.to_owned(),
         program,
         has_parse_errors: !parse_errors.is_empty(),
     });
     (diagnostics, retained)
+}
+
+/// A parsed file awaiting analysis. Retained across the parse-then-analyze
+/// reorder so a single cross-file [`ProjectIndex`] can be built from every
+/// program before the per-file pass runs (resolver-dependent rules need it).
+struct Parsed {
+    path: PathBuf,
+    source: String,
+    program: Program,
+    has_parse_errors: bool,
+}
+
+fn parse_one(path: &Path, source: &str) -> Parsed {
+    let (program, parse_errors) = parse(source);
+    Parsed {
+        path: path.to_path_buf(),
+        source: source.to_owned(),
+        program,
+        has_parse_errors: !parse_errors.is_empty(),
+    }
+}
+
+/// Retain the parsed programs as [`ProjectFile`]s for the project pass, or drop
+/// them when the caller does not need them.
+fn retain(parsed: Vec<Parsed>, collect_programs: bool) -> Vec<ProjectFile> {
+    if !collect_programs {
+        return Vec::new();
+    }
+    parsed
+        .into_iter()
+        .map(|p| ProjectFile {
+            path: p.path,
+            source: p.source,
+            program: p.program,
+            has_parse_errors: p.has_parse_errors,
+        })
+        .collect()
+}
+
+/// Build one cross-file [`ProjectIndex`] from every parsed program, then run the
+/// per-file rules with that index attached to each context. Shared by the
+/// parallel and sequential resolving entry points.
+fn analyze_indexed(
+    registry: &RuleRegistry,
+    parsed: &[Parsed],
+    config: &FalconConfig,
+    parallel: bool,
+) -> Vec<Diagnostic> {
+    let index = {
+        let sources: Vec<ProgramSource> = parsed
+            .iter()
+            .map(|p| ProgramSource {
+                program: &p.program,
+                has_parse_errors: p.has_parse_errors,
+            })
+            .collect();
+        ProjectIndex::from_project_files(&sources)
+    };
+    let run_one = |p: &Parsed| {
+        let span = info_span!("analyze_file", file = %p.path.display());
+        let _enter = span.enter();
+        let ctx = AnalyzeContext::new(&p.path, &p.source, config).with_project(&index);
+        let diagnostics = registry.run_all(&p.program, &ctx);
+        info!(file = %p.path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
+        diagnostics
+    };
+    if parallel {
+        parsed.par_iter().flat_map(run_one).collect()
+    } else {
+        parsed.iter().flat_map(run_one).collect()
+    }
 }
 
 /// Analyze multiple Dart files in parallel using Rayon work-stealing.
@@ -66,7 +125,7 @@ pub fn analyze_sequential(
 ) -> Vec<Diagnostic> {
     files
         .iter()
-        .flat_map(|(path, source)| analyze_file(registry, path, source, config, false, false).0)
+        .flat_map(|(path, source)| analyze_file(registry, path, source, config, false).0)
         .collect()
 }
 
@@ -93,10 +152,11 @@ pub fn analyze_sequential_collecting(
     analyze_sequential_collecting_resolving(registry, files, config, collect_programs, false)
 }
 
-/// Like [`analyze_parallel_collecting`], but with `resolve` controlling whether
-/// each file's per-file rules receive a degraded single-file [`ProjectIndex`]
-/// (see [`AnalyzeContext::project`]). Callers that enable resolver-dependent
-/// rules pass `resolve = true`; the plain variants pass `false` for zero cost.
+/// Like [`analyze_parallel_collecting`], but with `resolve` controlling whether a
+/// shared cross-file [`ProjectIndex`] is built and attached to every file's
+/// [`AnalyzeContext::project`]. When `resolve` is set the driver parses all files
+/// first, builds one index from every program, then runs the per-file pass with
+/// that index; otherwise it takes the per-file fast path (no index, zero cost).
 pub fn analyze_parallel_collecting_resolving(
     registry: &RuleRegistry,
     files: &[(PathBuf, String)],
@@ -104,16 +164,22 @@ pub fn analyze_parallel_collecting_resolving(
     collect_programs: bool,
     resolve: bool,
 ) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
-    let (diagnostics, retained): (Vec<Vec<Diagnostic>>, Vec<Option<ProjectFile>>) = files
+    if !resolve {
+        let (diagnostics, retained): (Vec<Vec<Diagnostic>>, Vec<Option<ProjectFile>>) = files
+            .par_iter()
+            .map(|(path, source)| analyze_file(registry, path, source, config, collect_programs))
+            .unzip();
+        return (
+            diagnostics.into_iter().flatten().collect(),
+            retained.into_iter().flatten().collect(),
+        );
+    }
+    let parsed: Vec<Parsed> = files
         .par_iter()
-        .map(|(path, source)| {
-            analyze_file(registry, path, source, config, collect_programs, resolve)
-        })
-        .unzip();
-    (
-        diagnostics.into_iter().flatten().collect(),
-        retained.into_iter().flatten().collect(),
-    )
+        .map(|(path, source)| parse_one(path, source))
+        .collect();
+    let diagnostics = analyze_indexed(registry, &parsed, config, true);
+    (diagnostics, retain(parsed, collect_programs))
 }
 
 /// Sequential counterpart of [`analyze_parallel_collecting_resolving`].
@@ -124,12 +190,17 @@ pub fn analyze_sequential_collecting_resolving(
     collect_programs: bool,
     resolve: bool,
 ) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
-    let mut diagnostics = Vec::new();
-    let mut retained = Vec::new();
-    for (path, source) in files {
-        let (diags, file) = analyze_file(registry, path, source, config, collect_programs, resolve);
-        diagnostics.extend(diags);
-        retained.extend(file);
+    if !resolve {
+        let mut diagnostics = Vec::new();
+        let mut retained = Vec::new();
+        for (path, source) in files {
+            let (diags, file) = analyze_file(registry, path, source, config, collect_programs);
+            diagnostics.extend(diags);
+            retained.extend(file);
+        }
+        return (diagnostics, retained);
     }
-    (diagnostics, retained)
+    let parsed: Vec<Parsed> = files.iter().map(|(p, s)| parse_one(p, s)).collect();
+    let diagnostics = analyze_indexed(registry, &parsed, config, false);
+    (diagnostics, retain(parsed, collect_programs))
 }

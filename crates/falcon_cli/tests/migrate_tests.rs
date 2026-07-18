@@ -195,6 +195,58 @@ fn upgrade_merges_duplicate_twins_keeping_more_severe_level() {
 }
 
 #[test]
+fn official_lints_rules_list_maps_to_falcon_ids() {
+    // package:lints / flutter_lints rules live under the top-level `linter.rules`
+    // key (list form). Official snake_case ids map to falcon kebab ids, camelCase
+    // humps split, and a `- id: false` entry disables the rule.
+    let yaml = "\
+linter:
+  rules:
+    - avoid_print
+    - prefer_for_elements_to_map_fromIterable
+    - unnecessary_const: false
+";
+    let (value, unrecognized, count) = parse(yaml);
+    assert!(unrecognized.is_empty(), "unexpected: {unrecognized:?}");
+    assert_eq!(count, 3);
+    assert_eq!(
+        value["linter"]["rules"]["suspicious"]["avoid-print"],
+        Value::String("warn".into())
+    );
+    assert_eq!(
+        value["linter"]["rules"]["complexity"]["prefer-for-elements-to-map-from-iterable"],
+        Value::String("warn".into())
+    );
+    assert_eq!(
+        value["linter"]["rules"]["complexity"]["unnecessary-const"],
+        Value::String("off".into())
+    );
+}
+
+#[test]
+fn official_lints_rules_map_form_maps_to_falcon_ids() {
+    // The map form (`id: true` / `id: false`) is equally valid in
+    // analysis_options.yaml and must map through the same lints lookup.
+    let yaml = "\
+linter:
+  rules:
+    avoid_print: true
+    empty_catches: false
+";
+    let (value, unrecognized, count) = parse(yaml);
+    assert!(unrecognized.is_empty(), "unexpected: {unrecognized:?}");
+    assert_eq!(count, 2);
+    assert_eq!(
+        value["linter"]["rules"]["suspicious"]["avoid-print"],
+        Value::String("warn".into())
+    );
+    assert_eq!(
+        value["linter"]["rules"]["suspicious"]["empty-catches"],
+        Value::String("off".into())
+    );
+}
+
+#[test]
 fn upgrade_leaves_canonical_config_unchanged() {
     let input = r#"{
       "linter": { "rules": { "style": { "no-magic-number": "warn" } } }

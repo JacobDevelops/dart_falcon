@@ -22,10 +22,13 @@ use crate::file_walker::walk_files;
 use crate::output;
 
 /// Per-file rules that consult [`falcon_analyze::AnalyzeContext::project`]. When
-/// any is enabled, the driver builds a per-file [`falcon_analyze::ProjectIndex`]
-/// so these rules can reason about declaration return types. Kept here (rather
-/// than a rule-trait flag) as a deliberately small, explicit seam; extend this
-/// list as further resolver-dependent rules are integrated.
+/// any is enabled, the driver parses all files first and builds ONE cross-file
+/// [`falcon_analyze::ProjectIndex`] shared across the per-file pass, so these
+/// rules can reason about declaration return types project-wide. Kept here
+/// (rather than a rule-trait flag) as a deliberately small, explicit seam;
+/// extend this list as further resolver-dependent per-file rules are integrated.
+/// (Project rules such as `unnecessary-nullable` build their own index inside
+/// `analyze_project` and are not listed here.)
 const RESOLVER_DEPENDENT_RULES: &[&str] =
     &["no-boolean-literal-compare", "avoid-ignoring-return-values"];
 
@@ -204,12 +207,10 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     // only collect programs when at least one is enabled (they are memory-heavy).
     let project_registry = build_project_registry(resolve_project_rules(&config));
     let collect_programs = !project_registry.is_empty();
-    // Resolver seam: enable per-file type resolution only when a per-file rule
-    // that consumes it is active, so a default run pays nothing. Today this
-    // attaches a degraded single-file `ProjectIndex` (this file's declarations +
-    // builtins). A true cross-file index would be built once from all programs
-    // and shared; that requires a parse-then-analyze reorder and lands with the
-    // resolver-dependent rules' integration.
+    // Resolver seam: enable cross-file type resolution only when a per-file rule
+    // that consumes it is active, so a default run pays nothing. When set, the
+    // engine parses all files first and builds one shared `ProjectIndex` (every
+    // file's declarations + builtins) attached to each per-file context.
     let resolve = registry
         .rules()
         .iter()

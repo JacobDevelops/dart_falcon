@@ -30,6 +30,9 @@ pub enum RuleSource {
     DartCodeLinter(&'static str),
     /// Ported from pyramid_lint; carries the upstream rule id.
     PyramidLint(&'static str),
+    /// Adopted from the official `package:lints` / `package:flutter_lints`
+    /// rule sets; carries the official (snake_case) lint id.
+    Lints(&'static str),
     /// Original to falcon — no upstream equivalent.
     Falcon,
 }
@@ -54,6 +57,78 @@ const NONE: &[&str] = &[];
 /// Metadata for every registered rule. Keep in sync with `all_rules()`.
 pub const RULE_METADATA: &[RuleMeta] = &[
     // ── complexity ──────────────────────────────────────────────────────────
+    RuleMeta {
+        name: "avoid-unnecessary-containers",
+        source: RuleSource::Lints("avoid_unnecessary_containers"),
+        group: "complexity",
+        domains: FLUTTER,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "unnecessary-overrides",
+        source: RuleSource::Lints("unnecessary_overrides"),
+        group: "complexity",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "avoid-function-literals-in-foreach-calls",
+        source: RuleSource::Lints("avoid_function_literals_in_foreach_calls"),
+        group: "complexity",
+        domains: NONE,
+        recommended: false,
+        project: false,
+    },
+    RuleMeta {
+        name: "prefer-conditional-assignment",
+        source: RuleSource::Lints("prefer_conditional_assignment"),
+        group: "complexity",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "prefer-for-elements-to-map-from-iterable",
+        source: RuleSource::Lints("prefer_for_elements_to_map_fromIterable"),
+        group: "complexity",
+        domains: NONE,
+        recommended: false,
+        project: false,
+    },
+    RuleMeta {
+        name: "prefer-if-null-operators",
+        source: RuleSource::Lints("prefer_if_null_operators"),
+        group: "complexity",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "prefer-null-aware-operators",
+        source: RuleSource::Lints("prefer_null_aware_operators"),
+        group: "complexity",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "unnecessary-const",
+        source: RuleSource::Lints("unnecessary_const"),
+        group: "complexity",
+        domains: NONE,
+        recommended: false,
+        project: false,
+    },
+    RuleMeta {
+        name: "unnecessary-getters-setters",
+        source: RuleSource::Lints("unnecessary_getters_setters"),
+        group: "complexity",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
     RuleMeta {
         name: "avoid-nested-conditional-expressions",
         source: RuleSource::DartCodeLinter("avoid-nested-conditional-expressions"),
@@ -150,19 +225,18 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         recommended: true,
         project: false,
     },
-    // Not in the recommended preset: faithfully reproducing dart_code_linter
-    // requires type information. dcl only flags a boolean-literal comparison
-    // when the other operand's static type is non-nullable `bool`; `x == true`
-    // is the correct null-safe idiom for a `bool?` and must not be flagged.
-    // Without type resolution falcon only flags provably-boolean operands
-    // (literals, negations, `is` checks, comparison/logical expressions), so the
-    // rule is opt-in rather than on by default.
+    // In the recommended preset now that the type-resolution layer backs it: the
+    // rule flags a boolean-literal comparison whose other operand is provably
+    // boolean (literals, negations, `is` checks, comparison/logical expressions)
+    // or a local/param the resolver infers to be a *non-nullable* `bool`. A
+    // `bool?` operand resolves to a nullable bool and stays exempt — `x == true`
+    // is its idiomatic null-safe form.
     RuleMeta {
         name: "no-boolean-literal-compare",
         source: RuleSource::DartCodeLinter("no-boolean-literal-compare"),
         group: "complexity",
         domains: NONE,
-        recommended: false,
+        recommended: true,
         project: false,
     },
     RuleMeta {
@@ -214,6 +288,54 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     // ── correctness ─────────────────────────────────────────────────────────
+    RuleMeta {
+        name: "avoid-web-libraries-in-flutter",
+        source: RuleSource::Lints("avoid_web_libraries_in_flutter"),
+        group: "correctness",
+        domains: FLUTTER,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "no-logic-in-create-state",
+        source: RuleSource::Lints("no_logic_in_create_state"),
+        group: "correctness",
+        domains: FLUTTER,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "avoid-relative-lib-imports",
+        source: RuleSource::Lints("avoid_relative_lib_imports"),
+        group: "correctness",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "hash-and-equals",
+        source: RuleSource::Lints("hash_and_equals"),
+        group: "correctness",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "valid-regexps",
+        source: RuleSource::Lints("valid_regexps"),
+        group: "correctness",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "implementation-imports",
+        source: RuleSource::Lints("implementation_imports"),
+        group: "correctness",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
     RuleMeta {
         name: "avoid-global-state",
         source: RuleSource::DartCodeLinter("avoid-global-state"),
@@ -280,13 +402,17 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: true,
     },
     RuleMeta {
-        // Off in the recommended preset: heuristic without type resolution
-        // (flags nullable params never passed null project-wide). Opt in.
+        // In the recommended preset now that the type-resolution layer backs it:
+        // it flags a private declaration's nullable param only when every visible
+        // call site is proven to pass a non-null value (a cross-file return-type
+        // index plus local inference decide non-nullability; anything uncertain
+        // suppresses). Restricting to `_`-prefixed names keeps all call sites in
+        // view, which is what makes the heuristic sound.
         name: "unnecessary-nullable",
         source: RuleSource::DartCodeLinter("check-unnecessary-nullable"),
         group: "correctness",
         domains: NONE,
-        recommended: false,
+        recommended: true,
         project: true,
     },
     RuleMeta {
@@ -307,6 +433,22 @@ pub const RULE_METADATA: &[RuleMeta] = &[
     },
     // ── performance ─────────────────────────────────────────────────────────
     RuleMeta {
+        name: "sized-box-for-whitespace",
+        source: RuleSource::Lints("sized_box_for_whitespace"),
+        group: "performance",
+        domains: FLUTTER,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "unnecessary-to-list-in-spreads",
+        source: RuleSource::Lints("unnecessary_to_list_in_spreads"),
+        group: "performance",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
         name: "prefer-const-border-radius",
         source: RuleSource::DartCodeLinter("prefer-const-border-radius"),
         group: "performance",
@@ -326,11 +468,27 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         name: "prefer-declaring-const-constructor",
         source: RuleSource::PyramidLint("prefer_declaring_const_constructor"),
         group: "performance",
-        domains: NONE,
+        domains: FLUTTER,
         recommended: true,
         project: false,
     },
     // ── style ─────────────────────────────────────────────────────────────
+    RuleMeta {
+        name: "sort-child-properties-last",
+        source: RuleSource::Lints("sort_child_properties_last"),
+        group: "style",
+        domains: FLUTTER,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "use-full-hex-values-for-flutter-colors",
+        source: RuleSource::Lints("use_full_hex_values_for_flutter_colors"),
+        group: "style",
+        domains: FLUTTER,
+        recommended: true,
+        project: false,
+    },
     RuleMeta {
         name: "avoid-late-keyword",
         source: RuleSource::DartCodeLinter("avoid-late-keyword"),
@@ -597,6 +755,102 @@ pub const RULE_METADATA: &[RuleMeta] = &[
     },
     // ── suspicious ──────────────────────────────────────────────────────────
     RuleMeta {
+        name: "avoid-print",
+        source: RuleSource::Lints("avoid_print"),
+        group: "suspicious",
+        domains: FLUTTER,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "avoid-empty-else",
+        source: RuleSource::Lints("avoid_empty_else"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "avoid-shadowing-type-parameters",
+        source: RuleSource::Lints("avoid_shadowing_type_parameters"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "empty-catches",
+        source: RuleSource::Lints("empty_catches"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "no-wildcard-variable-uses",
+        source: RuleSource::Lints("no_wildcard_variable_uses"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "avoid-returning-null-for-void",
+        source: RuleSource::Lints("avoid_returning_null_for_void"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "control-flow-in-finally",
+        source: RuleSource::Lints("control_flow_in_finally"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "empty-statements",
+        source: RuleSource::Lints("empty_statements"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "recursive-getters",
+        source: RuleSource::Lints("recursive_getters"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "unnecessary-null-aware-assignments",
+        source: RuleSource::Lints("unnecessary_null_aware_assignments"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "unnecessary-null-in-if-null-operators",
+        source: RuleSource::Lints("unnecessary_null_in_if_null_operators"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
+        name: "use-rethrow-when-possible",
+        source: RuleSource::Lints("use_rethrow_when_possible"),
+        group: "suspicious",
+        domains: NONE,
+        recommended: true,
+        project: false,
+    },
+    RuleMeta {
         name: "avoid-dynamic",
         source: RuleSource::DartCodeLinter("avoid-dynamic"),
         group: "suspicious",
@@ -605,14 +859,16 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         project: false,
     },
     RuleMeta {
-        // Off in the recommended preset: without type resolution falcon cannot
-        // tell a discarded meaningful return from a side-effect call, making the
-        // rule inherently false-positive heavy (see rule impl). Opt in explicitly.
+        // In the recommended preset now that the type-resolution layer backs it:
+        // the callee's declared return type decides it — a known `void` return is
+        // safe to discard, a known non-void return is flagged, and only an
+        // unknown return type falls back to the receiver-less side-effect
+        // allowlist. This removes the false positives that kept it opt-in.
         name: "avoid-ignoring-return-values",
         source: RuleSource::DartCodeLinter("avoid-ignoring-return-values"),
         group: "suspicious",
         domains: NONE,
-        recommended: false,
+        recommended: true,
         project: false,
     },
     RuleMeta {

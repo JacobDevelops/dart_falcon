@@ -1,13 +1,16 @@
 //! `unnecessary-nullable` — flag nullable parameters of private functions and
 //! private methods that are never actually passed (or assigned) null anywhere
 //! in the project. Conservative port of dart_code_linter's
-//! `check-unnecessary-nullable`; heuristic without type resolution, hence
-//! recommended: false. Restricting to `_`-prefixed declarations guarantees all
-//! call sites are visible in-project, which is what makes the heuristic sound.
+//! `check-unnecessary-nullable`. Restricting to `_`-prefixed declarations
+//! guarantees all call sites are visible in-project; the type-resolution layer
+//! then proves each argument non-null (local inference of literals/`new`/
+//! arithmetic plus a cross-file return-type index), which removed the false
+//! positives that had kept the rule opt-in — it is now recommended.
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{ProjectFile, ProjectRule};
+use falcon_analyze::resolve::ProgramSource;
+use falcon_analyze::{LocalTypes, ProjectFile, ProjectIndex, ProjectRule, StaticType};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
@@ -35,8 +38,20 @@ impl ProjectRule for UnnecessaryNullable {
             }
         }
 
+        // Cross-file return-type index, so a call/field argument whose declared
+        // return type is a known non-nullable type can be recognized as non-null
+        // (strengthening the literal-`null` matching below).
+        let sources: Vec<ProgramSource> = files
+            .iter()
+            .map(|f| ProgramSource {
+                program: &f.program,
+                has_parse_errors: f.has_parse_errors,
+            })
+            .collect();
+        let index = ProjectIndex::from_project_files(&sources);
+
         // Gather every call site (and bare tear-off reference) across all files.
-        let mut collector = CallCollector::default();
+        let mut collector = CallCollector::new(&index);
         for f in files {
             collector.visit_program(&f.program);
         }
@@ -260,24 +275,26 @@ fn method_names(out: &mut Vec<String>, members: &[ClassMember]) {
 /// A single call's argument shape relevant to nullability.
 struct CallInfo {
     name: String,
-    positional_is_null: Vec<bool>,
-    named_is_null: HashMap<String, bool>,
+    positional_maybe_null: Vec<bool>,
+    named_maybe_null: HashMap<String, bool>,
 }
 
 impl CallInfo {
-    /// Whether this call passes (or omits-as-null) `param`.
+    /// Whether this call *might* pass null (or omit-as-null) for `param`. A `true`
+    /// here suppresses the diagnostic — the rule only flags a param when every
+    /// call is proven to pass a non-null value.
     fn passes_null(&self, param: &NullableParam) -> bool {
         match &param.slot {
             ParamSlot::Positional { index, optional } => {
-                match self.positional_is_null.get(*index) {
-                    Some(is_null) => *is_null,
+                match self.positional_maybe_null.get(*index) {
+                    Some(maybe_null) => *maybe_null,
                     // Argument omitted: for an optional param that defaults to null,
                     // omission means null; a required param can't legally be omitted.
                     None => *optional && param.default_is_null,
                 }
             }
-            ParamSlot::Named { optional } => match self.named_is_null.get(&param.name) {
-                Some(is_null) => *is_null,
+            ParamSlot::Named { optional } => match self.named_maybe_null.get(&param.name) {
+                Some(maybe_null) => *maybe_null,
                 None => *optional && param.default_is_null,
             },
         }
@@ -288,14 +305,50 @@ fn is_null_expr(e: &Expr) -> bool {
     matches!(e, Expr::NullLit { .. })
 }
 
-fn call_info(name: String, args: &ArgList) -> CallInfo {
+/// Whether an argument expression *might* be null. Literal `null` obviously is;
+/// beyond that an argument is proven non-null only when [`LocalTypes::of_expr`]
+/// infers a non-nullable type (literals, `new`, arithmetic, …) or the project
+/// index resolves the callee/getter to a known non-nullable return type.
+/// Everything else stays "maybe null" so the rule never flags a param that could
+/// legitimately receive null.
+fn arg_maybe_null(arg: &Expr, lt: &LocalTypes, index: &ProjectIndex) -> bool {
+    if is_null_expr(arg) {
+        return true;
+    }
+    if !lt.of_expr(arg).is_nullable() {
+        return false;
+    }
+    if let Some(name) = arg_return_name(arg) {
+        let rt = index.return_type(&name);
+        if rt != StaticType::Unknown && !rt.is_nullable() {
+            return false;
+        }
+    }
+    true
+}
+
+/// The name whose declared return type describes `arg`'s value: the callee of a
+/// call, or the accessed getter/field.
+fn arg_return_name(arg: &Expr) -> Option<String> {
+    match arg {
+        Expr::Call { callee, .. } => callee_name(callee),
+        Expr::Field { field, .. } => Some(field.name.clone()),
+        _ => None,
+    }
+}
+
+fn call_info(name: String, args: &ArgList, lt: &LocalTypes, index: &ProjectIndex) -> CallInfo {
     CallInfo {
         name,
-        positional_is_null: args.positional.iter().map(is_null_expr).collect(),
-        named_is_null: args
+        positional_maybe_null: args
+            .positional
+            .iter()
+            .map(|a| arg_maybe_null(a, lt, index))
+            .collect(),
+        named_maybe_null: args
             .named
             .iter()
-            .map(|a| (a.name.name.clone(), is_null_expr(&a.value)))
+            .map(|a| (a.name.name.clone(), arg_maybe_null(&a.value, lt, index)))
             .collect(),
     }
 }
@@ -308,19 +361,34 @@ fn callee_name(callee: &Expr) -> Option<String> {
     }
 }
 
-#[derive(Default)]
-struct CallCollector {
+struct CallCollector<'a> {
     calls: Vec<CallInfo>,
     /// Names used as bare values (tear-offs), not as a call callee.
     tear_offs: HashSet<String>,
+    index: &'a ProjectIndex,
+    /// A file-local scope tracker with no bindings: it resolves the structurally
+    /// non-null argument forms (literals, `new`, arithmetic) without full scope
+    /// tracking, which is all the null-flow heuristic needs.
+    lt: LocalTypes,
 }
 
-impl Visitor for CallCollector {
+impl<'a> CallCollector<'a> {
+    fn new(index: &'a ProjectIndex) -> Self {
+        Self {
+            calls: Vec::new(),
+            tear_offs: HashSet::new(),
+            index,
+            lt: LocalTypes::new(),
+        }
+    }
+}
+
+impl Visitor for CallCollector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         match node {
             Expr::Call { callee, args, .. } => {
                 if let Some(name) = callee_name(callee) {
-                    self.calls.push(call_info(name, args));
+                    self.calls.push(call_info(name, args, &self.lt, self.index));
                 }
                 // Recurse into the callee's receiver (but not the callee name
                 // itself) and the arguments.
@@ -342,7 +410,8 @@ impl Visitor for CallCollector {
                 self.visit_expr(object);
                 for section in sections {
                     if let CascadeOp::Call(ident, _, args) = &section.op {
-                        self.calls.push(call_info(ident.name.clone(), args));
+                        self.calls
+                            .push(call_info(ident.name.clone(), args, &self.lt, self.index));
                         for a in &args.positional {
                             self.visit_expr(a);
                         }

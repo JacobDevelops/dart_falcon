@@ -146,7 +146,9 @@ fn project_flag_matches_the_project_rule_set() {
 fn every_rule_has_a_source_with_a_non_empty_upstream_id() {
     for meta in RULE_METADATA {
         match meta.source {
-            RuleSource::DartCodeLinter(id) | RuleSource::PyramidLint(id) => assert!(
+            RuleSource::DartCodeLinter(id)
+            | RuleSource::PyramidLint(id)
+            | RuleSource::Lints(id) => assert!(
                 !id.is_empty(),
                 "rule `{}` has a ported source with an empty upstream id",
                 meta.name
