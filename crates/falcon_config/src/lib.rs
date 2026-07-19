@@ -662,13 +662,11 @@ pub fn load_config(path: &Path) -> Result<FalconConfig, ConfigError> {
 /// 3. `$HOME/.falcon.json` (via `std::env::var("HOME")`)
 /// 4. Return None if nothing found
 pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
-    // 1. Check start_dir/falcon.json
     let local_config = start_dir.join("falcon.json");
     if local_config.exists() {
         return Some(local_config);
     }
 
-    // 2. Walk parent dirs looking for .git, then check <git_root>/falcon.json
     let mut current = start_dir;
     loop {
         let git_dir = current.join(".git");
@@ -685,7 +683,6 @@ pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
         }
     }
 
-    // 3. Check $HOME/.falcon.json
     if let Ok(home) = std::env::var("HOME") {
         let home_config = PathBuf::from(home).join(".falcon.json");
         if home_config.exists() {

@@ -171,7 +171,6 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             operand,
             span,
         } => {
-            // Check if operand is also a bang unary
             if is_bang_unary(operand) {
                 // Double negation (or more): emit one diagnostic at this outer bang
                 diags.push(Diagnostic::new(

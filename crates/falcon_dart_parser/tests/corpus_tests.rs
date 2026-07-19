@@ -197,7 +197,6 @@ fn diag_error_distribution() {
         };
         let (_, errors) = parse(&source);
         for e in &errors {
-            // Normalize message to first 60 chars
             let key = e.message.chars().take(60).collect::<String>();
             *msg_counts.entry(key).or_insert(0) += 1;
         }

@@ -25,7 +25,6 @@ impl Rule for PreferIterableEvery {
     }
 }
 
-/// Check if expression matches pattern: !.where(...).isEmpty
 fn is_negated_where_is_empty(expr: &Expr) -> Option<Span> {
     if let Expr::Unary {
         op: UnaryOp::Bang,
@@ -48,7 +47,6 @@ fn is_negated_where_is_empty(expr: &Expr) -> Option<Span> {
     None
 }
 
-/// Check if expression matches pattern: .where(...).length == .length
 fn is_where_length_eq_length(expr: &Expr) -> Option<Span> {
     if let Expr::Binary {
         op: BinaryOp::EqEq,
@@ -57,7 +55,6 @@ fn is_where_length_eq_length(expr: &Expr) -> Option<Span> {
         span,
     } = expr
     {
-        // Check if left is something.where(...).length
         if let Expr::Field {
             object: left_obj,
             field: left_field,
@@ -75,7 +72,6 @@ fn is_where_length_eq_length(expr: &Expr) -> Option<Span> {
             } = &**left_callee
             && left_where_field.name == "where"
         {
-            // Check if right is iterable.length (the original iterable)
             if let Expr::Field {
                 field: right_field, ..
             } = &**right

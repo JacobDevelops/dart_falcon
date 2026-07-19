@@ -23,12 +23,10 @@ impl Rule for AvoidTopLevelMemberAccess {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
-        // Collect all top-level variable declarations (non-const, non-final with certain patterns)
         let mut top_level_vars = HashSet::new();
         for decl in &program.declarations {
             if let TopLevelDecl::Variable(v) = decl {
                 for declarator in &v.declarators {
-                    // Mark non-const, non-final top-level variables as "global state"
                     if !v.is_const && !v.is_final {
                         top_level_vars.insert(declarator.name.name.clone());
                     }
@@ -41,7 +39,6 @@ impl Rule for AvoidTopLevelMemberAccess {
                 && !v.is_const
                 && !v.is_final
             {
-                // Report the declaration itself
                 diags.push(Diagnostic::new(
                     "avoid-top-level-member-access",
                     Severity::Warning,

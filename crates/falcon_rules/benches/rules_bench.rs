@@ -175,7 +175,6 @@ class AppConfig {
 "#,
 ];
 
-/// Helper to run all rules against a source file.
 fn run_all_rules_on_source(rules: &[Box<dyn Rule>], path: &Path, source: &str) {
     let (program, _) = parse(source);
     let config = FalconConfig::default();
