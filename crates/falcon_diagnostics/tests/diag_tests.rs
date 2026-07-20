@@ -1,4 +1,6 @@
-use falcon_diagnostics::{ContextLine, Diagnostic, Severity, Span, byte_to_lsp_position};
+use falcon_diagnostics::{
+    ContextLine, Diagnostic, Severity, Span, byte_to_line_col, byte_to_lsp_position,
+};
 
 #[test]
 fn test_diagnostic_new() {
@@ -79,15 +81,41 @@ fn test_diagnostic_with_context_lines() {
 
 #[test]
 fn test_format_text_error() {
-    let span = Span { start: 5, end: 10 };
-    let diag = Diagnostic::new("DCL001", Severity::Error, "test message", "file.dart", span);
+    let source = "line1\nsecond";
+    let span = Span { start: 6, end: 12 }; // 's' of 'second' -> line 2, col 1
+    let mut diag = Diagnostic::new("DCL001", Severity::Error, "test message", "file.dart", span);
+    diag.resolve_position(source);
     let text = diag.format_text();
 
     assert!(text.contains("file.dart"));
     assert!(text.contains("DCL001"));
     assert!(text.contains("error"));
     assert!(text.contains("test message"));
-    assert!(text.contains("+5:10"));
+    // 1-based line:col of the span start, not the raw byte range.
+    assert!(text.contains("file.dart:2:1:"), "got: {text}");
+    assert!(!text.contains("+"), "must not print raw byte offsets: {text}");
+}
+
+#[test]
+fn test_byte_to_line_col_is_one_based() {
+    let source = "void main() {\n  print(\"hi\"\n}\n";
+    // offset 0 -> line 1, col 1
+    assert_eq!(byte_to_line_col(source, 0), (1, 1));
+    // offset 5 ('m' of main) -> line 1, col 6
+    assert_eq!(byte_to_line_col(source, 5), (1, 6));
+    // offset of the '}' on line 3 -> line 3, col 1
+    let brace = source.rfind('}').unwrap();
+    assert_eq!(byte_to_line_col(source, brace), (3, 1));
+}
+
+#[test]
+fn test_resolve_position_sets_line_col() {
+    let source = "a\nbc\ndef";
+    let span = Span { start: 5, end: 6 }; // 'd' on line 3, col 1
+    let mut diag = Diagnostic::new("DCL001", Severity::Warning, "m", "f.dart", span);
+    assert_eq!((diag.line, diag.col), (0, 0), "unresolved before call");
+    diag.resolve_position(source);
+    assert_eq!((diag.line, diag.col), (3, 1));
 }
 
 #[test]
@@ -122,6 +150,20 @@ fn test_format_json_has_severity() {
     let json = diag.format_json();
 
     assert!(json.get("severity").is_some());
+}
+
+#[test]
+fn test_format_json_carries_resolved_line_col() {
+    let source = "a\nbc\ndef";
+    let span = Span { start: 5, end: 6 }; // 'd' on line 3, col 1
+    let mut diag = Diagnostic::new("DCL001", Severity::Error, "m", "f.dart", span);
+    diag.resolve_position(source);
+    let json = diag.format_json();
+
+    // Byte span stays alongside the navigable line/col.
+    assert_eq!(json.get("span").unwrap().get("start").unwrap().as_u64(), Some(5));
+    assert_eq!(json.get("line").unwrap().as_u64(), Some(3));
+    assert_eq!(json.get("col").unwrap().as_u64(), Some(1));
 }
 
 #[test]

@@ -64,9 +64,11 @@ impl CrossFileRuleRegistry {
     /// Inline suppression and per-path severity resolution are applied by the
     /// caller (the CLI pipeline), exactly as for the per-file pass.
     pub fn run_all(&self, files: &[ProjectFile], config: &FalconConfig) -> Vec<Diagnostic> {
-        self.rules
-            .iter()
-            .flat_map(|rule| rule.analyze_project(files, config))
-            .collect()
+        crate::registry::with_rules_stack(|| {
+            self.rules
+                .iter()
+                .flat_map(|rule| rule.analyze_project(files, config))
+                .collect()
+        })
     }
 }

@@ -9,6 +9,22 @@ fn no_lookup(_name: &str) -> Option<(&'static str, &'static str, bool)> {
     None
 }
 
+/// Stack for rule-execution worker threads, sized like the parser's
+/// `PARSER_STACK_SIZE` (reserved lazily, not committed).
+const RULES_STACK_SIZE: usize = 256 * 1024 * 1024;
+
+/// Run `f` on a scoped thread with [`RULES_STACK_SIZE`] of stack.
+pub(crate) fn with_rules_stack<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(RULES_STACK_SIZE)
+            .spawn_scoped(scope, f)
+            .expect("spawn rules thread")
+            .join()
+            .expect("rules thread panicked")
+    })
+}
+
 /// Registry of enabled lint rules.
 pub struct RuleRegistry {
     rules: Vec<Box<dyn Rule>>,
@@ -48,7 +64,21 @@ impl RuleRegistry {
     }
 
     /// Run all registered rules on a program and return combined diagnostics.
+    ///
+    /// Runs on a scoped worker thread with a large explicit stack for the same
+    /// reason `falcon_dart_parser::parse` does: rule visitors recurse over ASTs
+    /// that can legally nest deep enough to exhaust a default 2 MB rayon-worker
+    /// stack (e.g. long `a = b = c = ...` chains build depth without tripping
+    /// the parser's recursion guard).
     pub fn run_all(
+        &self,
+        program: &falcon_syntax::Program,
+        ctx: &AnalyzeContext,
+    ) -> Vec<Diagnostic> {
+        with_rules_stack(|| self.run_all_inner(program, ctx))
+    }
+
+    fn run_all_inner(
         &self,
         program: &falcon_syntax::Program,
         ctx: &AnalyzeContext,
