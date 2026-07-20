@@ -138,16 +138,9 @@ fn check_members(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Ana
         if cat == u8::MAX {
             continue;
         }
-        if min_right[i] != u8::MAX && cat > min_right[i] {
-            let span = member.span();
-            diags.push(Diagnostic::new(
-                NAME,
-                Severity::Warning,
-                "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan { start: span.start, end: span.end },
-            ));
-        } else if i > 0 && cat < max_left[i] && i > 3 {
+        let after_smaller = min_right[i] != u8::MAX && cat > min_right[i];
+        let before_larger = i > 3 && cat < max_left[i];
+        if after_smaller || before_larger {
             let span = member.span();
             diags.push(Diagnostic::new(
                 NAME,

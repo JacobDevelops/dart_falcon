@@ -54,35 +54,29 @@ fn is_where_length_eq_length(expr: &Expr) -> Option<Span> {
         right,
         span,
     } = expr
-    {
-        if let Expr::Field {
+        && let Expr::Field {
             object: left_obj,
             field: left_field,
             ..
         } = &**left
-            && left_field.name == "length"
-            && let Expr::Call {
-                callee: left_callee,
-                ..
-            } = &**left_obj
-            && let Expr::Field {
-                field: left_where_field,
-                object: _left_where_object,
-                ..
-            } = &**left_callee
-            && left_where_field.name == "where"
-        {
-            if let Expr::Field {
-                field: right_field, ..
-            } = &**right
-                && right_field.name == "length"
-            {
-                return Some(Span {
-                    start: span.start,
-                    end: span.end,
-                });
-            }
-        }
+        && left_field.name == "length"
+        && let Expr::Call {
+            callee: left_callee, ..
+        } = &**left_obj
+        && let Expr::Field {
+            field: left_where_field,
+            ..
+        } = &**left_callee
+        && left_where_field.name == "where"
+        && let Expr::Field {
+            field: right_field, ..
+        } = &**right
+        && right_field.name == "length"
+    {
+        return Some(Span {
+            start: span.start,
+            end: span.end,
+        });
     }
     None
 }
