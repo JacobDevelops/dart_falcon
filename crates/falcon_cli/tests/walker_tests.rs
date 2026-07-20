@@ -112,3 +112,20 @@ fn test_walk_jfit_mobile_lib_dart_files() {
         results.len()
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn test_walk_does_not_follow_symlinked_dirs() {
+    let outside = tempdir().unwrap();
+    fs::write(outside.path().join("external.dart"), "void main() {}").unwrap();
+
+    let temp = tempdir().unwrap();
+    fs::write(temp.path().join("local.dart"), "void main() {}").unwrap();
+    std::os::unix::fs::symlink(outside.path(), temp.path().join("plugin_link")).unwrap();
+    // A self-referential link must not cycle the walk either.
+    std::os::unix::fs::symlink(temp.path(), temp.path().join("self_link")).unwrap();
+
+    let results = walk_files(&[temp.path().to_path_buf()], &[]);
+    assert_eq!(results.len(), 1);
+    assert!(results[0].0.ends_with("local.dart"));
+}
