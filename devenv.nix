@@ -30,10 +30,8 @@ in
     nil
     nixfmt
 
-    # Docs website (website/): Bun runtime + Cloudflare Workers deploy CLI.
-    # `bun run deploy` in website/ shells out to wrangler.
+    # Docs website (website/):
     bun
-    wrangler
   ]);
 
   # ── Environment ─────────────────────────────────────────────────────────────
