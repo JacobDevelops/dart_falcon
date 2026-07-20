@@ -284,3 +284,26 @@ fn generic_function_typed_formal_rejected_inside_function_type() {
     let (_prog, errors) = parse("typedef Old = void Function(int cb<T>(T x));");
     assert!(!errors.is_empty(), "expected rejection inside function type");
 }
+
+#[test]
+fn test_generic_function_typed_formal_retains_type_params() {
+    // `int cb<T>(T x)` must be distinguishable from `int cb(T x)` in the AST.
+    let (prog, errors) = parse("void f(int cb<T>(T x)) {}");
+    assert_eq!(errors.len(), 0, "{errors:?}");
+    let func = match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("got {other:?}"),
+    };
+    let param = &func.params.positional[0];
+    assert!(param.function_params.is_some());
+    assert_eq!(param.type_params.len(), 1, "generic <T> must be retained");
+    assert_eq!(param.type_params[0].name.name, "T");
+
+    let (prog2, errors2) = parse("void f(int cb(int x)) {}");
+    assert_eq!(errors2.len(), 0, "{errors2:?}");
+    let func2 = match &prog2.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("got {other:?}"),
+    };
+    assert!(func2.params.positional[0].type_params.is_empty());
+}

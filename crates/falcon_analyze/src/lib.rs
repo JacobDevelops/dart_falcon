@@ -19,7 +19,7 @@ pub use parallel::{
     analyze_sequential, analyze_sequential_collecting, analyze_sequential_collecting_resolving,
     syntax_error_diagnostics,
 };
-pub use registry::RuleRegistry;
+pub use registry::{RuleRegistry, with_rules_stack};
 pub use resolve::{
     LibraryGrouping, LibrarySource, LibraryUnit, LocalTypes, MemberKind, MemberResult,
     ProjectIndex, ReceiverTypes, StaticType, SubtypeResult, TypeIndex, TypeKind, group_libraries,

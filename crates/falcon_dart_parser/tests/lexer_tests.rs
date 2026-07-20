@@ -1181,3 +1181,14 @@ fn test_raw_string_with_backslash_in_interpolation() {
         other => panic!("expected string literal, got {other:?}"),
     }
 }
+
+#[test]
+fn test_bom_then_shebang_is_script_directive() {
+    // Dart grammar: `FEFF? SCRIPT_TAG? ...` — a shebang may follow a BOM.
+    let src = "\u{FEFF}#!/usr/bin/env dart\nvoid main() {}\n";
+    let tokens = Lexer::new(src).tokenize();
+    assert!(
+        !tokens.iter().any(|t| t.kind == TokenKind::Error),
+        "BOM + shebang must lex clean: {tokens:?}"
+    );
+}

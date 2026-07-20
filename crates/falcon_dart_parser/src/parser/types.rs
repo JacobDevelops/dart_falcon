@@ -490,9 +490,11 @@ impl<'src> Parser<'src> {
         // Generic old-style function-typed formal: `name<T>(params)`. Dart allows
         // type parameters on a function-typed formal parameter (unlike inside a
         // generic function TYPE, which the caller keeps rejecting).
-        if self.at(TokenKind::Lt) {
-            self.parse_type_params();
-        }
+        let type_params = if self.at(TokenKind::Lt) {
+            self.parse_type_params()
+        } else {
+            Vec::new()
+        };
         // function-typed param: name(params)
         let function_params = if self.at(TokenKind::LParen) {
             Some(self.parse_formal_param_list())
@@ -521,6 +523,7 @@ impl<'src> Parser<'src> {
             param_type,
             name,
             default_value,
+            type_params,
             function_params,
             span: self.span_from(start),
         }

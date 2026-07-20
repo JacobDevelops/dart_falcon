@@ -54,12 +54,16 @@ impl<'src> Parser<'src> {
             });
         }
 
-        // `await for (...)` — an asynchronous for-in loop. The `await` precedes
-        // the `for` keyword (unlike the loop-variable `await`), so recognise it
-        // here and hand the `is_await` flag to the for-statement parser.
+        // `await for (...)` — an asynchronous for-in loop, legal only in an
+        // async body (like `await` itself). In a sync body this is an error
+        // (the front end rejects it); recover as a plain for-loop rather than
+        // silently reading `await` as an identifier statement.
         if self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For {
+            if !self.in_async {
+                self.error("'await for' is only allowed in an async function body");
+            }
             self.advance(); // await
-            return self.parse_for_stmt(true, start);
+            return self.parse_for_stmt(self.in_async, start);
         }
 
         match self.cur().kind {

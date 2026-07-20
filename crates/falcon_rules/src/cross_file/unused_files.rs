@@ -90,6 +90,10 @@ impl CrossFileRule for UnusedFiles {
             if reachable[repr[i]] {
                 continue;
             }
+            // One diagnostic per real file: aliases defer to the representative.
+            if repr[i] != i {
+                continue;
+            }
             diags.push(Diagnostic::new(
                 NAME,
                 Severity::Warning,
@@ -320,5 +324,26 @@ mod tests {
         let out = flagged(&files);
         std::fs::remove_dir_all(&d).unwrap();
         assert!(out.is_empty(), "{out:?}");
+    }
+
+    // An UNREACHABLE file seen under two spellings yields exactly one
+    // diagnostic, using the representative (first-seen) spelling.
+    #[cfg(unix)]
+    #[test]
+    fn duplicate_canonical_paths_emit_one_diagnostic() {
+        let d = pkg_dir("dup_dead");
+        std::fs::write(d.join("lib/app.dart"), "void main() {}\n").unwrap();
+        std::fs::write(d.join("lib/src/dead.dart"), "void x() {}\n").unwrap();
+        std::os::unix::fs::symlink(d.join("lib/src"), d.join("lib/alias")).unwrap();
+
+        let files = vec![
+            pf(d.join("lib/app.dart").to_str().unwrap(), "void main() {}\n"),
+            pf(d.join("lib/src/dead.dart").to_str().unwrap(), "void x() {}\n"),
+            pf(d.join("lib/alias/dead.dart").to_str().unwrap(), "void x() {}\n"),
+        ];
+        let out = flagged(&files);
+        std::fs::remove_dir_all(&d).unwrap();
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].ends_with("lib/src/dead.dart"), "{out:?}");
     }
 }

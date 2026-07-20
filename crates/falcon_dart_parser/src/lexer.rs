@@ -8,6 +8,9 @@ use falcon_syntax::token::{Token, TokenKind};
 pub struct Lexer<'src> {
     src: &'src str,
     pos: usize,
+    /// Where source logically begins: 0, or past a leading BOM. The Dart
+    /// grammar is `FEFF? SCRIPT_TAG? ...`, so a shebang may follow a BOM.
+    logical_start: usize,
 }
 
 impl<'src> Lexer<'src> {
@@ -19,7 +22,11 @@ impl<'src> Lexer<'src> {
         } else {
             0
         };
-        Self { src, pos }
+        Self {
+            src,
+            pos,
+            logical_start: pos,
+        }
     }
 
     /// Lex the full source and return all tokens, ending with a single `Eof`.
@@ -76,8 +83,9 @@ impl<'src> Lexer<'src> {
 
         // Shebang: `#!...` on the very first line is a script directive, not
         // Dart source. Consume the whole line as a comment (trivia) — but only
-        // at byte offset 0, so a stray `#!` elsewhere still lexes normally.
-        if start == 0 && self.remaining().starts_with("#!") {
+        // at the logical start (offset 0, or right after a leading BOM), so a
+        // stray `#!` elsewhere still lexes normally.
+        if start == self.logical_start && self.remaining().starts_with("#!") {
             while !matches!(self.cur(), None | Some('\n')) {
                 self.advance();
             }

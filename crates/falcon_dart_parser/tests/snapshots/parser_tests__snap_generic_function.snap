@@ -94,6 +94,7 @@ Function(
                         },
                     },
                     default_value: None,
+                    type_params: [],
                     function_params: None,
                     span: Span {
                         start: 14,

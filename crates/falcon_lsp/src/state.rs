@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use falcon_analyze::{
     AnalyzeContext, CrossFileRuleRegistry, FileSuppressions, ProjectFile, Rule,
-    syntax_error_diagnostics,
+    syntax_error_diagnostics, with_rules_stack,
 };
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::parse;
@@ -174,11 +174,14 @@ impl LspState {
         // enhancement could pass `AnalyzeContext::with_project(&ProjectIndex::from_program(..))`
         // for single-file resolution.
         let ctx = AnalyzeContext::new(&file_path, &doc.text, &self.config);
-        let mut diagnostics: Vec<Diagnostic> = self
-            .rules
-            .iter()
-            .flat_map(|rule| rule.analyze(&doc.program, &ctx))
-            .collect();
+        // Same large-stack protection as RuleRegistry::run_all — an open buffer
+        // can hold a deep-but-legal AST that would overflow this thread.
+        let mut diagnostics: Vec<Diagnostic> = with_rules_stack(|| {
+            self.rules
+                .iter()
+                .flat_map(|rule| rule.analyze(&doc.program, &ctx))
+                .collect()
+        });
         // Honor inline `// falcon-ignore` suppressions (the LSP drives rules
         // directly rather than through RuleRegistry::run_all, so it filters and
         // reports malformed comments here too).

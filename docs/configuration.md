@@ -17,13 +17,14 @@ schema](#migrating-from-the-legacy-flat-schema). Discovery and explicit
 `--config` behave identically here, so a typo can never quietly re-enable every
 rule.
 
-### Unknown and legacy keys
+## Unknown and legacy keys
 
 Unknown top-level keys are **warned about by name** and then ignored, so a
 mistyped section (`linterr` for `linter`, `cross_file` for `cross-file`) never
 vanishes silently. The deprecated spellings `project` and `cross_file` (for
 `cross-file`) and `max_errors` (for `max-errors`) still load, but each earns a
-deprecation warning pointing at `falcon migrate`. The published JSON schema
+deprecation warning pointing at `falcon migrate` — including when the legacy
+spelling appears inside an `overrides` entry. The published JSON schema
 validates only the canonical kebab-case keys — an editor will flag a legacy
 spelling even though falcon still accepts it, which is your cue to migrate.
 

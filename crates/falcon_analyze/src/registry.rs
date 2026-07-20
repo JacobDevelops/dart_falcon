@@ -13,8 +13,10 @@ fn no_lookup(_name: &str) -> Option<(&'static str, &'static str, bool)> {
 /// `PARSER_STACK_SIZE` (reserved lazily, not committed).
 const RULES_STACK_SIZE: usize = 256 * 1024 * 1024;
 
-/// Run `f` on a scoped thread with [`RULES_STACK_SIZE`] of stack.
-pub(crate) fn with_rules_stack<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+/// Run `f` on a scoped thread with [`RULES_STACK_SIZE`] of stack. Public so
+/// every rule-execution path (including the LSP, which drives rules directly)
+/// gets the same protection against deep-but-legal ASTs.
+pub fn with_rules_stack<T: Send>(f: impl FnOnce() -> T + Send) -> T {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .stack_size(RULES_STACK_SIZE)

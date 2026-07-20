@@ -30,12 +30,16 @@ use crate::lexer::{Lexer, filter_trivia};
 /// pipeline has already consumed.
 pub fn parse(source: &str) -> (Program, Vec<ParseError>) {
     std::thread::scope(|scope| {
-        std::thread::Builder::new()
+        match std::thread::Builder::new()
             .stack_size(PARSER_STACK_SIZE)
             .spawn_scoped(scope, || parse_inner(source))
-            .expect("spawn parser thread")
-            .join()
-            .expect("parser thread panicked")
+        {
+            Ok(handle) => handle.join().expect("parser thread panicked"),
+            // Spawn can fail under thread/memory exhaustion; parsing on the
+            // current stack is still protected by the MAX_PARSE_DEPTH guard,
+            // just with less headroom — better than aborting the process.
+            Err(_) => parse_inner(source),
+        }
     })
 }
 

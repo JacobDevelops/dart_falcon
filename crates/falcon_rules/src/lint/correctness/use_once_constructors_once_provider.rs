@@ -148,7 +148,16 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::New { .. } => {}
+        // `new`/`const` constructions are never provider calls themselves, but
+        // their arguments can contain one.
+        Expr::New { args, .. } => {
+            for arg in &args.positional {
+                scan_expr(arg, diags, ctx);
+            }
+            for named in &args.named {
+                scan_expr(&named.value, diags, ctx);
+            }
+        }
         Expr::Call { callee, args, .. } => {
             check_once_provider_call(callee, expr, args, diags, ctx);
             // Don't scan the callee recursively to avoid false positives on .once() calls

@@ -656,3 +656,36 @@ fn test_deep_block_nesting_does_not_overflow() {
         "expected a nesting-too-deep error for deeply nested blocks"
     );
 }
+
+#[test]
+fn test_await_for_rejected_in_plain_function() {
+    // `await for` is only legal in an async body; in a sync body `await` is an
+    // identifier and this must NOT silently parse as an await-for loop.
+    let (stmts, errors) = sync_body_stmts("await for (var x in xs) { print(x); }");
+    assert!(errors > 0, "sync-body await-for must error: {stmts:?}");
+    assert!(
+        !stmts
+            .iter()
+            .any(|s| matches!(s, Stmt::For(f) if f.is_await)),
+        "must not build an await-for in a sync body: {stmts:?}"
+    );
+}
+
+#[test]
+fn test_await_for_accepted_in_async_function() {
+    let (prog, errors) = parse("void f(Stream<int> xs) async { await for (var x in xs) { print(x); } }");
+    assert_eq!(errors.len(), 0, "{errors:?}");
+    let func = match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("got {other:?}"),
+    };
+    let block = match func.body.as_ref().unwrap() {
+        FunctionBody::Block(b) => b,
+        other => panic!("got {other:?}"),
+    };
+    assert!(
+        matches!(&block.stmts[0], Stmt::For(f) if f.is_await),
+        "expected await-for, got {:?}",
+        block.stmts[0]
+    );
+}

@@ -646,7 +646,8 @@ fn top_level_key_warnings(value: &serde_json::Value) -> Vec<String> {
     let Some(obj) = value.as_object() else {
         return Vec::new();
     };
-    obj.keys()
+    let mut warnings: Vec<String> = obj
+        .keys()
         .filter(|k| !KNOWN_TOP_LEVEL_KEYS.contains(&k.as_str()))
         .map(|key| {
             match LEGACY_TOP_LEVEL_KEYS.iter().find(|(legacy, _)| legacy == key) {
@@ -660,7 +661,26 @@ fn top_level_key_warnings(value: &serde_json::Value) -> Vec<String> {
                 ),
             }
         })
-        .collect()
+        .collect();
+    // Override entries accept `project`/`cross_file` as serde aliases for
+    // `cross-file`; they load, but deserve the same deprecation nudge.
+    if let Some(overrides) = obj.get("overrides").and_then(|v| v.as_array()) {
+        for (i, entry) in overrides.iter().enumerate() {
+            let Some(entry) = entry.as_object() else {
+                continue;
+            };
+            for legacy in ["project", "cross_file"] {
+                if entry.contains_key(legacy) {
+                    warnings.push(format!(
+                        "warning: falcon.json `overrides[{i}]` uses the deprecated key \
+                         `{legacy}`; it still works but is a legacy spelling of \
+                         `cross-file` — run `falcon migrate` to update"
+                    ));
+                }
+            }
+        }
+    }
+    warnings
 }
 
 /// Load a config from a specific file path.
@@ -763,6 +783,24 @@ mod warning_tests {
         assert_eq!(warnings.len(), 2);
         assert!(warnings.iter().any(|w| w.contains("unknown top-level key `linterr`")));
         assert!(warnings.iter().any(|w| w.contains("unknown top-level key `totallyBogus`")));
+    }
+
+    /// An override entry using a legacy alias (`project`/`cross_file`) for
+    /// `cross-file` earns the same deprecation warning, indexed by entry.
+    #[test]
+    fn override_level_legacy_alias_is_deprecation_warned() {
+        let warnings = top_level_key_warnings(&json!({
+            "linter": {},
+            "overrides": [
+                { "includes": ["test/**"], "cross-file": { "enabled": false } },
+                { "includes": ["lib/**"], "project": { "enabled": false } }
+            ]
+        }));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("overrides[1]"));
+        assert!(warnings[0].contains("deprecated"));
+        assert!(warnings[0].contains("`project`"));
+        assert!(warnings[0].contains("falcon migrate"));
     }
 
     /// Findings 3/4: legacy spellings load but earn a deprecation warning naming
