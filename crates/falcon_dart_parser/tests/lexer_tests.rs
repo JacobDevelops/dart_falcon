@@ -1086,6 +1086,67 @@ fn nested_double_triple_quote_in_interpolation() {
     assert!(matches!(node.interpolations[0].expr, Expr::Call { .. }));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// UTF-8 handling: leading BOM stripping and ASCII-only identifiers.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Leading UTF-8 BOM (U+FEFF) ─────────────────────────────────────────────────
+
+#[test]
+fn leading_bom_is_stripped_no_error() {
+    // Real Dart accepts a leading BOM as clean source; the lexer must skip it
+    // rather than emit an Error token at offset 0.
+    let src = "\u{FEFF}void main() {}";
+    assert_no_error_tokens(src);
+    let toks = all_tokens(src);
+    assert_ne!(toks[0].kind, TokenKind::Error);
+    // First token begins just past the 3-byte BOM.
+    assert_eq!(toks[0].offset, '\u{FEFF}'.len_utf8());
+}
+
+#[test]
+fn bom_file_parses_with_zero_errors() {
+    let (_program, errors) = parse("\u{FEFF}void main() {}");
+    assert!(errors.is_empty(), "BOM file should parse clean: {errors:?}");
+}
+
+#[test]
+fn bom_not_at_offset_zero_is_error() {
+    // Only a leading BOM is stripped; an interior U+FEFF stays illegal.
+    let toks = all_tokens("void\u{FEFF}main");
+    assert!(
+        toks.iter().any(|t| t.kind == TokenKind::Error),
+        "interior BOM must remain an Error token: {toks:?}"
+    );
+}
+
+// ── ASCII-only identifiers (Dart illegal_character) ────────────────────────────
+
+#[test]
+fn non_ascii_identifier_char_is_error() {
+    // Dart identifiers are ASCII only; a CJK char is `illegal_character`.
+    let toks = all_tokens("var 変数 = 1;");
+    assert!(
+        toks.iter().any(|t| t.kind == TokenKind::Error),
+        "non-ASCII identifier chars must lex as Error: {toks:?}"
+    );
+}
+
+#[test]
+fn non_ascii_char_is_single_error_token_no_panic() {
+    // Each non-ASCII char becomes one Error token spanning its UTF-8 bytes.
+    let toks = all_tokens("é");
+    let errs: Vec<_> = toks.iter().filter(|t| t.kind == TokenKind::Error).collect();
+    assert_eq!(errs.len(), 1, "expected a single Error token: {toks:?}");
+    assert_eq!(errs[0].len, 'é'.len_utf8());
+}
+
+#[test]
+fn ascii_identifiers_still_lex() {
+    assert_eq!(only_kind("foo"), TokenKind::Ident);
+    assert_no_error_tokens("foo _bar $baz name1");
+}
+
 // ── Raw string inside an interpolation body ───────────────────────────────────
 
 #[test]

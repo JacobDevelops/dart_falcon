@@ -12,7 +12,14 @@ pub struct Lexer<'src> {
 
 impl<'src> Lexer<'src> {
     pub fn new(src: &'src str) -> Self {
-        Self { src, pos: 0 }
+        // Dart accepts a single leading UTF-8 BOM as clean source; skip it so it
+        // never lexes as an Error. Elsewhere U+FEFF stays an illegal character.
+        let pos = if src.starts_with('\u{FEFF}') {
+            '\u{FEFF}'.len_utf8()
+        } else {
+            0
+        };
+        Self { src, pos }
     }
 
     /// Lex the full source and return all tokens, ending with a single `Eof`.
@@ -654,12 +661,12 @@ impl<'src> Lexer<'src> {
 
 #[inline]
 pub fn is_ident_start(c: char) -> bool {
-    c == '_' || c == '$' || c.is_alphabetic()
+    c == '_' || c == '$' || c.is_ascii_alphabetic()
 }
 
 #[inline]
 pub fn is_ident_continue(c: char) -> bool {
-    c == '_' || c == '$' || c.is_alphanumeric()
+    c == '_' || c == '$' || c.is_ascii_alphanumeric()
 }
 
 // ── Convenience: filter trivia ────────────────────────────────────────────────
