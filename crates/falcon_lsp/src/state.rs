@@ -305,7 +305,10 @@ impl LspState {
             .collect();
 
         let mut files = Vec::new();
-        for entry in WalkDir::new(&self.workspace_root).follow_links(true) {
+        // Never follow symlinks: Flutter's ephemeral/.plugin_symlinks point into
+        // the pub cache (same hazard the CLI walker fixed) and a long-lived LSP
+        // would hold all of it in memory.
+        for entry in WalkDir::new(&self.workspace_root).follow_links(false) {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(e) => {

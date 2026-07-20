@@ -97,7 +97,10 @@ fn is_side_effect_free(expr: &Expr) -> bool {
         | Expr::SymbolLit { .. }
         | Expr::This { .. }
         | Expr::Super { .. } => true,
-        Expr::StringLit(s) => s.interpolations.iter().all(|i| is_side_effect_free(&i.expr)),
+        Expr::StringLit(s) => s
+            .interpolations
+            .iter()
+            .all(|i| is_side_effect_free(&i.expr)),
         Expr::Field { object, .. } => is_side_effect_free(object),
         Expr::Index { object, index, .. } => {
             is_side_effect_free(object) && is_side_effect_free(index)
@@ -106,9 +109,7 @@ fn is_side_effect_free(expr: &Expr) -> bool {
             is_side_effect_free(operand)
         }
         Expr::Is { expr, .. } | Expr::As { expr, .. } => is_side_effect_free(expr),
-        Expr::Binary { left, right, .. } => {
-            is_side_effect_free(left) && is_side_effect_free(right)
-        }
+        Expr::Binary { left, right, .. } => is_side_effect_free(left) && is_side_effect_free(right),
         Expr::Conditional {
             condition,
             then_expr,
