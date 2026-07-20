@@ -163,6 +163,7 @@ Class(
                                     },
                                 },
                                 default_value: None,
+                                type_params: [],
                                 function_params: None,
                                 span: Span {
                                     start: 50,
@@ -185,6 +186,7 @@ Class(
                                     },
                                 },
                                 default_value: None,
+                                type_params: [],
                                 function_params: None,
                                 span: Span {
                                     start: 58,

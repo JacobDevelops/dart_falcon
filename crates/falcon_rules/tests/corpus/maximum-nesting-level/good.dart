@@ -47,3 +47,23 @@ class Printer {
     }
   }
 }
+
+// Labeled loop whose nesting stays within the limit.
+void labeledShallow(List<int> xs, bool a) {
+  loop:
+  for (final x in xs) {
+    if (a) {
+      print(x);
+      break loop;
+    }
+  }
+}
+
+// Closure whose nesting stays within the limit.
+void closureShallow(List<int> xs) {
+  run(() {
+    for (final x in xs) {
+      print(x);
+    }
+  });
+}

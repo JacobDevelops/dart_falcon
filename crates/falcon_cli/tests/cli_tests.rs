@@ -4,14 +4,12 @@ use falcon_cli::{CheckOptions, run_check};
 use std::fs;
 use tempfile::tempdir;
 
-/// Test 1: --version flag works via clap
 #[test]
 fn test_version_flag_parses() {
     let cmd = Cli::command();
     assert!(cmd.get_version().is_some());
 }
 
-/// Test 2: check --format json parses
 #[test]
 fn test_check_format_json_parses() {
     let args = vec!["falcon", "check", ".", "--format", "json"];
@@ -26,7 +24,6 @@ fn test_check_format_json_parses() {
     }
 }
 
-/// Test 3: check --exclude pattern parses
 #[test]
 fn test_check_exclude_parses() {
     let args = vec![
@@ -51,7 +48,6 @@ fn test_check_exclude_parses() {
     }
 }
 
-/// Test 4: check --max-errors parses
 #[test]
 fn test_check_max_errors_parses() {
     let args = vec!["falcon", "check", ".", "--max-errors", "10"];
@@ -66,7 +62,6 @@ fn test_check_max_errors_parses() {
     }
 }
 
-/// Test 5: check --quiet parses
 #[test]
 fn test_check_quiet_parses() {
     let args = vec!["falcon", "check", ".", "--quiet"];
@@ -81,7 +76,6 @@ fn test_check_quiet_parses() {
     }
 }
 
-/// Test 6: Integration test - run_check on a violation-free .dart file → exit 0
 #[test]
 fn test_run_check_integration_clean_file_exit_zero() {
     let dir = tempdir().unwrap();
@@ -100,7 +94,6 @@ fn test_run_check_integration_clean_file_exit_zero() {
     assert_eq!(code, 0);
 }
 
-/// Test 7: check --exit-code parses correctly
 #[test]
 fn test_check_exit_code_parses() {
     let args = vec!["falcon", "check", ".", "--exit-code", "2"];
@@ -115,7 +108,6 @@ fn test_check_exit_code_parses() {
     }
 }
 
-/// Test 8: check --exit-code defaults to 1
 #[test]
 fn test_check_exit_code_default_one() {
     let args = vec!["falcon", "check", "."];
@@ -130,7 +122,6 @@ fn test_check_exit_code_default_one() {
     }
 }
 
-/// Test 9: check --parallel flag parses
 #[test]
 fn test_check_parallel_flag_parses() {
     let args = vec!["falcon", "check", ".", "--parallel"];
@@ -145,7 +136,6 @@ fn test_check_parallel_flag_parses() {
     }
 }
 
-/// Test 10: version subcommand parses
 #[test]
 fn test_version_subcommand_parses() {
     let args = vec!["falcon", "version"];

@@ -5,7 +5,8 @@ use tracing::{info, info_span};
 
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;
-use falcon_diagnostics::Diagnostic;
+use falcon_dart_parser::parser::ParseError;
+use falcon_diagnostics::{Diagnostic, Severity, Span};
 use falcon_syntax::ast::Program;
 
 use crate::resolve::{
@@ -29,7 +30,8 @@ fn analyze_file(
     let _enter = span.enter();
     let (program, parse_errors) = parse(source);
     let ctx = AnalyzeContext::new(path, source, config);
-    let diagnostics = registry.run_all(&program, &ctx);
+    let mut diagnostics = syntax_error_diagnostics(path, &parse_errors);
+    diagnostics.extend(registry.run_all(&program, &ctx));
     info!(file = %path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
     let retained = collect_programs.then(|| ProjectFile {
         path: path.to_path_buf(),
@@ -40,6 +42,29 @@ fn analyze_file(
     (diagnostics, retained)
 }
 
+/// Convert the parser's recovered errors into `syntax-error` diagnostics
+/// (severity error) so non-compiling Dart is reported rather than silently
+/// linted as if valid. Public so other analyze consumers (e.g. the LSP server)
+/// surface the same diagnostics. Positions are resolved later, once source is at
+/// hand at the output boundary.
+pub fn syntax_error_diagnostics(path: &Path, errors: &[ParseError]) -> Vec<Diagnostic> {
+    errors
+        .iter()
+        .map(|e| {
+            Diagnostic::new(
+                "syntax-error",
+                Severity::Error,
+                e.message.clone(),
+                path.to_string_lossy().into_owned(),
+                Span {
+                    start: e.offset,
+                    end: e.offset,
+                },
+            )
+        })
+        .collect()
+}
+
 /// A parsed file awaiting analysis. Retained across the parse-then-analyze
 /// reorder so a single cross-file [`ProjectIndex`] can be built from every
 /// program before the per-file pass runs (resolver-dependent rules need it).
@@ -47,7 +72,7 @@ struct Parsed {
     path: PathBuf,
     source: String,
     program: Program,
-    has_parse_errors: bool,
+    parse_errors: Vec<ParseError>,
 }
 
 fn parse_one(path: &Path, source: &str) -> Parsed {
@@ -56,7 +81,7 @@ fn parse_one(path: &Path, source: &str) -> Parsed {
         path: path.to_path_buf(),
         source: source.to_owned(),
         program,
-        has_parse_errors: !parse_errors.is_empty(),
+        parse_errors,
     }
 }
 
@@ -72,7 +97,7 @@ fn retain(parsed: Vec<Parsed>, collect_programs: bool) -> Vec<ProjectFile> {
             path: p.path,
             source: p.source,
             program: p.program,
-            has_parse_errors: p.has_parse_errors,
+            has_parse_errors: !p.parse_errors.is_empty(),
         })
         .collect()
 }
@@ -91,7 +116,7 @@ fn analyze_indexed(
             .iter()
             .map(|p| ProgramSource {
                 program: &p.program,
-                has_parse_errors: p.has_parse_errors,
+                has_parse_errors: !p.parse_errors.is_empty(),
             })
             .collect();
         ProjectIndex::from_project_files(&sources)
@@ -109,7 +134,7 @@ fn analyze_indexed(
     let type_index = {
         let sources = parsed.iter().enumerate().map(|(i, p)| LibrarySource {
             program: &p.program,
-            has_parse_errors: p.has_parse_errors,
+            has_parse_errors: !p.parse_errors.is_empty(),
             has_unresolved_parts: grouping.is_unresolved(i),
         });
         TypeIndex::from_library_files(sources)
@@ -126,7 +151,8 @@ fn analyze_indexed(
             .with_project(&index)
             .with_types(&type_index)
             .with_library(&library_units[i]);
-        let diagnostics = registry.run_all(&p.program, &ctx);
+        let mut diagnostics = syntax_error_diagnostics(&p.path, &p.parse_errors);
+        diagnostics.extend(registry.run_all(&p.program, &ctx));
         info!(file = %p.path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
         diagnostics
     };

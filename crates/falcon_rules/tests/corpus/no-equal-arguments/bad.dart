@@ -7,6 +7,14 @@ void testEqualArguments() {
   baz(a, b, a); /* expect: no-equal-arguments */
 }
 
+// A label on the enclosing loop must not hide the equal-argument call inside.
+void testLabeledLoop() {
+  outer:
+  for (var i = 0; i < 3; i++) {
+    foo(value, value); /* expect: no-equal-arguments */
+  }
+}
+
 void testRectFromPoints() {
   final rect = Rect.fromPoints(start, start); /* expect: no-equal-arguments */
 }

@@ -23,8 +23,8 @@ use lsp_types::request::{HoverRequest, Request as _};
 use lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DidSaveTextDocumentParams, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeResult, MarkupContent, MarkupKind, PublishDiagnosticsParams, SaveOptions,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
+    InitializeResult, MarkupContent, MarkupKind, PositionEncodingKind, PublishDiagnosticsParams,
+    SaveOptions, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
     TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Uri,
 };
 use tracing::{debug, info, warn};
@@ -54,6 +54,9 @@ impl Default for ServerOptions {
 /// Capabilities advertised in the initialize response.
 fn server_capabilities() -> ServerCapabilities {
     ServerCapabilities {
+        // Positions use UTF-16 code units (the LSP default); advertise it so
+        // clients don't silently assume a different encoding.
+        position_encoding: Some(PositionEncodingKind::UTF16),
         text_document_sync: Some(TextDocumentSyncCapability::Options(
             TextDocumentSyncOptions {
                 open_close: Some(true),
@@ -103,6 +106,20 @@ pub fn run_with_connection(
     let mut dirty: HashSet<String> = HashSet::new();
     let mut deadline: Option<Instant> = None;
 
+    // Deserialize a notification's params or skip the message: a single
+    // malformed notification must not tear down the session (LSP spec).
+    macro_rules! parse_params {
+        ($method:expr, $params:expr) => {
+            match serde_json::from_value($params) {
+                Ok(value) => value,
+                Err(error) => {
+                    warn!(method = %$method, %error, "ignoring notification with malformed params");
+                    continue;
+                }
+            }
+        };
+    }
+
     loop {
         let message = match deadline {
             Some(at) => {
@@ -137,10 +154,9 @@ pub fn run_with_connection(
                 }
                 handle_request(&connection, &state, request)?;
             }
-            Message::Notification(notification) => match notification.method.as_str() {
+            Message::Notification(ServerNotification { method, params }) => match method.as_str() {
                 DidOpenTextDocument::METHOD => {
-                    let params: DidOpenTextDocumentParams =
-                        serde_json::from_value(notification.params)?;
+                    let params: DidOpenTextDocumentParams = parse_params!(&method, params);
                     let uri = params.text_document.uri.as_str().to_string();
                     let diagnostics = state.open(
                         &uri,
@@ -152,8 +168,7 @@ pub fn run_with_connection(
                     cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
                 }
                 DidChangeTextDocument::METHOD => {
-                    let params: DidChangeTextDocumentParams =
-                        serde_json::from_value(notification.params)?;
+                    let params: DidChangeTextDocumentParams = parse_params!(&method, params);
                     let uri = params.text_document.uri.as_str().to_string();
                     // FULL sync: the last change event carries the whole document.
                     let Some(change) = params.content_changes.into_iter().next_back() else {
@@ -170,8 +185,7 @@ pub fn run_with_connection(
                     }
                 }
                 DidSaveTextDocument::METHOD => {
-                    let params: DidSaveTextDocumentParams =
-                        serde_json::from_value(notification.params)?;
+                    let params: DidSaveTextDocumentParams = parse_params!(&method, params);
                     let uri = params.text_document.uri.as_str().to_string();
                     let diagnostics = state.save(&uri, params.text);
                     dirty.remove(&uri);
@@ -179,8 +193,7 @@ pub fn run_with_connection(
                     cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
                 }
                 DidCloseTextDocument::METHOD => {
-                    let params: DidCloseTextDocumentParams =
-                        serde_json::from_value(notification.params)?;
+                    let params: DidCloseTextDocumentParams = parse_params!(&method, params);
                     let uri = params.text_document.uri.as_str().to_string();
                     state.close(&uri);
                     dirty.remove(&uri);
@@ -198,7 +211,10 @@ pub fn run_with_connection(
                         deadline = None;
                     }
                 }
-                "exit" => return Ok(()),
+                // `handle_shutdown` consumes the `exit` that follows a `shutdown`
+                // request, so reaching this arm means `exit` arrived with no prior
+                // `shutdown` — the spec requires the process to exit with code 1.
+                "exit" => return Err("exit notification received without prior shutdown".into()),
                 other => debug!(method = other, "ignoring notification"),
             },
             // Phase 1 sends no server→client requests, so no responses arrive.
@@ -214,7 +230,21 @@ fn handle_request(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     match request.method.as_str() {
         HoverRequest::METHOD => {
-            let params: HoverParams = serde_json::from_value(request.params)?;
+            let params: HoverParams = match serde_json::from_value(request.params) {
+                Ok(params) => params,
+                // Malformed params get an InvalidParams error, not a dead server.
+                Err(error) => {
+                    connection.sender.send(
+                        Response::new_err(
+                            request.id,
+                            ErrorCode::InvalidParams as i32,
+                            format!("invalid params: {error}"),
+                        )
+                        .into(),
+                    )?;
+                    return Ok(());
+                }
+            };
             let result = hover(state, &params);
             connection
                 .sender

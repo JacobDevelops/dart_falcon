@@ -28,6 +28,11 @@ pub struct Diagnostic {
     pub message: String,
     pub file_path: String,
     pub span: Span,
+    /// 1-based line of `span.start`, resolved from source via
+    /// [`Diagnostic::resolve_position`]. 0 means unresolved.
+    pub line: u32,
+    /// 1-based column of `span.start`. 0 means unresolved.
+    pub col: u32,
     pub suggestions: Vec<Suggestion>,
     pub context_lines: Vec<ContextLine>,
 }
@@ -46,18 +51,18 @@ pub struct Span {
     pub end: usize,
 }
 
-/// Convert an LSP `Position` (0-based line + character) back to a byte offset
-/// in `source` — the inverse of [`byte_to_lsp_position`].
+/// Convert an LSP `Position` (0-based line + UTF-16 `character`) back to a byte
+/// offset in `source` — the inverse of [`byte_to_lsp_position`].
 ///
 /// Positions past the end of a line clamp to that line's newline; positions
-/// past the last line clamp to `source.len()`. Like `byte_to_lsp_position`,
-/// `character` counts Unicode scalar values rather than UTF-16 code units
-/// (a Phase 1 simplification; both directions are consistent with each other).
+/// past the last line clamp to `source.len()`. `character` counts UTF-16 code
+/// units, per the LSP default encoding (astral chars = 2 units), so a position
+/// landing inside a surrogate pair resolves to the character's start.
 pub fn lsp_position_to_byte(source: &str, position: Position) -> usize {
     let mut line = 0u32;
     let mut character = 0u32;
     for (i, c) in source.char_indices() {
-        if line == position.line && character == position.character {
+        if line == position.line && character >= position.character {
             return i;
         }
         if line > position.line {
@@ -68,13 +73,20 @@ pub fn lsp_position_to_byte(source: &str, position: Position) -> usize {
             line += 1;
             character = 0;
         } else {
-            character += 1;
+            let next = character + c.len_utf16() as u32;
+            // Target lands inside this char (e.g. mid surrogate pair): clamp to
+            // its start rather than splitting the code point.
+            if line == position.line && next > position.character {
+                return i;
+            }
+            character = next;
         }
     }
     source.len()
 }
 
-/// Convert a byte offset in `source` to an LSP `Position` (0-based line + character).
+/// Convert a byte offset in `source` to an LSP `Position` (0-based line +
+/// UTF-16 `character`, the LSP default encoding — astral chars count as 2).
 pub fn byte_to_lsp_position(source: &str, offset: usize) -> Position {
     let clamped = offset.min(source.len());
     let mut line = 0u32;
@@ -87,10 +99,18 @@ pub fn byte_to_lsp_position(source: &str, offset: usize) -> Position {
             line += 1;
             character = 0;
         } else {
-            character += 1;
+            character += c.len_utf16() as u32;
         }
     }
     Position { line, character }
+}
+
+/// 1-based `(line, column)` of `offset` within `source` — the convention
+/// `dart analyze` and editor jump-to-error use. Columns count Unicode scalar
+/// values (consistent with [`byte_to_lsp_position`]).
+pub fn byte_to_line_col(source: &str, offset: usize) -> (u32, u32) {
+    let pos = byte_to_lsp_position(source, offset);
+    (pos.line + 1, pos.character + 1)
 }
 
 impl Diagnostic {
@@ -109,9 +129,18 @@ impl Diagnostic {
             message: msg,
             file_path: file_path.into(),
             span,
+            line: 0,
+            col: 0,
             suggestions: Vec::new(),
             context_lines: Vec::new(),
         }
+    }
+
+    /// Fill `line`/`col` (1-based) from `source` for this diagnostic's span start.
+    pub fn resolve_position(&mut self, source: &str) {
+        let (line, col) = byte_to_line_col(source, self.span.start);
+        self.line = line;
+        self.col = col;
     }
 
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
@@ -139,8 +168,8 @@ impl Diagnostic {
 
     pub fn format_text(&self) -> String {
         format!(
-            "{}:+{}:{}: [{}] ({}) {}",
-            self.file_path, self.span.start, self.span.end, self.severity, self.rule, self.message
+            "{}:{}:{}: [{}] ({}) {}",
+            self.file_path, self.line, self.col, self.severity, self.rule, self.message
         )
     }
 
@@ -200,5 +229,79 @@ impl std::str::FromStr for Severity {
             "note" => Ok(Severity::Note),
             other => Err(format!("unknown severity: {other}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod position_tests {
+    use super::{byte_to_lsp_position, lsp_position_to_byte};
+    use lsp_types::Position;
+
+    // `😀` is U+1F600: 4 UTF-8 bytes, 1 scalar, 2 UTF-16 code units.
+    const EMOJI: &str = "😀";
+
+    #[test]
+    fn character_counts_utf16_units_past_astral_char() {
+        let src = "a😀b";
+        // byte offsets: 'a'=0, emoji=1..5, 'b'=5
+        assert_eq!(
+            byte_to_lsp_position(src, 5),
+            Position {
+                line: 0,
+                character: 3
+            },
+            "'b' sits at UTF-16 column 3 (1 for 'a' + 2 for the emoji)"
+        );
+    }
+
+    #[test]
+    fn character_on_bmp_text_is_unchanged() {
+        let src = "abc\ndef";
+        assert_eq!(
+            byte_to_lsp_position(src, 5),
+            Position {
+                line: 1,
+                character: 1
+            }
+        );
+    }
+
+    #[test]
+    fn round_trips_through_astral_chars() {
+        let src = "  var s = \"😀😀\"; var x = 1;";
+        let x_byte = src.find("var x").unwrap();
+        let pos = byte_to_lsp_position(src, x_byte);
+        // Two emoji before `var x`: each is 2 UTF-16 units, not 1 scalar.
+        assert_eq!(pos.character, 18);
+        assert_eq!(lsp_position_to_byte(src, pos), x_byte);
+    }
+
+    #[test]
+    fn position_inside_surrogate_pair_clamps_to_char_start() {
+        let src = "a😀b";
+        // Character 2 lands between the emoji's two UTF-16 units; resolve to the
+        // emoji's byte start rather than splitting it.
+        let byte = lsp_position_to_byte(
+            src,
+            Position {
+                line: 0,
+                character: 2,
+            },
+        );
+        assert_eq!(byte, 1, "emoji starts at byte 1");
+    }
+
+    #[test]
+    fn lsp_position_to_byte_lands_after_emoji() {
+        let src = format!("x{EMOJI}y");
+        // 'y' is UTF-16 character 3 (1 + 2).
+        let byte = lsp_position_to_byte(
+            &src,
+            Position {
+                line: 0,
+                character: 3,
+            },
+        );
+        assert_eq!(&src[byte..], "y");
     }
 }

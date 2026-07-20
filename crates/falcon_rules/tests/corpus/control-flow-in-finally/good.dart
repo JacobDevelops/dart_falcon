@@ -57,3 +57,16 @@ void g6(bool cond) {
     }
   }
 }
+
+// A labeled loop declared inside finally is a valid break target, so a
+// labeled break that stays within the finally does not escape it.
+void g7() {
+  try {
+    doThing();
+  } finally {
+    outer:
+    for (var i = 0; i < 3; i++) {
+      break outer;
+    }
+  }
+}

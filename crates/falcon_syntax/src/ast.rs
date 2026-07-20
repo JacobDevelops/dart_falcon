@@ -599,6 +599,9 @@ pub struct FormalParam {
     pub param_type: Option<DartType>,
     pub name: Identifier,
     pub default_value: Option<Expr>,
+    /// Type parameters of a generic function-typed formal (`int cb<T>(T x)`).
+    /// Empty unless `function_params` is present.
+    pub type_params: Vec<TypeParam>,
     pub function_params: Option<FormalParamList>,
     pub span: Span,
 }

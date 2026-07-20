@@ -188,7 +188,6 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             right,
             span,
         } => {
-            // Flag if left is a literal (value or const), UNLESS both sides are literals and left is null
             let left_is_literal = is_literal_or_const(left);
             let right_is_literal = is_literal_or_const(right);
             let left_is_null = matches!(left.as_ref(), Expr::NullLit { .. });

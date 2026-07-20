@@ -207,13 +207,11 @@ fn check_border_radius_only_call(
         let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
 
         let report_span = if start_line == end_line {
-            // Single line - report at start
             DiagSpan {
                 start: span.start,
                 end: span.end,
             }
         } else {
-            // Multi-line - check if opening line contains the closing paren or comment marker
             let opening_line_end = source[span.start..]
                 .find('\n')
                 .map(|off| span.start + off)
@@ -221,13 +219,11 @@ fn check_border_radius_only_call(
             let opening_line_text = &source[span.start..opening_line_end];
 
             if opening_line_text.contains("*/") {
-                // Comment is on opening line
                 DiagSpan {
                     start: span.start,
                     end: span.start + 1,
                 }
             } else {
-                // Comment is on closing line - report at end
                 DiagSpan {
                     start: span.end - 1,
                     end: span.end,
@@ -262,7 +258,6 @@ fn all_border_radii_equal(args: &ArgList) -> bool {
         }
     }
 
-    // All four must be present and equal
     if let (Some(tl), Some(tr), Some(bl), Some(br)) =
         (top_left, top_right, bottom_left, bottom_right)
     {
@@ -273,7 +268,6 @@ fn all_border_radii_equal(args: &ArgList) -> bool {
 }
 
 fn extract_radius_value(expr: &Expr) -> Option<String> {
-    // Extract the numeric value from Radius.circular(X)
     if let Expr::Call { callee, args, .. } = expr
         && let Expr::Field { object, field, .. } = callee.as_ref()
         && let Expr::Ident(ident) = object.as_ref()

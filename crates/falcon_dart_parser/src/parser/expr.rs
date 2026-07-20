@@ -515,6 +515,17 @@ impl<'src> Parser<'src> {
     // ── Unary ─────────────────────────────────────────────────────────────────
 
     fn parse_unary(&mut self) -> Expr {
+        if !self.enter_depth() {
+            return Expr::Error {
+                span: self.cur_span(),
+            };
+        }
+        let e = self.parse_unary_inner();
+        self.exit_depth();
+        e
+    }
+
+    fn parse_unary_inner(&mut self) -> Expr {
         let start = self.cur().offset;
         match self.cur().kind {
             TokenKind::Minus => {
@@ -562,7 +573,10 @@ impl<'src> Parser<'src> {
                     span: self.span_from(start),
                 }
             }
-            TokenKind::Await => {
+            // `await` is reserved only inside an async body; elsewhere it is a
+            // plain identifier (`var await = 0; print(await + 1);`), so fall
+            // through to postfix/primary parsing which reads it as an ident.
+            TokenKind::Await if self.in_async => {
                 self.advance();
                 let operand = self.parse_unary();
                 Expr::Await {
@@ -585,6 +599,17 @@ impl<'src> Parser<'src> {
     // ── Postfix ───────────────────────────────────────────────────────────────
 
     fn parse_postfix(&mut self) -> Expr {
+        if !self.enter_depth() {
+            return Expr::Error {
+                span: self.cur_span(),
+            };
+        }
+        let e = self.parse_postfix_inner();
+        self.exit_depth();
+        e
+    }
+
+    fn parse_postfix_inner(&mut self) -> Expr {
         let start = self.cur().offset;
         let mut expr = self.parse_primary();
 
@@ -777,7 +802,7 @@ impl<'src> Parser<'src> {
             let idx = self.parse_expr();
             self.expect(TokenKind::RBracket);
             if let Some(assign_op) = self.try_parse_assign_op() {
-                let rhs = self.parse_expr();
+                let rhs = self.parse_expr_without_cascade();
                 ops.push(CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs)));
                 return ops; // assignment terminates the section
             }
@@ -793,7 +818,7 @@ impl<'src> Parser<'src> {
                 let args = self.parse_arg_list();
                 CascadeOp::Call(name, type_args, args)
             } else if let Some(assign_op) = self.try_parse_assign_op() {
-                let rhs = self.parse_expr();
+                let rhs = self.parse_expr_without_cascade();
                 ops.push(CascadeOp::Assign(
                     Box::new(Expr::Ident(name)),
                     assign_op,
@@ -830,7 +855,7 @@ impl<'src> Parser<'src> {
                         let args = self.parse_arg_list();
                         ops.push(CascadeOp::Call(name, type_args, args));
                     } else if let Some(assign_op) = self.try_parse_assign_op() {
-                        let rhs = self.parse_expr();
+                        let rhs = self.parse_expr_without_cascade();
                         ops.push(CascadeOp::Assign(
                             Box::new(Expr::Ident(name)),
                             assign_op,
@@ -847,7 +872,7 @@ impl<'src> Parser<'src> {
                     let idx = self.parse_expr();
                     self.expect(TokenKind::RBracket);
                     if let Some(assign_op) = self.try_parse_assign_op() {
-                        let rhs = self.parse_expr();
+                        let rhs = self.parse_expr_without_cascade();
                         ops.push(CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs)));
                         break;
                     }
@@ -884,6 +909,17 @@ impl<'src> Parser<'src> {
     // ── Primary ───────────────────────────────────────────────────────────────
 
     pub(super) fn parse_primary(&mut self) -> Expr {
+        if !self.enter_depth() {
+            return Expr::Error {
+                span: self.cur_span(),
+            };
+        }
+        let e = self.parse_primary_inner();
+        self.exit_depth();
+        e
+    }
+
+    fn parse_primary_inner(&mut self) -> Expr {
         let start = self.cur().offset;
         match self.cur().kind.clone() {
             TokenKind::IntLit => {
@@ -1246,6 +1282,11 @@ impl<'src> Parser<'src> {
     ) -> Expr {
         let params = self.parse_formal_param_list();
         let (is_async, is_generator) = self.parse_async_marker();
+        // A closure establishes its own async/generator context: `await`/`yield`
+        // are reserved per this closure's markers, independent of any enclosing
+        // body (a plain closure inside an async function resets them).
+        let saved_ctx = (self.in_async, self.in_generator);
+        (self.in_async, self.in_generator) = (is_async, is_generator);
         // A closure's `=>` body is an expression, so it must NOT swallow the `;`
         // that terminates the enclosing declaration/statement — unlike a function
         // *declaration* body. `class C { final f = () => 0; }` relies on the `;`
@@ -1266,6 +1307,7 @@ impl<'src> Parser<'src> {
                 })
             }
         };
+        (self.in_async, self.in_generator) = saved_ctx;
         Expr::FuncExpr {
             type_params,
             params,

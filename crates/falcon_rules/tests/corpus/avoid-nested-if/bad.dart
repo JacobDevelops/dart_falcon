@@ -37,5 +37,17 @@ class NestedIfExamples {
     }
   }
 
+  // A label on the nested chain must not hide the `if`s it wraps.
+  void labeledChain(bool a, bool b, bool c) {
+    if (a) { /* expect: avoid-nested-if */
+      outer:
+      if (b) {
+        if (c) {
+          print('all true');
+        }
+      }
+    }
+  }
+
   void doSomething() {}
 }

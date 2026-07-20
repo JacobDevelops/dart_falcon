@@ -28,8 +28,8 @@ pub struct FalconConfig {
     /// Cross-file rule enablement and levels. A separate feature from `linter`:
     /// these rules reason across the whole file set (unused files, unused code,
     /// call-site nullability) and run in the CLI and LSP cross-file passes.
-    /// Accepts the legacy key `project` as a deserialization alias.
-    #[serde(rename = "cross-file", alias = "project")]
+    /// Accepts the legacy keys `project` and `cross_file` as deserialization aliases.
+    #[serde(rename = "cross-file", alias = "project", alias = "cross_file")]
     pub cross_file: CrossFileConfig,
     /// Per-path rule re-configuration (biome `overrides`). Each entry re-patches
     /// the base linter and/or cross-file resolution for files its `includes` match;
@@ -60,10 +60,11 @@ pub struct Override {
     pub linter: Option<OverrideRules>,
     /// Partial cross-file rule configuration applied to matching files. Same
     /// shape and semantics as `linter`, resolved against `cross_file.rules`.
-    /// Accepts the legacy key `project` as a deserialization alias.
+    /// Accepts the legacy keys `project` and `cross_file` as deserialization aliases.
     #[serde(
         rename = "cross-file",
         alias = "project",
+        alias = "cross_file",
         skip_serializing_if = "Option::is_none"
     )]
     pub cross_file: Option<OverrideRules>,
@@ -623,14 +624,78 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+/// Canonical top-level keys of a falcon.json.
+const KNOWN_TOP_LEVEL_KEYS: &[&str] =
+    &["$schema", "files", "linter", "cross-file", "overrides", "max-errors"];
+
+/// Legacy top-level spellings still accepted, each mapped to its canonical key.
+/// Recognized so a pre-rename config keeps loading, but warned on so the user
+/// knows to run `falcon migrate`.
+const LEGACY_TOP_LEVEL_KEYS: &[(&str, &str)] = &[
+    ("project", "cross-file"),
+    ("cross_file", "cross-file"),
+    ("max_errors", "max-errors"),
+];
+
+/// Warnings for a config's top-level keys: a deprecation notice for each legacy
+/// spelling, and an "unknown key" notice for anything unrecognized (typo
+/// protection). Unknown keys are ignored by serde, so without this a mistyped
+/// section vanishes silently. Legacy-flat-schema keys are handled earlier (hard
+/// error) and never reach here.
+fn top_level_key_warnings(value: &serde_json::Value) -> Vec<String> {
+    let Some(obj) = value.as_object() else {
+        return Vec::new();
+    };
+    let mut warnings: Vec<String> = obj
+        .keys()
+        .filter(|k| !KNOWN_TOP_LEVEL_KEYS.contains(&k.as_str()))
+        .map(|key| {
+            match LEGACY_TOP_LEVEL_KEYS.iter().find(|(legacy, _)| legacy == key) {
+                Some((_, canonical)) => format!(
+                    "warning: falcon.json uses the deprecated top-level key `{key}`; it \
+                     still works but is a legacy spelling of `{canonical}` — run \
+                     `falcon migrate` to update"
+                ),
+                None => format!(
+                    "warning: falcon.json contains unknown top-level key `{key}`; it is ignored"
+                ),
+            }
+        })
+        .collect();
+    // Override entries accept `project`/`cross_file` as serde aliases for
+    // `cross-file`; they load, but deserve the same deprecation nudge.
+    if let Some(overrides) = obj.get("overrides").and_then(|v| v.as_array()) {
+        for (i, entry) in overrides.iter().enumerate() {
+            let Some(entry) = entry.as_object() else {
+                continue;
+            };
+            for legacy in ["project", "cross_file"] {
+                if entry.contains_key(legacy) {
+                    warnings.push(format!(
+                        "warning: falcon.json `overrides[{i}]` uses the deprecated key \
+                         `{legacy}`; it still works but is a legacy spelling of \
+                         `cross-file` — run `falcon migrate` to update"
+                    ));
+                }
+            }
+        }
+    }
+    warnings
+}
+
 /// Load a config from a specific file path.
+///
+/// Prints a stderr warning for any unknown top-level key (typo protection) and
+/// for any legacy key spelling (`project`, `cross_file`, `max_errors`), which
+/// still load but are deprecated.
 ///
 /// # Errors
 ///
 /// Returns `ConfigError` if the file cannot be read, if JSON deserialization
-/// fails, or if the file uses the legacy flat schema (top-level `rules`,
+/// fails, if the file uses the legacy flat schema (top-level `rules`,
 /// `exclude_patterns`, or `severity_override`) — which serde would otherwise
-/// silently accept as an all-defaults config.
+/// silently accept as an all-defaults config — or if `max-errors` is `0`, which
+/// would suppress every diagnostic.
 pub fn load_config(path: &Path) -> Result<FalconConfig, ConfigError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| ConfigError(format!("failed to read config file: {}", e)))?;
@@ -649,8 +714,20 @@ pub fn load_config(path: &Path) -> Result<FalconConfig, ConfigError> {
         ));
     }
 
+    for warning in top_level_key_warnings(&value) {
+        eprintln!("{warning}");
+    }
+
     let config: FalconConfig = serde_json::from_value(value)
         .map_err(|e| ConfigError(format!("failed to parse config JSON: {}", e)))?;
+
+    if config.max_errors == Some(0) {
+        return Err(ConfigError(
+            "`max-errors` must be at least 1; 0 would suppress every diagnostic and pass a \
+             run with violations present. Omit it (or use null) for no limit."
+                .to_string(),
+        ));
+    }
 
     Ok(config)
 }
@@ -662,13 +739,11 @@ pub fn load_config(path: &Path) -> Result<FalconConfig, ConfigError> {
 /// 3. `$HOME/.falcon.json` (via `std::env::var("HOME")`)
 /// 4. Return None if nothing found
 pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
-    // 1. Check start_dir/falcon.json
     let local_config = start_dir.join("falcon.json");
     if local_config.exists() {
         return Some(local_config);
     }
 
-    // 2. Walk parent dirs looking for .git, then check <git_root>/falcon.json
     let mut current = start_dir;
     loop {
         let git_dir = current.join(".git");
@@ -685,7 +760,6 @@ pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
         }
     }
 
-    // 3. Check $HOME/.falcon.json
     if let Ok(home) = std::env::var("HOME") {
         let home_config = PathBuf::from(home).join(".falcon.json");
         if home_config.exists() {
@@ -696,22 +770,81 @@ pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Load config from discovered location, or return default if not found.
+#[cfg(test)]
+mod warning_tests {
+    use super::top_level_key_warnings;
+    use serde_json::json;
+
+    /// Finding 3: an unknown top-level section (a mistyped `linter`) is warned
+    /// about by name, not silently dropped.
+    #[test]
+    fn unknown_top_level_key_is_warned() {
+        let warnings = top_level_key_warnings(&json!({ "linterr": {}, "totallyBogus": 5 }));
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().any(|w| w.contains("unknown top-level key `linterr`")));
+        assert!(warnings.iter().any(|w| w.contains("unknown top-level key `totallyBogus`")));
+    }
+
+    /// An override entry using a legacy alias (`project`/`cross_file`) for
+    /// `cross-file` earns the same deprecation warning, indexed by entry.
+    #[test]
+    fn override_level_legacy_alias_is_deprecation_warned() {
+        let warnings = top_level_key_warnings(&json!({
+            "linter": {},
+            "overrides": [
+                { "includes": ["test/**"], "cross-file": { "enabled": false } },
+                { "includes": ["lib/**"], "project": { "enabled": false } }
+            ]
+        }));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("overrides[1]"));
+        assert!(warnings[0].contains("deprecated"));
+        assert!(warnings[0].contains("`project`"));
+        assert!(warnings[0].contains("falcon migrate"));
+    }
+
+    /// Findings 3/4: legacy spellings load but earn a deprecation warning naming
+    /// their canonical key and pointing at `falcon migrate`.
+    #[test]
+    fn legacy_spellings_are_deprecation_warned_not_unknown() {
+        let warnings = top_level_key_warnings(&json!({
+            "project": {}, "cross_file": {}, "max_errors": 10
+        }));
+        assert_eq!(warnings.len(), 3);
+        for w in &warnings {
+            assert!(w.contains("deprecated"), "should be a deprecation, not unknown: {w}");
+            assert!(w.contains("falcon migrate"));
+        }
+        assert!(warnings.iter().any(|w| w.contains("`project`") && w.contains("`cross-file`")));
+        assert!(warnings.iter().any(|w| w.contains("`cross_file`") && w.contains("`cross-file`")));
+        assert!(warnings.iter().any(|w| w.contains("`max_errors`") && w.contains("`max-errors`")));
+    }
+
+    /// Canonical keys produce no noise.
+    #[test]
+    fn canonical_keys_produce_no_warnings() {
+        let warnings = top_level_key_warnings(&json!({
+            "$schema": "x", "files": {}, "linter": {}, "cross-file": {},
+            "overrides": [], "max-errors": 50
+        }));
+        assert!(warnings.is_empty(), "unexpected: {warnings:?}");
+    }
+}
+
+/// Load config from its discovered location, or the default when none is found.
 ///
-/// If config file is found but loading fails, logs a warning to stderr and returns default.
-pub fn load_or_default(start_dir: &Path) -> FalconConfig {
+/// A discovered config that fails to load is a hard **error**, not a silent
+/// fall-back to defaults: a typo (invalid JSON, a wrong-typed value, the legacy
+/// flat schema) must not quietly re-enable every rule. Only the genuine
+/// no-config-found case yields `Ok(FalconConfig::default())`.
+///
+/// # Errors
+///
+/// Propagates any [`load_config`] error for a config that was found but could
+/// not be loaded.
+pub fn load_or_default(start_dir: &Path) -> Result<FalconConfig, ConfigError> {
     match find_config(start_dir) {
-        Some(path) => match load_config(&path) {
-            Ok(cfg) => cfg,
-            Err(e) => {
-                eprintln!(
-                    "warning: failed to load config from {}: {}",
-                    path.display(),
-                    e
-                );
-                FalconConfig::default()
-            }
-        },
-        None => FalconConfig::default(),
+        Some(path) => load_config(&path),
+        None => Ok(FalconConfig::default()),
     }
 }

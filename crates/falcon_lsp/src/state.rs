@@ -9,7 +9,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, CrossFileRuleRegistry, FileSuppressions, ProjectFile, Rule};
+use falcon_analyze::{
+    AnalyzeContext, CrossFileRuleRegistry, FileSuppressions, ProjectFile, Rule,
+    syntax_error_diagnostics, with_rules_stack,
+};
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::parse;
 use falcon_diagnostics::Diagnostic;
@@ -29,6 +32,9 @@ pub struct DocumentState {
     /// Whether the last parse produced errors — carried so the cross-file pass
     /// can populate [`ProjectFile::has_parse_errors`] without re-parsing.
     has_parse_errors: bool,
+    /// `syntax-error` diagnostics from the last parse, kept so `analyze` can
+    /// publish them alongside lints without re-parsing (parity with the CLI).
+    syntax_diagnostics: Vec<Diagnostic>,
     /// Most recent published output (byte spans) — read by hover. May include
     /// cross-file diagnostics after a cross-file pass; never an input to analysis.
     pub last_diagnostics: Vec<Diagnostic>,
@@ -99,6 +105,7 @@ impl LspState {
     /// `textDocument/didOpen`: cache and parse the document, then analyze it.
     pub fn open(&mut self, uri: &str, text: String, version: Option<i32>) -> Vec<Diagnostic> {
         let (program, parse_errors) = parse(&text);
+        let syntax_diagnostics = syntax_error_diagnostics(&uri_to_path(uri), &parse_errors);
         self.documents.insert(
             uri.to_string(),
             DocumentState {
@@ -106,6 +113,7 @@ impl LspState {
                 version,
                 program,
                 has_parse_errors: !parse_errors.is_empty(),
+                syntax_diagnostics,
                 last_diagnostics: Vec::new(),
                 had_cross_file_diags: false,
                 parse_count: 1,
@@ -126,6 +134,7 @@ impl LspState {
             return false;
         };
         let (program, parse_errors) = parse(&text);
+        doc.syntax_diagnostics = syntax_error_diagnostics(&uri_to_path(uri), &parse_errors);
         doc.text = text;
         doc.version = version;
         doc.program = program;
@@ -165,11 +174,14 @@ impl LspState {
         // enhancement could pass `AnalyzeContext::with_project(&ProjectIndex::from_program(..))`
         // for single-file resolution.
         let ctx = AnalyzeContext::new(&file_path, &doc.text, &self.config);
-        let mut diagnostics: Vec<Diagnostic> = self
-            .rules
-            .iter()
-            .flat_map(|rule| rule.analyze(&doc.program, &ctx))
-            .collect();
+        // Same large-stack protection as RuleRegistry::run_all — an open buffer
+        // can hold a deep-but-legal AST that would overflow this thread.
+        let mut diagnostics: Vec<Diagnostic> = with_rules_stack(|| {
+            self.rules
+                .iter()
+                .flat_map(|rule| rule.analyze(&doc.program, &ctx))
+                .collect()
+        });
         // Honor inline `// falcon-ignore` suppressions (the LSP drives rules
         // directly rather than through RuleRegistry::run_all, so it filters and
         // reports malformed comments here too).
@@ -182,6 +194,9 @@ impl LspState {
             });
         }
         diagnostics.extend(suppressions.into_diagnostics());
+        // Syntax errors are surfaced like the CLI: reported regardless of inline
+        // suppression (added after the retain above), but still severity-mapped.
+        diagnostics.extend(doc.syntax_diagnostics.iter().cloned());
         apply_severities(&mut diagnostics, &self.config);
         diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start).then(a.rule.cmp(b.rule)));
         doc.analyze_count += 1;
@@ -293,7 +308,10 @@ impl LspState {
             .collect();
 
         let mut files = Vec::new();
-        for entry in WalkDir::new(&self.workspace_root).follow_links(true) {
+        // Never follow symlinks: Flutter's ephemeral/.plugin_symlinks point into
+        // the pub cache (same hazard the CLI walker fixed) and a long-lived LSP
+        // would hold all of it in memory.
+        for entry in WalkDir::new(&self.workspace_root).follow_links(false) {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(e) => {
@@ -409,7 +427,10 @@ fn load_from(path: Option<&Path>) -> FalconConfig {
             FalconConfig::default()
         }),
         None => match std::env::current_dir() {
-            Ok(cwd) => load_or_default(&cwd),
+            Ok(cwd) => load_or_default(&cwd).unwrap_or_else(|e| {
+                warn!("failed to load discovered config: {e} — using defaults");
+                FalconConfig::default()
+            }),
             Err(_) => FalconConfig::default(),
         },
     };

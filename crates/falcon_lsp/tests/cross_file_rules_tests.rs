@@ -68,9 +68,13 @@ impl TestClient {
         self.workspace.path().join(name)
     }
 
-    /// Write a `.dart` file into the workspace and return its `file://` URI.
-    fn write_dart(&self, name: &str, source: &str) -> String {
-        let path = self.workspace_file(name);
+    /// Write a file at a (possibly nested) workspace-relative path, creating
+    /// parent directories. Returns its `file://` URI.
+    fn write_file(&self, rel: &str, source: &str) -> String {
+        let path = self.workspace_file(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
         fs::write(&path, source).unwrap();
         uri_for(&path)
     }
@@ -207,15 +211,16 @@ fn any_publish_has_rule(publishes: &[PublishDiagnosticsParams], uri: &str, rule:
         .any(|p| p.uri.as_str() == uri && has_rule(p, rule))
 }
 
-/// Lay down a minimal referenced graph plus one dead file. `orphan.dart` is
-/// referenced by nothing and has no `main`, so `unused-files` flags it.
+/// Lay down a minimal referenced graph plus one dead file under `lib/` (the
+/// rule's scope). `orphan.dart` is referenced by nothing and has no `main`, so
+/// `unused-files` flags it.
 fn write_corpus(client: &TestClient) -> String {
-    client.write_dart(
-        "main.dart",
+    client.write_file(
+        "lib/main.dart",
         "import 'used.dart';\n\nvoid main() {\n  helper();\n}\n",
     );
-    client.write_dart("used.dart", "void helper() {\n  print('helper');\n}\n");
-    client.write_dart("orphan.dart", "class OrphanThing {}\n")
+    client.write_file("lib/used.dart", "void helper() {\n  print('helper');\n}\n");
+    client.write_file("lib/orphan.dart", "class OrphanThing {}\n")
 }
 
 /// (1) didOpen a file that a cross-file rule flags → the published diagnostics for
@@ -261,6 +266,132 @@ fn clean_file_still_gets_cross_file_diagnostic() {
     assert!(
         any_publish_has_rule(&after_save, &orphan_uri, "unused-files"),
         "didSave must republish the cross-file diagnostic: {after_save:?}"
+    );
+    client.shutdown();
+}
+
+/// Conditional (`if (dart.library.io) '...'`) import/export targets are real
+/// reference edges: the platform-specific `lib/src` impl files are reachable
+/// from the public-surface `lib/api.dart` and must NOT be flagged. An
+/// unreferenced `lib/src/orphan.dart` is the positive control.
+#[test]
+fn conditional_directive_targets_not_flagged_unused() {
+    let mut client = TestClient::start(ENABLE_UNUSED_FILES);
+    client.write_file("pubspec.yaml", "name: cond\n");
+    let api_src = "export 'src/impl_stub.dart'\n    if (dart.library.io) 'src/impl_io.dart'\n    if (dart.library.html) 'src/impl_web.dart';\n";
+    let api = client.write_file("lib/api.dart", api_src);
+    client.write_file("lib/src/impl_stub.dart", "class Impl {}\n");
+    let io = client.write_file("lib/src/impl_io.dart", "class Impl {}\n");
+    let web = client.write_file("lib/src/impl_web.dart", "class Impl {}\n");
+    let orphan_src = "class Orphan {}\n";
+    let orphan = client.write_file("lib/src/orphan.dart", orphan_src);
+
+    client.open(&api, api_src, 1);
+    client.open(&io, "class Impl {}\n", 1);
+    client.open(&web, "class Impl {}\n", 1);
+    client.open(&orphan, orphan_src, 1);
+    let pubs = client.drain_publishes();
+
+    assert!(
+        any_publish_has_rule(&pubs, &orphan, "unused-files"),
+        "control: unreachable lib/src orphan must be flagged: {pubs:?}"
+    );
+    assert!(
+        !any_publish_has_rule(&pubs, &api, "unused-files"),
+        "public-surface lib/api.dart is an entrypoint external consumers import: {pubs:?}"
+    );
+    assert!(
+        !any_publish_has_rule(&pubs, &io, "unused-files"),
+        "conditional `if (dart.library.io)` target must not be flagged: {pubs:?}"
+    );
+    assert!(
+        !any_publish_has_rule(&pubs, &web, "unused-files"),
+        "conditional `if (dart.library.html)` target must not be flagged: {pubs:?}"
+    );
+    client.shutdown();
+}
+
+/// The upgrade to reachability: a `lib/src` island (two files referencing only
+/// each other, unreachable from any entrypoint) is dead — both are flagged, even
+/// though each is "referenced" by the other.
+#[test]
+fn dead_code_island_both_flagged() {
+    let mut client = TestClient::start(ENABLE_UNUSED_FILES);
+    client.write_file("pubspec.yaml", "name: island\n");
+    // Live surface, reachable, as a control that the rule isn't flagging blindly.
+    client.write_file("lib/island.dart", "export 'src/live.dart';\n");
+    client.write_file("lib/src/live.dart", "class Live {}\n");
+    // Dead island: a <-> b reference each other and nothing else reaches them.
+    let a_src = "import 'b.dart';\nclass A { B? b; }\n";
+    let b_src = "import 'a.dart';\nclass B { A? a; }\n";
+    let a = client.write_file("lib/src/a.dart", a_src);
+    let b = client.write_file("lib/src/b.dart", b_src);
+
+    client.open(&a, a_src, 1);
+    client.open(&b, b_src, 1);
+    let pubs = client.drain_publishes();
+
+    assert!(
+        any_publish_has_rule(&pubs, &a, "unused-files"),
+        "island file a must be flagged: {pubs:?}"
+    );
+    assert!(
+        any_publish_has_rule(&pubs, &b, "unused-files"),
+        "island file b must be flagged: {pubs:?}"
+    );
+    client.shutdown();
+}
+
+/// The package barrel `lib/<pkg>.dart` is the public entrypoint external
+/// consumers import, so it is never referenced from within its own package and
+/// must not be flagged. An unreferenced non-barrel lib file is the control.
+#[test]
+fn package_barrel_not_flagged_unused() {
+    let mut client = TestClient::start(ENABLE_UNUSED_FILES);
+    client.write_file("pubspec.yaml", "name: mypkg\n");
+    let barrel_src = "export 'src/foo.dart';\nexport 'src/bar.dart';\n";
+    let barrel = client.write_file("lib/mypkg.dart", barrel_src);
+    client.write_file("lib/src/foo.dart", "class Foo {}\n");
+    client.write_file("lib/src/bar.dart", "class Bar {}\n");
+    let dead_src = "class Dead {}\n";
+    let dead = client.write_file("lib/src/dead.dart", dead_src);
+
+    client.open(&barrel, barrel_src, 1);
+    client.open(&dead, dead_src, 1);
+    let pubs = client.drain_publishes();
+
+    assert!(
+        !any_publish_has_rule(&pubs, &barrel, "unused-files"),
+        "package barrel lib/mypkg.dart is the public entrypoint: {pubs:?}"
+    );
+    assert!(
+        any_publish_has_rule(&pubs, &dead, "unused-files"),
+        "control: unreachable lib/src file must still be flagged: {pubs:?}"
+    );
+    client.shutdown();
+}
+
+/// Without a pubspec the rule's documented scope (files under `lib/`) still
+/// holds: a `test/` helper must not be flagged. A `lib/` orphan is the control.
+#[test]
+fn pubspec_less_non_lib_files_not_flagged() {
+    let mut client = TestClient::start(ENABLE_UNUSED_FILES);
+    let helper_src = "void helper() {}\n";
+    let helpers = client.write_file("test/helpers.dart", helper_src);
+    let orphan_src = "class Orphan {}\n";
+    let orphan = client.write_file("lib/orphan.dart", orphan_src);
+
+    client.open(&helpers, helper_src, 1);
+    client.open(&orphan, orphan_src, 1);
+    let pubs = client.drain_publishes();
+
+    assert!(
+        !any_publish_has_rule(&pubs, &helpers, "unused-files"),
+        "pubspec-less test/ helper is out of the rule's lib/ scope: {pubs:?}"
+    );
+    assert!(
+        any_publish_has_rule(&pubs, &orphan, "unused-files"),
+        "control: pubspec-less lib/ orphan must still be flagged: {pubs:?}"
     );
     client.shutdown();
 }

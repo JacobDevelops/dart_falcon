@@ -39,5 +39,15 @@ class NestedIfExamples {
     }
   }
 
+  // A labeled `if` with only one nested `if` stays under the threshold.
+  void labeledSingle(bool a, bool b) {
+    outer:
+    if (a) {
+      if (b) {
+        print('two');
+      }
+    }
+  }
+
   void doSomething() {}
 }

@@ -237,6 +237,7 @@ fn count_stmt(stmt: &Stmt, count: &mut usize) {
             }
         }
         Stmt::Expr(e) => count_expr(&e.expr, count),
+        Stmt::Labeled(l) => count_stmt(&l.stmt, count),
         _ => {}
     }
 }

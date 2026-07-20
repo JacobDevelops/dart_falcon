@@ -791,3 +791,102 @@ fn test_assignment_in_both_conditional_branches() {
         other => panic!("expected conditional, got {other:?}"),
     }
 }
+
+// ── Cascade-section assignment RHS is expressionWithoutCascade ─────────────────
+
+/// Parse `void f(o) { <src> }` and return the first statement's expression.
+fn first_stmt_expr(src: &str) -> (Expr, usize) {
+    let (prog, errors) = parse(&format!("void f(o) {{ {src} }}"));
+    let func = match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("expected function, got {other:?}\nerrors: {errors:?}"),
+    };
+    let block = match func.body.as_ref().unwrap() {
+        FunctionBody::Block(b) => b,
+        other => panic!("expected block, got {other:?}"),
+    };
+    let expr = match &block.stmts[0] {
+        Stmt::Expr(e) => e.expr.clone(),
+        other => panic!("expected expr stmt, got {other:?}"),
+    };
+    (expr, errors.len())
+}
+
+#[test]
+fn test_cascade_assign_rhs_excludes_following_cascade_section() {
+    // `o..a = 1..b = 2` is TWO sections on `o` (o.a=1; o.b=2), not a single
+    // section whose value is a nested cascade `1..b=2`. The assignment RHS is
+    // parsed as `expressionWithoutCascade`, so the second `..` reattaches to `o`.
+    let (expr, errors) = first_stmt_expr("o..a = 1..b = 2;");
+    assert_eq!(errors, 0, "unexpected errors: {expr:?}");
+    let (object, sections) = match &expr {
+        Expr::Cascade {
+            object, sections, ..
+        } => (object, sections),
+        other => panic!("expected cascade, got {other:?}"),
+    };
+    assert!(matches!(**object, Expr::Ident(ref id) if id.name == "o"));
+    assert_eq!(sections.len(), 2, "expected two sections: {sections:?}");
+    for section in sections {
+        match &section.ops[0] {
+            // Each section is a bare `field = intLit` assignment; the RHS must be
+            // the int literal, never a nested Cascade.
+            CascadeOp::Assign(_, _, value) => assert!(
+                matches!(**value, Expr::IntLit { .. }),
+                "RHS should be an int literal, got {value:?}"
+            ),
+            other => panic!("expected assign op, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_cascade_index_assign_rhs_excludes_following_section() {
+    // Same rule for index-selector assignments: `o..[0] = 1..[1] = 2`.
+    let (expr, errors) = first_stmt_expr("o..[0] = 1..[1] = 2;");
+    assert_eq!(errors, 0, "unexpected errors: {expr:?}");
+    match &expr {
+        Expr::Cascade { sections, .. } => {
+            assert_eq!(sections.len(), 2, "expected two sections: {sections:?}")
+        }
+        other => panic!("expected cascade, got {other:?}"),
+    }
+}
+
+// ── Recursion-depth guard: deep nesting errors instead of overflowing ──────────
+
+#[test]
+fn test_deep_unary_chain_does_not_overflow() {
+    // A long prefix-operator chain recurses once per operator through
+    // `parse_unary`; without the depth guard this overflows the stack and
+    // aborts. The guard must instead emit a "nesting too deep" error. The chain
+    // trips the guard at a bounded depth, so it fits the default test stack.
+    let src = format!("var x = {}1;", "-".repeat(1000));
+    let (_, errors) = parse(&src);
+    assert!(
+        errors.iter().any(|e| e.message.contains("nesting too deep")),
+        "expected a nesting-too-deep error, got {errors:?}"
+    );
+}
+
+#[test]
+fn test_deep_parens_do_not_overflow() {
+    // Deeply nested parentheses recurse through the full expression ladder. Run
+    // on a large-stack worker so the guard (which fires well above realistic
+    // nesting) is reached before this debug build's small default test stack is
+    // exhausted — the point is that parsing terminates with an error, never a
+    // process abort.
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            let n = 3000;
+            let src = format!("var x = {}1{};", "(".repeat(n), ")".repeat(n));
+            let (_, errors) = parse(&src);
+            errors.iter().any(|e| e.message.contains("nesting too deep"))
+        })
+        .unwrap();
+    assert!(
+        handle.join().expect("parser thread must not panic/abort"),
+        "expected a nesting-too-deep error for deeply nested parens"
+    );
+}

@@ -31,7 +31,10 @@ pub fn walk_files(paths: &[PathBuf], exclude_patterns: &[String]) -> Vec<(PathBu
                 results.push(entry);
             }
         } else if path.is_dir() {
-            for item in WalkDir::new(path).follow_links(true) {
+            // Never follow symlinks: Flutter's ephemeral/.plugin_symlinks point
+            // into the pub cache, turning a project walk into a multi-minute
+            // crawl of every dependency (and risking cycles).
+            for item in WalkDir::new(path).follow_links(false) {
                 match item {
                     Ok(e) => {
                         if let Some(entry) = try_read_dart(e.path(), &compiled) {

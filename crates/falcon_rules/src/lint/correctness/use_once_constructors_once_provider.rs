@@ -148,9 +148,15 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match expr {
-        Expr::New { .. } => {
-            // Skip checking New expressions here; they'll be caught if used as direct calls
-            // Don't recurse into New expressions to avoid false positives
+        // `new`/`const` constructions are never provider calls themselves, but
+        // their arguments can contain one.
+        Expr::New { args, .. } => {
+            for arg in &args.positional {
+                scan_expr(arg, diags, ctx);
+            }
+            for named in &args.named {
+                scan_expr(&named.value, diags, ctx);
+            }
         }
         Expr::Call { callee, args, .. } => {
             check_once_provider_call(callee, expr, args, diags, ctx);
@@ -246,7 +252,6 @@ fn check_once_provider_call(
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    // Check if this is calling a provider without .once()
     match callee {
         // Direct call: OnceProvider(...)
         Expr::Ident(id) => {
@@ -255,13 +260,7 @@ fn check_once_provider_call(
             }
         }
         // Method call: OnceProvider.once(...) or OnceProvider<T>.once(...)
-        Expr::Field { field, .. }
-            // If it's calling .once(), it's OK, don't flag
-            if field.name != "once" => {
-                // Otherwise check if this is a provider being called without .once()
-                // For now, we assume if it's a Field call, it's either .once() (which is correct)
-                // or something else (which we don't need to flag)
-            }
+        Expr::Field { field, .. } if field.name != "once" => {}
         _ => {}
     }
 }

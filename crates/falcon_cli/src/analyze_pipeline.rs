@@ -188,7 +188,7 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
         None => {
             let cwd = std::env::current_dir()
                 .map_err(|e| format!("failed to get current directory: {}", e))?;
-            load_or_default(&cwd)
+            load_or_default(&cwd).map_err(|e| e.to_string())?
         }
     };
     // Rewrite any legacy rule ids in the config to their canonical ids so old
@@ -253,11 +253,25 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
         );
     }
 
+    // Resolve 1-based line/col for every diagnostic from its file's source, so
+    // text and JSON output carry navigable positions rather than byte offsets.
+    let sources: HashMap<String, &str> = files
+        .iter()
+        .map(|(p, s)| (p.to_string_lossy().into_owned(), s.as_str()))
+        .collect();
+    for d in &mut diagnostics {
+        if let Some(src) = sources.get(&d.file_path) {
+            d.resolve_position(src);
+        }
+    }
+
     // Parallel analysis collects in nondeterministic file order; sort so
     // output (and max_errors truncation) is stable across runs and modes.
+    // Syntax errors sort ahead of lints within a file (`false` < `true`).
     diagnostics.sort_by(|a, b| {
         a.file_path
             .cmp(&b.file_path)
+            .then((a.rule != "syntax-error").cmp(&(b.rule != "syntax-error")))
             .then(a.span.start.cmp(&b.span.start))
             .then(a.rule.cmp(b.rule))
     });

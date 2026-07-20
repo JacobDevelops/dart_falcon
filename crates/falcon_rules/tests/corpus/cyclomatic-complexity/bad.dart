@@ -55,3 +55,15 @@ class Calculator {
     return a + b;
   }
 }
+
+// Decision points inside a labeled loop must still count.
+int labeledBranches(List<int> xs) { /* expect: cyclomatic-complexity */
+  outer:
+  while (xs.isNotEmpty) {
+    if (xs.first > 0) return 1;
+    if (xs.last < 0) return 2;
+    if (xs.length > 5 && xs.first == 0) break outer;
+    xs.removeAt(0);
+  }
+  return 0;
+}

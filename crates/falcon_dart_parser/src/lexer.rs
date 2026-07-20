@@ -8,11 +8,25 @@ use falcon_syntax::token::{Token, TokenKind};
 pub struct Lexer<'src> {
     src: &'src str,
     pos: usize,
+    /// Where source logically begins: 0, or past a leading BOM. The Dart
+    /// grammar is `FEFF? SCRIPT_TAG? ...`, so a shebang may follow a BOM.
+    logical_start: usize,
 }
 
 impl<'src> Lexer<'src> {
     pub fn new(src: &'src str) -> Self {
-        Self { src, pos: 0 }
+        // Dart accepts a single leading UTF-8 BOM as clean source; skip it so it
+        // never lexes as an Error. Elsewhere U+FEFF stays an illegal character.
+        let pos = if src.starts_with('\u{FEFF}') {
+            '\u{FEFF}'.len_utf8()
+        } else {
+            0
+        };
+        Self {
+            src,
+            pos,
+            logical_start: pos,
+        }
     }
 
     /// Lex the full source and return all tokens, ending with a single `Eof`.
@@ -69,8 +83,9 @@ impl<'src> Lexer<'src> {
 
         // Shebang: `#!...` on the very first line is a script directive, not
         // Dart source. Consume the whole line as a comment (trivia) — but only
-        // at byte offset 0, so a stray `#!` elsewhere still lexes normally.
-        if start == 0 && self.remaining().starts_with("#!") {
+        // at the logical start (offset 0, or right after a leading BOM), so a
+        // stray `#!` elsewhere still lexes normally.
+        if start == self.logical_start && self.remaining().starts_with("#!") {
             while !matches!(self.cur(), None | Some('\n')) {
                 self.advance();
             }
@@ -654,12 +669,12 @@ impl<'src> Lexer<'src> {
 
 #[inline]
 pub fn is_ident_start(c: char) -> bool {
-    c == '_' || c == '$' || c.is_alphabetic()
+    c == '_' || c == '$' || c.is_ascii_alphabetic()
 }
 
 #[inline]
 pub fn is_ident_continue(c: char) -> bool {
-    c == '_' || c == '$' || c.is_alphanumeric()
+    c == '_' || c == '$' || c.is_ascii_alphanumeric()
 }
 
 // ── Convenience: filter trivia ────────────────────────────────────────────────

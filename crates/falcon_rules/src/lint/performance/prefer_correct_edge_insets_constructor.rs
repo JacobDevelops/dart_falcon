@@ -299,13 +299,11 @@ fn check_edge_insets_only_call(
             let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
 
             let report_span = if start_line == end_line {
-                // Single line - report at start
                 DiagSpan {
                     start: span.start,
                     end: span.end,
                 }
             } else {
-                // Multi-line - check if opening line contains comment marker
                 let opening_line_end = source[span.start..]
                     .find('\n')
                     .map(|off| span.start + off)
@@ -313,13 +311,11 @@ fn check_edge_insets_only_call(
                 let opening_line_text = &source[span.start..opening_line_end];
 
                 if opening_line_text.contains("*/") {
-                    // Comment is on opening line
                     DiagSpan {
                         start: span.start,
                         end: span.start + 1,
                     }
                 } else {
-                    // Comment is on closing line
                     DiagSpan {
                         start: span.end - 1,
                         end: span.end,
@@ -382,7 +378,6 @@ fn should_use_better_constructor(args: &ArgList) -> bool {
         }
     }
 
-    // Check if all four are present and equal -> should use .all()
     if let (Some(l), Some(r), Some(t), Some(b)) =
         (left.clone(), right.clone(), top.clone(), bottom.clone())
         && l == r
@@ -392,7 +387,6 @@ fn should_use_better_constructor(args: &ArgList) -> bool {
         return true;
     }
 
-    // Check if only top and bottom are present and equal -> should use .symmetric(vertical: ...)
     if left.is_none()
         && right.is_none()
         && let (Some(t), Some(b)) = (top.clone(), bottom.clone())
@@ -401,7 +395,6 @@ fn should_use_better_constructor(args: &ArgList) -> bool {
         return true;
     }
 
-    // Check if only left and right are present and equal -> should use .symmetric(horizontal: ...)
     if top.is_none()
         && bottom.is_none()
         && let (Some(l), Some(r)) = (left.clone(), right.clone())

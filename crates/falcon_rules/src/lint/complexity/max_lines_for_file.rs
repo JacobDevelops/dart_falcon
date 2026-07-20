@@ -35,7 +35,6 @@ impl Rule for MaxLinesForFile {
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
-        // Count total lines in the file
         let line_count = ctx.source.lines().count();
         let threshold = max_lines_option(ctx);
 

@@ -10,7 +10,7 @@ pub mod unnecessary_nullable;
 pub mod unused_code;
 pub mod unused_files;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use falcon_analyze::ProjectFile;
@@ -118,15 +118,18 @@ pub fn resolve_directive_uri(
         if sub.is_empty() {
             return None;
         }
-        if let Some(pkg) = pkg
-            && pkg_name == pkg.name
-        {
-            return Some(ResolvedRef::Path(canonical_or_lexical(
-                &pkg.lib_root.join(sub),
-            )));
+        match pkg {
+            Some(pkg) if pkg_name == pkg.name => {
+                return Some(ResolvedRef::Path(canonical_or_lexical(
+                    &pkg.lib_root.join(sub),
+                )));
+            }
+            // Known local package: a `package:` URI naming a *different* package
+            // cannot denote a file in this package, so it is not a local edge.
+            Some(_) => return None,
+            // No pubspec: match tolerantly on the `lib/<sub>` suffix.
+            None => return Some(ResolvedRef::Suffix(format!("lib/{sub}"))),
         }
-        // Unknown package (or no pubspec): match on the `lib/<sub>` suffix.
-        return Some(ResolvedRef::Suffix(format!("lib/{sub}")));
     }
     // Relative URI, resolved against the importing file's directory.
     let from_dir = from_file.parent().unwrap_or_else(|| Path::new(""));
@@ -134,24 +137,23 @@ pub fn resolve_directive_uri(
 }
 
 /// All directive URIs a program declares, as `(uri_value)` — imports, exports,
-/// and `part` directives (the things that reference another file).
+/// and `part` directives (the things that reference another file). Each
+/// import/export also yields its `configurable_uris` targets, so conditional
+/// (`if (dart.library.io) '...'`) platform-specific files count as referenced.
 fn program_reference_uris(program: &Program) -> impl Iterator<Item = &str> {
-    program
-        .imports
+    let imports = program.imports.iter().flat_map(|i: &ImportDirective| {
+        std::iter::once(i.uri.value.as_str())
+            .chain(i.configurable_uris.iter().map(|c| c.uri.value.as_str()))
+    });
+    let exports = program.exports.iter().flat_map(|e: &ExportDirective| {
+        std::iter::once(e.uri.value.as_str())
+            .chain(e.configurable_uris.iter().map(|c| c.uri.value.as_str()))
+    });
+    let parts = program
+        .part_directives
         .iter()
-        .map(|i: &ImportDirective| i.uri.value.as_str())
-        .chain(
-            program
-                .exports
-                .iter()
-                .map(|e: &ExportDirective| e.uri.value.as_str()),
-        )
-        .chain(
-            program
-                .part_directives
-                .iter()
-                .map(|p: &PartDirective| p.uri.value.as_str()),
-        )
+        .map(|p: &PartDirective| p.uri.value.as_str());
+    imports.chain(exports).chain(parts)
 }
 
 /// A set of resolved reference targets: concrete canonical paths plus tolerant
@@ -186,13 +188,62 @@ impl ReferenceSet {
 
 /// Whether `path` lives under the package `lib/` directory (the scope both
 /// unused-* rules flag within). With a known package this is a prefix check;
-/// without pubspec metadata (rare in real projects, common in tests) every
-/// analyzed file is treated as in-scope.
+/// without pubspec metadata every analyzed file is treated as in-scope (callers
+/// that need the stricter documented `lib/`-only scope apply it themselves).
 pub fn is_under_lib(path: &Path, pkg: Option<&PackageInfo>) -> bool {
     match pkg {
         Some(pkg) => path.starts_with(&pkg.lib_root),
         None => true,
     }
+}
+
+/// Whether `path` has a `lib/` path component. Used as the pubspec-less scope
+/// fallback for `unused-files`, whose documented scope is files under `lib/`.
+pub fn has_lib_component(path: &Path) -> bool {
+    path.components().any(|c| c.as_os_str() == "lib")
+}
+
+/// Directed reference graph over the file set: `adj[i]` lists the indices of the
+/// files that `files[i]` references via its imports/exports/parts (all URI kinds,
+/// including conditional). `canons` is the caller's canonical path per file (same
+/// order as `files`), reused to avoid re-canonicalizing. Edge targets are the
+/// *first* file index for a given canonical path, so two spellings of one file
+/// collapse to a single node. A tolerant suffix reference (pubspec-less only)
+/// resolves to every file it matches. Unresolvable/external URIs contribute no
+/// edge. Duplicate edges are harmless for the reachability traversal that uses it.
+pub fn build_reference_graph(
+    files: &[ProjectFile],
+    canons: &[PathBuf],
+    pkg: Option<&PackageInfo>,
+) -> Vec<Vec<usize>> {
+    let mut by_path: HashMap<&Path, usize> = HashMap::with_capacity(canons.len());
+    for (i, c) in canons.iter().enumerate() {
+        by_path.entry(c.as_path()).or_insert(i);
+    }
+    let slashed_paths: Vec<String> = canons.iter().map(|c| slashed(c)).collect();
+
+    let mut adj = vec![Vec::new(); files.len()];
+    for (i, f) in files.iter().enumerate() {
+        for uri in program_reference_uris(&f.program) {
+            match resolve_directive_uri(&canons[i], uri, pkg) {
+                Some(ResolvedRef::Path(p)) => {
+                    if let Some(&j) = by_path.get(p.as_path()) {
+                        adj[i].push(j);
+                    }
+                }
+                Some(ResolvedRef::Suffix(s)) => {
+                    let needle = format!("/{s}");
+                    for (j, sp) in slashed_paths.iter().enumerate() {
+                        if *sp == s || sp.ends_with(&needle) {
+                            adj[i].push(j);
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+    }
+    adj
 }
 
 /// Collect every file's resolved outgoing references into one [`ReferenceSet`].
@@ -207,4 +258,69 @@ pub fn collect_references(files: &[ProjectFile], pkg: Option<&PackageInfo>) -> R
         }
     }
     refs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_dart_parser::parser::parse;
+
+    fn project_file(path: &str, source: &str) -> ProjectFile {
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "fixture must parse: {errors:?}");
+        ProjectFile {
+            path: PathBuf::from(path),
+            source: source.to_string(),
+            program,
+            has_parse_errors: false,
+        }
+    }
+
+    // Finding: conditional import/export URIs were ignored, so platform-specific
+    // impl files were falsely reported unused.
+    #[test]
+    fn program_reference_uris_yields_configurable_uris() {
+        let src = "export 'src/impl_stub.dart'\n    if (dart.library.io) 'src/impl_io.dart'\n    if (dart.library.html) 'src/impl_web.dart';";
+        let (program, errors) = parse(src);
+        assert!(errors.is_empty(), "{errors:?}");
+        let uris: Vec<&str> = program_reference_uris(&program).collect();
+        assert!(
+            uris.contains(&"src/impl_stub.dart"),
+            "default uri: {uris:?}"
+        );
+        assert!(uris.contains(&"src/impl_io.dart"), "io branch: {uris:?}");
+        assert!(uris.contains(&"src/impl_web.dart"), "web branch: {uris:?}");
+    }
+
+    #[test]
+    fn conditional_import_uris_are_collected_too() {
+        let src = "import 'src/stub.dart' if (dart.library.io) 'src/io.dart';";
+        let (program, _) = parse(src);
+        let uris: Vec<&str> = program_reference_uris(&program).collect();
+        assert!(uris.contains(&"src/io.dart"), "import branch: {uris:?}");
+    }
+
+    #[test]
+    fn collect_references_resolves_conditional_impl_files() {
+        let f = project_file(
+            "/pkg/lib/api.dart",
+            "export 'src/impl_stub.dart' if (dart.library.io) 'src/impl_io.dart' if (dart.library.html) 'src/impl_web.dart';",
+        );
+        let refs = collect_references(std::slice::from_ref(&f), None);
+        for target in ["impl_stub", "impl_io", "impl_web"] {
+            let p = PathBuf::from(format!("/pkg/lib/src/{target}.dart"));
+            assert!(refs.contains(&p), "{target} should be referenced");
+        }
+    }
+
+    // Finding: with no pubspec, unused-files flagged test/bin/tool files. The
+    // pubspec-less scope fallback must accept only paths with a `lib/` component.
+    #[test]
+    fn has_lib_component_restricts_pubspec_less_scope() {
+        assert!(has_lib_component(Path::new("/proj/lib/foo.dart")));
+        assert!(has_lib_component(Path::new("/proj/lib/src/foo.dart")));
+        assert!(!has_lib_component(Path::new("/proj/test/helpers.dart")));
+        assert!(!has_lib_component(Path::new("/proj/bin/script.dart")));
+        assert!(!has_lib_component(Path::new("/proj/tool/gen.dart")));
+    }
 }

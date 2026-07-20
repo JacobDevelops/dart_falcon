@@ -286,7 +286,6 @@ fn check_media_query_size_field(
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    // Check if accessing .width or .height on MediaQuery.of(context).size
     if (field.name == "width" || field.name == "height") && is_media_query_size(object) {
         diags.push(Diagnostic::new(
             "prefer-dedicated-media-query-methods",

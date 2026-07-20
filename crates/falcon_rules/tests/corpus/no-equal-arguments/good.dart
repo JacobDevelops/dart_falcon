@@ -96,3 +96,11 @@ void testEqualLiterals() {
   final edges = EdgeInsets.fromLTRB(0, 0, 0, 0);
   final negative = clamp(-1, -1);
 }
+
+// A labeled loop whose call passes distinct arguments is not a violation.
+void testLabeledDistinct() {
+  outer:
+  for (var i = 0; i < 3; i++) {
+    foo(a, b);
+  }
+}

@@ -248,7 +248,6 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             if is_from_constructor(dart_type, constructor_name) {
                 flag(span, diags, ctx);
             }
-            // Recurse into arguments
             for arg in &args.positional {
                 scan_expr(arg, diags, ctx);
             }

@@ -239,3 +239,71 @@ fn record_return_function_type_as_field_type() {
         other => panic!("expected record return type, got {other:?}"),
     }
 }
+
+// ── Generic old-style (inline) function-typed formal parameters ────────────────
+
+fn only_function(prog: &Program) -> &FunctionDecl {
+    match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("expected function, got {other:?}"),
+    }
+}
+
+#[test]
+fn generic_inline_function_typed_positional_formal() {
+    let (prog, errors) = parse("void f(int cb<T>(T x)) {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let params = &only_function(&prog).params;
+    let p = &params.positional[0];
+    assert_eq!(p.name.name, "cb");
+    assert!(p.function_params.is_some(), "expected a function-typed formal");
+}
+
+#[test]
+fn generic_inline_function_typed_named_formal() {
+    let (prog, errors) = parse("void f({int cb<T>(T x)?}) {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let p = &only_function(&prog).params.named[0];
+    assert_eq!(p.name.name, "cb");
+    assert!(p.function_params.is_some());
+}
+
+#[test]
+fn generic_inline_function_typed_type_param_return() {
+    let (prog, errors) = parse("void f(T select<T>(List<T> xs)) {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let p = &only_function(&prog).params.positional[0];
+    assert_eq!(p.name.name, "select");
+    assert!(p.function_params.is_some());
+}
+
+#[test]
+fn generic_function_typed_formal_rejected_inside_function_type() {
+    // A generic function-typed formal is NOT valid inside a generic function
+    // TYPE — Dart rejects it and falcon must keep rejecting it there.
+    let (_prog, errors) = parse("typedef Old = void Function(int cb<T>(T x));");
+    assert!(!errors.is_empty(), "expected rejection inside function type");
+}
+
+#[test]
+fn test_generic_function_typed_formal_retains_type_params() {
+    // `int cb<T>(T x)` must be distinguishable from `int cb(T x)` in the AST.
+    let (prog, errors) = parse("void f(int cb<T>(T x)) {}");
+    assert_eq!(errors.len(), 0, "{errors:?}");
+    let func = match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("got {other:?}"),
+    };
+    let param = &func.params.positional[0];
+    assert!(param.function_params.is_some());
+    assert_eq!(param.type_params.len(), 1, "generic <T> must be retained");
+    assert_eq!(param.type_params[0].name.name, "T");
+
+    let (prog2, errors2) = parse("void f(int cb(int x)) {}");
+    assert_eq!(errors2.len(), 0, "{errors2:?}");
+    let func2 = match &prog2.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("got {other:?}"),
+    };
+    assert!(func2.params.positional[0].type_params.is_empty());
+}

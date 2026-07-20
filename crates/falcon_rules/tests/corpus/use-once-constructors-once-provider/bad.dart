@@ -25,3 +25,13 @@ final futureProvider = FutureProvider( /* expect: use-once-constructors-once-pro
 final stateProvider = StateProvider( /* expect: use-once-constructors-once-provider */
   (ref) => 42,
 );
+
+// Bad: provider constructed inside constructor arguments
+class Holder {
+  final Object provider;
+  const Holder(this.provider);
+}
+
+final nested = new Holder(OnceProvider( /* expect: use-once-constructors-once-provider */
+  (ref) => MyService(),
+));

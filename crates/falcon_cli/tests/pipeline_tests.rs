@@ -152,6 +152,64 @@ fn test_output_text_empty_snapshot() {
 }
 
 // ---------------------------------------------------------------------------
+// Parse errors must surface as `syntax-error` diagnostics (severity error),
+// listed ahead of that file's lints, and count toward the error exit code.
+// ---------------------------------------------------------------------------
+
+use falcon_diagnostics::Severity;
+
+/// Non-compiling Dart (missing close paren) yields a `syntax-error` diagnostic
+/// at the recovered offset with severity Error, and drives a nonzero exit code.
+#[test]
+fn test_parse_error_surfaces_as_syntax_error() {
+    let temp = tempdir().unwrap();
+    fs::write(
+        temp.path().join("typo.dart"),
+        "void main() {\n  print(\"hello\"\n}\n",
+    )
+    .unwrap();
+    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+
+    let syntax: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.rule == "syntax-error")
+        .collect();
+    assert_eq!(syntax.len(), 1, "exactly one syntax-error expected");
+    assert_eq!(syntax[0].severity, Severity::Error);
+    // Resolved 1-based position: the '}' recovery point on line 3, col 1.
+    assert_eq!((syntax[0].line, syntax[0].col), (3, 1));
+    assert_eq!(out.exit_code, 1, "syntax errors must fail the run");
+}
+
+/// Lints on the recovered AST still fire, but the syntax error is listed first
+/// for the file.
+#[test]
+fn test_syntax_error_listed_before_lints() {
+    let temp = tempdir().unwrap();
+    fs::write(
+        temp.path().join("typo.dart"),
+        "void main() {\n  print(\"hello\"\n}\n",
+    )
+    .unwrap();
+    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+
+    assert!(
+        out.diagnostics.iter().any(|d| d.rule == "avoid-print"),
+        "lints on the recovered AST still fire"
+    );
+    let first_for_file = out
+        .diagnostics
+        .iter()
+        .find(|d| d.file_path.ends_with("typo.dart"))
+        .expect("a diagnostic for typo.dart");
+    assert_eq!(
+        first_for_file.rule, "syntax-error",
+        "parse errors must be listed first for the file"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Config-as-Contract: falcon.json must control rule enablement, severity,
 // excludes, and max_errors (plan M2.3 / M3.3 / Phase-1 acceptance criteria).
 // ---------------------------------------------------------------------------

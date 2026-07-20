@@ -452,7 +452,7 @@ fn test_load_or_default_missing() {
     let dir = std::env::temp_dir().join(format!("falcon_test_load_or_default_{}", id));
     fs::create_dir_all(&dir).expect("create temp dir");
 
-    let cfg = load_or_default(&dir);
+    let cfg = load_or_default(&dir).expect("no config found yields default");
     assert!(cfg.linter.enabled);
     assert_eq!(cfg.max_errors, None);
 
@@ -469,12 +469,93 @@ fn test_load_or_default_with_file() {
     let json = r#"{ "linter": { "rules": { "recommended": true } }, "max_errors": 50 }"#;
     fs::write(&config_path, json).expect("write config");
 
-    let cfg = load_or_default(&dir);
+    let cfg = load_or_default(&dir).expect("valid discovered config loads");
     assert_eq!(cfg.linter.rules.recommended, Some(true));
     assert_eq!(cfg.max_errors, Some(50));
 
     fs::remove_file(&config_path).expect("cleanup config");
     let _ = fs::remove_dir(&dir);
+}
+
+/// Finding 1: a discovered falcon.json that fails to load is a hard error, not
+/// a silent fall-back to `FalconConfig::default()` (which would re-enable every
+/// rule). Both a malformed value and the legacy flat schema must propagate.
+#[test]
+fn test_load_or_default_errors_on_malformed_discovered_config() {
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("falcon_test_bad_discovered_{}", id));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let config_path = dir.join("falcon.json");
+
+    // Wrong-typed value (a trailing-comma typo would fail even earlier at JSON parse).
+    fs::write(&config_path, r#"{ "max-errors": "100" }"#).expect("write config");
+    assert!(
+        load_or_default(&dir).is_err(),
+        "wrong-typed value must error, not fall back to defaults"
+    );
+
+    // Legacy flat schema is likewise a hard error via discovery, matching the
+    // explicit --config path.
+    fs::write(&config_path, r#"{ "rules": { "avoid-dynamic": { "enabled": false } } }"#)
+        .expect("write config");
+    let err = load_or_default(&dir).expect_err("legacy flat schema must error");
+    assert!(err.to_string().contains("legacy flat schema"));
+
+    fs::remove_file(&config_path).expect("cleanup config");
+    let _ = fs::remove_dir(&dir);
+}
+
+/// Finding 5: `max-errors: 0` is rejected (minimum 1) — a cap of 0 would suppress
+/// every diagnostic and pass a CI gate green with violations present.
+#[test]
+fn test_load_config_rejects_max_errors_zero() {
+    let path = temp_file_path("max_errors_zero.json");
+    fs::write(&path, r#"{ "max-errors": 0 }"#).expect("write temp file");
+    let err = load_config(&path).expect_err("max-errors 0 must be rejected");
+    assert!(
+        err.to_string().contains("max-errors"),
+        "error should name max-errors: {err}"
+    );
+    cleanup(&path);
+
+    // A positive cap and the legacy underscore spelling both still load.
+    let ok = temp_file_path("max_errors_one.json");
+    fs::write(&ok, r#"{ "max_errors": 1 }"#).expect("write temp file");
+    assert_eq!(
+        load_config(&ok).expect("max-errors 1 loads").max_errors,
+        Some(1)
+    );
+    cleanup(&ok);
+}
+
+/// Finding 4: the underscore `cross_file` top-level spelling is honored by the
+/// loader (deserialization alias), resolving identically to `cross-file` — it is
+/// no longer silently dropped.
+#[test]
+fn test_legacy_underscore_cross_file_alias_resolves_identically() {
+    let legacy = from_json(serde_json::json!({
+        "cross_file": { "rules": { "correctness": { "unused-files": "error" } } }
+    }));
+    let canonical = from_json(serde_json::json!({
+        "cross-file": { "rules": { "correctness": { "unused-files": "error" } } }
+    }));
+    assert_eq!(
+        legacy.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        Some(ResolvedSeverity::Error)
+    );
+    assert_eq!(
+        legacy.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        canonical.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true)
+    );
+
+    // The alias also flows through an override's underscore `cross_file` block.
+    let legacy_override = from_json(serde_json::json!({
+        "overrides": [ { "includes": ["gen/**"], "cross_file": { "enabled": false } } ]
+    }));
+    assert_eq!(
+        legacy_override.resolve_cross_file_rule_for("gen/a.dart", "correctness", "unused-files", true),
+        None
+    );
 }
 
 // ── overrides (biome-style per-path re-configuration) ───────────────────────

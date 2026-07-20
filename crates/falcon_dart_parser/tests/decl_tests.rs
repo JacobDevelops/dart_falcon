@@ -601,3 +601,23 @@ fn test_var_in_c_style_for_initializer_sets_neither() {
     assert!(!decl.is_final);
     assert!(!decl.is_const);
 }
+
+// ── Metadata annotations on record-type fields ─────────────────────────────────
+
+#[test]
+fn test_metadata_on_positional_record_type_field() {
+    let (_prog, errors) = parse("const meta = 0;\n(int, @meta int) r = (1, 2);");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+}
+
+#[test]
+fn test_metadata_on_named_record_type_field() {
+    let (_prog, errors) = parse("const meta = 0;\n({int a, @meta int b}) r = (a: 1, b: 2);");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+}
+
+#[test]
+fn test_metadata_on_record_type_field_in_param() {
+    let (_prog, errors) = parse("const meta = 0;\nvoid f((int, @meta String) r) {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+}

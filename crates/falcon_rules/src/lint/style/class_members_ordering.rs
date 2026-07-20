@@ -119,7 +119,6 @@ fn check_members(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Ana
     let mut min_right: Vec<u8> = vec![u8::MAX; members.len()];
     let mut max_left: Vec<u8> = vec![0; members.len()];
 
-    // Compute the minimum category to the right of each member
     for i in (0..members.len()).rev() {
         if i + 1 < members.len() {
             min_right[i] = std::cmp::min(categories[i + 1], min_right[i + 1]);
@@ -128,31 +127,20 @@ fn check_members(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Ana
         }
     }
 
-    // Compute the maximum category to the left of each member
     for i in 0..members.len() {
         if i > 0 {
             max_left[i] = std::cmp::max(max_left[i - 1], categories[i - 1]);
         }
     }
 
-    // Flag members that are out of order
     for (i, member) in members.iter().enumerate() {
         let cat = categories[i];
         if cat == u8::MAX {
             continue;
         }
-        // Flag if this member is higher than something to the right
-        if min_right[i] != u8::MAX && cat > min_right[i] {
-            let span = member.span();
-            diags.push(Diagnostic::new(
-                NAME,
-                Severity::Warning,
-                "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan { start: span.start, end: span.end },
-            ));
-        // Also flag if this member is lower than something to the left (and comes late in the sequence)
-        } else if i > 0 && cat < max_left[i] && i > 3 {
+        let after_smaller = min_right[i] != u8::MAX && cat > min_right[i];
+        let before_larger = i > 3 && cat < max_left[i];
+        if after_smaller || before_larger {
             let span = member.span();
             diags.push(Diagnostic::new(
                 NAME,

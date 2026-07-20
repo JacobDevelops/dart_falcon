@@ -69,3 +69,30 @@ class Grid {
     }
   }
 }
+
+// A label on the outer loop must not hide the nesting it wraps.
+void labeledDeep(List<int> xs, bool a, bool b) { /* expect: maximum-nesting-level */
+  outer:
+  for (final x in xs) {
+    if (a) {
+      if (b) {
+        print(x);
+        break outer;
+      }
+    }
+  }
+}
+
+// Control flow inside a closure argument counts like a local function does.
+void closureDeep(List<int> xs) { /* expect: maximum-nesting-level */
+  run(() {
+    for (final x in xs) {
+      if (x > 0) {
+        while (x > 10) {
+          print(x);
+          break;
+        }
+      }
+    }
+  });
+}
