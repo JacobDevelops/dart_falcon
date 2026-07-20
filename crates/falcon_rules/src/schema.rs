@@ -173,10 +173,11 @@ pub fn config_schema() -> Value {
             },
             "max-errors": {
                 "type": ["integer", "null"],
-                "minimum": 0,
+                "minimum": 1,
                 "default": null,
                 "description": "Stop after emitting this many diagnostics. Null (the \
-                    default) means no limit."
+                    default) means no limit. Must be at least 1; 0 is rejected because \
+                    it would suppress every diagnostic."
             }
         },
         "definitions": {

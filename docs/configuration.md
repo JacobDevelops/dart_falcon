@@ -9,6 +9,24 @@ falcon reads a biome 2.x-shaped `falcon.json`. Discovery order (first match wins
 If no config is found, falcon runs with defaults: every rule enabled at its
 default severity (warning).
 
+A config that **is** found but fails to load is a hard **error** — falcon prints
+a message and exits non-zero rather than silently falling back to defaults. This
+covers invalid JSON, wrong-typed values, `max-errors: 0` (see
+[`max-errors`](#max-errors)), and the [legacy flat
+schema](#migrating-from-the-legacy-flat-schema). Discovery and explicit
+`--config` behave identically here, so a typo can never quietly re-enable every
+rule.
+
+### Unknown and legacy keys
+
+Unknown top-level keys are **warned about by name** and then ignored, so a
+mistyped section (`linterr` for `linter`, `cross_file` for `cross-file`) never
+vanishes silently. The deprecated spellings `project` and `cross_file` (for
+`cross-file`) and `max_errors` (for `max-errors`) still load, but each earns a
+deprecation warning pointing at `falcon migrate`. The published JSON schema
+validates only the canonical kebab-case keys — an editor will flag a legacy
+spelling even though falcon still accepts it, which is your cue to migrate.
+
 ## Editor autocomplete (`$schema`)
 
 Point the top-level `$schema` at the published JSON schema to get rule-name
@@ -128,8 +146,11 @@ Net effect: with no config file, every rule is on at warning.
 
 ## `max-errors`
 
-Optional cap on the number of reported diagnostics (`null` = unlimited). A CLI
-`--max-errors` flag overrides the config value.
+Optional cap on the number of reported diagnostics (`null` = unlimited). Must be
+**at least 1**: `0` is rejected at load (it would suppress every diagnostic and
+pass a run green with violations present). A CLI `--max-errors` flag overrides
+the config value. The legacy `max_errors` (underscore) spelling still loads with
+a deprecation warning.
 
 ## Rule options
 
@@ -271,7 +292,7 @@ given.
 ### `overrides[].linter` and `overrides[].cross-file`
 
 A partial rule block for file rules (`linter`) or cross-file rules (`cross-file`;
-the legacy key `project` is still accepted), respectively. Both have the same
+the legacy keys `project` and `cross_file` are still accepted), respectively. Both have the same
 shape as `linter.rules`: rule levels, per-rule
 `options`, and an optional `enabled` master switch are honored — but no
 `domains`, no nested `overrides`, no `files`. An override may carry either or
@@ -343,7 +364,8 @@ Most rules analyze one file at a time. A small set of **cross-file rules** inste
 reason across the whole analyzed file set — they need to see every file to decide
 whether something is referenced anywhere. They are a **separate feature** from the
 linter and live under their own top-level `cross-file` block, *not* under
-`linter`. The pre-1.0 key `project` is still accepted as a deprecated alias:
+`linter`. The pre-1.0 spellings `project` and `cross_file` (underscore) are still
+accepted as deprecated aliases (each warns on load — run `falcon migrate`):
 
 ```json
 "cross-file": {

@@ -1141,8 +1141,8 @@
     },
     "max-errors": {
       "default": null,
-      "description": "Stop after emitting this many diagnostics. Null (the default) means no limit.",
-      "minimum": 0,
+      "description": "Stop after emitting this many diagnostics. Null (the default) means no limit. Must be at least 1; 0 is rejected because it would suppress every diagnostic.",
+      "minimum": 1,
       "type": [
         "integer",
         "null"
