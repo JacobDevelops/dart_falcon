@@ -19,6 +19,22 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_stmt(&mut self) -> Stmt {
+        if !self.enter_depth() {
+            // Consume a token so an enclosing block loop makes progress and the
+            // deep recursion unwinds instead of spinning on the same token.
+            let span = self.cur_span();
+            self.advance();
+            return Stmt::Expr(ExprStmt {
+                expr: Expr::Error { span: span.clone() },
+                span,
+            });
+        }
+        let stmt = self.parse_stmt_inner();
+        self.exit_depth();
+        stmt
+    }
+
+    fn parse_stmt_inner(&mut self) -> Stmt {
         let start = self.cur().offset;
 
         // Labeled statement: `label: stmt`. A plain identifier directly followed
@@ -124,7 +140,10 @@ impl<'src> Parser<'src> {
                 })
             }
             TokenKind::Assert => self.parse_assert_stmt(),
-            TokenKind::Yield => self.parse_yield_stmt(),
+            // `yield` is reserved only inside a generator (sync*/async*) body;
+            // in a plain function it is a valid identifier, so fall through to
+            // expression/declaration parsing (`var yield = 0; yield = 1;`).
+            TokenKind::Yield if self.in_generator => self.parse_yield_stmt(),
             TokenKind::Rethrow => {
                 self.advance();
                 self.eat(TokenKind::Semicolon);
@@ -234,6 +253,13 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_for_clauses(&mut self) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
+        // Metadata may annotate the loop variable in every for form:
+        // `for (@meta var x in xs)`, `for (@meta final (a, b) in xs)`,
+        // `for (@meta var i = 0; ...)`. No AST slot carries it, so consume it.
+        if self.at(TokenKind::At) {
+            self.parse_annotations();
+        }
+
         // Empty for (;;)
         if self.at(TokenKind::Semicolon) {
             self.advance();

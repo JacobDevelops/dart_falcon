@@ -19,7 +19,32 @@ use crate::lexer::{Lexer, filter_trivia};
 /// Returns the AST and any non-fatal parse errors encountered. The parser
 /// always produces an AST (possibly with [`TopLevelDecl::Error`] nodes) and
 /// never panics.
+///
+/// The recursive descent runs on a scoped worker thread with a large explicit
+/// stack. The [`MAX_PARSE_DEPTH`](Parser::MAX_PARSE_DEPTH) guard bounds nesting
+/// to a value the guard reports as a parse error, but a legitimately deep file
+/// (up to that bound) still descends far enough to exhaust the default 8 MB
+/// main-thread stack under the `check` pipeline — so parsing gets its own stack
+/// sized to clear the guard ceiling with wide margin. Callers therefore never
+/// abort on hostile/generated input regardless of how much stack the enclosing
+/// pipeline has already consumed.
 pub fn parse(source: &str) -> (Program, Vec<ParseError>) {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(PARSER_STACK_SIZE)
+            .spawn_scoped(scope, || parse_inner(source))
+            .expect("spawn parser thread")
+            .join()
+            .expect("parser thread panicked")
+    })
+}
+
+/// Stack for the parser worker thread. Sized so a descent to the full
+/// [`MAX_PARSE_DEPTH`](Parser::MAX_PARSE_DEPTH) ceiling clears with wide margin
+/// (that ceiling costs well under 16 MB of native stack).
+const PARSER_STACK_SIZE: usize = 256 * 1024 * 1024;
+
+fn parse_inner(source: &str) -> (Program, Vec<ParseError>) {
     debug!("parsing file");
     let raw_tokens = Lexer::new(source).tokenize();
     let tokens = filter_trivia(raw_tokens);
@@ -68,6 +93,21 @@ pub(super) struct Parser<'src> {
     /// [`rewind_to`] — otherwise a discarded type parse over a shift-token close
     /// leaves the token permanently narrowed and corrupts the re-parse.
     pub(super) gt_undo: Vec<(usize, TokenKind)>,
+    /// `await`/`yield` are contextual keywords, reserved only inside the body of
+    /// an async / generator function respectively. These track the enclosing
+    /// body's kind so the parser can fall back to identifier parsing outside it
+    /// (`var yield = 0; yield = 1;` in a plain function is valid Dart). Set per
+    /// function body in [`parse_function_body`] and the closure body parser, and
+    /// restored on exit so nested sync closures reset the context.
+    pub(super) in_async: bool,
+    pub(super) in_generator: bool,
+    /// Current recursive-descent nesting depth and a latch marking that the
+    /// [`MAX_PARSE_DEPTH`](Self::MAX_PARSE_DEPTH) guard has fired. Bounds the
+    /// hand-rolled recursion so pathological/generated source (deeply nested
+    /// parens, lists, blocks, …) yields a parse error instead of overflowing the
+    /// stack and aborting the process.
+    pub(super) depth: usize,
+    pub(super) depth_limit_hit: bool,
 }
 
 impl<'src> Parser<'src> {
@@ -82,7 +122,38 @@ impl<'src> Parser<'src> {
             enclosing_ctor_name: None,
             in_ctor_init_value: false,
             gt_undo: Vec::new(),
+            in_async: false,
+            in_generator: false,
+            depth: 0,
+            depth_limit_hit: false,
         }
+    }
+
+    /// Recursion-depth ceiling for the recursive-descent parser. Chosen well
+    /// above any realistic source nesting yet low enough that the guard fires
+    /// before the native stack is exhausted (the guard is applied at several
+    /// points per grammatical nesting level).
+    pub(super) const MAX_PARSE_DEPTH: usize = 150;
+
+    /// Enter a recursion level, returning `false` when the depth limit is
+    /// exceeded. On the first overflow it records a single parse error; callers
+    /// must then unwind without recursing further. Always pair a `true` result
+    /// with [`exit_depth`](Self::exit_depth).
+    pub(super) fn enter_depth(&mut self) -> bool {
+        self.depth += 1;
+        if self.depth > Self::MAX_PARSE_DEPTH {
+            self.depth -= 1;
+            if !self.depth_limit_hit {
+                self.depth_limit_hit = true;
+                self.error("nesting too deep");
+            }
+            return false;
+        }
+        true
+    }
+
+    pub(super) fn exit_depth(&mut self) {
+        self.depth -= 1;
     }
 
     /// Roll the cursor back to `saved`, restoring any `>>`/`>>>` tokens that were
@@ -380,7 +451,10 @@ impl<'src> Parser<'src> {
     // ── Function body ─────────────────────────────────────────────────────────
 
     pub(super) fn parse_function_body(&mut self) -> Option<FunctionBody> {
-        match self.cur().kind {
+        let (is_async, is_generator) = self.body_marker_context();
+        let saved = (self.in_async, self.in_generator);
+        (self.in_async, self.in_generator) = (is_async, is_generator);
+        let body = match self.cur().kind {
             TokenKind::Arrow => {
                 let start = self.cur().offset;
                 self.advance();
@@ -399,6 +473,25 @@ impl<'src> Parser<'src> {
                 None
             }
             _ => None,
+        };
+        (self.in_async, self.in_generator) = saved;
+        body
+    }
+
+    /// Recover the async / generator kind of the body about to be parsed from the
+    /// `async` / `sync*` / `async*` marker consumed just before it, by inspecting
+    /// the tokens immediately preceding the body opener (`{`/`=>`/`;`). `await` is
+    /// reserved iff the body is async; `yield` iff it is a generator.
+    fn body_marker_context(&self) -> (bool, bool) {
+        let kind_at = |i: usize| self.tokens.get(i).map(|t| &t.kind);
+        match self.pos.checked_sub(1).and_then(kind_at) {
+            Some(TokenKind::Star) => match self.pos.checked_sub(2).and_then(kind_at) {
+                Some(TokenKind::Async) => (true, true),  // async*
+                Some(TokenKind::Sync) => (false, true),  // sync*
+                _ => (false, false),
+            },
+            Some(TokenKind::Async) => (true, false), // async
+            _ => (false, false),
         }
     }
 

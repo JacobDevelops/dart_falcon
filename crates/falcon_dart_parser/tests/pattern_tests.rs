@@ -546,3 +546,83 @@ fn const_parenthesised_expr_pattern_still_single() {
         other => panic!("expected const pattern, got {other:?}"),
     }
 }
+
+// ── Adjacent string literals fold into one constant string pattern ────────────
+
+/// The string value of the first case's literal string pattern.
+fn first_case_string(sw: &SwitchStmt) -> String {
+    match first_case(sw).0 {
+        Pattern::Literal(LiteralPattern {
+            value: LiteralPatternValue::String(node),
+            ..
+        }) => node.value.clone(),
+        other => panic!("expected string literal pattern, got {other:?}"),
+    }
+}
+
+#[test]
+fn adjacent_string_case_label_folds() {
+    let (sw, errs) = parse_switch("case 'foo' 'bar': break;");
+    assert_eq!(errs, 0, "switch: {sw:?}");
+    assert_eq!(first_case_string(&sw), "foobar");
+}
+
+#[test]
+fn adjacent_string_switch_expr_arm_folds() {
+    let (stmts, errs) =
+        parse_body("var r = switch (x) { 'a' 'b' => 1, _ => 0 };");
+    assert_eq!(errs, 0, "stmts: {stmts:?}");
+}
+
+#[test]
+fn adjacent_string_in_list_pattern_folds() {
+    let (sw, errs) = parse_switch("case ['a' 'b', _]: break;");
+    assert_eq!(errs, 0, "switch: {sw:?}");
+    match first_case(&sw).0 {
+        Pattern::List(lp) => match &lp.elements[0] {
+            ListPatternElement::Pattern(Pattern::Literal(LiteralPattern {
+                value: LiteralPatternValue::String(node),
+                ..
+            })) => assert_eq!(node.value, "ab"),
+            other => panic!("expected string element, got {other:?}"),
+        },
+        other => panic!("expected list pattern, got {other:?}"),
+    }
+}
+
+#[test]
+fn adjacent_string_in_record_field_folds() {
+    let (sw, errs) = parse_switch("case (k: 'a' 'b'): break;");
+    assert_eq!(errs, 0, "switch: {sw:?}");
+    match first_case(&sw).0 {
+        Pattern::Record(rp) => match &rp.fields[0].pattern {
+            Pattern::Literal(LiteralPattern {
+                value: LiteralPatternValue::String(node),
+                ..
+            }) => assert_eq!(node.value, "ab"),
+            other => panic!("expected string field, got {other:?}"),
+        },
+        other => panic!("expected record pattern, got {other:?}"),
+    }
+}
+
+#[test]
+fn adjacent_string_if_case_folds() {
+    let (stmts, errs) = parse_body("if (x case 'a' 'b') print('yes');");
+    assert_eq!(errs, 0, "stmts: {stmts:?}");
+}
+
+#[test]
+fn triple_adjacent_string_folds() {
+    let (sw, errs) = parse_switch("case 'foo' 'bar' 'baz': break;");
+    assert_eq!(errs, 0, "switch: {sw:?}");
+    assert_eq!(first_case_string(&sw), "foobarbaz");
+}
+
+#[test]
+fn single_string_pattern_unaffected() {
+    // Regression guard: a lone string literal still parses as one pattern.
+    let (sw, errs) = parse_switch("case 'foo': break;");
+    assert_eq!(errs, 0, "switch: {sw:?}");
+    assert_eq!(first_case_string(&sw), "foo");
+}

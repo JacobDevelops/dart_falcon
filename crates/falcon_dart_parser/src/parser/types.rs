@@ -272,6 +272,9 @@ impl<'src> Parser<'src> {
             if self.at(TokenKind::LBrace) {
                 self.advance();
                 while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+                    if self.at(TokenKind::At) {
+                        self.parse_annotations();
+                    }
                     let field_type = self.parse_type();
                     let name = self.expect_ident();
                     named.push(NamedRecordField { name, field_type });
@@ -281,6 +284,9 @@ impl<'src> Parser<'src> {
                 }
                 self.eat(TokenKind::RBrace);
             } else {
+                if self.at(TokenKind::At) {
+                    self.parse_annotations();
+                }
                 positional.push(self.parse_type());
                 // Skip optional name
                 if (self.is_ident_like()
@@ -481,6 +487,12 @@ impl<'src> Parser<'src> {
             );
         }
 
+        // Generic old-style function-typed formal: `name<T>(params)`. Dart allows
+        // type parameters on a function-typed formal parameter (unlike inside a
+        // generic function TYPE, which the caller keeps rejecting).
+        if self.at(TokenKind::Lt) {
+            self.parse_type_params();
+        }
         // function-typed param: name(params)
         let function_params = if self.at(TokenKind::LParen) {
             Some(self.parse_formal_param_list())

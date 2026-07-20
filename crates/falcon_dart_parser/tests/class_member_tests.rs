@@ -661,3 +661,33 @@ fn test_getter_arrow_body_with_semicolon_ok() {
     let (_prog, errors) = parse("class A { int get b => 42; }");
     assert_clean(&errors);
 }
+
+// ── `const` on a redirecting factory constructor is preserved ──────────────────
+
+#[test]
+fn test_const_factory_preserves_is_const() {
+    let (prog, errors) = parse("class C { const factory C.i() = D; }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Constructor(c) => {
+            assert!(c.is_factory, "expected a factory");
+            assert!(c.is_const, "the `const` modifier must be preserved");
+            assert!(c.redirect.is_some(), "expected a redirecting factory");
+        }
+        other => panic!("expected constructor, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_non_const_factory_is_not_const() {
+    // Control: a plain factory keeps `is_const: false`.
+    let (prog, errors) = parse("class C { factory C.i() = D; }");
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Constructor(c) => {
+            assert!(c.is_factory);
+            assert!(!c.is_const);
+        }
+        other => panic!("expected constructor, got {other:?}"),
+    }
+}

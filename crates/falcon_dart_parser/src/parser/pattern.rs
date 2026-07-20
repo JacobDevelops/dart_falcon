@@ -298,9 +298,21 @@ impl<'src> Parser<'src> {
             });
         }
 
-        // String literal
+        // String literal. Adjacent string literals are implicitly concatenated
+        // into one constant string, legal wherever a constant pattern appears.
         if self.at(TokenKind::StringLit) {
-            let node = self.parse_string_lit();
+            let mut node = self.parse_string_lit();
+            while self.at(TokenKind::StringLit) {
+                let next = self.parse_string_lit();
+                let mut interpolations = node.interpolations;
+                interpolations.extend(next.interpolations);
+                node = StringLitNode {
+                    raw: node.raw + &next.raw,
+                    value: node.value + &next.value,
+                    span: node.span.merge(&next.span),
+                    interpolations,
+                };
+            }
             return Pattern::Literal(LiteralPattern {
                 value: LiteralPatternValue::String(node),
                 span: self.span_from(start),

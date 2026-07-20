@@ -491,3 +491,168 @@ fn test_parenthesised_collection_with_complex_element() {
         other => panic!("expected expression statement, got {other:?}"),
     }
 }
+
+// ── Contextual keywords: yield/await as identifiers in non-generator/non-async ─
+
+/// Parse `src` as the body of a plain (non-async, non-generator) function and
+/// return its statements plus the parse-error count. In this context `await`
+/// and `yield` are ordinary identifiers, not reserved words.
+fn sync_body_stmts(src: &str) -> (Vec<Stmt>, usize) {
+    let (prog, errors) = parse(&format!("void f() {{ {src} }}"));
+    let func = match prog.declarations.first() {
+        Some(TopLevelDecl::Function(f)) => f,
+        other => panic!("expected function, got {other:?}\nerrors: {errors:?}"),
+    };
+    let block = match func.body.as_ref() {
+        Some(FunctionBody::Block(b)) => b,
+        other => panic!("expected block body, got {other:?}"),
+    };
+    (block.stmts.clone(), errors.len())
+}
+
+#[test]
+fn test_yield_as_identifier_in_plain_function() {
+    let (stmts, errors) = sync_body_stmts("var yield = 0; yield = 1;");
+    assert_eq!(errors, 0, "yield is a valid identifier here: {stmts:?}");
+    // Second statement is an assignment to the local `yield`, not a yield stmt.
+    match &stmts[1] {
+        Stmt::Expr(e) => assert!(
+            matches!(e.expr, Expr::Assign { .. }),
+            "expected assignment, got {:?}",
+            e.expr
+        ),
+        other => panic!("expected expr stmt, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_yield_method_call_is_member_access_not_yield_stmt() {
+    // `yield.toString()` on a local `yield` must parse as a member call, not a
+    // YieldStmt of a dot-shorthand (the silent wrong-AST regression).
+    let (stmts, errors) = sync_body_stmts("var yield = 0; yield.toString();");
+    assert_eq!(errors, 0, "{stmts:?}");
+    let expr = match &stmts[1] {
+        Stmt::Expr(e) => &e.expr,
+        other => panic!("expected expr stmt, got {other:?}"),
+    };
+    match expr {
+        Expr::Call { callee, .. } => match &**callee {
+            Expr::Field { object, field, .. } => {
+                assert!(matches!(**object, Expr::Ident(ref id) if id.name == "yield"));
+                assert_eq!(field.name, "toString");
+            }
+            other => panic!("expected field access callee, got {other:?}"),
+        },
+        other => panic!("expected call, got {other:?}"),
+    }
+    assert!(
+        !stmts.iter().any(|s| matches!(s, Stmt::Yield(_))),
+        "must not produce a yield statement"
+    );
+}
+
+#[test]
+fn test_yield_still_reserved_in_generator() {
+    // Inside a `sync*` generator, `yield` remains the yield keyword.
+    let (prog, errors) = parse("Iterable<int> f() sync* { yield 1; }");
+    assert_eq!(errors.len(), 0, "{errors:?}");
+    let func = match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("got {other:?}"),
+    };
+    let block = match func.body.as_ref().unwrap() {
+        FunctionBody::Block(b) => b,
+        other => panic!("got {other:?}"),
+    };
+    assert!(
+        matches!(block.stmts[0], Stmt::Yield(_)),
+        "expected yield stmt, got {:?}",
+        block.stmts[0]
+    );
+}
+
+#[test]
+fn test_await_as_identifier_in_plain_function() {
+    let (stmts, errors) = sync_body_stmts("var await = 0; await = 1; print(await + 1);");
+    assert_eq!(errors, 0, "await is a valid identifier here: {stmts:?}");
+    match &stmts[1] {
+        Stmt::Expr(e) => assert!(
+            matches!(e.expr, Expr::Assign { .. }),
+            "expected assignment, got {:?}",
+            e.expr
+        ),
+        other => panic!("expected expr stmt, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_await_still_reserved_in_async_function() {
+    // Inside an `async` body, a leading `await` is still an await-expression.
+    let (prog, errors) = parse("void f() async { await g(); }");
+    assert_eq!(errors.len(), 0, "{errors:?}");
+    let func = match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("got {other:?}"),
+    };
+    let block = match func.body.as_ref().unwrap() {
+        FunctionBody::Block(b) => b,
+        other => panic!("got {other:?}"),
+    };
+    match &block.stmts[0] {
+        Stmt::Expr(e) => assert!(
+            matches!(e.expr, Expr::Await { .. }),
+            "expected await expr, got {:?}",
+            e.expr
+        ),
+        other => panic!("expected expr stmt, got {other:?}"),
+    }
+}
+
+// ── Metadata on for-loop variables (all three forms) ──────────────────────────
+
+#[test]
+fn test_metadata_on_for_each_var() {
+    let (_, errors) = sync_body_stmts("for (@meta var x in [1, 2]) { print(x); }");
+    assert_eq!(errors, 0, "annotation on for-each var must parse");
+}
+
+#[test]
+fn test_metadata_on_for_each_final() {
+    let (_, errors) = sync_body_stmts("for (@meta final x in [1]) { print(x); }");
+    assert_eq!(errors, 0, "annotation on for-each final must parse");
+}
+
+#[test]
+fn test_metadata_on_c_style_for_var() {
+    let (_, errors) = sync_body_stmts("for (@meta var i = 0; i < 3; i++) { print(i); }");
+    assert_eq!(errors, 0, "annotation on C-style for var must parse");
+}
+
+#[test]
+fn test_metadata_on_pattern_for_each() {
+    let (_, errors) =
+        sync_body_stmts("for (@meta var (a, b) in <(int, int)>[]) { print(a + b); }");
+    assert_eq!(errors, 0, "annotation on pattern for-each must parse");
+}
+
+// ── Recursion-depth guard on statement nesting ────────────────────────────────
+
+#[test]
+fn test_deep_block_nesting_does_not_overflow() {
+    // Deeply nested blocks recurse through parse_stmt/parse_block. Run on a
+    // large-stack worker so the guard is reached before the default test stack
+    // is exhausted; parsing must terminate with an error, never abort.
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            let n = 3000;
+            let src = format!("void f() {{ {}{} }}", "{".repeat(n), "}".repeat(n));
+            let (_, errors) = parse(&src);
+            errors.iter().any(|e| e.message.contains("nesting too deep"))
+        })
+        .unwrap();
+    assert!(
+        handle.join().expect("parser thread must not panic/abort"),
+        "expected a nesting-too-deep error for deeply nested blocks"
+    );
+}

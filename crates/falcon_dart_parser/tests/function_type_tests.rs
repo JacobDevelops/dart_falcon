@@ -239,3 +239,48 @@ fn record_return_function_type_as_field_type() {
         other => panic!("expected record return type, got {other:?}"),
     }
 }
+
+// ── Generic old-style (inline) function-typed formal parameters ────────────────
+
+fn only_function(prog: &Program) -> &FunctionDecl {
+    match &prog.declarations[0] {
+        TopLevelDecl::Function(f) => f,
+        other => panic!("expected function, got {other:?}"),
+    }
+}
+
+#[test]
+fn generic_inline_function_typed_positional_formal() {
+    let (prog, errors) = parse("void f(int cb<T>(T x)) {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let params = &only_function(&prog).params;
+    let p = &params.positional[0];
+    assert_eq!(p.name.name, "cb");
+    assert!(p.function_params.is_some(), "expected a function-typed formal");
+}
+
+#[test]
+fn generic_inline_function_typed_named_formal() {
+    let (prog, errors) = parse("void f({int cb<T>(T x)?}) {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let p = &only_function(&prog).params.named[0];
+    assert_eq!(p.name.name, "cb");
+    assert!(p.function_params.is_some());
+}
+
+#[test]
+fn generic_inline_function_typed_type_param_return() {
+    let (prog, errors) = parse("void f(T select<T>(List<T> xs)) {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let p = &only_function(&prog).params.positional[0];
+    assert_eq!(p.name.name, "select");
+    assert!(p.function_params.is_some());
+}
+
+#[test]
+fn generic_function_typed_formal_rejected_inside_function_type() {
+    // A generic function-typed formal is NOT valid inside a generic function
+    // TYPE — Dart rejects it and falcon must keep rejecting it there.
+    let (_prog, errors) = parse("typedef Old = void Function(int cb<T>(T x));");
+    assert!(!errors.is_empty(), "expected rejection inside function type");
+}

@@ -685,6 +685,7 @@ impl<'src> Parser<'src> {
             return ClassMember::Constructor(self.parse_factory_constructor(
                 annotations,
                 is_external,
+                is_const,
                 start,
             ));
         }
@@ -884,6 +885,7 @@ impl<'src> Parser<'src> {
         &mut self,
         annotations: Vec<Annotation>,
         is_external: bool,
+        is_const: bool,
         start: usize,
     ) -> ConstructorDecl {
         self.advance(); // factory
@@ -909,7 +911,7 @@ impl<'src> Parser<'src> {
         };
         ConstructorDecl {
             annotations,
-            is_const: false,
+            is_const,
             is_factory: true,
             is_external,
             name,
