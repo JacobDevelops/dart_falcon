@@ -30,6 +30,11 @@ const RECV_TIMEOUT: Duration = Duration::from_secs(5);
 const VIOLATING_SRC: &str = "void f() {\n  dynamic x = 1;\n  print(x);\n}\n";
 const CLEAN_SRC: &str = "void f() {\n  final int x = 1;\n  print(x);\n}\n";
 const DOC_URI: &str = "file:///test/a.dart";
+/// Non-compiling Dart: the parser recovers but reports a syntax error.
+const SYNTAX_ERR_SRC: &str = "void f() {\n  final int x = ;\n}\n";
+/// Syntax error on a line preceded by two astral-plane emoji: the reported
+/// column must count UTF-16 code units (each emoji = 2), not scalar values.
+const EMOJI_SYNTAX_SRC: &str = "final s = \"\u{1F600}\u{1F600}\"; final int x = ;\n";
 
 struct TestClient {
     client: Connection,
@@ -149,6 +154,11 @@ impl TestClient {
             "text document sync must be advertised"
         );
         assert!(result.capabilities.hover_provider.is_some());
+        assert_eq!(
+            result.capabilities.position_encoding,
+            Some(lsp_types::PositionEncodingKind::UTF16),
+            "positions must be advertised as UTF-16 so clients decode columns correctly"
+        );
         let info = result.server_info.expect("server_info");
         assert_eq!(info.name, "falcon");
         self.notify(
@@ -454,4 +464,110 @@ fn config_override_disables_rule_not_published() {
         "override-disabled rule fired: {params:?}"
     );
     client.shutdown();
+}
+
+/// Non-compiling Dart surfaces `syntax-error` diagnostics over LSP, matching the
+/// CLI — otherwise broken code is silently linted as if it parsed.
+#[test]
+fn did_open_publishes_syntax_error_diagnostics() {
+    let mut client = TestClient::start(Duration::ZERO, None);
+    client.open(DOC_URI, SYNTAX_ERR_SRC, 1);
+    let params = client.recv_publish();
+    assert!(
+        has_rule(&params, "syntax-error"),
+        "syntax errors must be published over LSP: {params:?}"
+    );
+    let diag = params
+        .diagnostics
+        .iter()
+        .find(|d| matches!(&d.code, Some(lsp_types::NumberOrString::String(c)) if c == "syntax-error"))
+        .unwrap();
+    assert_eq!(diag.severity, Some(lsp_types::DiagnosticSeverity::ERROR));
+    client.shutdown();
+}
+
+/// Published columns count UTF-16 code units: a syntax error after two emoji
+/// lands at character 32 (2 emoji × 2 units), not 30 (scalar count).
+#[test]
+fn published_positions_count_utf16_code_units() {
+    let mut client = TestClient::start(Duration::ZERO, None);
+    client.open(DOC_URI, EMOJI_SYNTAX_SRC, 1);
+    let params = client.recv_publish();
+    let diag = params
+        .diagnostics
+        .iter()
+        .find(|d| matches!(&d.code, Some(lsp_types::NumberOrString::String(c)) if c == "syntax-error"))
+        .expect("syntax error must be published");
+    assert_eq!(diag.range.start.line, 0);
+    assert_eq!(
+        diag.range.start.character, 32,
+        "column must count UTF-16 units past the emoji, not scalars: {:?}",
+        diag.range
+    );
+    client.shutdown();
+}
+
+/// A single malformed notification (didChange with `version: null`, a real
+/// client quirk) must be ignored, not tear the session down. The server stays
+/// alive and still analyzes a subsequent well-formed change.
+#[test]
+fn malformed_did_change_params_do_not_kill_server() {
+    let mut client = TestClient::start(Duration::ZERO, None);
+    client.open(DOC_URI, CLEAN_SRC, 1);
+    client.recv_publish();
+
+    // `version: null` violates VersionedTextDocumentIdentifier (required i32).
+    client.notify(
+        lsp_types::notification::DidChangeTextDocument::METHOD,
+        serde_json::json!({
+            "textDocument": { "uri": DOC_URI, "version": null },
+            "contentChanges": [ { "text": VIOLATING_SRC } ]
+        }),
+    );
+
+    // Ignored, not fatal: the next valid change is still analyzed and published.
+    client.change(DOC_URI, VIOLATING_SRC, 3);
+    let params = client.recv_publish();
+    assert_eq!(params.version, Some(3));
+    assert!(
+        has_rule(&params, "avoid-dynamic"),
+        "server must survive malformed params: {params:?}"
+    );
+    client.shutdown();
+}
+
+/// A malformed *request* gets an InvalidParams error response rather than
+/// killing the server (which then keeps handling messages).
+#[test]
+fn malformed_request_params_return_invalid_params() {
+    let mut client = TestClient::start(Duration::ZERO, None);
+    client.open(DOC_URI, VIOLATING_SRC, 1);
+    client.recv_publish();
+
+    // position.line as a string is not a valid HoverParams.
+    let id = client.request(
+        lsp_types::request::HoverRequest::METHOD,
+        serde_json::json!({
+            "textDocument": { "uri": DOC_URI },
+            "position": { "line": "nope", "character": 0 }
+        }),
+    );
+    let resp = client.recv_response(&id);
+    let err = resp.error.expect("malformed request must error");
+    assert_eq!(err.code, lsp_server::ErrorCode::InvalidParams as i32);
+    client.shutdown();
+}
+
+/// `exit` without a prior `shutdown` must fail the server loop (process exit
+/// code 1 per the LSP spec), not return success.
+#[test]
+fn exit_without_shutdown_terminates_with_error() {
+    let mut client = TestClient::start(Duration::ZERO, None);
+    client.notify(lsp_types::notification::Exit::METHOD, ());
+    let server = client.server.take().unwrap();
+    let result = server.join();
+    assert!(
+        result.is_err(),
+        "exit before shutdown must fail the server loop (exit code 1)"
+    );
 }
