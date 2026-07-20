@@ -271,9 +271,9 @@ fn clean_file_still_gets_cross_file_diagnostic() {
 }
 
 /// Conditional (`if (dart.library.io) '...'`) import/export targets are real
-/// references: the platform-specific impl files must NOT be flagged unused. The
-/// unreferenced non-barrel `lib/api.dart` is the positive control proving the
-/// rule is live.
+/// reference edges: the platform-specific `lib/src` impl files are reachable
+/// from the public-surface `lib/api.dart` and must NOT be flagged. An
+/// unreferenced `lib/src/orphan.dart` is the positive control.
 #[test]
 fn conditional_directive_targets_not_flagged_unused() {
     let mut client = TestClient::start(ENABLE_UNUSED_FILES);
@@ -283,15 +283,22 @@ fn conditional_directive_targets_not_flagged_unused() {
     client.write_file("lib/src/impl_stub.dart", "class Impl {}\n");
     let io = client.write_file("lib/src/impl_io.dart", "class Impl {}\n");
     let web = client.write_file("lib/src/impl_web.dart", "class Impl {}\n");
+    let orphan_src = "class Orphan {}\n";
+    let orphan = client.write_file("lib/src/orphan.dart", orphan_src);
 
     client.open(&api, api_src, 1);
     client.open(&io, "class Impl {}\n", 1);
     client.open(&web, "class Impl {}\n", 1);
+    client.open(&orphan, orphan_src, 1);
     let pubs = client.drain_publishes();
 
     assert!(
-        any_publish_has_rule(&pubs, &api, "unused-files"),
-        "control: unreferenced non-barrel lib/api.dart must be flagged: {pubs:?}"
+        any_publish_has_rule(&pubs, &orphan, "unused-files"),
+        "control: unreachable lib/src orphan must be flagged: {pubs:?}"
+    );
+    assert!(
+        !any_publish_has_rule(&pubs, &api, "unused-files"),
+        "public-surface lib/api.dart is an entrypoint external consumers import: {pubs:?}"
     );
     assert!(
         !any_publish_has_rule(&pubs, &io, "unused-files"),
@@ -300,6 +307,37 @@ fn conditional_directive_targets_not_flagged_unused() {
     assert!(
         !any_publish_has_rule(&pubs, &web, "unused-files"),
         "conditional `if (dart.library.html)` target must not be flagged: {pubs:?}"
+    );
+    client.shutdown();
+}
+
+/// The upgrade to reachability: a `lib/src` island (two files referencing only
+/// each other, unreachable from any entrypoint) is dead — both are flagged, even
+/// though each is "referenced" by the other.
+#[test]
+fn dead_code_island_both_flagged() {
+    let mut client = TestClient::start(ENABLE_UNUSED_FILES);
+    client.write_file("pubspec.yaml", "name: island\n");
+    // Live surface, reachable, as a control that the rule isn't flagging blindly.
+    client.write_file("lib/island.dart", "export 'src/live.dart';\n");
+    client.write_file("lib/src/live.dart", "class Live {}\n");
+    // Dead island: a <-> b reference each other and nothing else reaches them.
+    let a_src = "import 'b.dart';\nclass A { B? b; }\n";
+    let b_src = "import 'a.dart';\nclass B { A? a; }\n";
+    let a = client.write_file("lib/src/a.dart", a_src);
+    let b = client.write_file("lib/src/b.dart", b_src);
+
+    client.open(&a, a_src, 1);
+    client.open(&b, b_src, 1);
+    let pubs = client.drain_publishes();
+
+    assert!(
+        any_publish_has_rule(&pubs, &a, "unused-files"),
+        "island file a must be flagged: {pubs:?}"
+    );
+    assert!(
+        any_publish_has_rule(&pubs, &b, "unused-files"),
+        "island file b must be flagged: {pubs:?}"
     );
     client.shutdown();
 }
@@ -316,7 +354,7 @@ fn package_barrel_not_flagged_unused() {
     client.write_file("lib/src/foo.dart", "class Foo {}\n");
     client.write_file("lib/src/bar.dart", "class Bar {}\n");
     let dead_src = "class Dead {}\n";
-    let dead = client.write_file("lib/dead.dart", dead_src);
+    let dead = client.write_file("lib/src/dead.dart", dead_src);
 
     client.open(&barrel, barrel_src, 1);
     client.open(&dead, dead_src, 1);
@@ -328,7 +366,7 @@ fn package_barrel_not_flagged_unused() {
     );
     assert!(
         any_publish_has_rule(&pubs, &dead, "unused-files"),
-        "control: unreferenced non-barrel lib file must still be flagged: {pubs:?}"
+        "control: unreachable lib/src file must still be flagged: {pubs:?}"
     );
     client.shutdown();
 }

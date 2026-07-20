@@ -10,7 +10,7 @@ pub mod unnecessary_nullable;
 pub mod unused_code;
 pub mod unused_files;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use falcon_analyze::ProjectFile;
@@ -118,15 +118,18 @@ pub fn resolve_directive_uri(
         if sub.is_empty() {
             return None;
         }
-        if let Some(pkg) = pkg
-            && pkg_name == pkg.name
-        {
-            return Some(ResolvedRef::Path(canonical_or_lexical(
-                &pkg.lib_root.join(sub),
-            )));
+        match pkg {
+            Some(pkg) if pkg_name == pkg.name => {
+                return Some(ResolvedRef::Path(canonical_or_lexical(
+                    &pkg.lib_root.join(sub),
+                )));
+            }
+            // Known local package: a `package:` URI naming a *different* package
+            // cannot denote a file in this package, so it is not a local edge.
+            Some(_) => return None,
+            // No pubspec: match tolerantly on the `lib/<sub>` suffix.
+            None => return Some(ResolvedRef::Suffix(format!("lib/{sub}"))),
         }
-        // Unknown package (or no pubspec): match on the `lib/<sub>` suffix.
-        return Some(ResolvedRef::Suffix(format!("lib/{sub}")));
     }
     // Relative URI, resolved against the importing file's directory.
     let from_dir = from_file.parent().unwrap_or_else(|| Path::new(""));
@@ -200,6 +203,49 @@ pub fn has_lib_component(path: &Path) -> bool {
     path.components().any(|c| c.as_os_str() == "lib")
 }
 
+/// Directed reference graph over the file set: `adj[i]` lists the indices of the
+/// files that `files[i]` references via its imports/exports/parts (all URI kinds,
+/// including conditional). `canons` is the caller's canonical path per file (same
+/// order as `files`), reused to avoid re-canonicalizing. Edge targets are the
+/// *first* file index for a given canonical path, so two spellings of one file
+/// collapse to a single node. A tolerant suffix reference (pubspec-less only)
+/// resolves to every file it matches. Unresolvable/external URIs contribute no
+/// edge. Duplicate edges are harmless for the reachability traversal that uses it.
+pub fn build_reference_graph(
+    files: &[ProjectFile],
+    canons: &[PathBuf],
+    pkg: Option<&PackageInfo>,
+) -> Vec<Vec<usize>> {
+    let mut by_path: HashMap<&Path, usize> = HashMap::with_capacity(canons.len());
+    for (i, c) in canons.iter().enumerate() {
+        by_path.entry(c.as_path()).or_insert(i);
+    }
+    let slashed_paths: Vec<String> = canons.iter().map(|c| slashed(c)).collect();
+
+    let mut adj = vec![Vec::new(); files.len()];
+    for (i, f) in files.iter().enumerate() {
+        for uri in program_reference_uris(&f.program) {
+            match resolve_directive_uri(&canons[i], uri, pkg) {
+                Some(ResolvedRef::Path(p)) => {
+                    if let Some(&j) = by_path.get(p.as_path()) {
+                        adj[i].push(j);
+                    }
+                }
+                Some(ResolvedRef::Suffix(s)) => {
+                    let needle = format!("/{s}");
+                    for (j, sp) in slashed_paths.iter().enumerate() {
+                        if *sp == s || sp.ends_with(&needle) {
+                            adj[i].push(j);
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+    }
+    adj
+}
+
 /// Collect every file's resolved outgoing references into one [`ReferenceSet`].
 pub fn collect_references(files: &[ProjectFile], pkg: Option<&PackageInfo>) -> ReferenceSet {
     let mut refs = ReferenceSet::default();
@@ -238,7 +284,10 @@ mod tests {
         let (program, errors) = parse(src);
         assert!(errors.is_empty(), "{errors:?}");
         let uris: Vec<&str> = program_reference_uris(&program).collect();
-        assert!(uris.contains(&"src/impl_stub.dart"), "default uri: {uris:?}");
+        assert!(
+            uris.contains(&"src/impl_stub.dart"),
+            "default uri: {uris:?}"
+        );
         assert!(uris.contains(&"src/impl_io.dart"), "io branch: {uris:?}");
         assert!(uris.contains(&"src/impl_web.dart"), "web branch: {uris:?}");
     }
