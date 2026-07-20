@@ -105,6 +105,12 @@ fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext
                     check_stmts(&catch.body.stmts, diags, ctx);
                 }
             }
+            Stmt::Switch(s) => {
+                for case in &s.cases {
+                    check_stmts(&case.body, diags, ctx);
+                }
+            }
+            Stmt::LocalFunc(lf) => check_body(&lf.body, diags, ctx),
             _ => {}
         }
     }

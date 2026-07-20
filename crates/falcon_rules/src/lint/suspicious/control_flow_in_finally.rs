@@ -123,6 +123,7 @@ fn scan_finally(stmt: &Stmt, d: Depth, diags: &mut Vec<Diagnostic>, ctx: &Analyz
                 }
             }
         }
+        Stmt::Labeled(l) => scan_finally(&l.stmt, d, diags, ctx),
         // Closures introduce their own control-flow scope — do not descend.
         _ => {}
     }
@@ -179,6 +180,7 @@ fn find_in_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
             }
         }
         Stmt::LocalFunc(lf) => find_finally(&lf.body, diags, ctx),
+        Stmt::Labeled(l) => find_in_stmt(&l.stmt, diags, ctx),
         Stmt::Expr(e) => find_in_expr(&e.expr, diags, ctx),
         Stmt::Return(r) => {
             if let Some(v) = &r.value {

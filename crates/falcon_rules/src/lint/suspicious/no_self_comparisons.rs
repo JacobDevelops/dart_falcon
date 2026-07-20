@@ -48,7 +48,7 @@ impl Visitor for Collector<'_> {
         {
             let l = strip_ws(&self.source[left.span().start..left.span().end]);
             let r = strip_ws(&self.source[right.span().start..right.span().end]);
-            if !l.is_empty() && l == r {
+            if !l.is_empty() && l == r && is_side_effect_free(left) && is_side_effect_free(right) {
                 self.diags.push(Diagnostic::new(
                     "no-self-comparisons",
                     Severity::Warning,
@@ -81,4 +81,44 @@ fn is_comparison(op: &BinaryOp) -> bool {
 /// formatting differences do not hide a structurally identical comparison.
 fn strip_ws(s: &str) -> String {
     s.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// Two textually identical operands are only a self-comparison when evaluating
+/// them twice yields the same value. A call/constructor may return a different
+/// value each time (`list.removeLast() == list.removeLast()`), so any operand
+/// reaching an invocation is not treated as identical.
+fn is_side_effect_free(expr: &Expr) -> bool {
+    match expr {
+        Expr::Ident(_)
+        | Expr::IntLit { .. }
+        | Expr::DoubleLit { .. }
+        | Expr::BoolLit { .. }
+        | Expr::NullLit { .. }
+        | Expr::SymbolLit { .. }
+        | Expr::This { .. }
+        | Expr::Super { .. } => true,
+        Expr::StringLit(s) => s.interpolations.iter().all(|i| is_side_effect_free(&i.expr)),
+        Expr::Field { object, .. } => is_side_effect_free(object),
+        Expr::Index { object, index, .. } => {
+            is_side_effect_free(object) && is_side_effect_free(index)
+        }
+        Expr::Unary { operand, .. } | Expr::NullAssert { operand, .. } => {
+            is_side_effect_free(operand)
+        }
+        Expr::Is { expr, .. } | Expr::As { expr, .. } => is_side_effect_free(expr),
+        Expr::Binary { left, right, .. } => {
+            is_side_effect_free(left) && is_side_effect_free(right)
+        }
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            is_side_effect_free(condition)
+                && is_side_effect_free(then_expr)
+                && is_side_effect_free(else_expr)
+        }
+        _ => false,
+    }
 }

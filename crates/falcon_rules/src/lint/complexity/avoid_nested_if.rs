@@ -98,6 +98,7 @@ fn count_ifs_including(stmt: &Stmt) -> usize {
             FunctionBody::Block(b) => b.stmts.iter().map(count_ifs_including).sum(),
             _ => 0,
         },
+        Stmt::Labeled(l) => count_ifs_including(&l.stmt),
         _ => 0,
     }
 }
@@ -157,6 +158,7 @@ fn walk(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
                 b.stmts.iter().for_each(|s| walk(s, diags, ctx));
             }
         }
+        Stmt::Labeled(l) => walk(&l.stmt, diags, ctx),
         _ => {}
     }
 }

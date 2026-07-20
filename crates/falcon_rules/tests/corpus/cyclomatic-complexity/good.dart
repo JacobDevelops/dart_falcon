@@ -33,3 +33,13 @@ class Counter {
     return value;
   }
 }
+
+// Labeled loop whose complexity stays within the limit.
+int labeledLow(List<int> xs) {
+  loop:
+  while (xs.isNotEmpty) {
+    xs.removeAt(0);
+    continue loop;
+  }
+  return 0;
+}

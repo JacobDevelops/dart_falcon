@@ -16,6 +16,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct MaximumNestingLevel;
 
@@ -57,6 +58,17 @@ fn check_function(
     let threshold = max_nesting_option(ctx);
     let mut max = 0;
     walk_body(body, 0, &mut max);
+    let mut closures = ClosureNesting { max };
+    match body {
+        FunctionBody::Block(b) => {
+            for s in &b.stmts {
+                closures.visit_stmt(s);
+            }
+        }
+        FunctionBody::Arrow(e, _) => closures.visit_expr(e),
+        FunctionBody::Native(_, _) => {}
+    }
+    max = closures.max;
     if max > threshold {
         diags.push(Diagnostic::new(
             "maximum-nesting-level",
@@ -211,6 +223,25 @@ fn walk_stmt(stmt: &Stmt, depth: usize, max: &mut usize) {
         }
         // Nested local functions start their own fresh nesting context.
         Stmt::LocalFunc(lf) => walk_body(&lf.body, 0, max),
+        // A label wraps a statement without adding depth; recurse into it.
+        Stmt::Labeled(l) => walk_stmt(&l.stmt, depth, max),
         _ => {}
+    }
+}
+
+/// Finds every function-expression (closure) anywhere in a body and measures
+/// its nesting from a fresh depth of 0, mirroring how local functions restart
+/// the count. Closures in argument position (`run(() { … })`) were otherwise
+/// invisible to the statement walk.
+struct ClosureNesting {
+    max: usize,
+}
+
+impl Visitor for ClosureNesting {
+    fn visit_expr(&mut self, node: &Expr) {
+        if let Expr::FuncExpr { body, .. } = node {
+            walk_body(body, 0, &mut self.max);
+        }
+        walk_expr(self, node);
     }
 }

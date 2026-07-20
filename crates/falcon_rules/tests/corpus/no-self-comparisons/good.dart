@@ -20,3 +20,13 @@ void d(int x, int y) {
 }
 
 bool e(int x) => -x == x;
+
+// Side-effecting calls evaluate to different values, so identical text is
+// not a self-comparison.
+bool popEqual(List<int> l) => l.removeLast() == l.removeLast();
+
+bool nowEqual() => DateTime.now() == DateTime.now();
+
+int nextId = 0;
+int gen() => nextId++;
+bool genEqual() => gen() == gen();

@@ -169,6 +169,7 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             }
         }
         Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx),
+        Stmt::Labeled(l) => scan_stmt(&l.stmt, diags, ctx),
         _ => {}
     }
 }
