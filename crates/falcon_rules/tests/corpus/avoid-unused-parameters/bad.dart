@@ -45,3 +45,12 @@ extension StringExt on String {
     print(value);
   }
 }
+
+// A name appearing inside an interpolation only as a member (`${obj.param}`) is
+// not a read of the parameter. Scanning the raw text collected it and silently
+// suppressed this report; the parsed interpolations do not.
+class InterpolationPrecision {
+  String memberNotParameter(Object obj, int param) { /* expect: avoid-unused-parameters */
+    return "value ${obj.param}";
+  }
+}

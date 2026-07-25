@@ -49,3 +49,9 @@ void mixedApproach(bool condition) {
 bool isEligible(bool verified, bool premium) {
   return verified && premium;
 }
+
+// A ternary inside a closure body is read on its own, so it is not "nested"
+// in the ternary the closure sits in.
+List<int> closureInsideConditional(bool flag, List<int> items) {
+  return flag ? items.map((x) => x > 0 ? 1 : 0).toList() : const [];
+}

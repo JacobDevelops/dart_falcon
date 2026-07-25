@@ -42,3 +42,39 @@ void testChainedUnnecessaryCast() {
   final Map<String, int> data = {};
   final result = data as Map<String, int>; /* expect: avoid-unnecessary-type-casts */
 }
+
+// Regression: the cast must still be found inside Dart 3 containers.
+void testCastsInContainers() {
+  final int n = 5;
+  final (a, _) = (n as int, 0); /* expect: avoid-unnecessary-type-casts */
+  lbl: {
+    final b = n as int; /* expect: avoid-unnecessary-type-casts */
+    print(b);
+  }
+  final c = switch (n) {
+    0 => n as int, /* expect: avoid-unnecessary-type-casts */
+    _ => 0,
+  };
+  final d = switch (n as int) { /* expect: avoid-unnecessary-type-casts */
+    _ => 0,
+  };
+  final e = [if (n > 0) n as int]; /* expect: avoid-unnecessary-type-casts */
+  final f = [...[n as int]]; /* expect: avoid-unnecessary-type-casts */
+  final g = (p: n as int, q: 0); /* expect: avoid-unnecessary-type-casts */
+  print([a, c, d, e, f, g]);
+}
+
+// Regression: locals declared inside a loop or a try body are tracked, so a
+// redundant cast there is still reported.
+void loopScopeRegression(List<int> xs) {
+  for (final _ in xs) {
+    final int inLoop = 1;
+    print(inLoop as int); /* expect: avoid-unnecessary-type-casts */
+  }
+  try {
+    final int inTry = 2;
+    print(inTry as int); /* expect: avoid-unnecessary-type-casts */
+  } catch (e) {
+    print(e);
+  }
+}

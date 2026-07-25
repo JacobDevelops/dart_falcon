@@ -33,3 +33,25 @@ class MyWidget {
 void testSmallRadius() {
   final border = BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(4), bottomLeft: Radius.circular(4), bottomRight: Radius.circular(4)); /* expect: prefer-const-border-radius */
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
+void containersRegression(int rcount) {
+  final (ra, _) = (BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)), 0); /* expect: prefer-const-border-radius */
+  lbl: {
+    final rb = BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)); /* expect: prefer-const-border-radius */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)), /* expect: prefer-const-border-radius */
+    _ => null,
+  };
+  final rd = switch (BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10))) { /* expect: prefer-const-border-radius */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10))]; /* expect: prefer-const-border-radius */
+  final rf = [...[BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10))]]; /* expect: prefer-const-border-radius */
+  final rg = (p: BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)), q: 0); /* expect: prefer-const-border-radius */
+  print([ra, rc, rd, re, rf, rg]);
+}

@@ -48,3 +48,25 @@ void multipleAssertions() {
   final b = value2!; /* expect: avoid-non-null-assertion */
   final c = (nested!.property)!; /* expect: avoid-non-null-assertion *//* expect: avoid-non-null-assertion */
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
+void containersRegression(int rcount, Object? maybe) {
+  final (ra, _) = (maybe!, 0); /* expect: avoid-non-null-assertion */
+  lbl: {
+    final rb = maybe!; /* expect: avoid-non-null-assertion */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => maybe!, /* expect: avoid-non-null-assertion */
+    _ => null,
+  };
+  final rd = switch (maybe!) { /* expect: avoid-non-null-assertion */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) maybe!]; /* expect: avoid-non-null-assertion */
+  final rf = [...[maybe!]]; /* expect: avoid-non-null-assertion */
+  final rg = (p: maybe!, q: 0); /* expect: avoid-non-null-assertion */
+  print([ra, rc, rd, re, rf, rg]);
+}

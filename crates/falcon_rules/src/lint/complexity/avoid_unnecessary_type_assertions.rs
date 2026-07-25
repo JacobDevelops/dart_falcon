@@ -116,8 +116,15 @@ fn analyze_function_body_with_scope(
     }
 }
 
-fn analyze_block(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let mut scope_map: HashMap<String, DartType> = HashMap::new();
+/// Walk a nested block with the enclosing declarations visible. Inner
+/// declarations must not leak back out, hence the clone.
+fn analyze_block(
+    block: &Block,
+    outer_scope: &HashMap<String, DartType>,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+) {
+    let mut scope_map = outer_scope.clone();
     for stmt in &block.stmts {
         analyze_statement(stmt, &mut scope_map, diags, ctx);
     }
@@ -160,9 +167,7 @@ fn analyze_statement(
                 }
             }
         }
-        Stmt::Block(block) => {
-            analyze_block(block, diags, ctx);
-        }
+        Stmt::Block(block) => analyze_block(block, scope_map, diags, ctx),
         Stmt::If(if_stmt) => {
             match &if_stmt.condition {
                 IfCondition::Expr(expr) => {
@@ -206,12 +211,12 @@ fn analyze_statement(
             }
         }
         Stmt::TryCatch(try_catch) => {
-            analyze_block(&try_catch.body, diags, ctx);
+            analyze_block(&try_catch.body, scope_map, diags, ctx);
             for catch_clause in &try_catch.catches {
-                analyze_block(&catch_clause.body, diags, ctx);
+                analyze_block(&catch_clause.body, scope_map, diags, ctx);
             }
             if let Some(finally_block) = &try_catch.finally {
-                analyze_block(finally_block, diags, ctx);
+                analyze_block(finally_block, scope_map, diags, ctx);
             }
         }
         Stmt::Return(return_stmt) => {

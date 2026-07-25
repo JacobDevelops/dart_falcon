@@ -72,3 +72,37 @@ void copyMap(Map map) {
 void testMultipleDuplicates(String a, String b) {
   process(a, a, b); /* expect: no-equal-arguments */
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
+void containersRegression(int rcount) {
+  final (ra, _) = (foo(rcount, rcount), 0); /* expect: no-equal-arguments */
+  lbl: {
+    final rb = foo(rcount, rcount); /* expect: no-equal-arguments */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => foo(rcount, rcount), /* expect: no-equal-arguments */
+    _ => null,
+  };
+  final rd = switch (foo(rcount, rcount)) { /* expect: no-equal-arguments */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) foo(rcount, rcount)]; /* expect: no-equal-arguments */
+  final rf = [...[foo(rcount, rcount)]]; /* expect: no-equal-arguments */
+  final rg = (p: foo(rcount, rcount), q: 0); /* expect: no-equal-arguments */
+  print([ra, rc, rd, re, rf, rg]);
+}
+
+// Regression: a cascade call carries its own argument list and is never
+// rebuilt as a plain call expression, so it needs checking on its own.
+class Configurable {
+  void configure(int a, int b) {}
+}
+
+void cascadeRegression(Configurable c, int dup) {
+  c
+    ..configure(dup, dup) /* expect: no-equal-arguments */
+    ..configure(1, 2);
+}

@@ -11,6 +11,7 @@
       "no-logic-in-create-state",
       "prefer-async-callback",
       "prefer-const-border-radius",
+      "prefer-const-constructors-in-immutables",
       "prefer-correct-edge-insets-constructor",
       "prefer-declaring-const-constructor",
       "prefer-dedicated-media-query-methods",
@@ -21,8 +22,10 @@
       "sized-box-for-whitespace",
       "sort-child-properties-last",
       "unnecessary-flutter-imports",
+      "use-build-context-synchronously",
       "use-design-system-item",
       "use-full-hex-values-for-flutter-colors",
+      "use-key-in-widget-constructors",
       "use-once-constructors-once-provider",
       "use-spacer-as-expanded-child"
     ]

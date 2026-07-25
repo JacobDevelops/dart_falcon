@@ -25,3 +25,25 @@ int calculate(bool x, bool y) {
 List<String> getItems(bool filter) {
   return filter ? (items.isNotEmpty ? (items.toList()) : []) : items; /* expect: avoid-nested-conditional-expressions */
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
+void containersRegression(int rcount) {
+  final (ra, _) = ((rcount > 0 ? (rcount > 1 ? 1 : 2) : 3), 0); /* expect: avoid-nested-conditional-expressions */
+  lbl: {
+    final rb = (rcount > 0 ? (rcount > 1 ? 1 : 2) : 3); /* expect: avoid-nested-conditional-expressions */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => (rcount > 0 ? (rcount > 1 ? 1 : 2) : 3), /* expect: avoid-nested-conditional-expressions */
+    _ => null,
+  };
+  final rd = switch ((rcount > 0 ? (rcount > 1 ? 1 : 2) : 3)) { /* expect: avoid-nested-conditional-expressions */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) (rcount > 0 ? (rcount > 1 ? 1 : 2) : 3)]; /* expect: avoid-nested-conditional-expressions */
+  final rf = [...[(rcount > 0 ? (rcount > 1 ? 1 : 2) : 3)]]; /* expect: avoid-nested-conditional-expressions */
+  final rg = (p: (rcount > 0 ? (rcount > 1 ? 1 : 2) : 3), q: 0); /* expect: avoid-nested-conditional-expressions */
+  print([ra, rc, rd, re, rf, rg]);
+}

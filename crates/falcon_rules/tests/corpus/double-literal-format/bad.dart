@@ -49,3 +49,33 @@ void mixedFormats() {
   final a = .5; /* expect: double-literal-format */
   final c = .125; /* expect: double-literal-format */
 }
+
+// Regression: a literal must be found wherever it appears, including inside
+// Dart 3 containers whose walkers were previously not visited.
+void testContainers(List<double> xs, int count) {
+  final (a, _) = (.5, 0); /* expect: double-literal-format */
+  double b;
+  int _u;
+  (b, _u) = (1.50, 0); /* expect: double-literal-format */
+  lbl: {
+    final c = .25; /* expect: double-literal-format */
+    print(c);
+  }
+  for (final (d, _) in [(.75, 0)]) { /* expect: double-literal-format */
+    print(d);
+  }
+  final e = switch (count) {
+    0 => .125, /* expect: double-literal-format */
+    _ => 1.230, /* expect: double-literal-format */
+  };
+  final f = switch (.5) { /* expect: double-literal-format */
+    _ => 0,
+  };
+  final g = [if (count > 0) .5]; /* expect: double-literal-format */
+  final h = [...[.5]]; /* expect: double-literal-format */
+  final i = (x: .5, y: 0); /* expect: double-literal-format */
+  final j = {for (final k in xs) k: .5}; /* expect: double-literal-format */
+  assert(.5 > 0, "x"); /* expect: double-literal-format */
+  final l = (.5 as Object) is double; /* expect: double-literal-format */
+  print([a, b, e, f, g, h, i, j, l]);
+}

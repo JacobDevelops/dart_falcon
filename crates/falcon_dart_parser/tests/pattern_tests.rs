@@ -569,8 +569,7 @@ fn adjacent_string_case_label_folds() {
 
 #[test]
 fn adjacent_string_switch_expr_arm_folds() {
-    let (stmts, errs) =
-        parse_body("var r = switch (x) { 'a' 'b' => 1, _ => 0 };");
+    let (stmts, errs) = parse_body("var r = switch (x) { 'a' 'b' => 1, _ => 0 };");
     assert_eq!(errs, 0, "stmts: {stmts:?}");
 }
 

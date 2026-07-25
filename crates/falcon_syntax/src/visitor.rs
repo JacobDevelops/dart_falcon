@@ -1185,3 +1185,120 @@ fn walk_map_element<V: Visitor>(v: &mut V, element: &MapElement) {
         }
     }
 }
+
+/// Call `f` on `root` and every expression nested anywhere beneath it.
+///
+/// Rules that only need "find expressions matching a shape" should use this
+/// instead of hand-rolling a recursive match: the walk below is exhaustive over
+/// the AST, so a new expression or statement kind cannot silently hide a
+/// violation the way a `_ => {}` arm does.
+pub fn for_each_expr<F: FnMut(&Expr)>(root: &Expr, f: &mut F) {
+    ExprWalker { f }.visit_expr(root);
+}
+
+/// Call `f` on every expression in the program, wherever it appears.
+pub fn for_each_expr_in_program<F: FnMut(&Expr)>(program: &Program, f: &mut F) {
+    ExprWalker { f }.visit_program(program);
+}
+
+/// Call `f` on every expression appearing anywhere in `stmts`, including inside
+/// nested statements, closures, patterns' initializers and collection elements.
+pub fn for_each_expr_in_stmts<F: FnMut(&Expr)>(stmts: &[Stmt], f: &mut F) {
+    let mut w = ExprWalker { f };
+    for stmt in stmts {
+        w.visit_stmt(stmt);
+    }
+}
+
+/// Backs the three `for_each_expr*` helpers: every expression the default walk
+/// reaches, handed to `f` before descending into it.
+struct ExprWalker<'f, F> {
+    f: &'f mut F,
+}
+
+impl<F: FnMut(&Expr)> Visitor for ExprWalker<'_, F> {
+    fn visit_expr(&mut self, node: &Expr) {
+        (self.f)(node);
+        walk_expr(self, node);
+    }
+}
+
+/// Call `f` on every statement in `stmts` and every statement nested beneath
+/// them (inside blocks, labeled statements, loops, closures, switch cases).
+pub fn for_each_stmt_in_stmts<F: FnMut(&Stmt)>(stmts: &[Stmt], f: &mut F) {
+    struct StmtWalker<'f, F> {
+        f: &'f mut F,
+    }
+
+    impl<F: FnMut(&Stmt)> Visitor for StmtWalker<'_, F> {
+        fn visit_stmt(&mut self, node: &Stmt) {
+            (self.f)(node);
+            walk_stmt(self, node);
+        }
+    }
+
+    let mut w = StmtWalker { f };
+    for stmt in stmts {
+        w.visit_stmt(stmt);
+    }
+}
+
+/// Every identifier a pattern binds — the `Pattern::Variable` leaves reached
+/// through records, lists, maps, objects, and the unary pattern wrappers.
+///
+/// Rules that check declared names (length, casing, leading underscores) must
+/// use this for Dart 3 destructuring: `final (a, b) = …` declares `a` and `b`
+/// just as `final a = …` does. The match below is exhaustive on purpose — a new
+/// pattern kind must fail to compile rather than silently bind invisible names.
+pub fn bound_names(pattern: &Pattern) -> Vec<&Identifier> {
+    let mut out = Vec::new();
+    collect_bound_names(pattern, &mut out);
+    out
+}
+
+fn collect_bound_names<'a>(pattern: &'a Pattern, out: &mut Vec<&'a Identifier>) {
+    match pattern {
+        Pattern::Variable { name, .. } => out.push(name),
+        Pattern::List(list) => {
+            for element in &list.elements {
+                match element {
+                    ListPatternElement::Pattern(p) | ListPatternElement::Rest(Some(p), _) => {
+                        collect_bound_names(p, out)
+                    }
+                    ListPatternElement::Rest(None, _) => {}
+                }
+            }
+        }
+        Pattern::Record(record) => {
+            for field in &record.fields {
+                collect_bound_names(&field.pattern, out);
+            }
+        }
+        Pattern::Map(map) => {
+            for entry in &map.entries {
+                collect_bound_names(&entry.pattern, out);
+            }
+        }
+        Pattern::Object(object) => {
+            for field in &object.fields {
+                if let Some(p) = &field.pattern {
+                    collect_bound_names(p, out);
+                }
+            }
+        }
+        Pattern::LogicalAnd { left, right, .. } | Pattern::LogicalOr { left, right, .. } => {
+            collect_bound_names(left, out);
+            collect_bound_names(right, out);
+        }
+        Pattern::Cast { inner, .. }
+        | Pattern::NullCheck { inner, .. }
+        | Pattern::NullAssert { inner, .. }
+        | Pattern::ParenPattern { inner, .. } => collect_bound_names(inner, out),
+        // Bind nothing: wildcards, literals, constants, relational tests, errors.
+        Pattern::Wildcard { .. }
+        | Pattern::Literal(_)
+        | Pattern::Const(_)
+        | Pattern::Relational { .. }
+        | Pattern::Error { .. } => {}
+    }
+}

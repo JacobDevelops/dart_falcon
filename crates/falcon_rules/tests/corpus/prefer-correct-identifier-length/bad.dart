@@ -22,3 +22,25 @@ void loop(List<int> items) {
 }
 
 enum Size { s, m, l } /* expect: prefer-correct-identifier-length */ /* expect: prefer-correct-identifier-length */ /* expect: prefer-correct-identifier-length */
+
+// A Dart 3 destructuring declaration declares variables, so every name the
+// pattern binds is length-checked — records, lists, and nested patterns alike.
+void patternDeclarations(List<int> items) {
+  final (a, b) = (1, 2); /* expect: prefer-correct-identifier-length */ /* expect: prefer-correct-identifier-length */
+  final [c, d] = items; /* expect: prefer-correct-identifier-length */ /* expect: prefer-correct-identifier-length */
+  final (e, (f, _)) = (1, (2, 3)); /* expect: prefer-correct-identifier-length */ /* expect: prefer-correct-identifier-length */
+  print([a, b, c, d, e, f]);
+}
+
+// A declaration inside a labeled block or a closure body is reached too.
+void nestedDeclarations() {
+  lbl: {
+    final gg = 1; /* expect: prefer-correct-identifier-length */
+    print(gg);
+  }
+  final callback = () {
+    final hh = 2; /* expect: prefer-correct-identifier-length */
+    return hh;
+  };
+  print(callback);
+}

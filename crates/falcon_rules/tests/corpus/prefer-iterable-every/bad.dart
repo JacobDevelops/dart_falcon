@@ -35,3 +35,25 @@ void checkAllPositive(List<int> numbers) {
 void verifyList(List<String> items) {
   bool hasContent = !items.where((i) => i.isNotEmpty).isEmpty; /* expect: prefer-iterable-every */
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
+void containersRegression(int rcount, List<int> items) {
+  final (ra, _) = (!items.where((x) => x > 1).isEmpty, 0); /* expect: prefer-iterable-every */
+  lbl: {
+    final rb = !items.where((x) => x > 1).isEmpty; /* expect: prefer-iterable-every */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => !items.where((x) => x > 1).isEmpty, /* expect: prefer-iterable-every */
+    _ => null,
+  };
+  final rd = switch (!items.where((x) => x > 1).isEmpty) { /* expect: prefer-iterable-every */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) !items.where((x) => x > 1).isEmpty]; /* expect: prefer-iterable-every */
+  final rf = [...[!items.where((x) => x > 1).isEmpty]]; /* expect: prefer-iterable-every */
+  final rg = (p: !items.where((x) => x > 1).isEmpty, q: 0); /* expect: prefer-iterable-every */
+  print([ra, rc, rd, re, rf, rg]);
+}

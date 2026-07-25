@@ -864,7 +864,9 @@ fn test_deep_unary_chain_does_not_overflow() {
     let src = format!("var x = {}1;", "-".repeat(1000));
     let (_, errors) = parse(&src);
     assert!(
-        errors.iter().any(|e| e.message.contains("nesting too deep")),
+        errors
+            .iter()
+            .any(|e| e.message.contains("nesting too deep")),
         "expected a nesting-too-deep error, got {errors:?}"
     );
 }
@@ -882,7 +884,9 @@ fn test_deep_parens_do_not_overflow() {
             let n = 3000;
             let src = format!("var x = {}1{};", "(".repeat(n), ")".repeat(n));
             let (_, errors) = parse(&src);
-            errors.iter().any(|e| e.message.contains("nesting too deep"))
+            errors
+                .iter()
+                .any(|e| e.message.contains("nesting too deep"))
         })
         .unwrap();
     assert!(

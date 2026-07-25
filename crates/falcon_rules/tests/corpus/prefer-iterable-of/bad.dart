@@ -29,3 +29,25 @@ void legacyNew(List<int> other, Set<String> names) {
   final b = new Set.from(names); /* expect: prefer-iterable-of */
   final c = new Iterable.from(other); /* expect: prefer-iterable-of */
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
+void containersRegression(int rcount, List<int> other) {
+  final (ra, _) = (List<int>.from(other), 0); /* expect: prefer-iterable-of */
+  lbl: {
+    final rb = List<int>.from(other); /* expect: prefer-iterable-of */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => List<int>.from(other), /* expect: prefer-iterable-of */
+    _ => null,
+  };
+  final rd = switch (List<int>.from(other)) { /* expect: prefer-iterable-of */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) List<int>.from(other)]; /* expect: prefer-iterable-of */
+  final rf = [...[List<int>.from(other)]]; /* expect: prefer-iterable-of */
+  final rg = (p: List<int>.from(other), q: 0); /* expect: prefer-iterable-of */
+  print([ra, rc, rd, re, rf, rg]);
+}

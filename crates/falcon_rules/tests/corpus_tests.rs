@@ -81,6 +81,19 @@ const RESOLVER_DEPENDENT_RULES: &[&str] = &[
     "prefer-iterable-where-type",
     "prefer-collection-literals",
     "prefer-final-fields",
+    "unrelated-type-equality-checks",
+    "collection-methods-unrelated-type",
+    "annotate-overrides",
+    "avoid-renaming-method-parameters",
+    "overridden-fields",
+    "use-key-in-widget-constructors",
+    "prefer-const-constructors-in-immutables",
+    "await-only-futures",
+    "implicit-call-tearoffs",
+    "type-literal-in-constant-pattern",
+    "avoid-types-as-parameter-names",
+    "exhaustive-cases",
+    "library-private-types-in-public-api",
 ];
 
 /// Run a single rule over `source`; return (rule-id, line) per diagnostic.

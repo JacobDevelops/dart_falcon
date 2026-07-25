@@ -69,7 +69,7 @@
   },
   {
     "default": null,
-    "description": "Stop after emitting this many diagnostics. Null (the default) means no limit.",
+    "description": "Stop after emitting this many diagnostics. Null (the default) means no limit. Must be at least 1; 0 is rejected because it would suppress every diagnostic.",
     "path": "max-errors",
     "type": "integer | null"
   },

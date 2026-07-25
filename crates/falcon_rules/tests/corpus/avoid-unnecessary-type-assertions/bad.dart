@@ -49,3 +49,30 @@ void testInlineAssertion() {
   final String message = "test";
   final result = message is String ? "yes" : "no"; /* expect: avoid-unnecessary-type-assertions */
 }
+
+// Regression: a nested block inherits the enclosing declarations, so a
+// redundant assertion inside one is still recognised.
+void nestedScopeRegression() {
+  final int known = 1;
+  {
+    final inBlock = known is int; /* expect: avoid-unnecessary-type-assertions */
+    print(inBlock);
+  }
+  lbl: {
+    final inLabeled = known is int; /* expect: avoid-unnecessary-type-assertions */
+    print(inLabeled);
+  }
+}
+
+// Regression: try/catch/finally bodies also inherit the enclosing
+// declarations, the same way a plain nested block does.
+void tryScopeRegression() {
+  final int known = 1;
+  try {
+    print(known is int); /* expect: avoid-unnecessary-type-assertions */
+  } catch (e) {
+    print(known is int); /* expect: avoid-unnecessary-type-assertions */
+  } finally {
+    print(known is int); /* expect: avoid-unnecessary-type-assertions */
+  }
+}

@@ -29,3 +29,25 @@ void testMultipleViolations() {
 class MyWidget {
   final padding = EdgeInsets.only(top: 20, bottom: 20); /* expect: prefer-correct-edge-insets-constructor */
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
+void containersRegression(int rcount) {
+  final (ra, _) = (EdgeInsets.only(top: 8, bottom: 8), 0); /* expect: prefer-correct-edge-insets-constructor */
+  lbl: {
+    final rb = EdgeInsets.only(top: 8, bottom: 8); /* expect: prefer-correct-edge-insets-constructor */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => EdgeInsets.only(top: 8, bottom: 8), /* expect: prefer-correct-edge-insets-constructor */
+    _ => null,
+  };
+  final rd = switch (EdgeInsets.only(top: 8, bottom: 8)) { /* expect: prefer-correct-edge-insets-constructor */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) EdgeInsets.only(top: 8, bottom: 8)]; /* expect: prefer-correct-edge-insets-constructor */
+  final rf = [...[EdgeInsets.only(top: 8, bottom: 8)]]; /* expect: prefer-correct-edge-insets-constructor */
+  final rg = (p: EdgeInsets.only(top: 8, bottom: 8), q: 0); /* expect: prefer-correct-edge-insets-constructor */
+  print([ra, rc, rd, re, rf, rg]);
+}

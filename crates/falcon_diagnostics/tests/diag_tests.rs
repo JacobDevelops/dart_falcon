@@ -93,7 +93,10 @@ fn test_format_text_error() {
     assert!(text.contains("test message"));
     // 1-based line:col of the span start, not the raw byte range.
     assert!(text.contains("file.dart:2:1:"), "got: {text}");
-    assert!(!text.contains("+"), "must not print raw byte offsets: {text}");
+    assert!(
+        !text.contains("+"),
+        "must not print raw byte offsets: {text}"
+    );
 }
 
 #[test]
@@ -161,7 +164,10 @@ fn test_format_json_carries_resolved_line_col() {
     let json = diag.format_json();
 
     // Byte span stays alongside the navigable line/col.
-    assert_eq!(json.get("span").unwrap().get("start").unwrap().as_u64(), Some(5));
+    assert_eq!(
+        json.get("span").unwrap().get("start").unwrap().as_u64(),
+        Some(5)
+    );
     assert_eq!(json.get("line").unwrap().as_u64(), Some(3));
     assert_eq!(json.get("col").unwrap().as_u64(), Some(1));
 }
