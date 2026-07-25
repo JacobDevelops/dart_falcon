@@ -12,7 +12,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct AvoidUnrelatedTypeAssertions;
 
@@ -78,59 +78,47 @@ impl AvoidUnrelatedTypeAssertions {
         }
     }
 
+    /// Types of the locals visible to `check_block`, which walks every statement
+    /// through the shared visitor — so this must too, or a local declared in a
+    /// loop or a `try` body goes untracked.
+    ///
+    /// The map is flat, with no lexical scoping. A name declared twice in one
+    /// body is therefore ambiguous, so it is dropped rather than guessed at: a
+    /// missed assertion beats reporting a satisfiable one as impossible.
     fn collect_local_vars(&self, stmts: &[Stmt]) -> HashMap<String, String> {
         let mut var_types = HashMap::new();
+        let mut seen: HashSet<String> = HashSet::new();
 
-        for stmt in stmts {
-            match stmt {
-                Stmt::LocalVar(LocalVarDecl {
-                    var_type,
-                    declarators,
-                    ..
-                }) => {
-                    for declarator in declarators {
-                        if let Some(init_expr) = &declarator.initializer
-                            && let Some(inferred) = Self::infer_type_from_expr(init_expr)
-                        {
-                            var_types.insert(declarator.name.name.clone(), inferred);
-                        }
-
-                        if let Some(var_t) = var_type
-                            && let Some(type_name) = Self::get_first_segment(var_t)
-                        {
-                            var_types.insert(declarator.name.name.clone(), type_name);
-                        }
-                    }
+        falcon_syntax::visitor::for_each_stmt_in_stmts(stmts, &mut |stmt| {
+            let Stmt::LocalVar(LocalVarDecl {
+                var_type,
+                declarators,
+                ..
+            }) = stmt
+            else {
+                return;
+            };
+            for declarator in declarators {
+                let name = &declarator.name.name;
+                if !seen.insert(name.clone()) {
+                    var_types.remove(name);
+                    continue;
                 }
-                Stmt::If(IfStmt {
-                    then_branch,
-                    else_branch,
-                    ..
-                }) => {
-                    if let Stmt::Block(Block {
-                        stmts: then_stmts, ..
-                    }) = then_branch.as_ref()
-                    {
-                        let nested = self.collect_local_vars(then_stmts);
-                        var_types.extend(nested);
-                    }
-
-                    if let Some(else_stmt) = else_branch
-                        && let Stmt::Block(Block {
-                            stmts: else_stmts, ..
-                        }) = else_stmt.as_ref()
-                    {
-                        let nested = self.collect_local_vars(else_stmts);
-                        var_types.extend(nested);
-                    }
+                // An explicit annotation wins over the inferred initializer type.
+                let resolved = var_type
+                    .as_ref()
+                    .and_then(Self::get_first_segment)
+                    .or_else(|| {
+                        declarator
+                            .initializer
+                            .as_ref()
+                            .and_then(Self::infer_type_from_expr)
+                    });
+                if let Some(type_name) = resolved {
+                    var_types.insert(name.clone(), type_name);
                 }
-                Stmt::Block(Block { stmts, .. }) => {
-                    let nested = self.collect_local_vars(stmts);
-                    var_types.extend(nested);
-                }
-                _ => {}
             }
-        }
+        });
 
         var_types
     }

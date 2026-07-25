@@ -162,3 +162,11 @@ class InterpolationReads {
 
   String complex(int count) => "n=${count + 1}";
 }
+
+// A Dart 3 pattern assignment writes to its targets, which counts as a use
+// just as a plain `x = …` assignment does.
+class PatternAssignTarget {
+  void reassign(int a, int b) {
+    (a, b) = (1, 2);
+  }
+}

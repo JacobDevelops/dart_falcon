@@ -43,6 +43,14 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_expr(&mut self, node: &Expr) {
+        if let Expr::FuncExpr { .. } = node {
+            // A closure body is read on its own; a ternary inside one is not
+            // stacked with the ternary the closure happens to sit in.
+            let saved = std::mem::replace(&mut self.cond_ancestor, false);
+            walk_expr(self, node);
+            self.cond_ancestor = saved;
+            return;
+        }
         if let Expr::Conditional { span, .. } = node {
             if self.cond_ancestor {
                 self.diags.push(Diagnostic::new(

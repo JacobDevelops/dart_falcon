@@ -1193,53 +1193,33 @@ fn walk_map_element<V: Visitor>(v: &mut V, element: &MapElement) {
 /// the AST, so a new expression or statement kind cannot silently hide a
 /// violation the way a `_ => {}` arm does.
 pub fn for_each_expr<F: FnMut(&Expr)>(root: &Expr, f: &mut F) {
-    struct ExprWalker<'f, F> {
-        f: &'f mut F,
-    }
-
-    impl<F: FnMut(&Expr)> Visitor for ExprWalker<'_, F> {
-        fn visit_expr(&mut self, node: &Expr) {
-            (self.f)(node);
-            walk_expr(self, node);
-        }
-    }
-
     ExprWalker { f }.visit_expr(root);
 }
 
 /// Call `f` on every expression in the program, wherever it appears.
 pub fn for_each_expr_in_program<F: FnMut(&Expr)>(program: &Program, f: &mut F) {
-    struct ProgramWalker<'f, F> {
-        f: &'f mut F,
-    }
-
-    impl<F: FnMut(&Expr)> Visitor for ProgramWalker<'_, F> {
-        fn visit_expr(&mut self, node: &Expr) {
-            (self.f)(node);
-            walk_expr(self, node);
-        }
-    }
-
-    ProgramWalker { f }.visit_program(program);
+    ExprWalker { f }.visit_program(program);
 }
 
 /// Call `f` on every expression appearing anywhere in `stmts`, including inside
 /// nested statements, closures, patterns' initializers and collection elements.
 pub fn for_each_expr_in_stmts<F: FnMut(&Expr)>(stmts: &[Stmt], f: &mut F) {
-    struct StmtsWalker<'f, F> {
-        f: &'f mut F,
-    }
-
-    impl<F: FnMut(&Expr)> Visitor for StmtsWalker<'_, F> {
-        fn visit_expr(&mut self, node: &Expr) {
-            (self.f)(node);
-            walk_expr(self, node);
-        }
-    }
-
-    let mut w = StmtsWalker { f };
+    let mut w = ExprWalker { f };
     for stmt in stmts {
         w.visit_stmt(stmt);
+    }
+}
+
+/// Backs the three `for_each_expr*` helpers: every expression the default walk
+/// reaches, handed to `f` before descending into it.
+struct ExprWalker<'f, F> {
+    f: &'f mut F,
+}
+
+impl<F: FnMut(&Expr)> Visitor for ExprWalker<'_, F> {
+    fn visit_expr(&mut self, node: &Expr) {
+        (self.f)(node);
+        walk_expr(self, node);
     }
 }
 

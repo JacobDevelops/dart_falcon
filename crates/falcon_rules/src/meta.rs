@@ -1269,7 +1269,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("unrelated_type_equality_checks"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1277,7 +1277,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("collection_methods_unrelated_type"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1285,7 +1285,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("annotate_overrides"),
         group: "style",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1293,7 +1293,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("avoid_renaming_method_parameters"),
         group: "style",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1301,7 +1301,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("overridden_fields"),
         group: "suspicious",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1309,7 +1309,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("use_build_context_synchronously"),
         group: "correctness",
         domains: FLUTTER,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1317,7 +1317,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("use_key_in_widget_constructors"),
         group: "correctness",
         domains: FLUTTER,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1325,7 +1325,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("prefer_const_constructors_in_immutables"),
         group: "style",
         domains: FLUTTER,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1333,7 +1333,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("await_only_futures"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1341,7 +1341,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("void_checks"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1349,7 +1349,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("null_closures"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1357,7 +1357,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("null_check_on_nullable_type_parameter"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1365,7 +1365,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("library_annotations"),
         group: "style",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1373,7 +1373,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("prefer_interpolation_to_compose_strings"),
         group: "style",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1381,7 +1381,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("type_literal_in_constant_pattern"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1389,7 +1389,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("avoid_types_as_parameter_names"),
         group: "suspicious",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1397,7 +1397,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("exhaustive_cases"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1405,7 +1405,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("implicit_call_tearoffs"),
         group: "style",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1413,7 +1413,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("library_private_types_in_public_api"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1421,7 +1421,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("invalid_runtime_check_with_js_interop_types"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1429,7 +1429,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("file_names"),
         group: "style",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {
@@ -1437,7 +1437,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("prefer_contains"),
         group: "performance",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: false,
     },
     RuleMeta {

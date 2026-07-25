@@ -230,7 +230,14 @@ mod dcl {
                     // Dart 3 destructuring: only the initializer holds reads — the
                     // pattern itself binds names rather than referencing them.
                     Stmt::PatternDecl(decl) => collect_from_expr(&decl.init, names),
-                    Stmt::PatternAssign(assign) => collect_from_expr(&assign.value, names),
+                    // A pattern assignment writes to names that already exist, so
+                    // its targets count as uses just like an `Expr::Assign` target.
+                    Stmt::PatternAssign(assign) => {
+                        for ident in falcon_syntax::visitor::bound_names(&assign.pattern) {
+                            names.insert(ident.name.clone());
+                        }
+                        collect_from_expr(&assign.value, names);
+                    }
                     Stmt::Labeled(labeled) => collect_from_stmt(&labeled.stmt, names),
                     Stmt::Expr(expr_stmt) => collect_from_expr(&expr_stmt.expr, names),
                     Stmt::Assert(assert_stmt) => {

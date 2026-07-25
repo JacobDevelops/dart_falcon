@@ -10,59 +10,45 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct AvoidUnnecessaryTypeCasts;
 
 impl AvoidUnnecessaryTypeCasts {
+    /// Declared types of the locals visible to `check_block`, which walks every
+    /// statement through the shared visitor — so this must too, or a local
+    /// declared in a loop or a `try` body goes untracked.
+    ///
+    /// The map is flat, with no lexical scoping. A name declared twice in one
+    /// body is therefore ambiguous, so it is dropped rather than guessed at: a
+    /// missed cast beats reporting a correct one as redundant.
     fn collect_local_vars(&self, stmts: &[Stmt]) -> HashMap<String, DartType> {
         let mut var_types = HashMap::new();
+        let mut seen: HashSet<String> = HashSet::new();
 
-        for stmt in stmts {
-            match stmt {
-                Stmt::LocalVar(LocalVarDecl {
-                    var_type,
-                    declarators,
-                    ..
-                }) => {
-                    if let Some(var_t) = var_type
-                        && let DartType::Named(named) = var_t
-                        && !named.is_nullable
-                    {
-                        for declarator in declarators {
-                            var_types.insert(declarator.name.name.clone(), var_t.clone());
-                        }
-                    }
+        falcon_syntax::visitor::for_each_stmt_in_stmts(stmts, &mut |stmt| {
+            let Stmt::LocalVar(LocalVarDecl {
+                var_type,
+                declarators,
+                ..
+            }) = stmt
+            else {
+                return;
+            };
+            for declarator in declarators {
+                let name = &declarator.name.name;
+                if !seen.insert(name.clone()) {
+                    var_types.remove(name);
+                    continue;
                 }
-                Stmt::If(IfStmt {
-                    then_branch,
-                    else_branch,
-                    ..
-                }) => {
-                    if let Stmt::Block(Block {
-                        stmts: then_stmts, ..
-                    }) = then_branch.as_ref()
-                    {
-                        let nested = self.collect_local_vars(then_stmts);
-                        var_types.extend(nested);
-                    }
-
-                    if let Some(else_stmt) = else_branch
-                        && let Stmt::Block(Block {
-                            stmts: else_stmts, ..
-                        }) = else_stmt.as_ref()
-                    {
-                        let nested = self.collect_local_vars(else_stmts);
-                        var_types.extend(nested);
-                    }
+                if let Some(var_t) = var_type
+                    && let DartType::Named(named) = var_t
+                    && !named.is_nullable
+                {
+                    var_types.insert(name.clone(), var_t.clone());
                 }
-                Stmt::Block(Block { stmts, .. }) => {
-                    let nested = self.collect_local_vars(stmts);
-                    var_types.extend(nested);
-                }
-                _ => {}
             }
-        }
+        });
 
         var_types
     }

@@ -4,7 +4,6 @@ cross_file/unnecessary_nullable.rs::visit_expr
 lint/complexity/avoid_nested_if.rs::count_ifs_including
 lint/complexity/avoid_nested_if.rs::walk
 lint/complexity/avoid_unnecessary_type_assertions.rs::analyze_expression
-lint/complexity/avoid_unnecessary_type_casts.rs::collect_local_vars
 lint/complexity/cyclomatic_complexity.rs::count_expr
 lint/complexity/cyclomatic_complexity.rs::count_stmt
 lint/complexity/max_switch_cases.rs::scan_expr
@@ -68,7 +67,6 @@ lint/suspicious/avoid_shadowing_type_parameters.rs::scan_expr
 lint/suspicious/avoid_shadowing_type_parameters.rs::scan_stmt
 lint/suspicious/avoid_throw_in_catch_block.rs::check_stmt
 lint/suspicious/avoid_throw_in_catch_block.rs::collect_throws
-lint/suspicious/avoid_unrelated_type_assertions.rs::collect_local_vars
 lint/suspicious/control_flow_in_finally.rs::find_in_expr
 lint/suspicious/control_flow_in_finally.rs::find_in_stmt
 lint/suspicious/control_flow_in_finally.rs::scan_finally

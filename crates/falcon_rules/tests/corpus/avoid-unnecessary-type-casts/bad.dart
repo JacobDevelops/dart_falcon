@@ -63,3 +63,18 @@ void testCastsInContainers() {
   final g = (p: n as int, q: 0); /* expect: avoid-unnecessary-type-casts */
   print([a, c, d, e, f, g]);
 }
+
+// Regression: locals declared inside a loop or a try body are tracked, so a
+// redundant cast there is still reported.
+void loopScopeRegression(List<int> xs) {
+  for (final _ in xs) {
+    final int inLoop = 1;
+    print(inLoop as int); /* expect: avoid-unnecessary-type-casts */
+  }
+  try {
+    final int inTry = 2;
+    print(inTry as int); /* expect: avoid-unnecessary-type-casts */
+  } catch (e) {
+    print(e);
+  }
+}

@@ -96,9 +96,13 @@ fn walkers_in(src: &str) -> Vec<String> {
         };
         let self_recursive = body.contains(&format!("{name}("));
         let walks_ast = body.contains("Stmt::") || body.contains("Expr::");
-        let has_catch_all = body
-            .lines()
-            .any(|l| matches!(l.trim_start().strip_prefix('_'), Some(r) if r.starts_with(" =>") || r.starts_with(" |") || r.starts_with("=>")));
+        // A catch-all arm: `_` not starting a longer identifier, reaching a `=>`
+        // on the same line — with or without a `_ if guard =>` in between.
+        let has_catch_all = body.lines().any(|l| {
+            matches!(l.trim_start().strip_prefix('_'), Some(r)
+                if !r.starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                    && (r.contains("=>") || r.starts_with(" |")))
+        });
         if self_recursive && walks_ast && has_catch_all {
             found.push(name.to_string());
         }
@@ -113,7 +117,11 @@ fn current_set() -> BTreeSet<String> {
     let mut set = BTreeSet::new();
     for file in files {
         let text = fs::read_to_string(&file).expect("readable rule source");
-        let rel = file.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/");
+        let rel = file
+            .strip_prefix(&src)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
         for name in walkers_in(&text) {
             set.insert(format!("{rel}::{name}"));
         }
