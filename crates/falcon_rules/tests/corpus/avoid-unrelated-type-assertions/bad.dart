@@ -52,3 +52,25 @@ void testStringIsMapType() {
 void testConditionalExpressionImpossible() {
   final result = "text" is int ? "yes" : "no"; /* expect: avoid-unrelated-type-assertions */
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, pattern assignment, labeled statement, switch
+// expression, collection if/spread, record field, assert).
+void containersRegression(int rcount) {
+  final (ra, _) = ("hello" is int, 0); /* expect: avoid-unrelated-type-assertions */
+  lbl: {
+    final rb = "hello" is int; /* expect: avoid-unrelated-type-assertions */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => "hello" is int, /* expect: avoid-unrelated-type-assertions */
+    _ => null,
+  };
+  final rd = switch ("hello" is int) { /* expect: avoid-unrelated-type-assertions */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) "hello" is int]; /* expect: avoid-unrelated-type-assertions */
+  final rf = [...["hello" is int]]; /* expect: avoid-unrelated-type-assertions */
+  final rg = (p: "hello" is int, q: 0); /* expect: avoid-unrelated-type-assertions */
+  print([ra, rc, rd, re, rf, rg]);
+}

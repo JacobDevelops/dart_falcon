@@ -71,3 +71,25 @@ void testMultilineIfElse() {
     process(temp);
   }
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, pattern assignment, labeled statement, switch
+// expression, collection if/spread, record field, assert).
+void containersRegression(int rcount) {
+  final (ra, _) = ((rcount > 0 ? 1 : 1), 0); /* expect: no-equal-then-else */
+  lbl: {
+    final rb = (rcount > 0 ? 1 : 1); /* expect: no-equal-then-else */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => (rcount > 0 ? 1 : 1), /* expect: no-equal-then-else */
+    _ => null,
+  };
+  final rd = switch ((rcount > 0 ? 1 : 1)) { /* expect: no-equal-then-else */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) (rcount > 0 ? 1 : 1)]; /* expect: no-equal-then-else */
+  final rf = [...[(rcount > 0 ? 1 : 1)]]; /* expect: no-equal-then-else */
+  final rg = (p: (rcount > 0 ? 1 : 1), q: 0); /* expect: no-equal-then-else */
+  print([ra, rc, rd, re, rf, rg]);
+}

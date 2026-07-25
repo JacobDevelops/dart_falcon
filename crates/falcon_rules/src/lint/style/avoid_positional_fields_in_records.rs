@@ -176,47 +176,14 @@ fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
 
 fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let FunctionBody::Block(b) = body {
-        scan_stmts(&b.stmts, diags, ctx);
-    }
-}
-
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for s in stmts {
-        scan_stmt(s, diags, ctx);
-    }
-}
-
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::LocalVar(lv) => {
-            check_type(lv.var_type.as_ref(), diags, ctx);
-            check_declarators(&lv.declarators, lv.var_type.is_some(), diags, ctx);
-        }
-        Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx),
-        Stmt::If(i) => {
-            scan_stmt(&i.then_branch, diags, ctx);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx);
+        // Exhaustive traversal: a declaration nested in any statement form — a
+        // labeled block, a closure body, a switch case — must still be checked.
+        // A hand-rolled walk with a `_ => {}` arm silently skipped those.
+        falcon_syntax::visitor::for_each_stmt_in_stmts(&b.stmts, &mut |s| {
+            if let Stmt::LocalVar(lv) = s {
+                check_type(lv.var_type.as_ref(), diags, ctx);
+                check_declarators(&lv.declarators, lv.var_type.is_some(), diags, ctx);
             }
-        }
-        Stmt::While(w) => scan_stmt(&w.body, diags, ctx),
-        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx),
-        Stmt::For(f) => scan_stmt(&f.body, diags, ctx),
-        Stmt::TryCatch(tc) => {
-            scan_stmts(&tc.body.stmts, diags, ctx);
-            for catch in &tc.catches {
-                scan_stmts(&catch.body.stmts, diags, ctx);
-            }
-            if let Some(fin) = &tc.finally {
-                scan_stmts(&fin.stmts, diags, ctx);
-            }
-        }
-        Stmt::Switch(sw) => {
-            for case in &sw.cases {
-                scan_stmts(&case.body, diags, ctx);
-            }
-        }
-        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx),
-        _ => {}
+        });
     }
 }

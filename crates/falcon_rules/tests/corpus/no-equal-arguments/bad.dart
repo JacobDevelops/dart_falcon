@@ -72,3 +72,25 @@ void copyMap(Map map) {
 void testMultipleDuplicates(String a, String b) {
   process(a, a, b); /* expect: no-equal-arguments */
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, pattern assignment, labeled statement, switch
+// expression, collection if/spread, record field, assert).
+void containersRegression(int rcount) {
+  final (ra, _) = (foo(rcount, rcount), 0); /* expect: no-equal-arguments */
+  lbl: {
+    final rb = foo(rcount, rcount); /* expect: no-equal-arguments */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => foo(rcount, rcount), /* expect: no-equal-arguments */
+    _ => null,
+  };
+  final rd = switch (foo(rcount, rcount)) { /* expect: no-equal-arguments */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) foo(rcount, rcount)]; /* expect: no-equal-arguments */
+  final rf = [...[foo(rcount, rcount)]]; /* expect: no-equal-arguments */
+  final rg = (p: foo(rcount, rcount), q: 0); /* expect: no-equal-arguments */
+  print([ra, rc, rd, re, rf, rg]);
+}

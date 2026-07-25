@@ -127,6 +127,11 @@ fn collect_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
                 }
             }
         }
+        // Dart 3 destructuring: only the initializer holds reads — the pattern
+        // itself binds names rather than referencing them.
+        Stmt::PatternDecl(decl) => collect_from_expr(&decl.init, names),
+        Stmt::PatternAssign(assign) => collect_from_expr(&assign.value, names),
+        Stmt::Labeled(labeled) => collect_from_stmt(&labeled.stmt, names),
         Stmt::Expr(expr_stmt) => collect_from_expr(&expr_stmt.expr, names),
         Stmt::Assert(assert_stmt) => {
             collect_from_expr(&assert_stmt.condition, names);
@@ -150,51 +155,12 @@ fn collect_from_expr(expr: &Expr, names: &mut HashSet<String>) {
             names.insert(ident.name.clone());
         }
         Expr::StringLit(lit) => {
-            // Interpolations are not decomposed in the AST; scan the raw text
-            // for `$name` and `${ ... }` identifiers (over-collecting is safe:
-            // it can only suppress a report, never invent one).
-            let chars: Vec<char> = lit.raw.chars().collect();
-            let is_ident_start = |c: char| c.is_alphabetic() || c == '_';
-            let is_ident_cont = |c: char| c.is_alphanumeric() || c == '_';
-            let mut i = 0;
-            while i < chars.len() {
-                if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
-                    let mut depth = 1;
-                    let mut j = i + 2;
-                    while j < chars.len() && depth > 0 {
-                        match chars[j] {
-                            '{' => {
-                                depth += 1;
-                                j += 1;
-                            }
-                            '}' => {
-                                depth -= 1;
-                                j += 1;
-                            }
-                            c if is_ident_start(c) => {
-                                let start = j;
-                                while j < chars.len() && is_ident_cont(chars[j]) {
-                                    j += 1;
-                                }
-                                names.insert(chars[start..j].iter().collect());
-                            }
-                            _ => j += 1,
-                        }
-                    }
-                    i = j;
-                    continue;
-                }
-                if chars[i] == '$' && i + 1 < chars.len() && is_ident_start(chars[i + 1]) {
-                    let start = i + 1;
-                    let mut end = start;
-                    while end < chars.len() && is_ident_cont(chars[end]) {
-                        end += 1;
-                    }
-                    names.insert(chars[start..end].iter().collect());
-                    i = end;
-                    continue;
-                }
-                i += 1;
+            // Interpolated expressions are parsed by the parser, so walk them
+            // directly rather than scanning the raw text. The old char scan also
+            // collected field and method names, which could silently suppress a
+            // real report.
+            for interp in &lit.interpolations {
+                collect_from_expr(&interp.expr, names);
             }
         }
         Expr::Unary { operand, .. } => collect_from_expr(operand, names),
@@ -309,6 +275,8 @@ fn collect_from_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
         }
         Expr::NullAssert { operand, .. } => collect_from_expr(operand, names),
+        // Bare generic tear-off `fn<int>` — the target is the read.
+        Expr::GenericInstantiation { target, .. } => collect_from_expr(target, names),
         _ => {}
     }
 }

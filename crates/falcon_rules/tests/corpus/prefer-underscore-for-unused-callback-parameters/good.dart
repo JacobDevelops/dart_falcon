@@ -37,3 +37,9 @@ void example6() {
     print('$key: $value');
   });
 }
+
+// A genuine interpolated read counts as a use of the callback parameter.
+void interpolatedRead(List<int> items) {
+  items.map((value) => "n=$value").toList();
+  items.map((value) => "n=${value + 1}").toList();
+}

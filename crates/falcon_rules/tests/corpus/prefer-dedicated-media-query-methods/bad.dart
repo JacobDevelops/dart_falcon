@@ -47,3 +47,25 @@ class ResponsiveBoxWidget extends StatelessWidget {
     return SizedBox(width: w, height: h);
   }
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, pattern assignment, labeled statement, switch
+// expression, collection if/spread, record field, assert).
+void containersRegression(int rcount, BuildContext context) {
+  final (ra, _) = (MediaQuery.of(context).size.width, 0); /* expect: prefer-dedicated-media-query-methods */
+  lbl: {
+    final rb = MediaQuery.of(context).size.width; /* expect: prefer-dedicated-media-query-methods */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => MediaQuery.of(context).size.width, /* expect: prefer-dedicated-media-query-methods */
+    _ => null,
+  };
+  final rd = switch (MediaQuery.of(context).size.width) { /* expect: prefer-dedicated-media-query-methods */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) MediaQuery.of(context).size.width]; /* expect: prefer-dedicated-media-query-methods */
+  final rf = [...[MediaQuery.of(context).size.width]]; /* expect: prefer-dedicated-media-query-methods */
+  final rg = (p: MediaQuery.of(context).size.width, q: 0); /* expect: prefer-dedicated-media-query-methods */
+  print([ra, rc, rd, re, rf, rg]);
+}

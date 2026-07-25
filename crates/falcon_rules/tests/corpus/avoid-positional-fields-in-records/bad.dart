@@ -27,3 +27,17 @@ class RecordExamples {
     print(result);
   }
 }
+
+// Regression: a declaration nested in a labeled block or a closure body must
+// still be checked — a hand-rolled walk skipped those statement forms.
+void containersRegression() {
+  lbl: {
+    final inLabeled = (1, 2); /* expect: avoid-positional-fields-in-records */
+    print(inLabeled);
+  }
+  final closure = () {
+    final inClosure = (3, 4); /* expect: avoid-positional-fields-in-records */
+    return inClosure;
+  };
+  print(closure);
+}

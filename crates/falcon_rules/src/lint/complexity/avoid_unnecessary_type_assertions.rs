@@ -161,7 +161,14 @@ fn analyze_statement(
             }
         }
         Stmt::Block(block) => {
-            analyze_block(block, diags, ctx);
+            // A nested block sees the enclosing declarations — starting a fresh
+            // scope here lost them, so `q is int` inside `{ … }` was never
+            // recognised as redundant. Inner declarations must not leak back out,
+            // hence the clone.
+            let mut inner = scope_map.clone();
+            for stmt in &block.stmts {
+                analyze_statement(stmt, &mut inner, diags, ctx);
+            }
         }
         Stmt::If(if_stmt) => {
             match &if_stmt.condition {

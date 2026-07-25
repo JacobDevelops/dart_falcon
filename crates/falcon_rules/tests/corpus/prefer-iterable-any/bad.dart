@@ -37,3 +37,25 @@ void checkMapKeys(Map<String, int> data) {
     print('Has test keys');
   }
 }
+
+// Regression: the violation must still be found inside Dart 3 containers
+// (pattern declaration, pattern assignment, labeled statement, switch
+// expression, collection if/spread, record field, assert).
+void containersRegression(int rcount, List<int> items) {
+  final (ra, _) = (items.where((x) => x > 1).isNotEmpty, 0); /* expect: prefer-iterable-any */
+  lbl: {
+    final rb = items.where((x) => x > 1).isNotEmpty; /* expect: prefer-iterable-any */
+    print(rb);
+  }
+  final rc = switch (rcount) {
+    0 => items.where((x) => x > 1).isNotEmpty, /* expect: prefer-iterable-any */
+    _ => null,
+  };
+  final rd = switch (items.where((x) => x > 1).isNotEmpty) { /* expect: prefer-iterable-any */
+    _ => 0,
+  };
+  final re = [if (rcount > 0) items.where((x) => x > 1).isNotEmpty]; /* expect: prefer-iterable-any */
+  final rf = [...[items.where((x) => x > 1).isNotEmpty]]; /* expect: prefer-iterable-any */
+  final rg = (p: items.where((x) => x > 1).isNotEmpty, q: 0); /* expect: prefer-iterable-any */
+  print([ra, rc, rd, re, rf, rg]);
+}

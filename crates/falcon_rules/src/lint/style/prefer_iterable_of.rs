@@ -10,6 +10,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
 
 pub struct PreferIterableOf;
 
@@ -19,11 +20,12 @@ impl Rule for PreferIterableOf {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
-        diags
+        let mut collector = Collector {
+            diags: Vec::new(),
+            ctx,
+        };
+        collector.visit_program(program);
+        collector.diags
     }
 }
 
@@ -91,210 +93,33 @@ fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     ));
 }
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            if let Some(body) = &f.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Variable(v) => {
-            for d in &v.declarators {
-                if let Some(init) = &d.initializer {
-                    scan_expr(init, diags, ctx);
-                }
-            }
-        }
-        _ => {}
-    }
+/// Detection runs through the exhaustive shared walker, so a violation cannot
+/// hide inside newer syntax the way a hand-rolled `_ => {}` walk allowed.
+struct Collector<'a> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match member {
-        ClassMember::Field(f) => {
-            for d in &f.declarators {
-                if let Some(init) = &d.initializer {
-                    scan_expr(init, diags, ctx);
-                }
-            }
-        }
-        ClassMember::Method(m) => {
-            if let Some(body) = &m.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        ClassMember::Constructor(c) => {
-            if let Some(body) = &c.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        ClassMember::Getter(g) => {
-            if let Some(body) = &g.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        ClassMember::Setter(s) => {
-            if let Some(body) = &s.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        _ => {}
+impl Visitor for Collector<'_> {
+    fn visit_program(&mut self, node: &Program) {
+        walk_program(self, node);
     }
-}
 
-fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match body {
-        FunctionBody::Block(b) => scan_stmts(&b.stmts, diags, ctx),
-        FunctionBody::Arrow(e, _) => scan_expr(e, diags, ctx),
-        FunctionBody::Native(_, _) => {}
-    }
-}
-
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for s in stmts {
-        scan_stmt(s, diags, ctx);
-    }
-}
-
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx),
-        Stmt::Expr(e) => scan_expr(&e.expr, diags, ctx),
-        Stmt::Return(r) => {
-            if let Some(v) = &r.value {
-                scan_expr(v, diags, ctx);
+    fn visit_expr(&mut self, node: &Expr) {
+        match node {
+            Expr::New {
+                dart_type,
+                constructor_name,
+                span,
+                ..
+            } if is_from_constructor(dart_type, constructor_name) => {
+                flag(span, &mut self.diags, self.ctx);
             }
-        }
-        Stmt::LocalVar(lv) => {
-            for d in &lv.declarators {
-                if let Some(init) = &d.initializer {
-                    scan_expr(init, diags, ctx);
-                }
+            Expr::Call { callee, span, .. } if is_from_static_call(callee) => {
+                flag(span, &mut self.diags, self.ctx);
             }
+            _ => {}
         }
-        Stmt::If(i) => {
-            match &i.condition {
-                IfCondition::Expr(e) => scan_expr(e, diags, ctx),
-                IfCondition::Case(e, _, guard) => {
-                    scan_expr(e, diags, ctx);
-                    if let Some(g) = guard {
-                        scan_expr(g, diags, ctx);
-                    }
-                }
-            }
-            scan_stmt(&i.then_branch, diags, ctx);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx);
-            }
-        }
-        Stmt::While(w) => {
-            scan_expr(&w.condition, diags, ctx);
-            scan_stmt(&w.body, diags, ctx);
-        }
-        Stmt::DoWhile(d) => {
-            scan_stmt(&d.body, diags, ctx);
-            scan_expr(&d.condition, diags, ctx);
-        }
-        Stmt::For(f) => {
-            if let Some(cond) = &f.condition {
-                scan_expr(cond, diags, ctx);
-            }
-            scan_stmt(&f.body, diags, ctx);
-        }
-        Stmt::Switch(sw) => {
-            scan_expr(&sw.subject, diags, ctx);
-            for case in &sw.cases {
-                scan_stmts(&case.body, diags, ctx);
-            }
-        }
-        Stmt::TryCatch(tc) => {
-            scan_stmts(&tc.body.stmts, diags, ctx);
-            for catch in &tc.catches {
-                scan_stmts(&catch.body.stmts, diags, ctx);
-            }
-            if let Some(fin) = &tc.finally {
-                scan_stmts(&fin.stmts, diags, ctx);
-            }
-        }
-        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx),
-        _ => {}
-    }
-}
-
-fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match expr {
-        Expr::New {
-            is_const: _,
-            dart_type,
-            constructor_name,
-            args,
-            span,
-        } => {
-            if is_from_constructor(dart_type, constructor_name) {
-                flag(span, diags, ctx);
-            }
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx);
-            }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx);
-            }
-        }
-        Expr::FuncExpr { body, .. } => scan_body(body, diags, ctx),
-        Expr::Call {
-            callee, args, span, ..
-        } => {
-            if is_from_static_call(callee) {
-                flag(span, diags, ctx);
-            }
-            scan_expr(callee, diags, ctx);
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx);
-            }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx);
-            }
-        }
-        Expr::Field { object, .. } => scan_expr(object, diags, ctx),
-        Expr::Index { object, index, .. } => {
-            scan_expr(object, diags, ctx);
-            scan_expr(index, diags, ctx);
-        }
-        Expr::Unary { operand, .. } => scan_expr(operand, diags, ctx),
-        Expr::Binary { left, right, .. } => {
-            scan_expr(left, diags, ctx);
-            scan_expr(right, diags, ctx);
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            scan_expr(condition, diags, ctx);
-            scan_expr(then_expr, diags, ctx);
-            scan_expr(else_expr, diags, ctx);
-        }
-        Expr::Assign { target, value, .. } => {
-            scan_expr(target, diags, ctx);
-            scan_expr(value, diags, ctx);
-        }
-        Expr::Await { expr: inner, .. } => scan_expr(inner, diags, ctx),
-        _ => {}
+        walk_expr(self, node);
     }
 }

@@ -188,11 +188,16 @@ fn check_body(
 }
 
 fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cfg: &IdentCfg) {
-    for stmt in stmts {
+    // Exhaustive traversal reaches declarations nested in any statement form —
+    // including labeled blocks and closure bodies, which a hand-rolled walk with
+    // a `_ => {}` arm skipped.
+    falcon_syntax::visitor::for_each_stmt_in_stmts(stmts, &mut |stmt| {
         check_stmt(stmt, diags, ctx, cfg);
-    }
+    });
 }
 
+/// Checks the names one statement declares. Nested statements are reached by the
+/// caller's walker, so this must not recurse itself.
 fn check_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cfg: &IdentCfg) {
     match stmt {
         Stmt::LocalVar(local) => {
@@ -200,42 +205,16 @@ fn check_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cf
                 check_ident(&decl.name, diags, ctx, cfg);
             }
         }
-        Stmt::Block(block) => check_stmts(&block.stmts, diags, ctx, cfg),
-        Stmt::If(if_stmt) => {
-            check_stmt(&if_stmt.then_branch, diags, ctx, cfg);
-            if let Some(else_b) = &if_stmt.else_branch {
-                check_stmt(else_b, diags, ctx, cfg);
+        // Dart 3 destructuring declares variables just as `final x = …` does, so
+        // every name the pattern binds is checked.
+        Stmt::PatternDecl(pattern_decl) => {
+            for name in falcon_syntax::visitor::bound_names(&pattern_decl.pattern) {
+                check_ident(name, diags, ctx, cfg);
             }
         }
-        Stmt::For(for_stmt) => {
-            // C-style `for (var i = 0; …)` declares a variable, so its counter
-            // is checked. A for-*each* loop variable is a `DeclaredIdentifier`,
-            // not a `VariableDeclaration`, and dcl does not check it.
-            if let Some(ForInit::VarDecl(local)) = &for_stmt.init {
-                for decl in &local.declarators {
-                    check_ident(&decl.name, diags, ctx, cfg);
-                }
-            }
-            check_stmt(&for_stmt.body, diags, ctx, cfg);
-        }
-        Stmt::While(s) => check_stmt(&s.body, diags, ctx, cfg),
-        Stmt::DoWhile(s) => check_stmt(&s.body, diags, ctx, cfg),
-        Stmt::TryCatch(s) => {
-            // A catch clause parameter (`catch (e)`) is not a variable
-            // declaration, so only the block bodies are traversed.
-            check_stmts(&s.body.stmts, diags, ctx, cfg);
-            for catch in &s.catches {
-                check_stmts(&catch.body.stmts, diags, ctx, cfg);
-            }
-            if let Some(fin) = &s.finally {
-                check_stmts(&fin.stmts, diags, ctx, cfg);
-            }
-        }
-        Stmt::LocalFunc(local_func) => {
-            // The local function's name and parameters are out of scope; only
-            // its body's variable declarations matter.
-            check_body(&local_func.body, diags, ctx, cfg);
-        }
+        // A C-style `for (var i = 0; …)` counter arrives here as the init's own
+        // `Stmt::LocalVar` via the walker. A for-*each* variable is a
+        // `DeclaredIdentifier`, not a declaration, and dcl does not check it.
         _ => {}
     }
 }
