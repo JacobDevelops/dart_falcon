@@ -1036,6 +1036,21 @@ fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
 /// The sentence usually wraps, so a per-line truncation left the tail behind as a
 /// stray "`some_lint`." line in the generated docs. Consume the continuation
 /// through the period that ends the sentence, stopping at a paragraph break.
+/// Byte index of the period that ends a sentence: one followed by whitespace or
+/// the end of the text. A period inside `List.filled` or `package:lints` does not
+/// count, so a wrapped provenance sentence is cut at its real boundary.
+fn sentence_end(text: &str) -> Option<usize> {
+    text.char_indices()
+        .find(|&(i, c)| {
+            c == '.'
+                && text[i + 1..]
+                    .chars()
+                    .next()
+                    .is_none_or(|next| next.is_whitespace())
+        })
+        .map(|(i, _)| i)
+}
+
 fn strip_provenance(lines: &mut Vec<String>) {
     const PROVENANCE: [&str; 4] = ["Ported from", "Port of", "Original to", "Adopted from"];
 
@@ -1045,13 +1060,13 @@ fn strip_provenance(lines: &mut Vec<String>) {
             i += 1;
             continue;
         };
-        let wraps = !lines[i][cut..].contains('.');
+        let wraps = sentence_end(&lines[i][cut..]).is_none();
         lines[i].truncate(cut);
         let trimmed_len = lines[i].trim_end().len();
         lines[i].truncate(trimmed_len);
 
         while wraps && i + 1 < lines.len() && !lines[i + 1].trim().is_empty() {
-            match lines[i + 1].find('.') {
+            match sentence_end(&lines[i + 1]) {
                 // Anything after the closing period belongs to the next
                 // sentence, so keep it.
                 Some(p) => {
@@ -1745,6 +1760,17 @@ mod tests {
                 "Body stays."
             ]),
             vec!["Flags a thing.", "Body stays."]
+        );
+    }
+
+    #[test]
+    fn a_period_inside_an_identifier_is_not_a_sentence_boundary() {
+        assert_eq!(
+            run(&[
+                "intro. Adopted from package:lints",
+                "`List.filled` and `prefer_collection_literals`. Body stays."
+            ]),
+            vec!["intro.", "Body stays."]
         );
     }
 

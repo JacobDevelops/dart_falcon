@@ -37,8 +37,8 @@ void verifyList(List<String> items) {
 }
 
 // Regression: the violation must still be found inside Dart 3 containers
-// (pattern declaration, pattern assignment, labeled statement, switch
-// expression, collection if/spread, record field, assert).
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
 void containersRegression(int rcount, List<int> items) {
   final (ra, _) = (!items.where((x) => x > 1).isEmpty, 0); /* expect: prefer-iterable-every */
   lbl: {

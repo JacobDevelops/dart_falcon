@@ -130,6 +130,15 @@ impl Visitor for Collector<'_> {
             Expr::Call { args, .. } | Expr::New { args, .. } => {
                 check_args(args, &mut self.diags, self.ctx);
             }
+            // A cascade call carries its own ArgList and is never rebuilt as an
+            // Expr::Call, so the arm above never sees `a..f(x, x)`.
+            Expr::Cascade { sections, .. } => {
+                for op in sections.iter().flat_map(|s| &s.ops) {
+                    if let CascadeOp::Call(_, _, args) = op {
+                        check_args(args, &mut self.diags, self.ctx);
+                    }
+                }
+            }
             _ => {}
         }
         walk_expr(self, node);

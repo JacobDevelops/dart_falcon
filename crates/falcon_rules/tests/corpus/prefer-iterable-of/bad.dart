@@ -31,8 +31,8 @@ void legacyNew(List<int> other, Set<String> names) {
 }
 
 // Regression: the violation must still be found inside Dart 3 containers
-// (pattern declaration, pattern assignment, labeled statement, switch
-// expression, collection if/spread, record field, assert).
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
 void containersRegression(int rcount, List<int> other) {
   final (ra, _) = (List<int>.from(other), 0); /* expect: prefer-iterable-of */
   lbl: {

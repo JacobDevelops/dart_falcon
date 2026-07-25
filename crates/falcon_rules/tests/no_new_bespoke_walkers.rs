@@ -77,6 +77,14 @@ fn block_body(src: &str, from: usize) -> Option<&str> {
 /// has a catch-all arm. Recursive *predicates* (`is_literal`, `base_type_name`)
 /// trip this too; that is deliberate — a false positive costs one baseline line,
 /// whereas a missed walker costs a silent rule.
+///
+/// This is a textual scan, not a parse. `fn `, `Stmt::`, `Expr::` and braces are
+/// matched wherever they appear, including inside comments and string literals,
+/// and the recursion check is a substring match on the function name. So a
+/// baseline entry may reflect a textual match rather than a real walker, and
+/// prose alone can move the list. That is accepted: the ratchet only has to make
+/// the set impossible to grow silently, and erring toward matching keeps a real
+/// walker from slipping through.
 fn walkers_in(src: &str) -> Vec<String> {
     let mut found = Vec::new();
     let mut cursor = 0usize;

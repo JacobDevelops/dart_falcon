@@ -31,8 +31,8 @@ class MyWidget {
 }
 
 // Regression: the violation must still be found inside Dart 3 containers
-// (pattern declaration, pattern assignment, labeled statement, switch
-// expression, collection if/spread, record field, assert).
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
 void containersRegression(int rcount) {
   final (ra, _) = (EdgeInsets.only(top: 8, bottom: 8), 0); /* expect: prefer-correct-edge-insets-constructor */
   lbl: {

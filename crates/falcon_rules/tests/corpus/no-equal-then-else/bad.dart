@@ -73,8 +73,8 @@ void testMultilineIfElse() {
 }
 
 // Regression: the violation must still be found inside Dart 3 containers
-// (pattern declaration, pattern assignment, labeled statement, switch
-// expression, collection if/spread, record field, assert).
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
 void containersRegression(int rcount) {
   final (ra, _) = ((rcount > 0 ? 1 : 1), 0); /* expect: no-equal-then-else */
   lbl: {

@@ -35,8 +35,8 @@ void testSmallRadius() {
 }
 
 // Regression: the violation must still be found inside Dart 3 containers
-// (pattern declaration, pattern assignment, labeled statement, switch
-// expression, collection if/spread, record field, assert).
+// (pattern declaration, labeled statement, switch expression and subject,
+// collection if/spread, record field).
 void containersRegression(int rcount) {
   final (ra, _) = (BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)), 0); /* expect: prefer-const-border-radius */
   lbl: {
