@@ -985,8 +985,6 @@ fn extract_description(source_path: &Path, rule_name: &str) -> String {
 /// "Adopted from …") is cut from any line that still carries one, and the block
 /// is trimmed of leading/blank framing. Returns "" when no module doc is present.
 fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
-    const PROVENANCE: [&str; 4] = ["Ported from", "Port of", "Original to", "Adopted from"];
-
     let content = match fs::read_to_string(source_path) {
         Ok(c) => c,
         Err(_) => {
@@ -1016,14 +1014,7 @@ fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
         // Before the block starts, skip anything (blank lines, attributes).
     }
 
-    // Cut a trailing provenance sentence from any line that still carries one.
-    for line in &mut lines {
-        if let Some(cut) = PROVENANCE.iter().filter_map(|p| line.find(p)).min() {
-            line.truncate(cut);
-            let trimmed_len = line.trim_end().len();
-            line.truncate(trimmed_len);
-        }
-    }
+    strip_provenance(&mut lines);
 
     // Trim leading and trailing blank lines so the markdown starts at the summary.
     while lines.first().is_some_and(|l| l.trim().is_empty()) {
@@ -1037,6 +1028,48 @@ fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
         eprintln!("warning: {rule_name}: no //! module doc found for docs");
     }
     lines.join("\n")
+}
+
+/// Cut the trailing provenance sentence ("Ported from …", "Adopted from …") from
+/// every line that carries one.
+///
+/// The sentence usually wraps, so a per-line truncation left the tail behind as a
+/// stray "`some_lint`." line in the generated docs. Consume the continuation
+/// through the period that ends the sentence, stopping at a paragraph break.
+fn strip_provenance(lines: &mut Vec<String>) {
+    const PROVENANCE: [&str; 4] = ["Ported from", "Port of", "Original to", "Adopted from"];
+
+    let mut i = 0;
+    while i < lines.len() {
+        let Some(cut) = PROVENANCE.iter().filter_map(|p| lines[i].find(p)).min() else {
+            i += 1;
+            continue;
+        };
+        let wraps = !lines[i][cut..].contains('.');
+        lines[i].truncate(cut);
+        let trimmed_len = lines[i].trim_end().len();
+        lines[i].truncate(trimmed_len);
+
+        while wraps && i + 1 < lines.len() && !lines[i + 1].trim().is_empty() {
+            match lines[i + 1].find('.') {
+                // Anything after the closing period belongs to the next
+                // sentence, so keep it.
+                Some(p) => {
+                    let rest = lines[i + 1][p + 1..].trim_start().to_string();
+                    if rest.is_empty() {
+                        lines.remove(i + 1);
+                    } else {
+                        lines[i + 1] = rest;
+                    }
+                    break;
+                }
+                None => {
+                    lines.remove(i + 1);
+                }
+            }
+        }
+        i += 1;
+    }
 }
 
 /// Remove all `/* expect: … */` annotation comments from fixture source, then
@@ -1668,4 +1701,58 @@ fn docgen(_args: &[String]) {
     println!("  Wrote: {}", cli_path.display());
     println!("  Wrote: {}", config_ref_path.display());
     println!("────────────────────────────────────────────────────────");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_provenance;
+
+    fn run(input: &[&str]) -> Vec<String> {
+        let mut lines: Vec<String> = input.iter().map(|s| s.to_string()).collect();
+        strip_provenance(&mut lines);
+        lines
+    }
+
+    #[test]
+    fn cuts_a_provenance_sentence_that_wraps_onto_the_next_line() {
+        assert_eq!(
+            run(&[
+                "those have no literal form. Adopted from package:lints",
+                "`prefer_collection_literals`.",
+                "",
+                "Two further facts."
+            ]),
+            vec!["those have no literal form.", "", "Two further facts."]
+        );
+    }
+
+    #[test]
+    fn keeps_content_following_the_closing_period() {
+        assert_eq!(
+            run(&[
+                "intro. Adopted from package:lints",
+                "`prefer_is_empty`. Only a plain access matches."
+            ]),
+            vec!["intro.", "Only a plain access matches."]
+        );
+    }
+
+    #[test]
+    fn leaves_a_single_line_sentence_and_unrelated_text_alone() {
+        assert_eq!(
+            run(&[
+                "Flags a thing. Adopted from package:lints `prefer_iterable_whereType`.",
+                "Body stays."
+            ]),
+            vec!["Flags a thing.", "Body stays."]
+        );
+    }
+
+    #[test]
+    fn stops_at_a_paragraph_break_rather_than_eating_the_next_block() {
+        assert_eq!(
+            run(&["intro. Ported from dart_code_linter", "", "Next paragraph."]),
+            vec!["intro.", "", "Next paragraph."]
+        );
+    }
 }
