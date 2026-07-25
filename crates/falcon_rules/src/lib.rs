@@ -247,12 +247,25 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(lint::correctness::unnecessary_flutter_imports::UnnecessaryFlutterImports),
         Box::new(lint::correctness::unnecessary_nullable_return_type::UnnecessaryNullableReturnType),
         Box::new(lint::correctness::use_once_constructors_once_provider::UseOnceConstructorsOnceProvider),
+        Box::new(lint::correctness::unrelated_type_equality_checks::UnrelatedTypeEqualityChecks),
+        Box::new(lint::correctness::collection_methods_unrelated_type::CollectionMethodsUnrelatedType),
+        Box::new(lint::correctness::use_build_context_synchronously::UseBuildContextSynchronously),
+        Box::new(lint::correctness::use_key_in_widget_constructors::UseKeyInWidgetConstructors),
+        Box::new(lint::correctness::await_only_futures::AwaitOnlyFutures),
+        Box::new(lint::correctness::void_checks::VoidChecks),
+        Box::new(lint::correctness::null_closures::NullClosures),
+        Box::new(lint::correctness::null_check_on_nullable_type_parameter::NullCheckOnNullableTypeParameter),
+        Box::new(lint::correctness::type_literal_in_constant_pattern::TypeLiteralInConstantPattern),
+        Box::new(lint::correctness::exhaustive_cases::ExhaustiveCases),
+        Box::new(lint::correctness::library_private_types_in_public_api::LibraryPrivateTypesInPublicApi),
+        Box::new(lint::correctness::invalid_runtime_check_with_js_interop_types::InvalidRuntimeCheckWithJsInteropTypes),
         // ── performance ──
         Box::new(lint::performance::sized_box_for_whitespace::SizedBoxForWhitespace),
         Box::new(lint::performance::unnecessary_to_list_in_spreads::UnnecessaryToListInSpreads),
         Box::new(lint::performance::prefer_const_border_radius::PreferConstBorderRadius),
         Box::new(lint::performance::prefer_correct_edge_insets_constructor::PreferCorrectEdgeInsetsConstructor),
         Box::new(lint::performance::prefer_declaring_const_constructor::PreferDeclaringConstConstructor),
+        Box::new(lint::performance::prefer_contains::PreferContains),
         // ── style ──
         Box::new(lint::style::sort_child_properties_last::SortChildPropertiesLast),
         Box::new(lint::style::use_full_hex_values_for_flutter_colors::UseFullHexValuesForFlutterColors),
@@ -326,6 +339,13 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(lint::style::prefer_underscore_for_unused_callback_parameters::PreferUnderscoreForUnusedCallbackParameters),
         Box::new(lint::style::use_design_system_item::UseDesignSystemItem),
         Box::new(lint::style::use_spacer_as_expanded_child::UseSpacerAsExpandedChild),
+        Box::new(lint::style::annotate_overrides::AnnotateOverrides),
+        Box::new(lint::style::avoid_renaming_method_parameters::AvoidRenamingMethodParameters),
+        Box::new(lint::style::prefer_const_constructors_in_immutables::PreferConstConstructorsInImmutables),
+        Box::new(lint::style::library_annotations::LibraryAnnotations),
+        Box::new(lint::style::prefer_interpolation_to_compose_strings::PreferInterpolationToComposeStrings),
+        Box::new(lint::style::implicit_call_tearoffs::ImplicitCallTearoffs),
+        Box::new(lint::style::file_names::FileNames),
         // ── suspicious ──
         Box::new(lint::suspicious::avoid_print::AvoidPrint),
         Box::new(lint::suspicious::avoid_empty_else::AvoidEmptyElse),
@@ -349,6 +369,8 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(lint::suspicious::no_equal_arguments::NoEqualArguments),
         Box::new(lint::suspicious::no_equal_then_else::NoEqualThenElse),
         Box::new(lint::suspicious::no_self_comparisons::NoSelfComparisons),
+        Box::new(lint::suspicious::overridden_fields::OverriddenFields),
+        Box::new(lint::suspicious::avoid_types_as_parameter_names::AvoidTypesAsParameterNames),
     ]
 }
 
@@ -360,6 +382,9 @@ pub fn all_cross_file_rules() -> Vec<Box<dyn CrossFileRule>> {
         Box::new(cross_file::unused_files::UnusedFiles),
         Box::new(cross_file::unused_code::UnusedCode),
         Box::new(cross_file::unnecessary_nullable::UnnecessaryNullable),
+        Box::new(cross_file::depend_on_referenced_packages::DependOnReferencedPackages),
+        Box::new(cross_file::package_names::PackageNames),
+        Box::new(cross_file::secure_pubspec_urls::SecurePubspecUrls),
     ]
 }
 

@@ -496,8 +496,11 @@ fn test_load_or_default_errors_on_malformed_discovered_config() {
 
     // Legacy flat schema is likewise a hard error via discovery, matching the
     // explicit --config path.
-    fs::write(&config_path, r#"{ "rules": { "avoid-dynamic": { "enabled": false } } }"#)
-        .expect("write config");
+    fs::write(
+        &config_path,
+        r#"{ "rules": { "avoid-dynamic": { "enabled": false } } }"#,
+    )
+    .expect("write config");
     let err = load_or_default(&dir).expect_err("legacy flat schema must error");
     assert!(err.to_string().contains("legacy flat schema"));
 
@@ -553,7 +556,12 @@ fn test_legacy_underscore_cross_file_alias_resolves_identically() {
         "overrides": [ { "includes": ["gen/**"], "cross_file": { "enabled": false } } ]
     }));
     assert_eq!(
-        legacy_override.resolve_cross_file_rule_for("gen/a.dart", "correctness", "unused-files", true),
+        legacy_override.resolve_cross_file_rule_for(
+            "gen/a.dart",
+            "correctness",
+            "unused-files",
+            true
+        ),
         None
     );
 }

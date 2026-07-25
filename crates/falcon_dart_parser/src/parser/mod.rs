@@ -490,8 +490,8 @@ impl<'src> Parser<'src> {
         let kind_at = |i: usize| self.tokens.get(i).map(|t| &t.kind);
         match self.pos.checked_sub(1).and_then(kind_at) {
             Some(TokenKind::Star) => match self.pos.checked_sub(2).and_then(kind_at) {
-                Some(TokenKind::Async) => (true, true),  // async*
-                Some(TokenKind::Sync) => (false, true),  // sync*
+                Some(TokenKind::Async) => (true, true), // async*
+                Some(TokenKind::Sync) => (false, true), // sync*
                 _ => (false, false),
             },
             Some(TokenKind::Async) => (true, false), // async

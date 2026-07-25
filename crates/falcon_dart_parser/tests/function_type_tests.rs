@@ -256,7 +256,10 @@ fn generic_inline_function_typed_positional_formal() {
     let params = &only_function(&prog).params;
     let p = &params.positional[0];
     assert_eq!(p.name.name, "cb");
-    assert!(p.function_params.is_some(), "expected a function-typed formal");
+    assert!(
+        p.function_params.is_some(),
+        "expected a function-typed formal"
+    );
 }
 
 #[test]
@@ -282,7 +285,10 @@ fn generic_function_typed_formal_rejected_inside_function_type() {
     // A generic function-typed formal is NOT valid inside a generic function
     // TYPE — Dart rejects it and falcon must keep rejecting it there.
     let (_prog, errors) = parse("typedef Old = void Function(int cb<T>(T x));");
-    assert!(!errors.is_empty(), "expected rejection inside function type");
+    assert!(
+        !errors.is_empty(),
+        "expected rejection inside function type"
+    );
 }
 
 #[test]

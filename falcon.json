@@ -1,7 +1,13 @@
 {
   "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json",
   "files": {
-    "includes": ["**", "!.dart_tool/**", "!build/**", "!**/*.g.dart", "!**/*.freezed.dart"]
+    "includes": [
+      "**",
+      "!.dart_tool/**",
+      "!build/**",
+      "!**/*.g.dart",
+      "!**/*.freezed.dart"
+    ]
   },
   "linter": {
     "enabled": true,
@@ -55,14 +61,27 @@
         "proper-super-init-state": "warn",
         "unnecessary-flutter-imports": "warn",
         "unnecessary-nullable-return-type": "warn",
-        "use-once-constructors-once-provider": "warn"
+        "use-once-constructors-once-provider": "warn",
+        "unrelated-type-equality-checks": "off",
+        "collection-methods-unrelated-type": "off",
+        "use-build-context-synchronously": "off",
+        "use-key-in-widget-constructors": "off",
+        "await-only-futures": "off",
+        "void-checks": "off",
+        "null-closures": "off",
+        "null-check-on-nullable-type-parameter": "off",
+        "type-literal-in-constant-pattern": "off",
+        "exhaustive-cases": "off",
+        "library-private-types-in-public-api": "off",
+        "invalid-runtime-check-with-js-interop-types": "off"
       },
       "performance": {
         "sized-box-for-whitespace": "warn",
         "unnecessary-to-list-in-spreads": "warn",
         "prefer-const-border-radius": "warn",
         "prefer-correct-edge-insets-constructor": "warn",
-        "prefer-declaring-const-constructor": "warn"
+        "prefer-declaring-const-constructor": "warn",
+        "prefer-contains": "off"
       },
       "style": {
         "sort-child-properties-last": "warn",
@@ -136,7 +155,14 @@
         "prefer-dedicated-media-query-methods": "warn",
         "prefer-underscore-for-unused-callback-parameters": "warn",
         "use-design-system-item": "warn",
-        "use-spacer-as-expanded-child": "warn"
+        "use-spacer-as-expanded-child": "warn",
+        "annotate-overrides": "off",
+        "avoid-renaming-method-parameters": "off",
+        "prefer-const-constructors-in-immutables": "off",
+        "library-annotations": "off",
+        "prefer-interpolation-to-compose-strings": "off",
+        "implicit-call-tearoffs": "off",
+        "file-names": "off"
       },
       "suspicious": {
         "avoid-print": "warn",
@@ -160,7 +186,9 @@
         "no-equal-arguments": "warn",
         "no-equal-then-else": "warn",
         "no-duplicate-case-values": "warn",
-        "no-self-comparisons": "warn"
+        "no-self-comparisons": "warn",
+        "overridden-fields": "off",
+        "avoid-types-as-parameter-names": "off"
       }
     }
   },
@@ -170,7 +198,14 @@
       "correctness": {
         "unnecessary-nullable": "warn",
         "unused-code": "warn",
-        "unused-files": "warn"
+        "unused-files": "warn",
+        "depend-on-referenced-packages": "off"
+      },
+      "style": {
+        "package-names": "off"
+      },
+      "suspicious": {
+        "secure-pubspec-urls": "off"
       }
     }
   },

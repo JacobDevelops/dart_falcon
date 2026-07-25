@@ -625,8 +625,14 @@ impl std::fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 /// Canonical top-level keys of a falcon.json.
-const KNOWN_TOP_LEVEL_KEYS: &[&str] =
-    &["$schema", "files", "linter", "cross-file", "overrides", "max-errors"];
+const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
+    "$schema",
+    "files",
+    "linter",
+    "cross-file",
+    "overrides",
+    "max-errors",
+];
 
 /// Legacy top-level spellings still accepted, each mapped to its canonical key.
 /// Recognized so a pre-rename config keeps loading, but warned on so the user
@@ -650,7 +656,10 @@ fn top_level_key_warnings(value: &serde_json::Value) -> Vec<String> {
         .keys()
         .filter(|k| !KNOWN_TOP_LEVEL_KEYS.contains(&k.as_str()))
         .map(|key| {
-            match LEGACY_TOP_LEVEL_KEYS.iter().find(|(legacy, _)| legacy == key) {
+            match LEGACY_TOP_LEVEL_KEYS
+                .iter()
+                .find(|(legacy, _)| legacy == key)
+            {
                 Some((_, canonical)) => format!(
                     "warning: falcon.json uses the deprecated top-level key `{key}`; it \
                      still works but is a legacy spelling of `{canonical}` — run \
@@ -770,6 +779,24 @@ pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Load config from its discovered location, or the default when none is found.
+///
+/// A discovered config that fails to load is a hard **error**, not a silent
+/// fall-back to defaults: a typo (invalid JSON, a wrong-typed value, the legacy
+/// flat schema) must not quietly re-enable every rule. Only the genuine
+/// no-config-found case yields `Ok(FalconConfig::default())`.
+///
+/// # Errors
+///
+/// Propagates any [`load_config`] error for a config that was found but could
+/// not be loaded.
+pub fn load_or_default(start_dir: &Path) -> Result<FalconConfig, ConfigError> {
+    match find_config(start_dir) {
+        Some(path) => load_config(&path),
+        None => Ok(FalconConfig::default()),
+    }
+}
+
 #[cfg(test)]
 mod warning_tests {
     use super::top_level_key_warnings;
@@ -781,8 +808,16 @@ mod warning_tests {
     fn unknown_top_level_key_is_warned() {
         let warnings = top_level_key_warnings(&json!({ "linterr": {}, "totallyBogus": 5 }));
         assert_eq!(warnings.len(), 2);
-        assert!(warnings.iter().any(|w| w.contains("unknown top-level key `linterr`")));
-        assert!(warnings.iter().any(|w| w.contains("unknown top-level key `totallyBogus`")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("unknown top-level key `linterr`"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("unknown top-level key `totallyBogus`"))
+        );
     }
 
     /// An override entry using a legacy alias (`project`/`cross_file`) for
@@ -812,12 +847,27 @@ mod warning_tests {
         }));
         assert_eq!(warnings.len(), 3);
         for w in &warnings {
-            assert!(w.contains("deprecated"), "should be a deprecation, not unknown: {w}");
+            assert!(
+                w.contains("deprecated"),
+                "should be a deprecation, not unknown: {w}"
+            );
             assert!(w.contains("falcon migrate"));
         }
-        assert!(warnings.iter().any(|w| w.contains("`project`") && w.contains("`cross-file`")));
-        assert!(warnings.iter().any(|w| w.contains("`cross_file`") && w.contains("`cross-file`")));
-        assert!(warnings.iter().any(|w| w.contains("`max_errors`") && w.contains("`max-errors`")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("`project`") && w.contains("`cross-file`"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("`cross_file`") && w.contains("`cross-file`"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("`max_errors`") && w.contains("`max-errors`"))
+        );
     }
 
     /// Canonical keys produce no noise.
@@ -828,23 +878,5 @@ mod warning_tests {
             "overrides": [], "max-errors": 50
         }));
         assert!(warnings.is_empty(), "unexpected: {warnings:?}");
-    }
-}
-
-/// Load config from its discovered location, or the default when none is found.
-///
-/// A discovered config that fails to load is a hard **error**, not a silent
-/// fall-back to defaults: a typo (invalid JSON, a wrong-typed value, the legacy
-/// flat schema) must not quietly re-enable every rule. Only the genuine
-/// no-config-found case yields `Ok(FalconConfig::default())`.
-///
-/// # Errors
-///
-/// Propagates any [`load_config`] error for a config that was found but could
-/// not be loaded.
-pub fn load_or_default(start_dir: &Path) -> Result<FalconConfig, ConfigError> {
-    match find_config(start_dir) {
-        Some(path) => load_config(&path),
-        None => Ok(FalconConfig::default()),
     }
 }

@@ -19,6 +19,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
+                "depend-on-referenced-packages": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-nullable": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -35,6 +38,26 @@
               "default": true,
               "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
               "type": "boolean"
+            },
+            "style": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `style` group.",
+              "properties": {
+                "package-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "suspicious": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `suspicious` group.",
+              "properties": {
+                "secure-pubspec-urls": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
             }
           },
           "type": "object"
@@ -167,7 +190,16 @@
                 "avoid-web-libraries-in-flutter": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "await-only-futures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "collection-methods-unrelated-type": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "correct-order-for-super-dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "exhaustive-cases": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "hash-and-equals": {
@@ -176,7 +208,19 @@
                 "implementation-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "invalid-runtime-check-with-js-interop-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "library-private-types-in-public-api": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "no-logic-in-create-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "null-check-on-nullable-type-parameter": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "null-closures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "proper-controller-dispose": {
@@ -191,16 +235,31 @@
                 "proper-super-init-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "type-literal-in-constant-pattern": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-flutter-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-nullable-return-type": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unrelated-type-equality-checks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-build-context-synchronously": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-key-in-widget-constructors": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "use-once-constructors-once-provider": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "valid-regexps": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "void-checks": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -211,6 +270,9 @@
               "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
                 "prefer-const-border-radius": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-contains": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-correct-edge-insets-constructor": {
@@ -237,6 +299,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `style` group.",
               "properties": {
+                "annotate-overrides": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-abbreviations-in-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -253,6 +318,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-redundant-pattern-field-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-renaming-method-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-return-types-on-setters": {
@@ -297,7 +365,16 @@
                 "empty-constructor-bodies": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "file-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "format-comment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "implicit-call-tearoffs": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "library-annotations": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "library-prefixes": {
@@ -336,6 +413,9 @@
                 "prefer-collection-literals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-const-constructors-in-immutables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-correct-identifier-length": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -361,6 +441,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-inlined-adds": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-interpolation-to-compose-strings": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-is-empty": {
@@ -484,6 +567,9 @@
                 "avoid-throw-in-catch-block": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-types-as-parameter-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unrelated-type-assertions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -512,6 +598,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-wildcard-variable-uses": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "overridden-fields": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "recursive-getters": {
@@ -593,6 +682,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
+                "depend-on-referenced-packages": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-nullable": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -609,6 +701,26 @@
               "default": true,
               "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
               "type": "boolean"
+            },
+            "style": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `style` group.",
+              "properties": {
+                "package-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
+            },
+            "suspicious": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `suspicious` group.",
+              "properties": {
+                "secure-pubspec-urls": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
             }
           },
           "type": "object"
@@ -771,7 +883,16 @@
                 "avoid-web-libraries-in-flutter": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "await-only-futures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "collection-methods-unrelated-type": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "correct-order-for-super-dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "exhaustive-cases": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "hash-and-equals": {
@@ -780,7 +901,19 @@
                 "implementation-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "invalid-runtime-check-with-js-interop-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "library-private-types-in-public-api": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "no-logic-in-create-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "null-check-on-nullable-type-parameter": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "null-closures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "proper-controller-dispose": {
@@ -795,16 +928,31 @@
                 "proper-super-init-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "type-literal-in-constant-pattern": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-flutter-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-nullable-return-type": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unrelated-type-equality-checks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-build-context-synchronously": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-key-in-widget-constructors": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "use-once-constructors-once-provider": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "valid-regexps": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "void-checks": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -815,6 +963,9 @@
               "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
                 "prefer-const-border-radius": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-contains": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-correct-edge-insets-constructor": {
@@ -841,6 +992,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `style` group.",
               "properties": {
+                "annotate-overrides": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-abbreviations-in-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -857,6 +1011,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-redundant-pattern-field-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-renaming-method-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-return-types-on-setters": {
@@ -901,7 +1058,16 @@
                 "empty-constructor-bodies": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "file-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "format-comment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "implicit-call-tearoffs": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "library-annotations": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "library-prefixes": {
@@ -940,6 +1106,9 @@
                 "prefer-collection-literals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-const-constructors-in-immutables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-correct-identifier-length": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -965,6 +1134,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-inlined-adds": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-interpolation-to-compose-strings": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-is-empty": {
@@ -1088,6 +1260,9 @@
                 "avoid-throw-in-catch-block": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-types-as-parameter-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unrelated-type-assertions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1116,6 +1291,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-wildcard-variable-uses": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "overridden-fields": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "recursive-getters": {

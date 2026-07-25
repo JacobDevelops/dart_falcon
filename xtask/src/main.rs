@@ -1018,11 +1018,7 @@ fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
 
     // Cut a trailing provenance sentence from any line that still carries one.
     for line in &mut lines {
-        if let Some(cut) = PROVENANCE
-            .iter()
-            .filter_map(|p| line.find(p))
-            .min()
-        {
+        if let Some(cut) = PROVENANCE.iter().filter_map(|p| line.find(p)).min() {
             line.truncate(cut);
             let trimmed_len = line.trim_end().len();
             line.truncate(trimmed_len);
@@ -1401,7 +1397,10 @@ fn walk_config_schema(root: &Value, node: &Value, path: &str, out: &mut Vec<Valu
     // Array of objects → descend into the item schema with a `[]` marker.
     if resolved.get("type").and_then(|t| t.as_str()) == Some("array")
         && let Some(items) = resolved.get("items")
-        && matches!(schema_resolve(root, items).get("properties"), Some(Value::Object(_)))
+        && matches!(
+            schema_resolve(root, items).get("properties"),
+            Some(Value::Object(_))
+        )
     {
         walk_config_schema(root, items, &format!("{path}[]"), out);
         return;

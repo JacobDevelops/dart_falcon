@@ -6,6 +6,9 @@
 //! This module root holds the shared cross-file plumbing every rule needs:
 //! package/pubspec discovery, directive-URI resolution, and path normalization.
 
+pub mod depend_on_referenced_packages;
+pub mod package_names;
+pub mod secure_pubspec_urls;
 pub mod unnecessary_nullable;
 pub mod unused_code;
 pub mod unused_files;

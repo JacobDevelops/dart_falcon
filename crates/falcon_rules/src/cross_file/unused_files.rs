@@ -51,7 +51,10 @@ impl CrossFileRule for UnusedFiles {
         for (i, c) in canons.iter().enumerate() {
             first_for_canon.entry(c.as_path()).or_insert(i);
         }
-        let repr: Vec<usize> = canons.iter().map(|c| first_for_canon[c.as_path()]).collect();
+        let repr: Vec<usize> = canons
+            .iter()
+            .map(|c| first_for_canon[c.as_path()])
+            .collect();
 
         // BFS from every entrypoint over the reference edges.
         let mut reachable = vec![false; files.len()];
@@ -271,7 +274,10 @@ mod tests {
         let d = std::env::temp_dir().join(format!(
             "falcon_unused_{}_{}_{tag}",
             std::process::id(),
-            std::thread::current().name().unwrap_or("t").replace("::", "_")
+            std::thread::current()
+                .name()
+                .unwrap_or("t")
+                .replace("::", "_")
         ));
         std::fs::create_dir_all(d.join("lib/src")).unwrap();
         std::fs::write(d.join("pubspec.yaml"), "name: app\n").unwrap();
@@ -318,8 +324,14 @@ mod tests {
                 d.join("lib/app.dart").to_str().unwrap(),
                 "import 'src/real.dart';\nvoid main() {}\n",
             ),
-            pf(d.join("lib/src/real.dart").to_str().unwrap(), "void r() {}\n"),
-            pf(d.join("lib/alias/real.dart").to_str().unwrap(), "void r() {}\n"),
+            pf(
+                d.join("lib/src/real.dart").to_str().unwrap(),
+                "void r() {}\n",
+            ),
+            pf(
+                d.join("lib/alias/real.dart").to_str().unwrap(),
+                "void r() {}\n",
+            ),
         ];
         let out = flagged(&files);
         std::fs::remove_dir_all(&d).unwrap();
@@ -338,8 +350,14 @@ mod tests {
 
         let files = vec![
             pf(d.join("lib/app.dart").to_str().unwrap(), "void main() {}\n"),
-            pf(d.join("lib/src/dead.dart").to_str().unwrap(), "void x() {}\n"),
-            pf(d.join("lib/alias/dead.dart").to_str().unwrap(), "void x() {}\n"),
+            pf(
+                d.join("lib/src/dead.dart").to_str().unwrap(),
+                "void x() {}\n",
+            ),
+            pf(
+                d.join("lib/alias/dead.dart").to_str().unwrap(),
+                "void x() {}\n",
+            ),
         ];
         let out = flagged(&files);
         std::fs::remove_dir_all(&d).unwrap();

@@ -630,8 +630,7 @@ fn test_metadata_on_c_style_for_var() {
 
 #[test]
 fn test_metadata_on_pattern_for_each() {
-    let (_, errors) =
-        sync_body_stmts("for (@meta var (a, b) in <(int, int)>[]) { print(a + b); }");
+    let (_, errors) = sync_body_stmts("for (@meta var (a, b) in <(int, int)>[]) { print(a + b); }");
     assert_eq!(errors, 0, "annotation on pattern for-each must parse");
 }
 
@@ -648,7 +647,9 @@ fn test_deep_block_nesting_does_not_overflow() {
             let n = 3000;
             let src = format!("void f() {{ {}{} }}", "{".repeat(n), "}".repeat(n));
             let (_, errors) = parse(&src);
-            errors.iter().any(|e| e.message.contains("nesting too deep"))
+            errors
+                .iter()
+                .any(|e| e.message.contains("nesting too deep"))
         })
         .unwrap();
     assert!(
@@ -673,7 +674,8 @@ fn test_await_for_rejected_in_plain_function() {
 
 #[test]
 fn test_await_for_accepted_in_async_function() {
-    let (prog, errors) = parse("void f(Stream<int> xs) async { await for (var x in xs) { print(x); } }");
+    let (prog, errors) =
+        parse("void f(Stream<int> xs) async { await for (var x in xs) { print(x); } }");
     assert_eq!(errors.len(), 0, "{errors:?}");
     let func = match &prog.declarations[0] {
         TopLevelDecl::Function(f) => f,

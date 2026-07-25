@@ -61,7 +61,8 @@ fn is_where_length_eq_length(expr: &Expr) -> Option<Span> {
         } = &**left
         && left_field.name == "length"
         && let Expr::Call {
-            callee: left_callee, ..
+            callee: left_callee,
+            ..
         } = &**left_obj
         && let Expr::Field {
             field: left_where_field,
