@@ -44,23 +44,12 @@ void functionalApproach({String? name, int? age, double? score, bool? flag}) {
   print('$name, $age, $score, $flag');
 }
 
-// dcl's number-of-parameters metric supports only functions and methods, never
-// constructors — so a wide named-parameter constructor is never counted.
-class Wide {
-  final int a, b, c, d, e, f, g;
+class AtLimit {
+  final int a, b, c, d, e;
 
-  const Wide({
-    required this.a,
-    required this.b,
-    required this.c,
-    required this.d,
-    required this.e,
-    required this.f,
-    required this.g,
-  });
+  const AtLimit(this.a, this.b, this.c, this.d, this.e);
 
-  // `copyWith` returning the same class is explicitly exempt.
-  Wide copyWith({int? a, int? b, int? c, int? d, int? e, int? f, int? g}) {
-    return this;
-  }
+  AtLimit copyWith({int? a, int? b, int? c, int? d, int? e}) => this;
 }
+
+typedef AtLimitCallback = void Function(int a, int b, int c, int d, int e);

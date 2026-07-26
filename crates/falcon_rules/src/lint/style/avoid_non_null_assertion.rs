@@ -1,16 +1,10 @@
-//! Flags the null-assertion operator `!`.
-//!
-//! `x!` asserts at runtime that `x` is non-null and throws if it is not,
-//! trading a compile-time guarantee for a potential crash. Prefer explicit null
-//! handling — `?.`, `??`, an `if (x != null)` promotion, or restructuring so
-//! the value is non-nullable — over silencing the type system. An assertion on
-//! a map index (`map[key]!`) is exempt, since `Map`'s index operator returns a
-//! nullable value by design and the assertion is idiomatic there.
+//! Flags the null-assertion operator `!` except on a resolved `Map` index.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+
+use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 pub struct AvoidNonNullAssertion;
 
@@ -20,49 +14,65 @@ impl Rule for AvoidNonNullAssertion {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut collector = Collector {
-            diags: Vec::new(),
-            ctx,
+        let Some(state) = SemanticState::new(program, ctx) else {
+            return Vec::new();
         };
-        collector.visit_program(program);
+        let mut collector = Collector {
+            file: ctx.file_path.to_string_lossy().into_owned(),
+            diags: Vec::new(),
+        };
+        visit_program(&mut collector, program, state);
         collector.diags
     }
 }
 
-fn diag(ctx: &AnalyzeContext, span: &Span) -> Diagnostic {
-    Diagnostic::new(
-        "avoid-non-null-assertion",
-        Severity::Warning,
-        "Avoid using the null assertion operator '!'",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    )
-}
-
-/// Detection runs on every expression the shared walker reaches. The walker is
-/// exhaustive over the AST, so a violation cannot hide inside newer syntax.
-struct Collector<'a> {
+struct Collector {
+    file: String,
     diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
-    fn visit_expr(&mut self, node: &Expr) {
-        // dart_code_linter exempts the null-assertion on a map index
-        // (`map[key]!`), since `Map`'s index operator returns a nullable value.
-        // Without type resolution we conservatively exempt any index operand.
-        if let Expr::NullAssert { operand, span } = node
-            && !matches!(operand.as_ref(), Expr::Index { .. })
-        {
-            self.diags.push(diag(self.ctx, span));
+impl SemanticRuleVisitor for Collector {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        let Expr::NullAssert { operand, span } = node else {
+            return;
+        };
+        if let Expr::Index { object, .. } = operand.as_ref() {
+            let receiver = state.infer(object);
+            if state
+                .signatures
+                .instantiated_supertype(&receiver, "dart:core", "Map", &state.model)
+                .is_some()
+            {
+                return;
+            }
+            if !known_non_map(&receiver) {
+                return;
+            }
         }
-        walk_expr(self, node);
+        self.diags.push(Diagnostic::new(
+            "avoid-non-null-assertion",
+            Severity::Warning,
+            "Avoid using the null assertion operator '!'",
+            self.file.clone(),
+            DiagSpan {
+                start: span.start,
+                end: span.end,
+            },
+        ));
     }
+}
+
+fn known_non_map(ty: &ResolvedType) -> bool {
+    matches!(
+        ty,
+        ResolvedType::Null
+            | ResolvedType::Void
+            | ResolvedType::Never
+            | ResolvedType::Function { .. }
+            | ResolvedType::Record { .. }
+            | ResolvedType::Interface {
+                identity: falcon_analyze::DeclarationIdentity::Sdk { .. },
+                ..
+            }
+    )
 }

@@ -1,31 +1,19 @@
-//! Flags an inline block-body callback passed to a widget constructor that
-//! should be extracted to a method.
+//! Flags inline block-body callbacks passed to Widget constructors.
 //!
-//! Large inline closures in a `build` method bloat the widget tree, hurt
-//! readability, and can defeat const-ness; moving them to a named widget method
-//! clarifies intent and eases reuse. The rule only inspects classes that
-//! syntactically extend a `Widget` or `State`, and flags block-body
-//! function-expression arguments to widget constructions. Arrow callbacks,
-//! empty blocks, and Flutter builders (whose first parameter is typed
-//! `BuildContext`) are never flagged.
-//!
-//! ## Options
-//!
-//! `allowed_line_count` (integer, default: none) — when set, only callbacks
-//! spanning more than this many lines are flagged; unset flags every qualifying
-//! callback.
-//!
-//! `ignored_named_arguments` (list of strings, default: empty) —
-//! named-argument labels whose callbacks are ignored.
+//! The rule uses resolved Flutter identities for both the containing Widget class
+//! and each constructed Widget. Calls that cannot be resolved uniquely are left
+//! alone; spelling, capitalization, and import-prefix shape are not evidence.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
+    TypeTruth,
+};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct PreferExtractingCallbacks;
 
-/// Resolved options. dcl's `allowed-line-count` defaults to `null`, meaning any
-/// non-empty block-body callback qualifies regardless of length.
 struct Cfg {
     allowed_line_count: Option<usize>,
     ignored: Vec<String>,
@@ -34,22 +22,21 @@ struct Cfg {
 fn cfg(ctx: &AnalyzeContext) -> Cfg {
     let opts = crate::meta::meta_for("prefer-extracting-callbacks")
         .and_then(|m| ctx.rule_options(m.group, "prefer-extracting-callbacks"));
-    let allowed_line_count = opts
-        .and_then(|o| o.get("allowed_line_count"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize);
-    let ignored = opts
-        .and_then(|o| o.get("ignored_named_arguments"))
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
     Cfg {
-        allowed_line_count,
-        ignored,
+        allowed_line_count: opts
+            .and_then(|o| o.get("allowed_line_count"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize),
+        ignored: opts
+            .and_then(|o| o.get("ignored_named_arguments"))
+            .and_then(|v| v.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -59,86 +46,212 @@ impl Rule for PreferExtractingCallbacks {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
+        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+            return Vec::new();
+        };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let widget = flutter_identity("Widget");
+        let state = flutter_identity("State");
         let cfg = cfg(ctx);
-        for decl in &program.declarations {
-            // dcl only visits classes that are a Widget or a Widget State.
-            if let TopLevelDecl::Class(c) = decl
-                && is_widget_class(c)
+        let mut diags = Vec::new();
+        for declaration in &program.declarations {
+            let TopLevelDecl::Class(class) = declaration else {
+                continue;
+            };
+            let Some(identity) = model.resolve_name(std::slice::from_ref(&class.name.name)) else {
+                continue;
+            };
+            let class_type = interface(identity);
+            if signatures.is_subtype_of(&class_type, &widget, &model) != TypeTruth::Yes
+                && signatures.is_subtype_of(&class_type, &state, &model) != TypeTruth::Yes
             {
-                for member in &c.members {
-                    if let Some(body) = member_body(member) {
-                        scan_body(body, &mut diags, ctx, &cfg);
-                    }
-                }
+                continue;
+            }
+            let mut collector = CallbackCollector {
+                model: &model,
+                signatures,
+                widget: &widget,
+                cfg: &cfg,
+                source: ctx.source,
+                file: ctx.file_path.to_string_lossy().into_owned(),
+                diags: &mut diags,
+            };
+            for member in &class.members {
+                collector.visit_class_member(member);
             }
         }
         diags
     }
 }
 
-fn member_body(member: &ClassMember) -> Option<&FunctionBody> {
-    match member {
-        ClassMember::Method(m) => m.body.as_ref(),
-        ClassMember::Constructor(c) => c.body.as_ref(),
-        ClassMember::Getter(g) => g.body.as_ref(),
-        ClassMember::Setter(s) => s.body.as_ref(),
+struct CallbackCollector<'a, 'b> {
+    model: &'a SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    widget: &'a DeclarationIdentity,
+    cfg: &'a Cfg,
+    source: &'a str,
+    file: String,
+    diags: &'b mut Vec<Diagnostic>,
+}
+
+impl Visitor for CallbackCollector<'_, '_> {
+    fn visit_expr(&mut self, node: &Expr) {
+        if let Some((constructed, _, args)) = construction(node, self.model)
+            && self
+                .signatures
+                .is_subtype_of(&constructed, self.widget, self.model)
+                == TypeTruth::Yes
+        {
+            for argument in &args.positional {
+                self.check_callback(argument);
+            }
+            for argument in &args.named {
+                if !self
+                    .cfg
+                    .ignored
+                    .iter()
+                    .any(|name| name == &argument.name.name)
+                {
+                    self.check_callback(&argument.value);
+                }
+            }
+        }
+        walk_expr(self, node);
+    }
+}
+
+impl CallbackCollector<'_, '_> {
+    fn check_callback(&mut self, expression: &Expr) {
+        let Expr::FuncExpr {
+            params, body, span, ..
+        } = expression
+        else {
+            return;
+        };
+        if !matches!(body.as_ref(), FunctionBody::Block(block) if !block.stmts.is_empty())
+            || self.is_flutter_builder(params, body)
+            || !is_long_enough(span, self.source, self.cfg)
+        {
+            return;
+        }
+        self.diags.push(Diagnostic::new(
+            "prefer-extracting-callbacks",
+            Severity::Warning,
+            "Prefer extracting the callback to a separate widget method.",
+            self.file.clone(),
+            DiagSpan {
+                start: span.start,
+                end: span.end,
+            },
+        ));
+    }
+
+    fn is_flutter_builder(&self, params: &FormalParamList, body: &FunctionBody) -> bool {
+        if !body_returns_widget(body, self.model, self.signatures, self.widget) {
+            return false;
+        }
+        let first = params
+            .positional
+            .first()
+            .or_else(|| params.optional_positional.first())
+            .or_else(|| params.named.first());
+        let Some(first) = first else {
+            return true;
+        };
+        first.param_type.as_ref().is_some_and(|ty| {
+            self.model.resolve_type(ty) == interface(flutter_identity("BuildContext"))
+        })
+    }
+}
+
+fn body_returns_widget(
+    body: &FunctionBody,
+    model: &SemanticModel<'_>,
+    signatures: &SignatureIndex,
+    widget: &DeclarationIdentity,
+) -> bool {
+    match body {
+        FunctionBody::Arrow(expression, _) => {
+            expression_is_widget(expression, model, signatures, widget)
+        }
+        FunctionBody::Block(block) => block.stmts.iter().any(|statement| match statement {
+            Stmt::Return(ReturnStmt {
+                value: Some(value), ..
+            }) => expression_is_widget(value, model, signatures, widget),
+            _ => false,
+        }),
+        FunctionBody::Native(..) => false,
+    }
+}
+
+fn expression_is_widget(
+    expression: &Expr,
+    model: &SemanticModel<'_>,
+    signatures: &SignatureIndex,
+    widget: &DeclarationIdentity,
+) -> bool {
+    construction(expression, model)
+        .is_some_and(|(ty, _, _)| signatures.is_subtype_of(&ty, widget, model) == TypeTruth::Yes)
+}
+
+fn construction<'a>(
+    expression: &'a Expr,
+    model: &SemanticModel<'_>,
+) -> Option<(ResolvedType, String, &'a ArgList)> {
+    match expression {
+        Expr::New {
+            dart_type, args, ..
+        } => Some((
+            model.resolve_type(dart_type).with_nullable(false),
+            "new".to_string(),
+            args,
+        )),
+        Expr::Call { callee, args, .. } => {
+            let mut segments = expression_segments(callee)?;
+            if let Some(identity) = model.resolve_name(&segments) {
+                return Some((interface(identity), "new".to_string(), args));
+            }
+            let constructor = segments.pop()?;
+            let identity = model.resolve_name(&segments)?;
+            Some((interface(identity), constructor, args))
+        }
         _ => None,
     }
 }
 
-fn type_base_name(dt: &DartType) -> Option<&str> {
-    match dt {
-        DartType::Named(n) => n.segments.last().map(|s| s.name.as_str()),
-        _ => None,
+fn expression_segments(expression: &Expr) -> Option<Vec<String>> {
+    let mut current = expression;
+    let mut segments = Vec::new();
+    loop {
+        match current {
+            Expr::Ident(identifier) => {
+                segments.push(identifier.name.clone());
+                segments.reverse();
+                return Some(segments);
+            }
+            Expr::Field { object, field, .. } => {
+                segments.push(field.name.clone());
+                current = object;
+            }
+            _ => return None,
+        }
     }
 }
 
-/// A class whose superclass is a Widget or a Widget `State`. Without type
-/// resolution this is a name heuristic over the common Flutter base classes
-/// (`StatelessWidget`, `StatefulWidget`, `ConsumerWidget`, `State<T>`, …).
-fn is_widget_class(c: &ClassDecl) -> bool {
-    c.extends
-        .as_ref()
-        .and_then(type_base_name)
-        .is_some_and(|base| base.ends_with("Widget") || base == "State" || base.ends_with("State"))
-}
-
-fn root_name(expr: &Expr) -> Option<&str> {
-    match expr {
-        Expr::Ident(id) => Some(&id.name),
-        Expr::Field { object, .. } => root_name(object),
-        _ => None,
+fn interface(identity: DeclarationIdentity) -> ResolvedType {
+    ResolvedType::Interface {
+        identity,
+        arguments: Vec::new(),
+        nullable: false,
+        extension_type: false,
     }
 }
 
-/// True for an instance-creation expression: an explicit `new`/`const`, or a
-/// call whose root identifier is upper-cased (a constructor, not a method like
-/// `setState(...)`).
-fn is_construction(expr: &Expr) -> bool {
-    match expr {
-        Expr::New { .. } => true,
-        Expr::Call { callee, .. } => root_name(callee)
-            .and_then(|n| n.chars().next())
-            .is_some_and(|c| c.is_uppercase()),
-        _ => false,
+fn flutter_identity(name: &str) -> DeclarationIdentity {
+    DeclarationIdentity::Package {
+        package: "flutter".to_string(),
+        name: name.to_string(),
     }
-}
-
-fn is_nonempty_block(body: &FunctionBody) -> bool {
-    matches!(body, FunctionBody::Block(b) if !b.stmts.is_empty())
-}
-
-/// A Flutter *builder* callback — first parameter typed `BuildContext` — is
-/// excluded, as extracting it defeats the builder pattern.
-fn is_builder(params: &FormalParamList) -> bool {
-    params
-        .positional
-        .first()
-        .or_else(|| params.optional_positional.first())
-        .and_then(|p| p.param_type.as_ref())
-        .and_then(type_base_name)
-        == Some("BuildContext")
 }
 
 fn is_long_enough(span: &Span, source: &str, cfg: &Cfg) -> bool {
@@ -146,240 +259,12 @@ fn is_long_enough(span: &Span, source: &str, cfg: &Cfg) -> bool {
         None => true,
         Some(limit) => {
             let end = span.end.min(source.len());
-            let lines = source[span.start..end]
+            source[span.start..end]
                 .bytes()
-                .filter(|&b| b == b'\n')
+                .filter(|byte| *byte == b'\n')
                 .count()
-                + 1;
-            lines > limit
-        }
-    }
-}
-
-/// Inspect the arguments of a widget construction for extractable callbacks.
-fn check_construction_args(
-    args: &ArgList,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    cfg: &Cfg,
-) {
-    for arg in &args.positional {
-        maybe_flag_callback(arg, diags, ctx, cfg);
-    }
-    for named in &args.named {
-        if cfg.ignored.iter().any(|n| n == &named.name.name) {
-            continue;
-        }
-        maybe_flag_callback(&named.value, diags, ctx, cfg);
-    }
-}
-
-fn maybe_flag_callback(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cfg: &Cfg) {
-    if let Expr::FuncExpr {
-        body, params, span, ..
-    } = expr
-        && is_nonempty_block(body)
-        && !is_builder(params)
-        && is_long_enough(span, ctx.source, cfg)
-    {
-        diags.push(Diagnostic::new(
-            "prefer-extracting-callbacks",
-            Severity::Warning,
-            "Prefer extracting the callback to a separate widget method.",
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-}
-
-fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cfg: &Cfg) {
-    match body {
-        FunctionBody::Block(b) => {
-            for s in &b.stmts {
-                scan_stmt(s, diags, ctx, cfg);
-            }
-        }
-        FunctionBody::Arrow(e, _) => scan_expr(e, diags, ctx, cfg),
-        FunctionBody::Native(_, _) => {}
-    }
-}
-
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cfg: &Cfg) {
-    match stmt {
-        Stmt::Block(b) => b.stmts.iter().for_each(|s| scan_stmt(s, diags, ctx, cfg)),
-        Stmt::Expr(e) => scan_expr(&e.expr, diags, ctx, cfg),
-        Stmt::Return(r) => {
-            if let Some(v) = &r.value {
-                scan_expr(v, diags, ctx, cfg);
-            }
-        }
-        Stmt::LocalVar(lv) => {
-            for d in &lv.declarators {
-                if let Some(init) = &d.initializer {
-                    scan_expr(init, diags, ctx, cfg);
-                }
-            }
-        }
-        Stmt::If(i) => {
-            if let IfCondition::Expr(e) = &i.condition {
-                scan_expr(e, diags, ctx, cfg);
-            }
-            scan_stmt(&i.then_branch, diags, ctx, cfg);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx, cfg);
-            }
-        }
-        Stmt::While(w) => scan_stmt(&w.body, diags, ctx, cfg),
-        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx, cfg),
-        Stmt::For(f) => scan_stmt(&f.body, diags, ctx, cfg),
-        Stmt::Switch(sw) => {
-            for case in &sw.cases {
-                case.body.iter().for_each(|s| scan_stmt(s, diags, ctx, cfg));
-            }
-        }
-        Stmt::TryCatch(tc) => {
-            tc.body
-                .stmts
-                .iter()
-                .for_each(|s| scan_stmt(s, diags, ctx, cfg));
-            for catch in &tc.catches {
-                catch
-                    .body
-                    .stmts
-                    .iter()
-                    .for_each(|s| scan_stmt(s, diags, ctx, cfg));
-            }
-            if let Some(fin) = &tc.finally {
-                fin.stmts.iter().for_each(|s| scan_stmt(s, diags, ctx, cfg));
-            }
-        }
-        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx, cfg),
-        Stmt::Throw(t) => scan_expr(&t.value, diags, ctx, cfg),
-        _ => {}
-    }
-}
-
-fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cfg: &Cfg) {
-    // At a widget construction, its callback arguments are candidates.
-    if is_construction(expr) {
-        let args = match expr {
-            Expr::New { args, .. } | Expr::Call { args, .. } => Some(args),
-            _ => None,
-        };
-        if let Some(args) = args {
-            check_construction_args(args, diags, ctx, cfg);
-        }
-    }
-
-    // Recurse everywhere so nested constructions and callback bodies are seen.
-    match expr {
-        Expr::New { args, .. } | Expr::Call { args, .. } => {
-            if let Expr::Call { callee, .. } = expr {
-                scan_expr(callee, diags, ctx, cfg);
-            }
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx, cfg);
-            }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx, cfg);
-            }
-        }
-        Expr::FuncExpr { body, .. } => scan_body(body, diags, ctx, cfg),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            scan_expr(condition, diags, ctx, cfg);
-            scan_expr(then_expr, diags, ctx, cfg);
-            scan_expr(else_expr, diags, ctx, cfg);
-        }
-        Expr::Binary { left, right, .. } => {
-            scan_expr(left, diags, ctx, cfg);
-            scan_expr(right, diags, ctx, cfg);
-        }
-        Expr::Unary { operand, .. } => scan_expr(operand, diags, ctx, cfg),
-        Expr::Assign { target, value, .. } => {
-            scan_expr(target, diags, ctx, cfg);
-            scan_expr(value, diags, ctx, cfg);
-        }
-        Expr::List { elements, .. } | Expr::Set { elements, .. } => {
-            for elem in elements {
-                scan_collection_elem(elem, diags, ctx, cfg);
-            }
-        }
-        Expr::Map {
-            entries, elements, ..
-        } => {
-            for entry in entries {
-                scan_expr(&entry.key, diags, ctx, cfg);
-                scan_expr(&entry.value, diags, ctx, cfg);
-            }
-            for e in map_element_exprs(elements) {
-                scan_expr(e, diags, ctx, cfg);
-            }
-        }
-        Expr::Await { expr: e, .. }
-        | Expr::Throw { expr: e, .. }
-        | Expr::NullAssert { operand: e, .. } => scan_expr(e, diags, ctx, cfg),
-        Expr::Field { object, .. } => scan_expr(object, diags, ctx, cfg),
-        Expr::Index { object, index, .. } => {
-            scan_expr(object, diags, ctx, cfg);
-            scan_expr(index, diags, ctx, cfg);
-        }
-        Expr::Cascade { object, .. } => scan_expr(object, diags, ctx, cfg),
-        _ => {}
-    }
-}
-
-fn scan_collection_elem(
-    elem: &CollectionElement,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    cfg: &Cfg,
-) {
-    match elem {
-        CollectionElement::Expr(e) | CollectionElement::Spread { expr: e, .. } => {
-            scan_expr(e, diags, ctx, cfg)
-        }
-        CollectionElement::NullAware { expr, .. } => scan_expr(expr, diags, ctx, cfg),
-        CollectionElement::If {
-            condition,
-            then_elem,
-            else_elem,
-            ..
-        } => {
-            match condition {
-                IfCondition::Expr(e) => scan_expr(e, diags, ctx, cfg),
-                IfCondition::Case(e, _, guard) => {
-                    scan_expr(e, diags, ctx, cfg);
-                    if let Some(g) = guard {
-                        scan_expr(g, diags, ctx, cfg);
-                    }
-                }
-            }
-            scan_collection_elem(then_elem, diags, ctx, cfg);
-            if let Some(ee) = else_elem {
-                scan_collection_elem(ee, diags, ctx, cfg);
-            }
-        }
-        CollectionElement::For {
-            iterable, element, ..
-        } => {
-            scan_expr(iterable, diags, ctx, cfg);
-            scan_collection_elem(element, diags, ctx, cfg);
-        }
-        CollectionElement::CFor {
-            condition, element, ..
-        } => {
-            if let Some(c) = condition {
-                scan_expr(c, diags, ctx, cfg);
-            }
-            scan_collection_elem(element, diags, ctx, cfg);
+                + 1
+                > limit
         }
     }
 }

@@ -58,3 +58,13 @@ class F extends State<StatefulWidget> {
 
   void _onScroll() {}
 }
+
+class G extends State<StatefulWidget> {
+  final controller = TextEditingController();
+
+  @override
+  void dispose() {
+    this.controller.dispose();
+    super.dispose();
+  }
+}

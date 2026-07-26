@@ -1,6 +1,7 @@
 //! Integration tests for the analyze pipeline.
 
 use falcon_cli::{CheckOptions, OutputFormat, collect_check, run_check};
+use falcon_lsp::LspState;
 use std::fs;
 use tempfile::tempdir;
 
@@ -506,13 +507,13 @@ fn test_override_disables_rule_for_matching_path_only() {
     );
 }
 
-fn write_package_resolution_config(root: &std::path::Path) -> PathBuf {
+fn write_identity_config(root: &std::path::Path) -> PathBuf {
     let config = root.join("falcon.json");
     fs::write(
         &config,
         r#"{
           "linter": { "rules": { "suspicious": {
-            "avoid-ignoring-return-values": "warn"
+            "avoid-types-as-parameter-names": "warn"
           } } }
         }"#,
     )
@@ -520,12 +521,12 @@ fn write_package_resolution_config(root: &std::path::Path) -> PathBuf {
     config
 }
 
-fn package_resolution_diagnostic_count(options: CheckOptions) -> usize {
+fn identity_diagnostic_count(options: CheckOptions) -> usize {
     collect_check(&options)
         .unwrap()
         .diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+        .filter(|diagnostic| diagnostic.rule == "avoid-types-as-parameter-names")
         .count()
 }
 
@@ -541,17 +542,17 @@ fn package_identity_is_discovered_for_direct_files_with_yaml_name_syntax() {
     .unwrap();
     let types = lib.join("types.dart");
     let main = lib.join("main.dart");
-    fs::write(&types, "int packageValue() => 1;\n").unwrap();
+    fs::write(&types, "class PackageType {}\n").unwrap();
     fs::write(
         &main,
-        "import 'package:direct_pkg/types.dart';\nvoid f() { packageValue(); }\n",
+        "import 'package:direct_pkg/types.dart';\nvoid f(int PackageType) {}\n",
     )
     .unwrap();
 
     assert_eq!(
-        package_resolution_diagnostic_count(CheckOptions {
+        identity_diagnostic_count(CheckOptions {
             paths: vec![main, types],
-            config_path: Some(write_package_resolution_config(temp.path())),
+            config_path: Some(write_identity_config(temp.path())),
             quiet: true,
             ..Default::default()
         }),
@@ -565,17 +566,17 @@ fn package_identity_is_discovered_for_lib_directory_invocation() {
     let lib = temp.path().join("lib");
     fs::create_dir(&lib).unwrap();
     fs::write(temp.path().join("pubspec.yaml"), "name: \"lib_pkg\"\n").unwrap();
-    fs::write(lib.join("types.dart"), "int packageValue() => 1;\n").unwrap();
+    fs::write(lib.join("types.dart"), "class PackageType {}\n").unwrap();
     fs::write(
         lib.join("main.dart"),
-        "import 'package:lib_pkg/types.dart';\nvoid f() { packageValue(); }\n",
+        "import 'package:lib_pkg/types.dart';\nvoid f(int PackageType) {}\n",
     )
     .unwrap();
 
     assert_eq!(
-        package_resolution_diagnostic_count(CheckOptions {
+        identity_diagnostic_count(CheckOptions {
             paths: vec![lib],
-            config_path: Some(write_package_resolution_config(temp.path())),
+            config_path: Some(write_identity_config(temp.path())),
             quiet: true,
             ..Default::default()
         }),
@@ -591,18 +592,18 @@ fn package_identity_supports_nested_multi_package_analysis() {
         let lib = root.join("lib");
         fs::create_dir_all(&lib).unwrap();
         fs::write(root.join("pubspec.yaml"), format!("name: {package}\n")).unwrap();
-        fs::write(lib.join("types.dart"), "int packageValue() => 1;\n").unwrap();
+        fs::write(lib.join("types.dart"), "class PackageType {}\n").unwrap();
         fs::write(
             lib.join("main.dart"),
-            format!("import 'package:{package}/types.dart';\nvoid f() {{ packageValue(); }}\n"),
+            format!("import 'package:{package}/types.dart';\nvoid f(int PackageType) {{}}\n"),
         )
         .unwrap();
     }
 
     assert_eq!(
-        package_resolution_diagnostic_count(CheckOptions {
+        identity_diagnostic_count(CheckOptions {
             paths: vec![temp.path().join("packages")],
-            config_path: Some(write_package_resolution_config(temp.path())),
+            config_path: Some(write_identity_config(temp.path())),
             quiet: true,
             ..Default::default()
         }),
@@ -620,21 +621,63 @@ fn sibling_workspace_package_name_binds_analyzed_project_file() {
     fs::create_dir_all(&inner_lib).unwrap();
     fs::write(temp.path().join("pubspec.yaml"), "name: outer\n").unwrap();
     fs::write(inner.join("pubspec.yaml"), "name: inner\n").unwrap();
-    fs::write(outer_lib.join("foreign.dart"), "int foreignValue() => 1;\n").unwrap();
-    fs::write(inner_lib.join("own.dart"), "int ownValue() => 1;\n").unwrap();
+    fs::write(outer_lib.join("foreign.dart"), "class ForeignType {}\n").unwrap();
+    fs::write(inner_lib.join("own.dart"), "class InnerType {}\n").unwrap();
     fs::write(
         inner_lib.join("main.dart"),
-        "import 'package:inner/own.dart';\nimport 'package:outer/foreign.dart';\nvoid f() { ownValue(); foreignValue(); }\n",
+        "import 'package:inner/own.dart';\nimport 'package:outer/foreign.dart';\nvoid f(int InnerType, int ForeignType) {}\n",
     )
     .unwrap();
 
     assert_eq!(
-        package_resolution_diagnostic_count(CheckOptions {
+        identity_diagnostic_count(CheckOptions {
             paths: vec![temp.path().to_path_buf()],
-            config_path: Some(write_package_resolution_config(temp.path())),
+            config_path: Some(write_identity_config(temp.path())),
             quiet: true,
             ..Default::default()
         }),
         2
     );
+}
+
+#[test]
+fn resolver_backed_rule_has_cli_lsp_parity() {
+    let temp = tempdir().unwrap();
+    let config_path = temp.path().join("falcon.json");
+    fs::write(
+        &config_path,
+        r#"{
+          "linter": { "rules": { "correctness": {
+            "use-key-in-widget-constructors": "warn"
+          } } }
+        }"#,
+    )
+    .unwrap();
+    let dart_path = temp.path().join("widget.dart");
+    let source =
+        "import 'package:flutter/widgets.dart';\nclass Missing extends StatelessWidget {}\n";
+    fs::write(&dart_path, source).unwrap();
+
+    let cli = collect_check(&CheckOptions {
+        paths: vec![dart_path.clone()],
+        config_path: Some(config_path.clone()),
+        quiet: true,
+        ..Default::default()
+    })
+    .unwrap();
+    let mut lsp = LspState::new(Some(config_path));
+    let uri = format!("file://{}", dart_path.display());
+    let lsp = lsp.open(&uri, source.to_string(), Some(1));
+
+    let cli_count = cli
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.rule == "use-key-in-widget-constructors")
+        .count();
+    let lsp_count = lsp
+        .iter()
+        .filter(|diagnostic| diagnostic.rule == "use-key-in-widget-constructors")
+        .count();
+    assert_eq!(cli_count, 1);
+    assert_eq!(lsp_count, cli_count);
 }

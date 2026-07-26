@@ -10,13 +10,17 @@
 //!   * every corpus subdirectory maps to a registered rule (no orphan fixtures);
 //!   * every `/* expect: */` annotation is matched by a diagnostic on the same line;
 //!   * no diagnostic fires on a line without a matching annotation (no false positives);
-//!   * clean files (zero annotations) produce zero diagnostics.
+//!   * clean files (zero annotations) produce zero diagnostics;
+//!   * source and corpus fixtures contain no explicit stub/placeholder markers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, ProjectFile, ProjectIndex, Rule, TypeIndex};
+use falcon_analyze::{
+    AnalyzeContext, IdentityIndex, IdentitySource, ProjectFile, ProjectIndex, Rule, SignatureIndex,
+    TypeIndex,
+};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
 use falcon_rules::lint::style::class_members_ordering::ClassMembersOrdering;
@@ -73,9 +77,18 @@ fn parse_expectations(source: &str) -> Vec<Expectation> {
 /// the builtin table), mirroring what the CLI/LSP build so the in-process corpus
 /// exercises the same code path as production. Mirrors
 /// `analyze_pipeline::RESOLVER_DEPENDENT_RULES`.
+const KNOWN_STUB_RULES: &[&str] = &[];
+
 const RESOLVER_DEPENDENT_RULES: &[&str] = &[
     "no-boolean-literal-compare",
+    "avoid-unnecessary-type-assertions",
+    "avoid-unnecessary-type-casts",
+    "avoid-unrelated-type-assertions",
+    "avoid-print",
+    "valid-regexps",
+    "avoid-passing-async-when-sync-expected",
     "avoid-ignoring-return-values",
+    "proper-controller-dispose",
     "unnecessary-string-interpolations",
     "prefer-is-empty",
     "prefer-is-not-empty",
@@ -89,12 +102,30 @@ const RESOLVER_DEPENDENT_RULES: &[&str] = &[
     "overridden-fields",
     "use-key-in-widget-constructors",
     "prefer-const-constructors-in-immutables",
+    "prefer-contains",
+    "prefer-interpolation-to-compose-strings",
     "await-only-futures",
+    "null-check-on-nullable-type-parameter",
+    "null-closures",
+    "void-checks",
     "implicit-call-tearoffs",
+    "library-annotations",
     "type-literal-in-constant-pattern",
     "avoid-types-as-parameter-names",
     "exhaustive-cases",
+    "invalid-runtime-check-with-js-interop-types",
+    "use-build-context-synchronously",
     "library-private-types-in-public-api",
+    "prefer-extracting-callbacks",
+    "no-logic-in-create-state",
+    "use-full-hex-values-for-flutter-colors",
+    "implementation-imports",
+    "avoid-non-null-assertion",
+    "no-self-comparisons",
+    "proper-super-init-state",
+    "no-duplicate-case-values",
+    "unnecessary-flutter-imports",
+    "prefer-declaring-const-constructor",
 ];
 
 /// Run a single rule over `source`; return (rule-id, line) per diagnostic.
@@ -108,12 +139,32 @@ fn run_rule(
     let resolver_dependent = RESOLVER_DEPENDENT_RULES.contains(&rule.name());
     let index = resolver_dependent.then(|| ProjectIndex::from_program(&program));
     let types = resolver_dependent.then(|| TypeIndex::from_program(&program));
+    let identity_sources = [IdentitySource {
+        path: file,
+        program: &program,
+        has_parse_errors: false,
+    }];
+    let identities =
+        resolver_dependent.then(|| IdentityIndex::from_project_files(&identity_sources, &[]));
+    let signatures = identities
+        .as_ref()
+        .zip(types.as_ref())
+        .map(|(identities, types)| {
+            let model = falcon_analyze::SemanticModel::new(file, identities, Some(types));
+            SignatureIndex::from_program(&program, &model)
+        });
     let mut ctx = AnalyzeContext::new(file, source, config);
     if let Some(index) = index.as_ref() {
         ctx = ctx.with_project(index);
     }
     if let Some(types) = types.as_ref() {
         ctx = ctx.with_types(types);
+    }
+    if let Some(identities) = identities.as_ref() {
+        ctx = ctx.with_identities(identities);
+    }
+    if let Some(signatures) = signatures.as_ref() {
+        ctx = ctx.with_signatures(signatures);
     }
     rule.analyze(&program, &ctx)
         .into_iter()
@@ -190,6 +241,302 @@ fn files_recursive(dir: &Path) -> Vec<PathBuf> {
     }
     files.sort();
     files
+}
+
+fn has_rule_expectation(source: &str, rule_name: &str) -> bool {
+    parse_expectations(source)
+        .iter()
+        .any(|expectation| expectation.rule == rule_name)
+}
+
+fn is_intentional_clean_fixture(rule_dir: &Path, path: &Path, source: &str) -> bool {
+    path.parent() == Some(rule_dir)
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("good") || name.starts_with("clean"))
+        && parse_expectations(source).is_empty()
+}
+
+fn contains_placeholder_marker(source: &str) -> bool {
+    source.lines().any(|line| {
+        matches!(
+            line.trim(),
+            "// Placeholder fixture: filled in when the rule is implemented."
+                | "// Placeholder: compliant code, no annotations."
+                | "// Placeholder: violation examples with expect annotations will be added"
+        )
+    })
+}
+
+fn source_rule_name(path: &Path) -> Option<String> {
+    path.file_stem()
+        .and_then(|name| name.to_str())
+        .map(|name| name.replace('_', "-"))
+}
+
+fn corpus_rule_name<'a>(corpus: &Path, path: &'a Path) -> Option<&'a str> {
+    path.strip_prefix(corpus)
+        .ok()?
+        .components()
+        .next()?
+        .as_os_str()
+        .to_str()
+}
+
+#[test]
+fn registered_rules_have_real_corpus_coverage() {
+    let corpus = corpus_dir();
+    let rules = all_rules();
+    let cross_file_rules = all_cross_file_rules();
+    let cross_file: HashSet<&str> = cross_file_rules.iter().map(|rule| rule.name()).collect();
+    let known_stubs: HashSet<&str> = KNOWN_STUB_RULES.iter().copied().collect();
+    let registered: HashSet<&str> = rules
+        .iter()
+        .map(|rule| rule.name())
+        .chain(cross_file.iter().copied())
+        .collect();
+    let mut failures = Vec::new();
+
+    for rule_name in &registered {
+        if known_stubs.contains(rule_name) {
+            continue;
+        }
+        let rule_dir = corpus.join(rule_name);
+        if !rule_dir.is_dir() {
+            failures.push(format!("MISSING `{rule_name}` corpus directory"));
+            continue;
+        }
+
+        if cross_file.contains(rule_name) {
+            let project_dir = rule_dir.join("cross-file");
+            if !project_dir.is_dir() {
+                failures.push(format!("MISSING `{rule_name}` cross-file project fixture"));
+                continue;
+            }
+            let projects = cross_file_project_dirs(&project_dir);
+            let mut has_positive_project = false;
+            let mut has_clean_project = false;
+            for project in projects {
+                let project_name = project
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                let sources: Vec<String> = files_recursive(&project)
+                    .iter()
+                    .filter_map(|path| fs::read_to_string(path).ok())
+                    .collect();
+                if project_name.starts_with("bad")
+                    && sources
+                        .iter()
+                        .any(|source| has_rule_expectation(source, rule_name))
+                {
+                    has_positive_project = true;
+                }
+                if project_name.starts_with("good")
+                    && sources
+                        .iter()
+                        .all(|source| parse_expectations(source).is_empty())
+                {
+                    has_clean_project = true;
+                }
+            }
+            if !has_positive_project {
+                failures.push(format!(
+                    "NO POSITIVE `{rule_name}` bad cross-file project has an expected diagnostic"
+                ));
+            }
+            if !has_clean_project {
+                failures.push(format!("NO CLEAN `{rule_name}` good cross-file project"));
+            }
+        } else {
+            let files = collect_dart_files_recursive(&rule_dir, 10_000);
+            let sources: Vec<(PathBuf, String)> = files
+                .into_iter()
+                .map(|path| {
+                    let source = fs::read_to_string(&path)
+                        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+                    (path, source)
+                })
+                .collect();
+            if !sources.iter().any(|(path, source)| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("bad"))
+                    && has_rule_expectation(source, rule_name)
+            }) {
+                failures.push(format!(
+                    "NO POSITIVE `{rule_name}` bad fixture has an expected diagnostic"
+                ));
+            }
+            if !sources
+                .iter()
+                .any(|(path, source)| is_intentional_clean_fixture(&rule_dir, path, source))
+            {
+                failures.push(format!(
+                    "NO CLEAN `{rule_name}` top-level good/clean Dart fixture"
+                ));
+            }
+        }
+    }
+
+    let mut corpus_dirs: Vec<PathBuf> = fs::read_dir(&corpus)
+        .expect("corpus dir must exist")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    corpus_dirs.sort();
+    for dir in corpus_dirs {
+        let name = dir.file_name().unwrap().to_string_lossy();
+        if !registered.contains(name.as_ref()) {
+            failures.push(format!(
+                "ORPHAN corpus dir `{name}` maps to no registered rule"
+            ));
+        }
+    }
+
+    failures.sort();
+    assert!(
+        failures.is_empty(),
+        "rule corpus coverage invariants failed:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn registered_rules_have_no_unlisted_stub_source_markers() {
+    let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let allowed: HashSet<&str> = KNOWN_STUB_RULES.iter().copied().collect();
+    let mut found = HashSet::new();
+    let mut failures = Vec::new();
+    for path in files_recursive(&source_root) {
+        if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        if source.contains("Stub registration") {
+            let rule_name = source_rule_name(&path)
+                .unwrap_or_else(|| panic!("stub source has no rule name: {}", path.display()));
+            if !allowed.contains(rule_name.as_str()) {
+                failures.push(format!(
+                    "UNLISTED stub marker for `{rule_name}` in {}",
+                    path.display()
+                ));
+            }
+            found.insert(rule_name);
+        }
+    }
+
+    for rule_name in KNOWN_STUB_RULES {
+        if !found.contains(*rule_name) {
+            failures.push(format!(
+                "STALE `{rule_name}` stub allowlist entry has no source marker"
+            ));
+        }
+    }
+    failures.sort();
+    assert!(
+        failures.is_empty(),
+        "stub source allowlist is out of sync:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn corpus_has_no_unlisted_placeholder_text() {
+    let corpus = corpus_dir();
+    let allowed: HashSet<&str> = KNOWN_STUB_RULES.iter().copied().collect();
+    let mut found = HashSet::new();
+    let mut failures = Vec::new();
+    for path in files_recursive(&corpus) {
+        let Ok(source) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if contains_placeholder_marker(&source) {
+            let rule_name = corpus_rule_name(&corpus, &path)
+                .unwrap_or_else(|| panic!("corpus file has no rule directory: {}", path.display()));
+            if !allowed.contains(rule_name) {
+                failures.push(format!(
+                    "UNLISTED placeholder fixture for `{rule_name}` in {}",
+                    path.display()
+                ));
+            }
+            found.insert(rule_name.to_string());
+        }
+    }
+
+    for rule_name in KNOWN_STUB_RULES {
+        if !found.contains(*rule_name) {
+            failures.push(format!(
+                "STALE `{rule_name}` stub allowlist entry has no placeholder fixture"
+            ));
+        }
+    }
+    failures.sort();
+    assert!(
+        failures.is_empty(),
+        "placeholder fixture allowlist is out of sync:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn intentional_clean_fixture_must_be_named_and_top_level() {
+    let rule_dir = Path::new("/corpus/sample-rule");
+
+    assert!(is_intentional_clean_fixture(
+        rule_dir,
+        &rule_dir.join("good.dart"),
+        "void good() {}",
+    ));
+    assert!(is_intentional_clean_fixture(
+        rule_dir,
+        &rule_dir.join("clean_regression.dart"),
+        "void clean() {}",
+    ));
+    assert!(!is_intentional_clean_fixture(
+        rule_dir,
+        &rule_dir.join("helper.dart"),
+        "void helper() {}",
+    ));
+    assert!(!is_intentional_clean_fixture(
+        rule_dir,
+        &rule_dir.join("project/good.dart"),
+        "void support() {}",
+    ));
+    assert!(!is_intentional_clean_fixture(
+        rule_dir,
+        &rule_dir.join("good.dart"),
+        "bad(); /* expect: sample-rule */",
+    ));
+}
+
+#[test]
+fn corpus_marker_detection_is_specific() {
+    assert!(contains_placeholder_marker(
+        "// Placeholder fixture: filled in when the rule is implemented."
+    ));
+    assert!(contains_placeholder_marker(
+        "// Placeholder: compliant code, no annotations."
+    ));
+    assert!(contains_placeholder_marker(
+        "// Placeholder: violation examples with expect annotations will be added"
+    ));
+    assert!(!contains_placeholder_marker("void placeholderBuilder() {}"));
+    assert!(!contains_placeholder_marker(
+        "// Placeholder: legitimate example text."
+    ));
+    assert!(!contains_placeholder_marker("void main() {}"));
+    assert!(has_rule_expectation(
+        "bad(); /* expect: sample-rule */",
+        "sample-rule"
+    ));
+    assert!(!has_rule_expectation(
+        "bad(); /* expect: another-rule */",
+        "sample-rule"
+    ));
 }
 
 #[test]
@@ -635,7 +982,7 @@ fn resolver_dependent_per_file_project_corpus() {
             continue;
         };
 
-        let paths = dart_files(&dir);
+        let paths = collect_dart_files_recursive(&dir, 1_000);
         let sources: Vec<String> = paths
             .iter()
             .map(|p| fs::read_to_string(p).unwrap())
@@ -662,11 +1009,24 @@ fn resolver_dependent_per_file_project_corpus() {
                     has_unresolved_parts: grouping.is_unresolved(i),
                 }
             }));
+        let identity_sources: Vec<_> = paths
+            .iter()
+            .zip(&parsed)
+            .map(|(path, (program, has_parse_errors))| IdentitySource {
+                path,
+                program,
+                has_parse_errors: *has_parse_errors,
+            })
+            .collect();
+        let identities = IdentityIndex::from_project_files(&identity_sources, &[]);
+        let signatures = SignatureIndex::from_project_files(&path_prog, &identities, &type_index);
 
         for (i, path) in paths.iter().enumerate() {
             let unit = library_unit(&grouping, &programs, i);
             let ctx = AnalyzeContext::new(path, &sources[i], &config)
                 .with_types(&type_index)
+                .with_identities(&identities)
+                .with_signatures(&signatures)
                 .with_library(&unit);
             let mut diag_lines: Vec<usize> = rule
                 .analyze(programs[i], &ctx)

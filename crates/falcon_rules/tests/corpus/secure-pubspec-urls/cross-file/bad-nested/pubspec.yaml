@@ -1,0 +1,21 @@
+name: secure_fixture
+# homepage: http://example.com/comment-only
+homepage: | # /* expect: secure-pubspec-urls */
+  http://example.com
+documentation: "http:\/\/example.com/docs" # /* expect: secure-pubspec-urls */
+repository: > # /* expect: secure-pubspec-urls */
+  git:example.com/
+  repository.git
+issue_tracker: git:example.com/issues # /* expect: secure-pubspec-urls */
+dependencies: {nested_git: {git: {url: git://example.com/repository.git}}} # /* expect: secure-pubspec-urls */
+dev_dependencies:
+  nested_hosted:
+    hosted:
+      url: "http:\/\/packages.example.com" # /* expect: secure-pubspec-urls */
+  direct: http://direct.example
+  ignored:
+    host: http://host.example
+funding:
+  - http://example.com/fund
+description: http://example.com/ignored
+archive_urls: [git://example.com/ignored]

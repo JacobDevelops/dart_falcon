@@ -3,209 +3,131 @@
 //! An empty function, method, loop, or switch-case body is frequently an
 //! unfinished implementation or a leftover after code was deleted, and it hides
 //! whether the emptiness is deliberate. Fill in the intended behavior, or, if a
-//! no-op is genuinely correct, add a comment saying so. Coverage spans functions,
-//! class/mixin/enum/extension members (including operators), and switch-case
-//! bodies; a block containing only a comment is treated as intentional and left
-//! alone. The report lands on the closing brace.
+//! no-op is genuinely correct, add a comment saying so. A block containing only
+//! a comment is treated as intentional and left alone. The report lands on the
+//! closing brace.
 
-/// The `no-empty-block` rule.
-pub use dcl::NoEmptyBlock;
+use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_function_decl,
+    walk_getter_decl, walk_method_decl, walk_setter_decl, walk_stmt,
+};
 
-mod dcl {
-    use falcon_analyze::{AnalyzeContext, Rule};
-    use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
-    use falcon_syntax::ast::*;
+pub struct NoEmptyBlock;
 
-    pub struct NoEmptyBlock;
-
-    impl Rule for NoEmptyBlock {
-        fn name(&self) -> &'static str {
-            "no-empty-block"
-        }
-
-        fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-            let mut diags = Vec::new();
-            for decl in &program.declarations {
-                scan_top(decl, &mut diags, ctx);
-            }
-            diags
-        }
+impl Rule for NoEmptyBlock {
+    fn name(&self) -> &'static str {
+        "no-empty-block"
     }
 
-    fn flag_if_empty(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-        if !block.stmts.is_empty() {
-            return;
-        }
-        let end = block.span.end.min(ctx.source.len());
-        let src_full = &ctx.source[block.span.start..end];
-        // span_from() includes content up to the next token, so rfind('}') finds
-        // the actual closing brace rather than trusting span.end directly.
-        let close_pos = match src_full.rfind('}') {
-            Some(p) => p,
-            None => return,
+    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let mut collector = Collector {
+            diags: Vec::new(),
+            ctx,
         };
-        let inner = &src_full[..=close_pos];
-        if inner.contains("//") || inner.contains("/*") {
-            return;
+        collector.visit_program(program);
+        collector.diags
+    }
+}
+
+struct Collector<'a, 'ctx> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
+}
+
+impl Collector<'_, '_> {
+    fn check_body(&mut self, body: Option<&FunctionBody>) {
+        if let Some(FunctionBody::Block(block)) = body {
+            flag_if_empty(block, &mut self.diags, self.ctx);
         }
-        let close_byte = block.span.start + close_pos;
-        diags.push(Diagnostic::new(
-            "no-empty-block",
-            Severity::Warning,
-            "Avoid empty blocks — add a comment explaining the intent or remove the block",
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: close_byte,
-                end: close_byte + 1,
-            },
-        ));
+    }
+}
+
+impl Visitor for Collector<'_, '_> {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        self.check_body(node.body.as_ref());
+        walk_function_decl(self, node);
     }
 
-    fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-        match decl {
-            TopLevelDecl::Function(f) => {
-                if let Some(body) = &f.body {
-                    scan_body(body, diags, ctx);
+    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+        self.check_body(node.body.as_ref());
+        walk_constructor_decl(self, node);
+    }
+
+    fn visit_method_decl(&mut self, node: &MethodDecl) {
+        self.check_body(node.body.as_ref());
+        walk_method_decl(self, node);
+    }
+
+    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+        self.check_body(node.body.as_ref());
+        walk_getter_decl(self, node);
+    }
+
+    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+        self.check_body(node.body.as_ref());
+        walk_setter_decl(self, node);
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) {
+        if let ClassMember::Operator(operator) = node {
+            self.check_body(operator.body.as_ref());
+        }
+        walk_class_member(self, node);
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) {
+        match node {
+            Stmt::Block(block) => flag_if_empty(block, &mut self.diags, self.ctx),
+            Stmt::TryCatch(try_catch) => {
+                flag_if_empty(&try_catch.body, &mut self.diags, self.ctx);
+                for catch in &try_catch.catches {
+                    flag_if_empty(&catch.body, &mut self.diags, self.ctx);
+                }
+                if let Some(finally) = &try_catch.finally {
+                    flag_if_empty(finally, &mut self.diags, self.ctx);
                 }
             }
-            TopLevelDecl::Class(c) => {
-                for m in &c.members {
-                    scan_member(m, diags, ctx);
-                }
-            }
-            TopLevelDecl::Mixin(m) => {
-                for mem in &m.members {
-                    scan_member(mem, diags, ctx);
-                }
-            }
-            TopLevelDecl::MixinClass(mc) => {
-                for m in &mc.members {
-                    scan_member(m, diags, ctx);
-                }
-            }
-            TopLevelDecl::Enum(e) => {
-                for m in &e.members {
-                    scan_member(m, diags, ctx);
-                }
-            }
-            TopLevelDecl::Extension(e) => {
-                for m in &e.members {
-                    scan_member(m, diags, ctx);
-                }
-            }
-            TopLevelDecl::ExtensionType(e) => {
-                for m in &e.members {
-                    scan_member(m, diags, ctx);
-                }
-            }
+            Stmt::LocalFunc(local) => self.check_body(Some(&local.body)),
             _ => {}
         }
+        walk_stmt(self, node);
     }
 
-    fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-        let body = match member {
-            ClassMember::Method(m) => m.body.as_ref(),
-            ClassMember::Constructor(c) => c.body.as_ref(),
-            ClassMember::Getter(g) => g.body.as_ref(),
-            ClassMember::Setter(s) => s.body.as_ref(),
-            ClassMember::Operator(o) => o.body.as_ref(),
-            _ => None,
-        };
-        if let Some(b) = body {
-            scan_body(b, diags, ctx);
+    fn visit_expr(&mut self, node: &Expr) {
+        if let Expr::FuncExpr { body, .. } = node {
+            self.check_body(Some(body));
         }
+        walk_expr(self, node);
     }
+}
 
-    fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-        match body {
-            FunctionBody::Block(b) => {
-                flag_if_empty(b, diags, ctx);
-                scan_stmts(&b.stmts, diags, ctx);
-            }
-            FunctionBody::Arrow(e, _) => scan_expr(e, diags, ctx),
-            FunctionBody::Native(_, _) => {}
-        }
+fn flag_if_empty(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+    if !block.stmts.is_empty() {
+        return;
     }
-
-    fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-        for s in stmts {
-            scan_stmt(s, diags, ctx);
-        }
+    let end = block.span.end.min(ctx.source.len());
+    let src_full = &ctx.source[block.span.start..end];
+    // span_from() includes content up to the next token, so rfind('}') finds
+    // the actual closing brace rather than trusting span.end directly.
+    let Some(close_pos) = src_full.rfind('}') else {
+        return;
+    };
+    let inner = &src_full[..=close_pos];
+    if inner.contains("//") || inner.contains("/*") {
+        return;
     }
-
-    fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-        match stmt {
-            Stmt::Block(b) => {
-                flag_if_empty(b, diags, ctx);
-                scan_stmts(&b.stmts, diags, ctx);
-            }
-            Stmt::Expr(e) => scan_expr(&e.expr, diags, ctx),
-            Stmt::Return(r) => {
-                if let Some(v) = &r.value {
-                    scan_expr(v, diags, ctx);
-                }
-            }
-            Stmt::LocalVar(lv) => {
-                for d in &lv.declarators {
-                    if let Some(init) = &d.initializer {
-                        scan_expr(init, diags, ctx);
-                    }
-                }
-            }
-            Stmt::If(i) => {
-                scan_stmt(&i.then_branch, diags, ctx);
-                if let Some(eb) = &i.else_branch {
-                    scan_stmt(eb, diags, ctx);
-                }
-            }
-            Stmt::While(w) => scan_stmt(&w.body, diags, ctx),
-            Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx),
-            Stmt::For(f) => scan_stmt(&f.body, diags, ctx),
-            Stmt::Switch(sw) => {
-                for case in &sw.cases {
-                    scan_stmts(&case.body, diags, ctx);
-                }
-            }
-            Stmt::TryCatch(tc) => {
-                flag_if_empty(&tc.body, diags, ctx);
-                scan_stmts(&tc.body.stmts, diags, ctx);
-                for catch in &tc.catches {
-                    flag_if_empty(&catch.body, diags, ctx);
-                    scan_stmts(&catch.body.stmts, diags, ctx);
-                }
-                if let Some(fin) = &tc.finally {
-                    flag_if_empty(fin, diags, ctx);
-                    scan_stmts(&fin.stmts, diags, ctx);
-                }
-            }
-            Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx),
-            _ => {}
-        }
-    }
-
-    fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-        match expr {
-            Expr::FuncExpr { body, .. } => scan_body(body, diags, ctx),
-            Expr::Call { callee, args, .. } => {
-                scan_expr(callee, diags, ctx);
-                for arg in &args.positional {
-                    scan_expr(arg, diags, ctx);
-                }
-                for named in &args.named {
-                    scan_expr(&named.value, diags, ctx);
-                }
-            }
-            Expr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                scan_expr(condition, diags, ctx);
-                scan_expr(then_expr, diags, ctx);
-                scan_expr(else_expr, diags, ctx);
-            }
-            _ => {}
-        }
-    }
+    let close_byte = block.span.start + close_pos;
+    diags.push(Diagnostic::new(
+        "no-empty-block",
+        Severity::Warning,
+        "Avoid empty blocks — add a comment explaining the intent or remove the block",
+        ctx.file_path.to_string_lossy().into_owned(),
+        DiagSpan {
+            start: close_byte,
+            end: close_byte + 1,
+        },
+    ));
 }

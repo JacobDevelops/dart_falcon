@@ -8,5 +8,7 @@ void examples(String dynamicPattern) {
   final f = RegExp('\\d+'); // non-raw with escapes — pattern not resolved, skipped
   final g = RegExp(dynamicPattern); // not a literal, skipped
   final h = RegExp('prefix-${dynamicPattern}'); // interpolated, skipped
-  print([a, b, c, d, e, f, g, h]);
+  final i = RegExp(r'(?=foo)foo'); // lookahead
+  final j = RegExp(r'(?:foo)*?'); // non-capturing group and lazy quantifier
+  print([a, b, c, d, e, f, g, h, i, j]);
 }

@@ -8,9 +8,12 @@
 //! the finally is fine and left alone, as are closures defined within it; only
 //! flow that escapes the finally itself is reported.
 
+use std::collections::HashSet;
+
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 pub struct ControlFlowInFinally;
 
@@ -20,11 +23,18 @@ impl Rule for ControlFlowInFinally {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for body in bodies(program) {
-            find_finally(body, &mut diags, ctx);
-        }
-        diags
+        let mut finder = Finder {
+            diags: Vec::new(),
+            ctx,
+        };
+        finder.visit_program(program);
+        finder
+            .diags
+            .sort_unstable_by_key(|diagnostic| diagnostic.span.start);
+        finder
+            .diags
+            .dedup_by_key(|diagnostic| diagnostic.span.start);
+        finder.diags
     }
 }
 
@@ -41,207 +51,127 @@ fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     ));
 }
 
-/// Depths of enclosing constructs *within the finally*. `breakable` counts
-/// loops and switches (valid `break` targets); `loops` counts loops only
-/// (valid `continue` targets).
-#[derive(Clone, Copy)]
-struct Depth {
+struct Finder<'a, 'ctx> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
+}
+
+impl Visitor for Finder<'_, '_> {
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::TryCatch(try_catch) = node
+            && let Some(finally) = &try_catch.finally
+        {
+            let mut scanner = FinallyScanner {
+                diags: &mut self.diags,
+                ctx: self.ctx,
+                breakable: 0,
+                loops: 0,
+                break_labels: HashSet::new(),
+                loop_labels: HashSet::new(),
+            };
+            for stmt in &finally.stmts {
+                scanner.visit_stmt(stmt);
+            }
+        }
+        walk_stmt(self, node);
+    }
+}
+
+struct FinallyScanner<'a, 'ctx, 'diags> {
+    diags: &'diags mut Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
     breakable: usize,
     loops: usize,
+    break_labels: HashSet<String>,
+    loop_labels: HashSet<String>,
 }
 
-fn scan_finally(stmt: &Stmt, d: Depth, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::Return(r) => flag(&r.span, diags, ctx),
-        Stmt::Break(b) => {
-            if b.label.is_none() && d.breakable == 0 {
-                flag(&b.span, diags, ctx);
-            }
+impl FinallyScanner<'_, '_, '_> {
+    fn with_depth(&mut self, breakable: usize, loops: usize, walk: impl FnOnce(&mut Self)) {
+        self.breakable += breakable;
+        self.loops += loops;
+        walk(self);
+        self.breakable -= breakable;
+        self.loops -= loops;
+    }
+
+    fn with_label(&mut self, labeled: &LabeledStmt, walk: impl FnOnce(&mut Self)) {
+        let name = labeled.label.name.clone();
+        self.break_labels.insert(name.clone());
+        let mut target = labeled.stmt.as_ref();
+        while let Stmt::Labeled(inner) = target {
+            target = inner.stmt.as_ref();
         }
-        Stmt::Continue(c) => {
-            if c.label.is_none() && d.loops == 0 {
-                flag(&c.span, diags, ctx);
-            }
+        let is_loop = matches!(target, Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_));
+        if is_loop {
+            self.loop_labels.insert(name.clone());
         }
-        Stmt::Block(b) => {
-            for s in &b.stmts {
-                scan_finally(s, d, diags, ctx);
+        walk(self);
+        self.break_labels.remove(&name);
+        self.loop_labels.remove(&name);
+    }
+
+    fn visit_switch(&mut self, switch: &SwitchStmt) {
+        self.visit_expr(&switch.subject);
+        self.with_depth(1, 0, |this| {
+            for label in switch.cases.iter().flat_map(|case| &case.labels) {
+                this.loop_labels.insert(label.name.clone());
             }
-        }
-        Stmt::If(i) => {
-            scan_finally(&i.then_branch, d, diags, ctx);
-            if let Some(eb) = &i.else_branch {
-                scan_finally(eb, d, diags, ctx);
-            }
-        }
-        Stmt::For(f) => scan_finally(
-            &f.body,
-            Depth {
-                breakable: d.breakable + 1,
-                loops: d.loops + 1,
-            },
-            diags,
-            ctx,
-        ),
-        Stmt::While(w) => scan_finally(
-            &w.body,
-            Depth {
-                breakable: d.breakable + 1,
-                loops: d.loops + 1,
-            },
-            diags,
-            ctx,
-        ),
-        Stmt::DoWhile(w) => scan_finally(
-            &w.body,
-            Depth {
-                breakable: d.breakable + 1,
-                loops: d.loops + 1,
-            },
-            diags,
-            ctx,
-        ),
-        Stmt::Switch(sw) => {
-            let inner = Depth {
-                breakable: d.breakable + 1,
-                loops: d.loops,
-            };
-            for case in &sw.cases {
-                for s in &case.body {
-                    scan_finally(s, inner, diags, ctx);
+            for case in &switch.cases {
+                for kind in &case.cases {
+                    if let SwitchCaseKind::Pattern(pattern, guard) = kind {
+                        this.visit_pattern(pattern);
+                        if let Some(guard) = &**guard {
+                            this.visit_expr(guard);
+                        }
+                    }
+                }
+                for stmt in &case.body {
+                    this.visit_stmt(stmt);
                 }
             }
-        }
-        Stmt::TryCatch(tc) => {
-            // The nested `finally` is scanned in its own right by `find_finally`.
-            for s in &tc.body.stmts {
-                scan_finally(s, d, diags, ctx);
+            for label in switch.cases.iter().flat_map(|case| &case.labels) {
+                this.loop_labels.remove(&label.name);
             }
-            for catch in &tc.catches {
-                for s in &catch.body.stmts {
-                    scan_finally(s, d, diags, ctx);
+        });
+    }
+}
+
+impl Visitor for FinallyScanner<'_, '_, '_> {
+    fn visit_stmt(&mut self, node: &Stmt) {
+        match node {
+            Stmt::Return(ret) => flag(&ret.span, self.diags, self.ctx),
+            Stmt::Break(brk) => {
+                let stays_inside = brk.label.as_ref().map_or(self.breakable > 0, |label| {
+                    self.break_labels.contains(&label.name)
+                });
+                if !stays_inside {
+                    flag(&brk.span, self.diags, self.ctx);
                 }
             }
-        }
-        Stmt::Labeled(l) => scan_finally(&l.stmt, d, diags, ctx),
-        // Closures introduce their own control-flow scope — do not descend.
-        _ => {}
-    }
-}
-
-/// Walk the whole tree to locate every `finally` block, then scan each for
-/// escaping control flow.
-fn find_finally(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match body {
-        FunctionBody::Block(b) => find_in_stmts(&b.stmts, diags, ctx),
-        FunctionBody::Arrow(e, _) => find_in_expr(e, diags, ctx),
-        FunctionBody::Native(_, _) => {}
-    }
-}
-
-fn find_in_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for s in stmts {
-        find_in_stmt(s, diags, ctx);
-    }
-}
-
-fn find_in_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::TryCatch(tc) => {
-            find_in_stmts(&tc.body.stmts, diags, ctx);
-            for catch in &tc.catches {
-                find_in_stmts(&catch.body.stmts, diags, ctx);
-            }
-            if let Some(fin) = &tc.finally {
-                let d = Depth {
-                    breakable: 0,
-                    loops: 0,
-                };
-                for s in &fin.stmts {
-                    scan_finally(s, d, diags, ctx);
-                }
-                // Recurse to catch nested finally blocks and closures within.
-                find_in_stmts(&fin.stmts, diags, ctx);
-            }
-        }
-        Stmt::If(i) => {
-            find_in_stmt(&i.then_branch, diags, ctx);
-            if let Some(eb) = &i.else_branch {
-                find_in_stmt(eb, diags, ctx);
-            }
-        }
-        Stmt::Block(b) => find_in_stmts(&b.stmts, diags, ctx),
-        Stmt::While(w) => find_in_stmt(&w.body, diags, ctx),
-        Stmt::DoWhile(d) => find_in_stmt(&d.body, diags, ctx),
-        Stmt::For(f) => find_in_stmt(&f.body, diags, ctx),
-        Stmt::Switch(sw) => {
-            for case in &sw.cases {
-                find_in_stmts(&case.body, diags, ctx);
-            }
-        }
-        Stmt::LocalFunc(lf) => find_finally(&lf.body, diags, ctx),
-        Stmt::Labeled(l) => find_in_stmt(&l.stmt, diags, ctx),
-        Stmt::Expr(e) => find_in_expr(&e.expr, diags, ctx),
-        Stmt::Return(r) => {
-            if let Some(v) = &r.value {
-                find_in_expr(v, diags, ctx);
-            }
-        }
-        Stmt::LocalVar(lv) => {
-            for d in &lv.declarators {
-                if let Some(init) = &d.initializer {
-                    find_in_expr(init, diags, ctx);
+            Stmt::Continue(cont) => {
+                let stays_inside = cont.label.as_ref().map_or(self.loops > 0, |label| {
+                    self.loop_labels.contains(&label.name)
+                });
+                if !stays_inside {
+                    flag(&cont.span, self.diags, self.ctx);
                 }
             }
-        }
-        _ => {}
-    }
-}
-
-fn find_in_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match expr {
-        Expr::FuncExpr { body, .. } => find_finally(body, diags, ctx),
-        Expr::Call { callee, args, .. } => {
-            find_in_expr(callee, diags, ctx);
-            for a in &args.positional {
-                find_in_expr(a, diags, ctx);
+            Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_) => {
+                self.with_depth(1, 1, |this| walk_stmt(this, node));
             }
-            for n in &args.named {
-                find_in_expr(&n.value, diags, ctx);
+            Stmt::Switch(switch) => self.visit_switch(switch),
+            Stmt::Labeled(labeled) => {
+                self.with_label(labeled, |this| walk_stmt(this, node));
             }
-        }
-        _ => {}
-    }
-}
-
-/// Every function body reachable from top-level declarations and their members.
-fn bodies(program: &Program) -> Vec<&FunctionBody> {
-    let mut out = Vec::new();
-    for decl in &program.declarations {
-        match decl {
-            TopLevelDecl::Function(f) => out.extend(f.body.as_ref()),
-            TopLevelDecl::Class(c) => member_bodies(&c.members, &mut out),
-            TopLevelDecl::Mixin(m) => member_bodies(&m.members, &mut out),
-            TopLevelDecl::MixinClass(mc) => member_bodies(&mc.members, &mut out),
-            TopLevelDecl::Enum(e) => member_bodies(&e.members, &mut out),
-            TopLevelDecl::Extension(e) => member_bodies(&e.members, &mut out),
-            TopLevelDecl::ExtensionType(e) => member_bodies(&e.members, &mut out),
-            _ => {}
+            Stmt::LocalFunc(_) => {}
+            _ => walk_stmt(self, node),
         }
     }
-    out
-}
 
-fn member_bodies<'a>(members: &'a [ClassMember], out: &mut Vec<&'a FunctionBody>) {
-    for m in members {
-        let body = match m {
-            ClassMember::Method(x) => x.body.as_ref(),
-            ClassMember::Constructor(x) => x.body.as_ref(),
-            ClassMember::Getter(x) => x.body.as_ref(),
-            ClassMember::Setter(x) => x.body.as_ref(),
-            ClassMember::Operator(x) => x.body.as_ref(),
-            _ => None,
-        };
-        out.extend(body);
+    fn visit_expr(&mut self, node: &Expr) {
+        if !matches!(node, Expr::FuncExpr { .. }) {
+            walk_expr(self, node);
+        }
     }
 }

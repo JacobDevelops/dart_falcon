@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "prefer-interpolation-to-compose-strings": "warn"
+      }
+    }
+  }
+}

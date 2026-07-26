@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "null-check-on-nullable-type-parameter": "warn"
+      }
+    }
+  }
+}

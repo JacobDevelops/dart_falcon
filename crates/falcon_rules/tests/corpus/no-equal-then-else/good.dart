@@ -102,3 +102,12 @@ void testNestedIfElse(bool a, bool b) {
 int priority(bool isUrgent) {
   return isUrgent ? 1 : 10;
 }
+
+void stringsAndComments(bool condition) {
+  final text = condition ? '/* kept */' : '';
+  if (condition) {
+    run(); /* first meaning */
+  } else {
+    run(); /* second meaning */
+  }
+}

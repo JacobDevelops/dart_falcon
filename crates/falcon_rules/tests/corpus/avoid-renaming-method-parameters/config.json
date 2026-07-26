@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "avoid-renaming-method-parameters": "warn"
+      }
+    }
+  }
+}

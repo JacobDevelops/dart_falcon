@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "avoid-passing-async-when-sync-expected": "warn"
+      }
+    }
+  }
+}
