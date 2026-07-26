@@ -10,6 +10,8 @@ use crate::{DeclarationIdentity, ResolvedType, SemanticModel, SignatureIndex};
 pub enum ConstantValue {
     Null,
     Bool(bool),
+    /// A numeric value. Models value equality only, not Dart's static or
+    /// runtime numeric type: `1.0` folds to the same `Number::Int(1)` as `1`.
     Number(Number),
     String(String),
     List(Vec<ConstantValue>),
@@ -26,6 +28,8 @@ pub enum Number {
 }
 
 impl Number {
+    /// Integral floats collapse to [`Number::Int`] so `2.0 == 2` compares equal;
+    /// the double-ness of the source expression is deliberately not preserved.
     fn from_float(value: f64) -> Self {
         if value.is_finite()
             && value.fract() == 0.0
@@ -443,7 +447,18 @@ fn eval_binary(op: &BinaryOp, left: ConstantValue, right: ConstantValue) -> Opti
     let (ConstantValue::Number(left), ConstantValue::Number(right)) = (left, right) else {
         return None;
     };
-    let integer = |value| Some(ConstantValue::Number(Number::Int(value)));
+    // Dart's `int` is 64-bit signed. Operands or results outside that range are
+    // not values Dart would produce, so refuse to fold rather than guess.
+    if let (Number::Int(left), Number::Int(right)) = (left, right)
+        && (i64::try_from(left).is_err() || i64::try_from(right).is_err())
+    {
+        return None;
+    }
+    let integer = |value: i128| {
+        i64::try_from(value)
+            .ok()
+            .map(|value| ConstantValue::Number(Number::Int(i128::from(value))))
+    };
     match (op, left, right) {
         (BinaryOp::Add, Number::Int(left), Number::Int(right)) => integer(left.checked_add(right)?),
         (BinaryOp::Sub, Number::Int(left), Number::Int(right)) => integer(left.checked_sub(right)?),

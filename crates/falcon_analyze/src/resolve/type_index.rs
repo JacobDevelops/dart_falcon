@@ -742,9 +742,8 @@ fn all_instance_fields_final(members: &[ClassMember]) -> bool {
     })
 }
 
-/// Collect a member list into a name → kind map. Constructors and error nodes
-/// contribute nothing; a getter/setter pair keeps whichever is seen first (only
-/// the member's *existence* matters to lookups).
+/// Collect the instance methods, operators, and setters of a member list into a
+/// name → parameter-names map. Static members contribute nothing.
 fn collect_member_parameters(members: &[ClassMember]) -> HashMap<String, Vec<String>> {
     let mut map = HashMap::new();
     for member in members {

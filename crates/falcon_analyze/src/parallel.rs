@@ -125,13 +125,11 @@ fn analyze_indexed(
 
     // Partition files into libraries, then build the type index (each type
     // inheriting its library's unresolved-part flag) and per-file library units.
-    let grouping = {
-        let files: Vec<(PathBuf, &Program)> = parsed
-            .iter()
-            .map(|p| (p.path.clone(), &p.program))
-            .collect();
-        group_libraries(&files)
-    };
+    let project_files: Vec<(PathBuf, &Program)> = parsed
+        .iter()
+        .map(|p| (p.path.clone(), &p.program))
+        .collect();
+    let grouping = group_libraries(&project_files);
     let type_index = {
         let sources = parsed.iter().enumerate().map(|(i, p)| LibrarySource {
             program: &p.program,
@@ -149,11 +147,7 @@ fn analyze_indexed(
         })
         .collect();
     let identities = IdentityIndex::from_project_files(&identity_sources, packages);
-    let semantic_files: Vec<(PathBuf, &Program)> = parsed
-        .iter()
-        .map(|p| (p.path.clone(), &p.program))
-        .collect();
-    let signatures = SignatureIndex::from_project_files(&semantic_files, &identities, &type_index);
+    let signatures = SignatureIndex::from_project_files(&project_files, &identities, &type_index);
     let programs: Vec<&Program> = parsed.iter().map(|p| &p.program).collect();
     let library_units: Vec<LibraryUnit> = (0..parsed.len())
         .map(|i| library_unit(&grouping, &programs, i))

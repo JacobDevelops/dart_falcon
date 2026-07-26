@@ -647,9 +647,8 @@ fn unique_declaration(candidates: Vec<DeclarationIdentity>) -> Option<Declaratio
 fn combine(result: &mut Option<NameIdentity>, identity: NameIdentity) {
     match result {
         None => *result = Some(identity),
-        Some(existing) if *existing == identity && identity != NameIdentity::Unknown => {
-            *existing = NameIdentity::Unknown;
-        }
+        // A name two imports can both supply is ambiguous, even when both
+        // supply the same kind of thing.
         Some(existing) => *existing = NameIdentity::Unknown,
     }
 }

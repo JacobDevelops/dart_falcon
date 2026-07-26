@@ -502,7 +502,7 @@ impl LspState {
         let by_path = files
             .iter()
             .enumerate()
-            .map(|(index, file)| (normalize_path(&file.path), index))
+            .map(|(index, file)| (file.path.clone(), index))
             .collect();
         let reverse_dependencies = build_reverse_dependencies(
             &files,
@@ -666,11 +666,7 @@ fn affected_open_uris_in_snapshot(
         .collect::<HashMap<_, _>>();
     affected
         .into_iter()
-        .filter_map(|index| {
-            open_by_path
-                .get(&normalize_path(&snapshot.files[index].path))
-                .copied()
-        })
+        .filter_map(|index| open_by_path.get(&snapshot.files[index].path).copied())
         .cloned()
         .collect()
 }
@@ -692,18 +688,22 @@ fn build_cross_file_registry(config: &FalconConfig) -> CrossFileRuleRegistry {
 }
 
 fn package_identities(files: &[ProjectFile]) -> Vec<PackageIdentity> {
-    let mut manifests = files
+    // Dedupe the directories before stat'ing: every file in a package shares
+    // the same ancestor chain.
+    let mut directories = files
         .iter()
         .filter_map(|file| file.path.parent())
         .flat_map(Path::ancestors)
+        .collect::<Vec<_>>();
+    directories.sort_unstable();
+    directories.dedup();
+    directories
+        .into_iter()
         .map(|directory| directory.join("pubspec.yaml"))
         .filter(|manifest| manifest.is_file())
-        .collect::<Vec<_>>();
-    manifests.sort();
-    manifests.dedup();
-    manifests
-        .into_iter()
         .filter_map(|path| {
+            // An unreadable manifest still bounds ownership, so keep the entry
+            // with an empty name (see `unreadable_nested_pubspec_...`).
             let name = std::fs::read(&path)
                 .ok()
                 .and_then(|source| serde_yaml::from_slice::<serde_yaml::Value>(&source).ok())

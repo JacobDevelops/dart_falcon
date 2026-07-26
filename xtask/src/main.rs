@@ -530,10 +530,18 @@ fn validate_cross_file_dir(
         sources.insert(key, source);
     }
 
-    let diags: Vec<_> = cross_file_project_roots(cross_file_dir)
-        .into_iter()
-        .flat_map(|root| run_falcon(falcon_bin, &root, config).unwrap_or_default())
-        .collect();
+    let mut failures = Vec::new();
+    let mut diags = Vec::new();
+    for root in cross_file_project_roots(cross_file_dir) {
+        // A failed invocation must not read as "the rule fired nowhere".
+        match run_falcon(falcon_bin, &root, config) {
+            Ok(found) => diags.extend(found),
+            Err(e) => failures.push(format!(
+                "ERROR {} — falcon invocation failed: {e}",
+                root.display()
+            )),
+        }
+    }
     let mut diag_keys: Vec<(String, usize)> = diags
         .iter()
         .filter(|d| d.rule == rule_name)
@@ -549,7 +557,6 @@ fn validate_cross_file_dir(
 
     let expected = expectations.len();
     let mut matched = 0usize;
-    let mut failures = Vec::new();
     for exp in &expectations {
         if let Some(pos) = diag_keys.iter().position(|k| k == exp) {
             diag_keys.remove(pos);
@@ -693,7 +700,7 @@ fn validate_rules(args: &[String]) {
             falcon_rules::meta::RULE_METADATA
                 .iter()
                 .find(|meta| meta.name == rule_name)
-                .and_then(|meta| docgen_config_for(&workspace, meta, &generated_config_path))
+                .and_then(|meta| docgen_config_for(&corpus_path, meta, &generated_config_path))
         } else {
             Some(rule_config_path)
         };
@@ -1213,11 +1220,8 @@ fn source_json(source: &RuleSource) -> Value {
 /// rule fires (even non-recommended ones). Rules that ship a corpus
 /// `config.json` (options/thresholds) reuse it verbatim; everything else gets a
 /// minimal generated config written to `temp_path`.
-fn docgen_config_for(root: &Path, meta: &RuleMeta, temp_path: &Path) -> Option<PathBuf> {
-    let corpus_config = root.join(format!(
-        "crates/falcon_rules/tests/corpus/{}/config.json",
-        meta.name
-    ));
+fn docgen_config_for(corpus_root: &Path, meta: &RuleMeta, temp_path: &Path) -> Option<PathBuf> {
+    let corpus_config = corpus_root.join(meta.name).join("config.json");
     if corpus_config.exists() {
         return Some(corpus_config);
     }
@@ -1584,7 +1588,7 @@ fn docgen(_args: &[String]) {
         let description = extract_description(&source_path, meta.name);
         let docs = extract_full_docs(&source_path, meta.name);
 
-        let config = docgen_config_for(&root, meta, &temp_config);
+        let config = docgen_config_for(&corpus_root, meta, &temp_config);
 
         // ── examples ──
         let bad_path = rule_dir.join("bad.dart");

@@ -161,10 +161,8 @@ fn package_identities(manifests: &[(PathBuf, String)]) -> Vec<PackageIdentity> {
     manifests
         .iter()
         .filter_map(|(path, source)| {
-            let name = serde_yaml::from_str::<serde_yaml::Value>(source)
-                .ok()
-                .and_then(|manifest| manifest.get("name")?.as_str().map(str::to_owned))
-                .unwrap_or_default();
+            let manifest = serde_yaml::from_str::<serde_yaml::Value>(source).ok()?;
+            let name = manifest.get("name")?.as_str()?.to_owned();
             Some(PackageIdentity {
                 name,
                 lib_root: path.parent()?.join("lib"),

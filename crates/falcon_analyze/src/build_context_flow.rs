@@ -106,7 +106,13 @@ pub struct BuildContextFlowAnalyzer<'a> {
     state_class: bool,
     diagnostics: Vec<Span>,
     reported: HashSet<usize>,
+    loop_depth: usize,
 }
+
+/// Each loop analyzes its body twice (entry pass + backedge pass), so nesting
+/// costs 2^depth body walks. Past this depth the backedge pass is replaced by a
+/// conservative gap state instead.
+const MAX_LOOP_REANALYSIS_DEPTH: usize = 4;
 
 impl<'a> BuildContextFlowAnalyzer<'a> {
     pub fn new(
@@ -125,7 +131,18 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             state_class,
             diagnostics: Vec::new(),
             reported: HashSet::new(),
+            loop_depth: 0,
         }
+    }
+
+    /// Enter a loop body, reporting whether the backedge pass is still affordable.
+    fn enter_loop(&mut self) -> bool {
+        self.loop_depth += 1;
+        self.loop_depth <= MAX_LOOP_REANALYSIS_DEPTH
+    }
+
+    fn leave_loop(&mut self) {
+        self.loop_depth -= 1;
     }
 
     pub fn analyze(
@@ -646,6 +663,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
 
     fn while_loop(&mut self, statement: &WhileStmt, state: State, label: Option<&str>) -> Outcome {
         self.push_scope();
+        let reanalyze = self.enter_loop();
         let guards = self.guard(&statement.condition, &state);
         let mut condition_state = state.clone();
         self.expression(&statement.condition, &mut condition_state);
@@ -660,22 +678,27 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             exits.push(break_state);
         }
         if let Some(backedge) = backedge {
-            let mut repeated_condition = backedge;
-            self.expression(&statement.condition, &mut repeated_condition);
-            let mut repeated_exit = repeated_condition.clone();
-            repeated_exit.mounted.extend(guards.when_false);
-            exits.push(repeated_exit);
-            repeated_condition.mounted.extend(guards.when_true);
-            let repeated = self.scoped_statement(&statement.body, repeated_condition);
-            let (_, repeated_break, repeated_abrupt) = loop_paths(repeated, label);
-            for (exit, state) in repeated_abrupt {
-                push_abrupt_path(&mut abrupt, exit, state);
-            }
-            if let Some(repeated_break) = repeated_break {
-                exits.push(repeated_break);
+            if !reanalyze {
+                exits.push(gap_state(backedge));
+            } else {
+                let mut repeated_condition = backedge;
+                self.expression(&statement.condition, &mut repeated_condition);
+                let mut repeated_exit = repeated_condition.clone();
+                repeated_exit.mounted.extend(guards.when_false);
+                exits.push(repeated_exit);
+                repeated_condition.mounted.extend(guards.when_true);
+                let repeated = self.scoped_statement(&statement.body, repeated_condition);
+                let (_, repeated_break, repeated_abrupt) = loop_paths(repeated, label);
+                for (exit, state) in repeated_abrupt {
+                    push_abrupt_path(&mut abrupt, exit, state);
+                }
+                if let Some(repeated_break) = repeated_break {
+                    exits.push(repeated_break);
+                }
             }
         }
         let normal = join_states(exits).or(Some(state));
+        self.leave_loop();
         self.pop_scope();
         Outcome::from_parts(normal, abrupt)
     }
@@ -687,6 +710,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         label: Option<&str>,
     ) -> Outcome {
         self.push_scope();
+        let reanalyze = self.enter_loop();
         let guards = self.guard(&statement.condition, &state);
         let first = self.scoped_statement(&statement.body, state.clone());
         let (backedge, break_state, mut abrupt) = loop_paths(first, label);
@@ -699,29 +723,36 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             let mut condition_exit = condition_state.clone();
             condition_exit.mounted.extend(guards.when_false.clone());
             exits.push(condition_exit);
-            let mut repeated_input = condition_state;
-            repeated_input.mounted.extend(guards.when_true.clone());
-            let repeated = self.scoped_statement(&statement.body, repeated_input);
-            let (repeated_backedge, repeated_break, repeated_abrupt) = loop_paths(repeated, label);
-            for (exit, state) in repeated_abrupt {
-                push_abrupt_path(&mut abrupt, exit, state);
-            }
-            if let Some(repeated_break) = repeated_break {
-                exits.push(repeated_break);
-            }
-            if let Some(mut repeated_condition) = repeated_backedge {
-                self.expression(&statement.condition, &mut repeated_condition);
-                repeated_condition.mounted.extend(guards.when_false);
-                exits.push(repeated_condition);
+            if !reanalyze {
+                exits.push(gap_state(condition_state));
+            } else {
+                let mut repeated_input = condition_state;
+                repeated_input.mounted.extend(guards.when_true.clone());
+                let repeated = self.scoped_statement(&statement.body, repeated_input);
+                let (repeated_backedge, repeated_break, repeated_abrupt) =
+                    loop_paths(repeated, label);
+                for (exit, state) in repeated_abrupt {
+                    push_abrupt_path(&mut abrupt, exit, state);
+                }
+                if let Some(repeated_break) = repeated_break {
+                    exits.push(repeated_break);
+                }
+                if let Some(mut repeated_condition) = repeated_backedge {
+                    self.expression(&statement.condition, &mut repeated_condition);
+                    repeated_condition.mounted.extend(guards.when_false);
+                    exits.push(repeated_condition);
+                }
             }
         }
         let outcome = Outcome::from_parts(join_states(exits), abrupt);
+        self.leave_loop();
         self.pop_scope();
         outcome
     }
 
     fn for_loop(&mut self, statement: &ForStmt, mut state: State, label: Option<&str>) -> Outcome {
         self.push_scope();
+        let reanalyze = self.enter_loop();
         if statement.is_await {
             state.after_gap = true;
             state.mounted.clear();
@@ -790,29 +821,34 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             exits.push(break_state);
         }
         if let Some(mut repeated_condition) = backedge {
-            for update in &statement.update {
-                self.expression(update, &mut repeated_condition);
-            }
-            if let Some(condition) = &statement.condition {
-                self.expression(condition, &mut repeated_condition);
-            }
-            let mut repeated_exit = repeated_condition.clone();
-            repeated_exit.mounted.extend(guards.when_false);
-            if may_skip_body {
-                exits.push(repeated_exit);
-            }
-            let mut repeated_input = repeated_condition;
-            repeated_input.mounted.extend(guards.when_true);
-            let repeated = self.scoped_statement(&statement.body, repeated_input);
-            let (_, repeated_break, repeated_abrupt) = loop_paths(repeated, label);
-            for (exit, state) in repeated_abrupt {
-                push_abrupt_path(&mut abrupt, exit, state);
-            }
-            if let Some(repeated_break) = repeated_break {
-                exits.push(repeated_break);
+            if !reanalyze {
+                exits.push(gap_state(repeated_condition));
+            } else {
+                for update in &statement.update {
+                    self.expression(update, &mut repeated_condition);
+                }
+                if let Some(condition) = &statement.condition {
+                    self.expression(condition, &mut repeated_condition);
+                }
+                let mut repeated_exit = repeated_condition.clone();
+                repeated_exit.mounted.extend(guards.when_false);
+                if may_skip_body {
+                    exits.push(repeated_exit);
+                }
+                let mut repeated_input = repeated_condition;
+                repeated_input.mounted.extend(guards.when_true);
+                let repeated = self.scoped_statement(&statement.body, repeated_input);
+                let (_, repeated_break, repeated_abrupt) = loop_paths(repeated, label);
+                for (exit, state) in repeated_abrupt {
+                    push_abrupt_path(&mut abrupt, exit, state);
+                }
+                if let Some(repeated_break) = repeated_break {
+                    exits.push(repeated_break);
+                }
             }
         }
         let outcome = Outcome::from_parts(join_states(exits), abrupt);
+        self.leave_loop();
         self.pop_scope();
         outcome
     }
@@ -1261,6 +1297,8 @@ impl Visitor for ExprScanner<'_, '_> {
                     other => visit_expression(self, other),
                 }
                 visit_expression(self, value);
+                // Indexed targets invalidate nothing: `expression_token` has no
+                // token for `a[i]`, so `a[i] = x` leaves mounted facts standing.
                 self.analyzer.invalidate_assignment(target, self.state);
                 if let Expr::Ident(identifier) = target.as_ref()
                     && self.analyzer.is_inferred(&identifier.name)
@@ -1347,6 +1385,14 @@ fn loop_paths(
         }
     }
     (join_states(backedges), join_states(breaks), abrupt)
+}
+
+/// The state to fall back on when a path is not analyzed: nothing is known to
+/// be mounted, and an async gap may have happened.
+fn gap_state(mut state: State) -> State {
+    state.after_gap = true;
+    state.mounted.clear();
+    state
 }
 
 fn join_states(states: impl IntoIterator<Item = State>) -> Option<State> {

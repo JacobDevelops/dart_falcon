@@ -352,7 +352,8 @@ fn debounced_related_changes_publish_each_affected_document_once() {
         } },
         "cross-file": { "enabled": false }
     }"#;
-    let mut client = TestClient::start(Duration::from_millis(25), Some(config));
+    // Debounce long enough that both changes reliably land in one flush.
+    let mut client = TestClient::start(Duration::from_millis(150), Some(config));
     let dir = client.config_path().parent().unwrap().to_path_buf();
     let api_path = dir.join("api.dart");
     let consumer_path = dir.join("consumer.dart");
@@ -376,7 +377,7 @@ fn debounced_related_changes_publish_each_affected_document_once() {
     ];
     published.sort();
     assert_eq!(published, vec![api_uri, consumer_uri]);
-    client.assert_quiet(Duration::from_millis(50));
+    client.assert_quiet(Duration::from_millis(300));
     client.shutdown();
 }
 
