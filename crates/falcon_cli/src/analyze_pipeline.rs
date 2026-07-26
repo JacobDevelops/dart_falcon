@@ -7,51 +7,19 @@ use std::collections::HashMap;
 
 use clap::ValueEnum;
 use falcon_analyze::{
-    CrossFileRuleRegistry, FileSuppressions, ProjectFile, RuleRegistry,
+    CrossFileRuleRegistry, FileSuppressions, PackageIdentity, ProjectFile, RuleRegistry,
     analyze_parallel_collecting_resolving, analyze_sequential_collecting_resolving,
 };
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
     ResolvedCrossFileRules, ResolvedRules, apply_severities, meta::suppression_lookup,
-    resolve_cross_file_rules, resolve_rules,
+    resolve_cross_file_rules, resolve_rules, rule_requires_resolution,
 };
 use glob::Pattern;
 
-use crate::file_walker::walk_files;
+use crate::file_walker::{walk_files, walk_pubspecs};
 use crate::output;
-
-/// Per-file rules that consult [`falcon_analyze::AnalyzeContext::project`]. When
-/// any is enabled, the driver parses all files first and builds ONE cross-file
-/// [`falcon_analyze::ProjectIndex`] shared across the per-file pass, so these
-/// rules can reason about declaration return types project-wide. Kept here
-/// (rather than a rule-trait flag) as a deliberately small, explicit seam;
-/// extend this list as further resolver-dependent per-file rules are integrated.
-/// (Cross-file rules such as `unnecessary-nullable` build their own index inside
-/// `analyze_project` and are not listed here.)
-const RESOLVER_DEPENDENT_RULES: &[&str] = &[
-    "no-boolean-literal-compare",
-    "avoid-ignoring-return-values",
-    "unnecessary-string-interpolations",
-    "prefer-is-empty",
-    "prefer-is-not-empty",
-    "prefer-iterable-where-type",
-    "prefer-collection-literals",
-    "prefer-final-fields",
-    "unrelated-type-equality-checks",
-    "collection-methods-unrelated-type",
-    "annotate-overrides",
-    "avoid-renaming-method-parameters",
-    "overridden-fields",
-    "use-key-in-widget-constructors",
-    "prefer-const-constructors-in-immutables",
-    "await-only-futures",
-    "implicit-call-tearoffs",
-    "type-literal-in-constant-pattern",
-    "avoid-types-as-parameter-names",
-    "exhaustive-cases",
-    "library-private-types-in-public-api",
-];
 
 /// Output format for diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -189,6 +157,20 @@ fn apply_includes(files: &mut Vec<(PathBuf, String)>, includes: &[String]) {
     });
 }
 
+fn package_identities(manifests: &[(PathBuf, String)]) -> Vec<PackageIdentity> {
+    manifests
+        .iter()
+        .filter_map(|(path, source)| {
+            let manifest = serde_yaml::from_str::<serde_yaml::Value>(source).ok()?;
+            let name = manifest.get("name")?.as_str()?.to_owned();
+            Some(PackageIdentity {
+                name,
+                lib_root: path.parent()?.join("lib"),
+            })
+        })
+        .collect()
+}
+
 /// Run analysis and collect results without printing diagnostics.
 ///
 /// # Errors
@@ -214,18 +196,11 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
 
     let mut files = walk_files(&options.paths, &exclude_patterns);
     apply_includes(&mut files, &config.files.include_patterns());
-    if files.is_empty() {
-        return Ok(CheckOutput {
-            diagnostics: vec![],
-            total_files: 0,
-            exit_code: 0,
-        });
-    }
 
     let resolved = resolve_rules(&config);
     let registry = build_registry(resolved);
     // Cross-file rules run a second pass over the retained programs; only collect
-    // programs when at least one is enabled (they are memory-heavy).
+    // programs and package manifests when at least one is enabled.
     let cross_file_registry = build_cross_file_registry(resolve_cross_file_rules(&config));
     let collect_programs = !cross_file_registry.is_empty();
     // Resolver seam: enable cross-file type resolution only when a per-file rule
@@ -235,7 +210,20 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     let resolve = registry
         .rules()
         .iter()
-        .any(|r| RESOLVER_DEPENDENT_RULES.contains(&r.name()));
+        .any(|rule| rule_requires_resolution(rule.name()));
+    let manifests = if collect_programs || resolve {
+        walk_pubspecs(&options.paths, &exclude_patterns)
+    } else {
+        Vec::new()
+    };
+    let packages = package_identities(&manifests);
+    if files.is_empty() && manifests.is_empty() {
+        return Ok(CheckOutput {
+            diagnostics: vec![],
+            total_files: 0,
+            exit_code: 0,
+        });
+    }
     info!(
         file_count = files.len(),
         rule_count = registry.rules().len(),
@@ -243,8 +231,15 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
         resolve,
         "starting check"
     );
-    let (mut diagnostics, project_files) = if options.parallel {
-        analyze_parallel_collecting_resolving(&registry, &files, &config, collect_programs, resolve)
+    let (mut diagnostics, mut project_files) = if options.parallel {
+        analyze_parallel_collecting_resolving(
+            &registry,
+            &files,
+            &config,
+            collect_programs,
+            resolve,
+            &packages,
+        )
     } else {
         analyze_sequential_collecting_resolving(
             &registry,
@@ -252,8 +247,18 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
             &config,
             collect_programs,
             resolve,
+            &packages,
         )
     };
+    if collect_programs {
+        let (empty_program, _) = falcon_dart_parser::parse("");
+        project_files.extend(manifests.iter().map(|(path, source)| ProjectFile {
+            path: path.clone(),
+            source: source.clone(),
+            program: empty_program.clone(),
+            has_parse_errors: false,
+        }));
+    }
 
     apply_severities(&mut diagnostics, &config);
 
@@ -270,7 +275,8 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     // text and JSON output carry navigable positions rather than byte offsets.
     let sources: HashMap<String, &str> = files
         .iter()
-        .map(|(p, s)| (p.to_string_lossy().into_owned(), s.as_str()))
+        .chain(manifests.iter())
+        .map(|(path, source)| (path.to_string_lossy().into_owned(), source.as_str()))
         .collect();
     for d in &mut diagnostics {
         if let Some(src) = sources.get(&d.file_path) {
@@ -301,7 +307,7 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     };
     Ok(CheckOutput {
         diagnostics,
-        total_files: files.len(),
+        total_files: files.len() + manifests.len(),
         exit_code,
     })
 }

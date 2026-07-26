@@ -14,6 +14,7 @@ falcon_syntax = { path = "../falcon_syntax" }
 lsp-server.workspace = true
 lsp-types.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 crossbeam-channel = "0.5"
 glob.workspace = true
 walkdir.workspace = true

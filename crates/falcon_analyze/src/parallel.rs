@@ -10,8 +10,8 @@ use falcon_diagnostics::{Diagnostic, Severity, Span};
 use falcon_syntax::ast::Program;
 
 use crate::resolve::{
-    LibrarySource, LibraryUnit, ProgramSource, ProjectIndex, TypeIndex, group_libraries,
-    library_unit,
+    IdentityIndex, IdentitySource, LibrarySource, LibraryUnit, PackageIdentity, ProgramSource,
+    ProjectIndex, SignatureIndex, TypeIndex, group_libraries, library_unit,
 };
 use crate::{AnalyzeContext, ProjectFile, RuleRegistry};
 
@@ -110,6 +110,7 @@ fn analyze_indexed(
     parsed: &[Parsed],
     config: &FalconConfig,
     parallel: bool,
+    packages: &[PackageIdentity],
 ) -> Vec<Diagnostic> {
     let index = {
         let sources: Vec<ProgramSource> = parsed
@@ -124,13 +125,11 @@ fn analyze_indexed(
 
     // Partition files into libraries, then build the type index (each type
     // inheriting its library's unresolved-part flag) and per-file library units.
-    let grouping = {
-        let files: Vec<(PathBuf, &Program)> = parsed
-            .iter()
-            .map(|p| (p.path.clone(), &p.program))
-            .collect();
-        group_libraries(&files)
-    };
+    let project_files: Vec<(PathBuf, &Program)> = parsed
+        .iter()
+        .map(|p| (p.path.clone(), &p.program))
+        .collect();
+    let grouping = group_libraries(&project_files);
     let type_index = {
         let sources = parsed.iter().enumerate().map(|(i, p)| LibrarySource {
             program: &p.program,
@@ -139,6 +138,16 @@ fn analyze_indexed(
         });
         TypeIndex::from_library_files(sources)
     };
+    let identity_sources: Vec<IdentitySource<'_>> = parsed
+        .iter()
+        .map(|p| IdentitySource {
+            path: &p.path,
+            program: &p.program,
+            has_parse_errors: !p.parse_errors.is_empty(),
+        })
+        .collect();
+    let identities = IdentityIndex::from_project_files(&identity_sources, packages);
+    let signatures = SignatureIndex::from_project_files(&project_files, &identities, &type_index);
     let programs: Vec<&Program> = parsed.iter().map(|p| &p.program).collect();
     let library_units: Vec<LibraryUnit> = (0..parsed.len())
         .map(|i| library_unit(&grouping, &programs, i))
@@ -150,6 +159,8 @@ fn analyze_indexed(
         let ctx = AnalyzeContext::new(&p.path, &p.source, config)
             .with_project(&index)
             .with_types(&type_index)
+            .with_identities(&identities)
+            .with_signatures(&signatures)
             .with_library(&library_units[i]);
         let mut diagnostics = syntax_error_diagnostics(&p.path, &p.parse_errors);
         diagnostics.extend(registry.run_all(&p.program, &ctx));
@@ -194,7 +205,7 @@ pub fn analyze_parallel_collecting(
     config: &FalconConfig,
     collect_programs: bool,
 ) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
-    analyze_parallel_collecting_resolving(registry, files, config, collect_programs, false)
+    analyze_parallel_collecting_resolving(registry, files, config, collect_programs, false, &[])
 }
 
 /// Sequential counterpart of [`analyze_parallel_collecting`].
@@ -204,7 +215,7 @@ pub fn analyze_sequential_collecting(
     config: &FalconConfig,
     collect_programs: bool,
 ) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
-    analyze_sequential_collecting_resolving(registry, files, config, collect_programs, false)
+    analyze_sequential_collecting_resolving(registry, files, config, collect_programs, false, &[])
 }
 
 /// Like [`analyze_parallel_collecting`], but with `resolve` controlling whether a
@@ -218,6 +229,7 @@ pub fn analyze_parallel_collecting_resolving(
     config: &FalconConfig,
     collect_programs: bool,
     resolve: bool,
+    packages: &[PackageIdentity],
 ) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
     if !resolve {
         let (diagnostics, retained): (Vec<Vec<Diagnostic>>, Vec<Option<ProjectFile>>) = files
@@ -233,7 +245,7 @@ pub fn analyze_parallel_collecting_resolving(
         .par_iter()
         .map(|(path, source)| parse_one(path, source))
         .collect();
-    let diagnostics = analyze_indexed(registry, &parsed, config, true);
+    let diagnostics = analyze_indexed(registry, &parsed, config, true, packages);
     (diagnostics, retain(parsed, collect_programs))
 }
 
@@ -244,6 +256,7 @@ pub fn analyze_sequential_collecting_resolving(
     config: &FalconConfig,
     collect_programs: bool,
     resolve: bool,
+    packages: &[PackageIdentity],
 ) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
     if !resolve {
         let mut diagnostics = Vec::new();
@@ -256,6 +269,6 @@ pub fn analyze_sequential_collecting_resolving(
         return (diagnostics, retained);
     }
     let parsed: Vec<Parsed> = files.iter().map(|(p, s)| parse_one(p, s)).collect();
-    let diagnostics = analyze_indexed(registry, &parsed, config, false);
+    let diagnostics = analyze_indexed(registry, &parsed, config, false, packages);
     (diagnostics, retain(parsed, collect_programs))
 }

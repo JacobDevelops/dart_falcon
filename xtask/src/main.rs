@@ -337,6 +337,7 @@ fn run_falcon(
         cmd.args(["--config", config_path.to_str().unwrap_or("")]);
     }
     let output = cmd
+        .env("RUST_LOG", "error")
         .output()
         .map_err(|e| format!("Failed to run falcon binary '{}': {}", falcon_bin, e))?;
 
@@ -458,102 +459,139 @@ fn validate_file(
     }
 }
 
-/// Validate a cross-file rule's multi-file fixture directory
-/// (`corpus/<rule>/cross-file/`) as ONE falcon invocation over the whole
-/// directory. Expectations are matched by (file name, line), since cross-file
-/// diagnostics can land in any of the fixture's files. Returns (expected,
-/// matched, failures).
+fn recursive_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
+            .unwrap_or_else(|_| panic!("cannot read {}", dir.display()))
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .collect();
+        entries.sort();
+        for path in entries.into_iter().rev() {
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+fn cross_file_project_roots(cross_file_dir: &Path) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = fs::read_dir(cross_file_dir)
+        .unwrap_or_else(|_| panic!("cannot read {}", cross_file_dir.display()))
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_dir()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("bad") || name.starts_with("good"))
+        })
+        .collect();
+    roots.sort();
+    if roots.is_empty() {
+        roots.push(cross_file_dir.to_path_buf());
+    }
+    roots
+}
+
+/// Validate each independent package under `corpus/<rule>/cross-file/` in its
+/// own falcon invocation. Expectations use full paths because package fixtures
+/// intentionally reuse basenames.
 fn validate_cross_file_dir(
     cross_file_dir: &Path,
     rule_name: &str,
     falcon_bin: &str,
     config: Option<&Path>,
 ) -> (usize, usize, Vec<String>) {
-    // Map each fixture file's basename → its source (for offset→line lookup).
-    let mut sources: HashMap<String, String> = HashMap::new();
-    let mut dart_files: Vec<PathBuf> = fs::read_dir(cross_file_dir)
-        .unwrap_or_else(|_| panic!("cannot read {}", cross_file_dir.display()))
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("dart"))
-        .collect();
-    dart_files.sort();
+    // Map every readable fixture file to its source. Pubspec-backed rules emit
+    // diagnostics in YAML, and nested bad/good projects can reuse basenames.
+    let fixture_files = recursive_files(cross_file_dir);
 
+    let mut sources: HashMap<String, String> = HashMap::new();
     let mut expectations: Vec<(String, usize)> = Vec::new();
-    for file in &dart_files {
+    for file in &fixture_files {
         let source = match fs::read_to_string(file) {
-            Ok(s) => s,
+            Ok(source) => source,
             Err(_) => continue,
         };
-        let base = file
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+        let key = file.to_string_lossy().into_owned();
         for exp in parse_expectations(&source) {
             if exp.rule == rule_name {
-                expectations.push((base.clone(), exp.line));
+                expectations.push((key.clone(), exp.line));
             }
         }
-        sources.insert(base, source);
+        sources.insert(key, source);
     }
 
-    let diags = run_falcon(falcon_bin, cross_file_dir, config).unwrap_or_default();
+    let mut failures = Vec::new();
+    let mut diags = Vec::new();
+    for root in cross_file_project_roots(cross_file_dir) {
+        // A failed invocation must not read as "the rule fired nowhere".
+        match run_falcon(falcon_bin, &root, config) {
+            Ok(found) => diags.extend(found),
+            Err(e) => failures.push(format!(
+                "ERROR {} — falcon invocation failed: {e}",
+                root.display()
+            )),
+        }
+    }
     let mut diag_keys: Vec<(String, usize)> = diags
         .iter()
         .filter(|d| d.rule == rule_name)
         .map(|d| {
-            let base = Path::new(&d.file_path)
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
+            let path = Path::new(&d.file_path).to_string_lossy().into_owned();
             let line = sources
-                .get(&base)
-                .map(|s| byte_offset_to_line(s, d.span.start))
+                .get(&path)
+                .map(|source| byte_offset_to_line(source, d.span.start))
                 .unwrap_or(0);
-            (base, line)
+            (path, line)
         })
         .collect();
 
     let expected = expectations.len();
     let mut matched = 0usize;
-    let mut failures = Vec::new();
     for exp in &expectations {
         if let Some(pos) = diag_keys.iter().position(|k| k == exp) {
             diag_keys.remove(pos);
             matched += 1;
         } else {
             failures.push(format!(
-                "MISS  {}/{}:{} — rule `{}` expected but not emitted",
-                cross_file_dir.display(),
-                exp.0,
-                exp.1,
-                rule_name
+                "MISS  {}:{} — rule `{}` expected but not emitted",
+                exp.0, exp.1, rule_name
             ));
         }
     }
     for key in diag_keys {
         failures.push(format!(
-            "EXTRA {}/{}:{} — rule `{}` fired unexpectedly",
-            cross_file_dir.display(),
-            key.0,
-            key.1,
-            rule_name
+            "EXTRA {}:{} — rule `{}` fired unexpectedly",
+            key.0, key.1, rule_name
         ));
     }
     (expected, matched, failures)
 }
 
+fn validate_rules_falcon_bin(workspace: &Path, explicit: Option<PathBuf>) -> (PathBuf, bool) {
+    match explicit {
+        Some(path) => (path, false),
+        None => (workspace.join("target/debug/falcon"), true),
+    }
+}
+
 fn validate_rules(args: &[String]) {
     let workspace = workspace_root();
     let default_corpus = workspace.join("crates/falcon_rules/tests/corpus");
-    let default_bin = workspace.join("target/debug/falcon");
 
     let mut corpus_path = default_corpus;
     let mut threshold: f64 = 0.85;
     let mut rule_filter: Option<String> = None;
-    let mut falcon_bin = default_bin.to_string_lossy().to_string();
+    let mut explicit_falcon_bin: Option<PathBuf> = None;
     let mut json_output = false;
 
     let mut i = 0;
@@ -580,7 +618,7 @@ fn validate_rules(args: &[String]) {
             "--falcon-bin" => {
                 i += 1;
                 if i < args.len() {
-                    falcon_bin = args[i].clone();
+                    explicit_falcon_bin = Some(PathBuf::from(&args[i]));
                 }
             }
             "--json" => {
@@ -590,6 +628,22 @@ fn validate_rules(args: &[String]) {
         }
         i += 1;
     }
+
+    let (falcon_bin, build_default_bin) =
+        validate_rules_falcon_bin(&workspace, explicit_falcon_bin);
+    if build_default_bin {
+        eprintln!("building falcon binary (debug)...");
+        let status = Command::new("cargo")
+            .args(["build", "--bin", "falcon"])
+            .current_dir(&workspace)
+            .status()
+            .expect("failed to spawn cargo build");
+        if !status.success() {
+            eprintln!("error: falcon build failed");
+            std::process::exit(1);
+        }
+    }
+    let falcon_bin = falcon_bin.to_string_lossy().to_string();
 
     if !corpus_path.exists() {
         eprintln!(
@@ -634,10 +688,22 @@ fn validate_rules(args: &[String]) {
             .collect();
         dart_files.sort();
 
-        // Config-gated rules ship a per-rule config (`corpus/<rule>/config.json`,
-        // full falcon.json shape) that is passed to the falcon binary via --config.
+        // Config-gated rules reuse their corpus config. Every other rule gets a
+        // generated config so validation also exercises non-recommended rules.
         let rule_config_path = rule_dir.join("config.json");
-        let rule_config = rule_config_path.exists().then_some(rule_config_path);
+        let uses_generated_config = !rule_config_path.exists();
+        let generated_config_path = workspace.join(format!(
+            "target/validate-rules-{}-{rule_name}.json",
+            std::process::id()
+        ));
+        let rule_config = if uses_generated_config {
+            falcon_rules::meta::RULE_METADATA
+                .iter()
+                .find(|meta| meta.name == rule_name)
+                .and_then(|meta| docgen_config_for(&corpus_path, meta, &generated_config_path))
+        } else {
+            Some(rule_config_path)
+        };
 
         for dart_file in &dart_files {
             let source = match fs::read_to_string(dart_file) {
@@ -706,6 +772,9 @@ fn validate_rules(args: &[String]) {
                     eprintln!("{msg}");
                 }
             }
+        }
+        if uses_generated_config {
+            let _ = fs::remove_file(&generated_config_path);
         }
     }
 
@@ -1151,11 +1220,8 @@ fn source_json(source: &RuleSource) -> Value {
 /// rule fires (even non-recommended ones). Rules that ship a corpus
 /// `config.json` (options/thresholds) reuse it verbatim; everything else gets a
 /// minimal generated config written to `temp_path`.
-fn docgen_config_for(root: &Path, meta: &RuleMeta, temp_path: &Path) -> Option<PathBuf> {
-    let corpus_config = root.join(format!(
-        "crates/falcon_rules/tests/corpus/{}/config.json",
-        meta.name
-    ));
+fn docgen_config_for(corpus_root: &Path, meta: &RuleMeta, temp_path: &Path) -> Option<PathBuf> {
+    let corpus_config = corpus_root.join(meta.name).join("config.json");
     if corpus_config.exists() {
         return Some(corpus_config);
     }
@@ -1522,7 +1588,7 @@ fn docgen(_args: &[String]) {
         let description = extract_description(&source_path, meta.name);
         let docs = extract_full_docs(&source_path, meta.name);
 
-        let config = docgen_config_for(&root, meta, &temp_config);
+        let config = docgen_config_for(&corpus_root, meta, &temp_config);
 
         // ── examples ──
         let bad_path = rule_dir.join("bad.dart");
@@ -1540,25 +1606,21 @@ fn docgen(_args: &[String]) {
             with_good += 1;
         }
 
-        // Cross-file fixture files (bad side): every .dart under cross-file/.
+        // Cross-file examples include nested Dart files and pubspecs. Relative
+        // paths keep identically named files from independent packages distinct.
         let mut cross_file_sources: Vec<(String, String)> = Vec::new();
-        if cross_file_dir.is_dir()
-            && let Ok(entries) = fs::read_dir(&cross_file_dir)
-        {
-            let mut files: Vec<PathBuf> = entries
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("dart"))
-                .collect();
-            files.sort();
-            for f in files {
-                if let Ok(src) = fs::read_to_string(&f) {
-                    let base = f
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
-                    cross_file_sources.push((base, src));
+        if cross_file_dir.is_dir() {
+            for file in recursive_files(&cross_file_dir).into_iter().filter(|path| {
+                matches!(
+                    path.extension().and_then(|extension| extension.to_str()),
+                    Some("dart" | "yaml")
+                )
+            }) {
+                if let Ok(source) = fs::read_to_string(&file)
+                    && let Ok(relative) = file.strip_prefix(&cross_file_dir)
+                {
+                    cross_file_sources
+                        .push((relative.to_string_lossy().replace('\\', "/"), source));
                 }
             }
         }
@@ -1580,26 +1642,27 @@ fn docgen(_args: &[String]) {
         let had_fixture;
         if meta.cross_file && !cross_file_sources.is_empty() {
             had_fixture = true;
-            let by_base: HashMap<&str, &str> = cross_file_sources
+            let by_path: HashMap<&str, &str> = cross_file_sources
                 .iter()
-                .map(|(b, s)| (b.as_str(), s.as_str()))
+                .map(|(path, source)| (path.as_str(), source.as_str()))
                 .collect();
-            for d in run_falcon(&falcon_bin, &cross_file_dir, config.as_deref())
-                .unwrap_or_default()
+            for d in cross_file_project_roots(&cross_file_dir)
                 .into_iter()
+                .flat_map(|project| {
+                    run_falcon(&falcon_bin, &project, config.as_deref()).unwrap_or_default()
+                })
                 .filter(|d| d.rule == meta.name)
             {
-                let base = Path::new(&d.file_path)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                let src = by_base.get(base.as_str()).copied().unwrap_or("");
+                let relative = Path::new(&d.file_path)
+                    .strip_prefix(&cross_file_dir)
+                    .map(|path| path.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_else(|_| d.file_path.clone());
+                let source = by_path.get(relative.as_str()).copied().unwrap_or("");
                 diagnostics.push(json!({
                     "message": d.message,
-                    "line": byte_offset_to_line(src, d.span.start),
-                    "column": byte_offset_to_col(src, d.span.start),
-                    "file": base,
+                    "line": byte_offset_to_line(source, d.span.start),
+                    "column": byte_offset_to_col(source, d.span.start),
+                    "file": relative,
                 }));
             }
         } else if bad_path.exists() {
@@ -1720,12 +1783,28 @@ fn docgen(_args: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_provenance;
+    use std::path::{Path, PathBuf};
+
+    use super::{strip_provenance, validate_rules_falcon_bin};
 
     fn run(input: &[&str]) -> Vec<String> {
         let mut lines: Vec<String> = input.iter().map(|s| s.to_string()).collect();
         strip_provenance(&mut lines);
         lines
+    }
+
+    #[test]
+    fn validate_rules_builds_only_the_default_falcon_binary() {
+        let workspace = Path::new("/workspace");
+
+        assert_eq!(
+            validate_rules_falcon_bin(workspace, None),
+            (PathBuf::from("/workspace/target/debug/falcon"), true)
+        );
+        assert_eq!(
+            validate_rules_falcon_bin(workspace, Some(PathBuf::from("/tmp/custom-falcon"))),
+            (PathBuf::from("/tmp/custom-falcon"), false)
+        );
     }
 
     #[test]

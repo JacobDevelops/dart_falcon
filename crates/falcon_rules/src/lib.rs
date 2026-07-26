@@ -19,6 +19,24 @@ use falcon_diagnostics::{Diagnostic, Severity};
 
 use crate::meta::meta_for;
 
+/// Per-file rules that consume resolver-backed project, type, identity, signature,
+/// or library facts. Drivers use this to preserve the single-file fast path when
+/// none are enabled and to build one shared semantic snapshot when any are active.
+const RESOLVER_DEPENDENT_RULES: &[&str] = &[
+    "avoid-ignoring-return-values",
+    "unnecessary-string-interpolations",
+    "prefer-is-empty",
+    "prefer-is-not-empty",
+    "prefer-iterable-where-type",
+    "prefer-collection-literals",
+    "prefer-final-fields",
+];
+
+/// Whether a per-file rule needs resolver-backed semantic context.
+pub fn rule_requires_resolution(name: &str) -> bool {
+    RESOLVER_DEPENDENT_RULES.contains(&name)
+}
+
 /// The enabled rule set: every rule that could fire for at least one path.
 pub struct ResolvedRules {
     pub rules: Vec<Box<dyn Rule>>,
@@ -408,8 +426,27 @@ pub fn resolve_cross_file_rules(config: &FalconConfig) -> ResolvedCrossFileRules
 
 #[cfg(test)]
 mod tests {
-    use super::config_warnings;
+    use super::{config_warnings, rule_requires_resolution};
     use falcon_config::FalconConfig;
+
+    #[test]
+    fn resolver_gating_matches_current_semantic_consumers() {
+        for rule in [
+            "avoid-ignoring-return-values",
+            "unnecessary-string-interpolations",
+            "prefer-is-empty",
+            "prefer-is-not-empty",
+            "prefer-iterable-where-type",
+            "prefer-collection-literals",
+            "prefer-final-fields",
+        ] {
+            assert!(rule_requires_resolution(rule), "{rule}");
+        }
+
+        for rule in ["avoid-dynamic", "await-only-futures", "exhaustive-cases"] {
+            assert!(!rule_requires_resolution(rule), "{rule}");
+        }
+    }
 
     /// `config_warnings` flags unknown/misgrouped rules in the base config *and*
     /// in every override, tagging each with its source block.

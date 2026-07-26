@@ -1,6 +1,6 @@
 use falcon_config::FalconConfig;
 
-use crate::resolve::{LibraryUnit, ProjectIndex, TypeIndex};
+use crate::resolve::{IdentityIndex, LibraryUnit, ProjectIndex, SignatureIndex, TypeIndex};
 
 /// Per-file analysis context passed to every rule.
 ///
@@ -20,6 +20,11 @@ pub struct AnalyzeContext<'a> {
     /// Cross-file *type* index (kinds, supertypes, members), when the driver has
     /// one. Same opt-in and absence semantics as [`AnalyzeContext::project`].
     pub types: Option<&'a TypeIndex>,
+    /// Project-wide declaration identity index for rules that must distinguish
+    /// type literals from values. Absent outside resolving analysis.
+    pub identities: Option<&'a IdentityIndex>,
+    /// Project-wide generic signatures and instantiated supertype facts.
+    pub signatures: Option<&'a SignatureIndex>,
     /// This file's library context — its part/owner siblings and the flag for an
     /// unresolved part. `None` when resolution is off or the file stands alone.
     pub library: Option<&'a LibraryUnit<'a>>,
@@ -35,6 +40,8 @@ impl<'a> AnalyzeContext<'a> {
             config,
             project: None,
             types: None,
+            identities: None,
+            signatures: None,
             library: None,
         }
     }
@@ -48,6 +55,18 @@ impl<'a> AnalyzeContext<'a> {
     /// Attach a cross-file type index.
     pub fn with_types(mut self, types: &'a TypeIndex) -> Self {
         self.types = Some(types);
+        self
+    }
+
+    /// Attach the project declaration identity index.
+    pub fn with_identities(mut self, identities: &'a IdentityIndex) -> Self {
+        self.identities = Some(identities);
+        self
+    }
+
+    /// Attach project-wide resolved signatures.
+    pub fn with_signatures(mut self, signatures: &'a SignatureIndex) -> Self {
+        self.signatures = Some(signatures);
         self
     }
 

@@ -19,17 +19,30 @@
 //! miss violations, but it must not fire a false positive because of a bad
 //! type fact.
 
+mod identity;
 mod library;
 mod local_types;
 mod project_index;
 mod receiver;
+mod semantic;
 mod type_index;
 
+pub use identity::{
+    DeclarationIdentity, IdentityIndex, IdentitySource, NameIdentity, PackageIdentity,
+};
 pub use library::{LibraryGrouping, LibraryUnit, group_libraries, library_unit};
 pub use local_types::LocalTypes;
 pub use project_index::{ProgramSource, ProjectIndex};
 pub use receiver::ReceiverTypes;
-pub use type_index::{LibrarySource, MemberKind, MemberResult, SubtypeResult, TypeIndex, TypeKind};
+pub use semantic::{
+    ConstructorFacts, DeclarationFacts, MemberFacts, ParameterFacts, ResolvedSignature,
+    ResolvedType, SemanticMemberKind, SemanticModel, SignatureIndex, StaticConstFacts,
+    TypeEnvironment, TypeParameterId, TypeParameterScope, TypeTruth,
+};
+pub use type_index::{
+    InheritedParameterNames, LibrarySource, MemberKind, MemberResult, SubtypeResult, TypeIndex,
+    TypeKind,
+};
 
 use falcon_syntax::ast::DartType;
 

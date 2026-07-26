@@ -60,22 +60,34 @@ fn slashed(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// Find the closest `pubspec.yaml` enclosing `path`.
+pub fn enclosing_pubspec(path: &Path) -> Option<PathBuf> {
+    let canon = canonical_or_lexical(path);
+    if canon.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml") && canon.is_file() {
+        return Some(canon);
+    }
+    let mut dir = canon.parent();
+    while let Some(d) = dir {
+        let pubspec = d.join("pubspec.yaml");
+        if pubspec.is_file() {
+            return Some(pubspec);
+        }
+        dir = d.parent();
+    }
+    None
+}
+
 /// Discover the enclosing package by walking up from the analyzed files to the
 /// first `pubspec.yaml`, reading its `name:`. Tolerant: any read/parse failure
 /// yields `None` and callers fall back to suffix matching.
 pub fn detect_package(files: &[ProjectFile]) -> Option<PackageInfo> {
     for f in files {
-        let canon = canonical_or_lexical(&f.path);
-        let mut dir = canon.parent();
-        while let Some(d) = dir {
-            let pubspec = d.join("pubspec.yaml");
-            if pubspec.exists() {
-                return read_pubspec_name(&pubspec).map(|name| PackageInfo {
-                    name,
-                    lib_root: canonical_or_lexical(&d.join("lib")),
-                });
-            }
-            dir = d.parent();
+        if let Some(pubspec) = enclosing_pubspec(&f.path) {
+            let root = pubspec.parent().unwrap_or_else(|| Path::new(""));
+            return read_pubspec_name(&pubspec).map(|name| PackageInfo {
+                name,
+                lib_root: canonical_or_lexical(&root.join("lib")),
+            });
         }
     }
     None

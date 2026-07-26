@@ -262,6 +262,378 @@ fn did_change_republishes() {
     client.shutdown();
 }
 
+#[test]
+fn did_change_republishes_cross_file_diagnostics() {
+    let config = r#"{
+        "cross-file": { "rules": {
+            "recommended": false,
+            "correctness": { "unused-code": "warn" }
+        } }
+    }"#;
+
+    for debounce in [Duration::ZERO, Duration::from_millis(25)] {
+        let mut client = TestClient::start(debounce, Some(config));
+        let path = client.config_path().parent().unwrap().join("unused.dart");
+        let uri = format!("file://{}", path.display());
+        let source = "void unused() {}\n";
+        fs::write(&path, source).unwrap();
+
+        client.open(&uri, source, 1);
+        client.recv_publish();
+        let initial = client.recv_publish();
+        assert!(
+            has_rule(&initial, "unused-code"),
+            "open must publish the cross-file diagnostic: {initial:?}"
+        );
+
+        client.change(&uri, "void unused() {}\n\n", 2);
+        client.recv_publish();
+        let refreshed = client.recv_publish();
+        assert_eq!(refreshed.version, Some(2));
+        assert!(
+            has_rule(&refreshed, "unused-code"),
+            "didChange must republish the cross-file diagnostic with debounce {debounce:?}: {refreshed:?}"
+        );
+        client.shutdown();
+    }
+}
+
+/// Resolver-backed diagnostics in open importers refresh when an exported
+/// signature changes in another open document.
+#[test]
+fn did_change_republishes_resolver_backed_diagnostics_in_dependents() {
+    let config = r#"{
+        "linter": { "rules": {
+            "suspicious": { "avoid-ignoring-return-values": "warn" }
+        } },
+        "cross-file": { "enabled": false }
+    }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
+    let dir = client.config_path().parent().unwrap().to_path_buf();
+    let api_path = dir.join("api.dart");
+    let consumer_path = dir.join("consumer.dart");
+    let api_uri = format!("file://{}", api_path.display());
+    let consumer_uri = format!("file://{}", consumer_path.display());
+    let returning = "int calculate() => 1;\n";
+    let returning_void = "void calculate() {}\n";
+    let consumer = "import 'api.dart';\nvoid check() { calculate(); }\n";
+    fs::write(&api_path, returning).unwrap();
+    fs::write(&consumer_path, consumer).unwrap();
+
+    client.open(&api_uri, returning, 1);
+    client.recv_publish();
+    client.open(&consumer_uri, consumer, 1);
+    let initial = client.recv_publish();
+    assert!(
+        has_rule(&initial, "avoid-ignoring-return-values"),
+        "imported non-void call must initially report: {initial:?}"
+    );
+
+    client.change(&api_uri, returning_void, 2);
+    let first = client.recv_publish();
+    let second = client.recv_publish();
+    let dependent = [&first, &second]
+        .into_iter()
+        .find(|params| params.uri.as_str() == consumer_uri)
+        .expect("dependent document must be republished");
+    assert!(
+        !has_rule(dependent, "avoid-ignoring-return-values"),
+        "changing the imported return type to void must clear the dependent diagnostic: {dependent:?}"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn debounced_related_changes_publish_each_affected_document_once() {
+    let config = r#"{
+        "linter": { "rules": {
+            "recommended": false,
+            "suspicious": { "avoid-ignoring-return-values": "warn" }
+        } },
+        "cross-file": { "enabled": false }
+    }"#;
+    // Debounce long enough that both changes reliably land in one flush.
+    let mut client = TestClient::start(Duration::from_millis(150), Some(config));
+    let dir = client.config_path().parent().unwrap().to_path_buf();
+    let api_path = dir.join("api.dart");
+    let consumer_path = dir.join("consumer.dart");
+    let api_uri = format!("file://{}", api_path.display());
+    let consumer_uri = format!("file://{}", consumer_path.display());
+    let api = "int calculate() => 1;\n";
+    let consumer = "import 'api.dart';\nvoid check() { calculate(); }\n";
+    fs::write(&api_path, api).unwrap();
+    fs::write(&consumer_path, consumer).unwrap();
+
+    client.open(&api_uri, api, 1);
+    client.recv_publish();
+    client.open(&consumer_uri, consumer, 1);
+    client.recv_publish();
+
+    client.change(&api_uri, "void calculate() {}\n", 2);
+    client.change(&consumer_uri, &format!("{consumer}\n"), 2);
+    let mut published = vec![
+        client.recv_publish().uri.as_str().to_string(),
+        client.recv_publish().uri.as_str().to_string(),
+    ];
+    published.sort();
+    assert_eq!(published, vec![api_uri, consumer_uri]);
+    client.assert_quiet(Duration::from_millis(300));
+    client.shutdown();
+}
+
+#[test]
+fn did_open_refreshes_disk_and_buffer_part_owners() {
+    let config = r#"{
+        "linter": { "rules": {
+            "recommended": false,
+            "suspicious": { "avoid-ignoring-return-values": "warn" }
+        } },
+        "cross-file": { "enabled": false }
+    }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
+    let dir = client.config_path().parent().unwrap().to_path_buf();
+    let old_path = dir.join("old.dart");
+    let new_path = dir.join("new.dart");
+    let pivot_path = dir.join("pivot.dart");
+    let old_uri = format!("file://{}", old_path.display());
+    let new_uri = format!("file://{}", new_path.display());
+    let pivot_uri = format!("file://{}", pivot_path.display());
+    fs::write(&old_path, "library old;\n").unwrap();
+    fs::write(&new_path, "library new;\n").unwrap();
+    fs::write(&pivot_path, "part of 'old.dart';\n").unwrap();
+
+    client.open(&old_uri, "library old;\n", 1);
+    client.recv_publish();
+    client.open(&new_uri, "library new;\n", 1);
+    client.recv_publish();
+    client.open(&pivot_uri, "part of 'new.dart';\n", 1);
+
+    let mut published = (0..3)
+        .map(|_| client.recv_publish().uri.as_str().to_string())
+        .collect::<Vec<_>>();
+    published.sort();
+    assert_eq!(published, vec![new_uri, old_uri, pivot_uri]);
+    client.shutdown();
+}
+
+/// Percent-encoded file URIs map to the same filesystem paths used by the
+/// workspace walk, so imported declarations still resolve.
+#[test]
+fn percent_encoded_file_uris_resolve_workspace_dependencies() {
+    let config = r#"{
+        "linter": { "rules": {
+            "suspicious": { "avoid-ignoring-return-values": "warn" }
+        } },
+        "cross-file": { "enabled": false }
+    }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
+    let dir = client.config_path().parent().unwrap().join("with space");
+    fs::create_dir(&dir).unwrap();
+    let api_path = dir.join("api.dart");
+    let consumer_path = dir.join("consumer.dart");
+    let api_uri = format!("file://{}", api_path.display()).replace(' ', "%20");
+    let consumer_uri = format!("file://{}", consumer_path.display()).replace(' ', "%20");
+    let api = "int calculate() => 1;\n";
+    let consumer = "import 'api.dart';\nvoid check() { calculate(); }\n";
+    fs::write(&api_path, api).unwrap();
+    fs::write(&consumer_path, consumer).unwrap();
+
+    client.open(&api_uri, api, 1);
+    client.recv_publish();
+    client.open(&consumer_uri, consumer, 1);
+    let diagnostics = client.recv_publish();
+    assert!(
+        has_rule(&diagnostics, "avoid-ignoring-return-values"),
+        "encoded URI paths must bind the imported declaration: {diagnostics:?}"
+    );
+    client.shutdown();
+}
+
+/// Saving before a pending debounce fires still immediately refreshes resolver-
+/// backed diagnostics in open importers.
+#[test]
+fn did_save_immediately_refreshes_resolver_backed_diagnostics_in_dependents() {
+    let config = r#"{
+        "linter": { "rules": {
+            "suspicious": { "avoid-ignoring-return-values": "warn" }
+        } },
+        "cross-file": { "enabled": false }
+    }"#;
+    let mut client = TestClient::start(Duration::from_secs(30), Some(config));
+    let dir = client.config_path().parent().unwrap().to_path_buf();
+    let api_path = dir.join("api.dart");
+    let consumer_path = dir.join("consumer.dart");
+    let api_uri = format!("file://{}", api_path.display());
+    let consumer_uri = format!("file://{}", consumer_path.display());
+    let returning = "int calculate() => 1;\n";
+    let returning_void = "void calculate() {}\n";
+    let consumer = "import 'api.dart';\nvoid check() { calculate(); }\n";
+    fs::write(&api_path, returning).unwrap();
+    fs::write(&consumer_path, consumer).unwrap();
+
+    client.open(&api_uri, returning, 1);
+    client.recv_publish();
+    client.open(&consumer_uri, consumer, 1);
+    let initial = client.recv_publish();
+    assert!(
+        has_rule(&initial, "avoid-ignoring-return-values"),
+        "the imported non-void call must initially report: {initial:?}"
+    );
+
+    client.change(&api_uri, returning_void, 2);
+    client.notify(
+        lsp_types::notification::DidSaveTextDocument::METHOD,
+        DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: Uri::from_str(&api_uri).unwrap(),
+            },
+            text: Some(returning_void.to_string()),
+        },
+    );
+    let first = client.recv_publish();
+    let second = client.recv_publish();
+    let dependent = [&first, &second]
+        .into_iter()
+        .find(|params| params.uri.as_str() == consumer_uri)
+        .expect("immediate save must republish the open importer");
+    assert!(
+        !has_rule(dependent, "avoid-ignoring-return-values"),
+        "saving the void signature must immediately clear the dependent diagnostic: {dependent:?}"
+    );
+
+    client.notify(
+        lsp_types::notification::DidSaveTextDocument::METHOD,
+        DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: Uri::from_str(&api_uri).unwrap(),
+            },
+            text: Some(returning.to_string()),
+        },
+    );
+    let first = client.recv_publish();
+    let second = client.recv_publish();
+    let dependent = [&first, &second]
+        .into_iter()
+        .find(|params| params.uri.as_str() == consumer_uri)
+        .expect("save text without didChange must republish the open importer");
+    assert!(
+        has_rule(dependent, "avoid-ignoring-return-values"),
+        "save text without a change event must update dependent diagnostics: {dependent:?}"
+    );
+    client.shutdown();
+}
+
+/// Closing an imported library refreshes open importers against the on-disk
+/// version after first clearing diagnostics for the closed URI.
+#[test]
+fn did_close_refreshes_resolver_backed_diagnostics_in_dependents() {
+    let config = r#"{
+        "linter": { "rules": {
+            "suspicious": { "avoid-ignoring-return-values": "warn" }
+        } },
+        "cross-file": { "enabled": false }
+    }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
+    let dir = client.config_path().parent().unwrap().to_path_buf();
+    let api_path = dir.join("api.dart");
+    let consumer_path = dir.join("consumer.dart");
+    let api_uri = format!("file://{}", api_path.display());
+    let consumer_uri = format!("file://{}", consumer_path.display());
+    let returning_void = "void calculate() {}\n";
+    let returning = "int calculate() => 1;\n";
+    let consumer = "import 'api.dart';\nvoid check() { calculate(); }\n";
+    fs::write(&api_path, returning_void).unwrap();
+    fs::write(&consumer_path, consumer).unwrap();
+
+    client.open(&consumer_uri, consumer, 1);
+    assert!(!has_rule(
+        &client.recv_publish(),
+        "avoid-ignoring-return-values"
+    ));
+    client.open(&api_uri, returning, 1);
+    let first = client.recv_publish();
+    let second = client.recv_publish();
+    let dependent = [&first, &second]
+        .into_iter()
+        .find(|params| params.uri.as_str() == consumer_uri)
+        .expect("opening the dependency must republish the importer");
+    assert!(
+        has_rule(dependent, "avoid-ignoring-return-values"),
+        "the open non-void signature must add the dependent diagnostic: {dependent:?}"
+    );
+
+    client.notify(
+        lsp_types::notification::DidCloseTextDocument::METHOD,
+        DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: Uri::from_str(&api_uri).unwrap(),
+            },
+        },
+    );
+    let cleared = client.recv_publish();
+    assert_eq!(cleared.uri.as_str(), api_uri);
+    assert!(
+        cleared.diagnostics.is_empty(),
+        "the closed URI must be cleared first: {cleared:?}"
+    );
+    let dependent = client.recv_publish();
+    assert_eq!(dependent.uri.as_str(), consumer_uri);
+    assert!(
+        !has_rule(&dependent, "avoid-ignoring-return-values"),
+        "falling back to the on-disk void signature must clear the dependent diagnostic: {dependent:?}"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn did_close_refreshes_buffer_and_restored_disk_part_owners() {
+    let config = r#"{
+        "linter": { "rules": {
+            "recommended": false,
+            "suspicious": { "avoid-ignoring-return-values": "warn" }
+        } },
+        "cross-file": { "enabled": false }
+    }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
+    let dir = client.config_path().parent().unwrap().to_path_buf();
+    let old_path = dir.join("old.dart");
+    let new_path = dir.join("new.dart");
+    let pivot_path = dir.join("pivot.dart");
+    let old_uri = format!("file://{}", old_path.display());
+    let new_uri = format!("file://{}", new_path.display());
+    let pivot_uri = format!("file://{}", pivot_path.display());
+    fs::write(&old_path, "library old;\n").unwrap();
+    fs::write(&new_path, "library new;\n").unwrap();
+    fs::write(&pivot_path, "part of 'new.dart';\n").unwrap();
+
+    client.open(&old_uri, "library old;\n", 1);
+    client.recv_publish();
+    client.open(&new_uri, "library new;\n", 1);
+    client.recv_publish();
+    client.open(&pivot_uri, "part of 'old.dart';\n", 1);
+    for _ in 0..3 {
+        client.recv_publish();
+    }
+
+    client.notify(
+        lsp_types::notification::DidCloseTextDocument::METHOD,
+        DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: Uri::from_str(&pivot_uri).unwrap(),
+            },
+        },
+    );
+    let cleared = client.recv_publish();
+    assert_eq!(cleared.uri.as_str(), pivot_uri);
+    assert!(cleared.diagnostics.is_empty());
+    let mut refreshed = (0..2)
+        .map(|_| client.recv_publish().uri.as_str().to_string())
+        .collect::<Vec<_>>();
+    refreshed.sort();
+    assert_eq!(refreshed, vec![new_uri, old_uri]);
+    client.shutdown();
+}
+
 /// M5.1: didSave re-analyzes (with included text refreshing the cache).
 #[test]
 fn did_save_republishes() {

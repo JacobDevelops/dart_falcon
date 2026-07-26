@@ -1,6 +1,6 @@
 //! Integration tests for the analyze pipeline.
 
-use falcon_cli::{CheckOptions, OutputFormat, run_check};
+use falcon_cli::{CheckOptions, OutputFormat, collect_check, run_check};
 use std::fs;
 use tempfile::tempdir;
 
@@ -189,13 +189,13 @@ fn test_syntax_error_listed_before_lints() {
     let temp = tempdir().unwrap();
     fs::write(
         temp.path().join("typo.dart"),
-        "void main() {\n  print(\"hello\"\n}\n",
+        "void main() {\n  dynamic value = 1;\n  print(\"hello\"\n}\n",
     )
     .unwrap();
     let out = collect_check(&options_for(temp.path(), None)).unwrap();
 
     assert!(
-        out.diagnostics.iter().any(|d| d.rule == "avoid-print"),
+        out.diagnostics.iter().any(|d| d.rule == "avoid-dynamic"),
         "lints on the recovered AST still fire"
     );
     let first_for_file = out
@@ -214,7 +214,6 @@ fn test_syntax_error_listed_before_lints() {
 // excludes, and max_errors (plan M2.3 / M3.3 / Phase-1 acceptance criteria).
 // ---------------------------------------------------------------------------
 
-use falcon_cli::collect_check;
 use std::path::PathBuf;
 
 /// Dart source that reliably triggers `avoid-dynamic`.
@@ -504,5 +503,138 @@ fn test_override_disables_rule_for_matching_path_only() {
             .iter()
             .all(|d| !(d.rule == "avoid-dynamic" && d.file_path.contains("gen"))),
         "avoid-dynamic must be suppressed under gen/ by the override"
+    );
+}
+
+fn write_package_resolution_config(root: &std::path::Path) -> PathBuf {
+    let config = root.join("falcon.json");
+    fs::write(
+        &config,
+        r#"{
+          "linter": { "rules": { "suspicious": {
+            "avoid-ignoring-return-values": "warn"
+          } } }
+        }"#,
+    )
+    .unwrap();
+    config
+}
+
+fn package_resolution_diagnostic_count(options: CheckOptions) -> usize {
+    collect_check(&options)
+        .unwrap()
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+        .count()
+}
+
+#[test]
+fn package_identity_is_discovered_for_direct_files_with_yaml_name_syntax() {
+    let temp = tempdir().unwrap();
+    let lib = temp.path().join("lib");
+    fs::create_dir(&lib).unwrap();
+    fs::write(
+        temp.path().join("pubspec.yaml"),
+        "# name: ignored\nname: 'direct_pkg' # quoted YAML value\n",
+    )
+    .unwrap();
+    let types = lib.join("types.dart");
+    let main = lib.join("main.dart");
+    fs::write(&types, "int packageValue() => 1;\n").unwrap();
+    fs::write(
+        &main,
+        "import 'package:direct_pkg/types.dart';\nvoid f() { packageValue(); }\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        package_resolution_diagnostic_count(CheckOptions {
+            paths: vec![main, types],
+            config_path: Some(write_package_resolution_config(temp.path())),
+            quiet: true,
+            ..Default::default()
+        }),
+        1
+    );
+}
+
+#[test]
+fn package_identity_is_discovered_for_lib_directory_invocation() {
+    let temp = tempdir().unwrap();
+    let lib = temp.path().join("lib");
+    fs::create_dir(&lib).unwrap();
+    fs::write(temp.path().join("pubspec.yaml"), "name: \"lib_pkg\"\n").unwrap();
+    fs::write(lib.join("types.dart"), "int packageValue() => 1;\n").unwrap();
+    fs::write(
+        lib.join("main.dart"),
+        "import 'package:lib_pkg/types.dart';\nvoid f() { packageValue(); }\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        package_resolution_diagnostic_count(CheckOptions {
+            paths: vec![lib],
+            config_path: Some(write_package_resolution_config(temp.path())),
+            quiet: true,
+            ..Default::default()
+        }),
+        1
+    );
+}
+
+#[test]
+fn package_identity_supports_nested_multi_package_analysis() {
+    let temp = tempdir().unwrap();
+    for package in ["alpha", "beta"] {
+        let root = temp.path().join("packages").join(package);
+        let lib = root.join("lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(root.join("pubspec.yaml"), format!("name: {package}\n")).unwrap();
+        fs::write(lib.join("types.dart"), "int packageValue() => 1;\n").unwrap();
+        fs::write(
+            lib.join("main.dart"),
+            format!("import 'package:{package}/types.dart';\nvoid f() {{ packageValue(); }}\n"),
+        )
+        .unwrap();
+    }
+
+    assert_eq!(
+        package_resolution_diagnostic_count(CheckOptions {
+            paths: vec![temp.path().join("packages")],
+            config_path: Some(write_package_resolution_config(temp.path())),
+            quiet: true,
+            ..Default::default()
+        }),
+        2
+    );
+}
+
+#[test]
+fn sibling_workspace_package_name_binds_analyzed_project_file() {
+    let temp = tempdir().unwrap();
+    let outer_lib = temp.path().join("lib");
+    let inner = temp.path().join("tools/inner");
+    let inner_lib = inner.join("lib");
+    fs::create_dir_all(&outer_lib).unwrap();
+    fs::create_dir_all(&inner_lib).unwrap();
+    fs::write(temp.path().join("pubspec.yaml"), "name: outer\n").unwrap();
+    fs::write(inner.join("pubspec.yaml"), "name: inner\n").unwrap();
+    fs::write(outer_lib.join("foreign.dart"), "int foreignValue() => 1;\n").unwrap();
+    fs::write(inner_lib.join("own.dart"), "int ownValue() => 1;\n").unwrap();
+    fs::write(
+        inner_lib.join("main.dart"),
+        "import 'package:inner/own.dart';\nimport 'package:outer/foreign.dart';\nvoid f() { ownValue(); foreignValue(); }\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        package_resolution_diagnostic_count(CheckOptions {
+            paths: vec![temp.path().to_path_buf()],
+            config_path: Some(write_package_resolution_config(temp.path())),
+            quiet: true,
+            ..Default::default()
+        }),
+        2
     );
 }
