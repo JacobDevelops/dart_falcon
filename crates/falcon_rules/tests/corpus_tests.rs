@@ -6,10 +6,11 @@
 //! it needs no pre-built binary, so `cargo test -p falcon_rules` exercises every rule.
 //!
 //! Invariants enforced:
+//!   * every registered rule has real positive and negative corpus coverage;
 //!   * every corpus subdirectory maps to a registered rule (no orphan fixtures);
 //!   * every `/* expect: */` annotation is matched by a diagnostic on the same line;
 //!   * no diagnostic fires on a line without a matching annotation (no false positives);
-//!   * `good.dart` files (zero annotations) produce zero diagnostics.
+//!   * clean files (zero annotations) produce zero diagnostics.
 
 use std::collections::HashMap;
 use std::fs;
@@ -149,6 +150,48 @@ fn dart_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+fn cross_file_project_dirs(dir: &Path) -> Vec<PathBuf> {
+    let mut projects: Vec<PathBuf> = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_dir()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("bad") || name.starts_with("good"))
+        })
+        .collect();
+    projects.sort();
+    if projects.is_empty() {
+        projects.push(dir.to_path_buf());
+    }
+    projects
+}
+
+fn files_recursive(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .collect();
+        entries.sort();
+        for path in entries.into_iter().rev() {
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
 #[test]
 fn corpus_matches_expectations() {
     let rules = all_rules();
@@ -263,6 +306,8 @@ Widget build(BuildContext context) {
         config: &default_cfg,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
     assert!(
@@ -294,6 +339,8 @@ Widget build(BuildContext context) {
         config: &configured,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
     let diags = rule.analyze(&program, &ctx);
@@ -319,6 +366,8 @@ Widget build(BuildContext context) {
         config: &configured,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
     assert!(
@@ -356,6 +405,8 @@ class Bar {
         config: &default_cfg,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
     let default_diags = rule.analyze(&program, &ctx);
@@ -393,6 +444,8 @@ class Bar {
         config: &configured,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
     let diags = rule.analyze(&program, &ctx);
@@ -458,70 +511,91 @@ fn cross_file_corpus_matches_expectations() {
             rule.name()
         );
 
-        let files: Vec<ProjectFile> = dart_files(&dir)
-            .into_iter()
-            .map(|path| {
-                let source = fs::read_to_string(&path)
-                    .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-                let (program, errors) = parse(&source);
-                ProjectFile {
-                    path,
-                    source,
-                    program,
-                    has_parse_errors: !errors.is_empty(),
-                }
-            })
-            .collect();
+        for project in cross_file_project_dirs(&dir) {
+            let fixture_sources: Vec<(PathBuf, String)> = files_recursive(&project)
+                .into_iter()
+                .filter_map(|path| fs::read_to_string(&path).ok().map(|source| (path, source)))
+                .collect();
+            let mut files: Vec<ProjectFile> = fixture_sources
+                .iter()
+                .filter(|(path, _)| {
+                    path.extension().and_then(|extension| extension.to_str()) == Some("dart")
+                })
+                .map(|(path, source)| {
+                    let (program, errors) = parse(source);
+                    ProjectFile {
+                        path: path.clone(),
+                        source: source.clone(),
+                        program,
+                        has_parse_errors: !errors.is_empty(),
+                    }
+                })
+                .collect();
+            let (empty_program, _) = parse("");
+            files.extend(
+                fixture_sources
+                    .iter()
+                    .filter(|(path, _)| {
+                        path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml")
+                    })
+                    .map(|(path, source)| ProjectFile {
+                        path: path.clone(),
+                        source: source.clone(),
+                        program: empty_program.clone(),
+                        has_parse_errors: false,
+                    }),
+            );
 
-        // (file_path, line) expectations for this rule across all fixture files.
-        let mut expectations: Vec<(String, usize)> = Vec::new();
-        for f in &files {
-            for exp in parse_expectations(&f.source) {
-                if exp.rule == rule.name() {
-                    total_expectations += 1;
-                    expectations.push((f.path.to_string_lossy().into_owned(), exp.line));
+            // (file_path, line) expectations for this rule across this project.
+            let mut expectations: Vec<(String, usize)> = Vec::new();
+            for (path, source) in &fixture_sources {
+                for exp in parse_expectations(source) {
+                    if exp.rule == rule.name() {
+                        total_expectations += 1;
+                        expectations.push((path.to_string_lossy().into_owned(), exp.line));
+                    }
                 }
             }
-        }
 
-        let mut diag_keys: Vec<(String, usize)> = rule
-            .analyze_project(&files, &config)
-            .into_iter()
-            .filter(|d| d.rule == rule.name())
-            .map(|d| {
-                (
-                    d.file_path.clone(),
-                    byte_offset_to_line(
-                        files
-                            .iter()
-                            .find(|f| f.path.to_string_lossy() == d.file_path)
-                            .map(|f| f.source.as_str())
-                            .unwrap_or(""),
-                        d.span.start,
-                    ),
-                )
-            })
-            .collect();
+            let mut diag_keys: Vec<(String, usize)> = rule
+                .analyze_project(&files, &config)
+                .into_iter()
+                .filter(|d| d.rule == rule.name())
+                .map(|d| {
+                    (
+                        d.file_path.clone(),
+                        byte_offset_to_line(
+                            fixture_sources
+                                .iter()
+                                .find(|(path, _)| path.to_string_lossy() == d.file_path)
+                                .map(|(_, source)| source.as_str())
+                                .unwrap_or(""),
+                            d.span.start,
+                        ),
+                    )
+                })
+                .collect();
 
-        for exp in &expectations {
-            if let Some(pos) = diag_keys.iter().position(|k| k == exp) {
-                diag_keys.remove(pos);
-            } else {
+            for exp in &expectations {
+                if let Some(pos) = diag_keys.iter().position(|k| k == exp) {
+                    diag_keys.remove(pos);
+                } else {
+                    failures.push(format!(
+                        "MISS  {}:{} — `{}` expected but not emitted",
+                        exp.0,
+                        exp.1,
+                        rule.name()
+                    ));
+                }
+            }
+            for key in diag_keys {
                 failures.push(format!(
-                    "MISS  {}:{} — `{}` expected but not emitted",
-                    exp.0,
-                    exp.1,
+                    "EXTRA {}:{} — `{}` fired without a matching annotation",
+                    key.0,
+                    key.1,
                     rule.name()
                 ));
             }
-        }
-        for key in diag_keys {
-            failures.push(format!(
-                "EXTRA {}:{} — `{}` fired without a matching annotation",
-                key.0,
-                key.1,
-                rule.name()
-            ));
         }
     }
 
@@ -679,6 +753,8 @@ fn all_rules_run_jfit_20_files_no_panic() {
             config: &config,
             project: None,
             types: None,
+            identities: None,
+            signatures: None,
             library: None,
         };
         for rule in &rules {
@@ -721,6 +797,8 @@ class Foo {
         config: &config,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
 

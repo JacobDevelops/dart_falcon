@@ -79,7 +79,10 @@ impl Visitor for Collector<'_> {
 
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Field {
-            object, field, span, ..
+            object,
+            field,
+            span,
+            ..
         } = node
         {
             check_media_query_size_field(object, field, span, &mut self.diags, self.ctx);

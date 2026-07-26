@@ -982,6 +982,7 @@ pub fn walk_formal_param<V: Visitor>(v: &mut V, node: &FormalParam) {
     for ann in &node.annotations {
         v.visit_annotation(ann);
     }
+    walk_type_params(v, &node.type_params);
     if let Some(ref t) = node.param_type {
         v.visit_dart_type(t);
     }

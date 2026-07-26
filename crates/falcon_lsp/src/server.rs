@@ -140,9 +140,10 @@ pub fn run_with_connection(
             // Debounce window elapsed: flush every dirty document.
             let mut uris: Vec<String> = dirty.drain().collect();
             uris.sort();
-            for uri in uris {
-                analyze_and_publish(&connection, &mut state, &uri)?;
+            for (affected_uri, diagnostics) in state.analyze_affected_many(&uris) {
+                publish(&connection, &state, &affected_uri, &diagnostics)?;
             }
+            cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
             deadline = None;
             continue;
         };
@@ -164,7 +165,10 @@ pub fn run_with_connection(
                         Some(params.text_document.version),
                     );
                     dirty.remove(&uri);
-                    publish(&connection, &state, &uri, &diagnostics)?;
+                    if dirty.is_empty() {
+                        deadline = None;
+                    }
+                    publish_affected_with_current(&connection, &mut state, &uri, &diagnostics)?;
                     cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
                 }
                 DidChangeTextDocument::METHOD => {
@@ -178,7 +182,8 @@ pub fn run_with_connection(
                         continue;
                     }
                     if options.debounce.is_zero() {
-                        analyze_and_publish(&connection, &mut state, &uri)?;
+                        analyze_affected_and_publish(&connection, &mut state, &uri)?;
+                        cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
                     } else {
                         dirty.insert(uri);
                         deadline = Some(Instant::now() + options.debounce);
@@ -188,17 +193,36 @@ pub fn run_with_connection(
                     let params: DidSaveTextDocumentParams = parse_params!(&method, params);
                     let uri = params.text_document.uri.as_str().to_string();
                     let diagnostics = state.save(&uri, params.text);
+                    publish_affected_with_current(&connection, &mut state, &uri, &diagnostics)?;
                     dirty.remove(&uri);
-                    publish(&connection, &state, &uri, &diagnostics)?;
+                    if dirty.is_empty() {
+                        deadline = None;
+                    }
                     cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
                 }
                 DidCloseTextDocument::METHOD => {
                     let params: DidCloseTextDocumentParams = parse_params!(&method, params);
                     let uri = params.text_document.uri.as_str().to_string();
+                    let mut affected = state.affected_open_uris(&uri);
                     state.close(&uri);
+                    affected.extend(state.affected_open_uris(&uri));
+                    affected.sort();
+                    affected.dedup();
                     dirty.remove(&uri);
-                    // Clear stale squiggles in the editor.
+                    if dirty.is_empty() {
+                        deadline = None;
+                    }
+                    // Clear stale squiggles before refreshing dependents against
+                    // the closed document's on-disk workspace state.
                     publish(&connection, &state, &uri, &[])?;
+                    for affected_uri in affected {
+                        if affected_uri == uri {
+                            continue;
+                        }
+                        let diagnostics = state.analyze(&affected_uri);
+                        publish(&connection, &state, &affected_uri, &diagnostics)?;
+                    }
+                    cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
                 }
                 DidChangeWatchedFiles::METHOD => {
                     debug!("watched files changed — reloading config");
@@ -313,14 +337,35 @@ fn cross_file_pass_and_publish(
     Ok(())
 }
 
-/// Analyze `uri` against its cached AST and publish the result.
-fn analyze_and_publish(
+/// Publish the already-computed result for `uri`, then re-analyze and publish
+/// every other open semantic dependent.
+fn publish_affected_with_current(
+    connection: &Connection,
+    state: &mut LspState,
+    uri: &str,
+    diagnostics: &[Diagnostic],
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    for affected_uri in state.affected_open_uris(uri) {
+        if affected_uri == uri {
+            publish(connection, state, &affected_uri, diagnostics)?;
+        } else {
+            let diagnostics = state.analyze(&affected_uri);
+            publish(connection, state, &affected_uri, &diagnostics)?;
+        }
+    }
+    Ok(())
+}
+
+/// Analyze `uri` and any open semantic dependents, then publish each result.
+fn analyze_affected_and_publish(
     connection: &Connection,
     state: &mut LspState,
     uri: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let diagnostics = state.analyze(uri);
-    publish(connection, state, uri, &diagnostics)
+    for (affected_uri, diagnostics) in state.analyze_affected(uri) {
+        publish(connection, state, &affected_uri, &diagnostics)?;
+    }
+    Ok(())
 }
 
 /// Send `textDocument/publishDiagnostics` for `uri`.

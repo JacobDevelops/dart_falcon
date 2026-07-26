@@ -203,6 +203,15 @@ fn walks_function_expression_type_param_bound() {
     );
 }
 
+#[test]
+fn walks_function_typed_formal_type_param_bound() {
+    let r = record("void f(int cb<T extends FormalBound>(T x)) {}");
+    assert!(
+        r.has_named("FormalBound"),
+        "function-typed formal type-param bound not walked"
+    );
+}
+
 // ── Item 7: mixin-class supertype clauses ─────────────────────────────────────
 
 #[test]

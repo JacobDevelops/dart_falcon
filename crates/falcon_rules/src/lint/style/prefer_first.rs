@@ -64,4 +64,3 @@ impl Visitor for Collector<'_> {
 fn is_zero(expr: &Expr) -> bool {
     matches!(expr, Expr::IntLit { value, .. } if value == "0")
 }
-

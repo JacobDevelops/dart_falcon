@@ -72,6 +72,8 @@ fn test_mock_rule_analyze_empty() {
         config: &config,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
 
@@ -92,6 +94,8 @@ fn test_registry_register_and_run_all_empty() {
         config: &config,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
 
@@ -112,6 +116,8 @@ fn test_registry_run_all_emits_diagnostic() {
         config: &config,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
 
@@ -136,6 +142,8 @@ fn test_registry_multiple_rules() {
         config: &config,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
 
@@ -156,6 +164,8 @@ fn test_analyze_context_fields() {
         config: &config,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
 
@@ -284,6 +294,8 @@ fn test_end_to_end_parse_analyze_serialize() {
         config: &config,
         project: None,
         types: None,
+        identities: None,
+        signatures: None,
         library: None,
     };
 

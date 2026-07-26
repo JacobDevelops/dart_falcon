@@ -49,6 +49,55 @@ pub fn walk_files(paths: &[PathBuf], exclude_patterns: &[String]) -> Vec<(PathBu
     results
 }
 
+/// Walk input directories and their ancestors for package manifests used by
+/// pubspec-backed rules.
+pub fn walk_pubspecs(paths: &[PathBuf], exclude_patterns: &[String]) -> Vec<(PathBuf, String)> {
+    let compiled: Vec<Pattern> = exclude_patterns
+        .iter()
+        .filter_map(|pattern| Pattern::new(pattern).ok())
+        .collect();
+    let mut manifests = Vec::new();
+    for path in paths {
+        let start = if path.is_file() {
+            path.parent().unwrap_or(path)
+        } else {
+            path.as_path()
+        };
+        manifests.extend(
+            start
+                .ancestors()
+                .map(|ancestor| ancestor.join("pubspec.yaml"))
+                .filter(|manifest| manifest.is_file()),
+        );
+
+        if path.is_dir() {
+            manifests.extend(
+                WalkDir::new(path)
+                    .follow_links(false)
+                    .into_iter()
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.into_path())
+                    .filter(|entry| {
+                        entry.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml")
+                    }),
+            );
+        } else if path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml") {
+            manifests.push(path.clone());
+        }
+    }
+    manifests.sort();
+    manifests.dedup();
+    manifests
+        .into_iter()
+        .filter(|path| !is_excluded(path, &compiled))
+        .filter_map(|path| {
+            std::fs::read_to_string(&path)
+                .ok()
+                .map(|source| (path, source))
+        })
+        .collect()
+}
+
 fn is_dart(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("dart")
 }
@@ -159,6 +208,16 @@ mod tests {
         let paths: Vec<_> = results.iter().map(|(p, _)| p).collect();
         assert!(paths.contains(&&b_dart));
         assert!(paths.contains(&&c_dart));
+    }
+
+    #[test]
+    fn test_walk_pubspec_only_package() {
+        let temp = tempdir().unwrap();
+        let pubspec = temp.path().join("pubspec.yaml");
+        fs::write(&pubspec, "name: package\n").unwrap();
+
+        let results = walk_pubspecs(&[temp.path().to_path_buf()], &[]);
+        assert_eq!(results, [(pubspec, "name: package\n".to_string())]);
     }
 
     #[test]
