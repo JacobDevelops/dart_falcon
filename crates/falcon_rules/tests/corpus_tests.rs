@@ -13,7 +13,7 @@
 //!   * clean files (zero annotations) produce zero diagnostics;
 //!   * source and corpus fixtures contain no explicit stub/placeholder markers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -26,6 +26,12 @@ use falcon_dart_parser::parser::parse;
 use falcon_rules::lint::style::class_members_ordering::ClassMembersOrdering;
 use falcon_rules::lint::style::use_design_system_item::UseDesignSystemItem;
 use falcon_rules::{RESOLVER_DEPENDENT_RULES, all_cross_file_rules, all_rules};
+
+/// Rules registered as deliberate stubs. A name here exempts the rule from the
+/// corpus-coverage invariants, and every entry must still have both a
+/// `Stub registration` source marker and a placeholder fixture, so the list
+/// cannot outlive the stub it excuses.
+const KNOWN_STUB_RULES: &[&str] = &[];
 
 fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus")
@@ -211,6 +217,219 @@ fn contains_placeholder_marker(source: &str) -> bool {
                 | "// Placeholder: violation examples with expect annotations will be added"
         )
     })
+}
+
+fn source_rule_name(path: &Path) -> Option<String> {
+    path.file_stem()
+        .and_then(|name| name.to_str())
+        .map(|name| name.replace('_', "-"))
+}
+
+fn corpus_rule_name<'a>(corpus: &Path, path: &'a Path) -> Option<&'a str> {
+    path.strip_prefix(corpus)
+        .ok()?
+        .components()
+        .next()?
+        .as_os_str()
+        .to_str()
+}
+
+#[test]
+fn registered_rules_have_real_corpus_coverage() {
+    let corpus = corpus_dir();
+    let rules = all_rules();
+    let cross_file_rules = all_cross_file_rules();
+    let cross_file: HashSet<&str> = cross_file_rules.iter().map(|rule| rule.name()).collect();
+    let known_stubs: HashSet<&str> = KNOWN_STUB_RULES.iter().copied().collect();
+    let registered: HashSet<&str> = rules
+        .iter()
+        .map(|rule| rule.name())
+        .chain(cross_file.iter().copied())
+        .collect();
+    let mut failures = Vec::new();
+
+    for rule_name in &registered {
+        if known_stubs.contains(rule_name) {
+            continue;
+        }
+        let rule_dir = corpus.join(rule_name);
+        if !rule_dir.is_dir() {
+            failures.push(format!("MISSING `{rule_name}` corpus directory"));
+            continue;
+        }
+
+        if cross_file.contains(rule_name) {
+            let project_dir = rule_dir.join("cross-file");
+            if !project_dir.is_dir() {
+                failures.push(format!("MISSING `{rule_name}` cross-file project fixture"));
+                continue;
+            }
+            let projects = cross_file_project_dirs(&project_dir);
+            let mut has_positive_project = false;
+            let mut has_clean_project = false;
+            for project in projects {
+                let project_name = project
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                let sources: Vec<String> = files_recursive(&project)
+                    .iter()
+                    .filter_map(|path| fs::read_to_string(path).ok())
+                    .collect();
+                if project_name.starts_with("bad")
+                    && sources
+                        .iter()
+                        .any(|source| has_rule_expectation(source, rule_name))
+                {
+                    has_positive_project = true;
+                }
+                if project_name.starts_with("good")
+                    && sources
+                        .iter()
+                        .all(|source| parse_expectations(source).is_empty())
+                {
+                    has_clean_project = true;
+                }
+            }
+            if !has_positive_project {
+                failures.push(format!(
+                    "NO POSITIVE `{rule_name}` bad cross-file project has an expected diagnostic"
+                ));
+            }
+            if !has_clean_project {
+                failures.push(format!("NO CLEAN `{rule_name}` good cross-file project"));
+            }
+        } else {
+            let files = collect_dart_files_recursive(&rule_dir, 10_000);
+            let sources: Vec<(PathBuf, String)> = files
+                .into_iter()
+                .map(|path| {
+                    let source = fs::read_to_string(&path)
+                        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+                    (path, source)
+                })
+                .collect();
+            if !sources.iter().any(|(path, source)| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("bad"))
+                    && has_rule_expectation(source, rule_name)
+            }) {
+                failures.push(format!(
+                    "NO POSITIVE `{rule_name}` bad fixture has an expected diagnostic"
+                ));
+            }
+            if !sources
+                .iter()
+                .any(|(path, source)| is_intentional_clean_fixture(&rule_dir, path, source))
+            {
+                failures.push(format!(
+                    "NO CLEAN `{rule_name}` top-level good/clean Dart fixture"
+                ));
+            }
+        }
+    }
+
+    let mut corpus_dirs: Vec<PathBuf> = fs::read_dir(&corpus)
+        .expect("corpus dir must exist")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    corpus_dirs.sort();
+    for dir in corpus_dirs {
+        let name = dir.file_name().unwrap().to_string_lossy();
+        if !registered.contains(name.as_ref()) {
+            failures.push(format!(
+                "ORPHAN corpus dir `{name}` maps to no registered rule"
+            ));
+        }
+    }
+
+    failures.sort();
+    assert!(
+        failures.is_empty(),
+        "rule corpus coverage invariants failed:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn registered_rules_have_no_unlisted_stub_source_markers() {
+    let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let allowed: HashSet<&str> = KNOWN_STUB_RULES.iter().copied().collect();
+    let mut found = HashSet::new();
+    let mut failures = Vec::new();
+    for path in files_recursive(&source_root) {
+        if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        if source.contains("Stub registration") {
+            let rule_name = source_rule_name(&path)
+                .unwrap_or_else(|| panic!("stub source has no rule name: {}", path.display()));
+            if !allowed.contains(rule_name.as_str()) {
+                failures.push(format!(
+                    "UNLISTED stub marker for `{rule_name}` in {}",
+                    path.display()
+                ));
+            }
+            found.insert(rule_name);
+        }
+    }
+
+    for rule_name in KNOWN_STUB_RULES {
+        if !found.contains(*rule_name) {
+            failures.push(format!(
+                "STALE `{rule_name}` stub allowlist entry has no source marker"
+            ));
+        }
+    }
+    failures.sort();
+    assert!(
+        failures.is_empty(),
+        "stub source allowlist is out of sync:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn corpus_has_no_unlisted_placeholder_text() {
+    let corpus = corpus_dir();
+    let allowed: HashSet<&str> = KNOWN_STUB_RULES.iter().copied().collect();
+    let mut found = HashSet::new();
+    let mut failures = Vec::new();
+    for path in files_recursive(&corpus) {
+        let Ok(source) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if contains_placeholder_marker(&source) {
+            let rule_name = corpus_rule_name(&corpus, &path)
+                .unwrap_or_else(|| panic!("corpus file has no rule directory: {}", path.display()));
+            if !allowed.contains(rule_name) {
+                failures.push(format!(
+                    "UNLISTED placeholder fixture for `{rule_name}` in {}",
+                    path.display()
+                ));
+            }
+            found.insert(rule_name.to_string());
+        }
+    }
+
+    for rule_name in KNOWN_STUB_RULES {
+        if !found.contains(*rule_name) {
+            failures.push(format!(
+                "STALE `{rule_name}` stub allowlist entry has no placeholder fixture"
+            ));
+        }
+    }
+    failures.sort();
+    assert!(
+        failures.is_empty(),
+        "placeholder fixture allowlist is out of sync:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]
