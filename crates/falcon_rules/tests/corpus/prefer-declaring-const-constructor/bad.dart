@@ -47,3 +47,21 @@ class Flags {
 
   Flags(); /* expect: prefer-declaring-const-constructor */
 }
+
+class Computed {
+  final int value;
+
+  Computed(int base) : value = base + 1; /* expect: prefer-declaring-const-constructor */
+}
+
+class Asserted {
+  final int value;
+
+  Asserted(this.value) : assert(value >= 0); /* expect: prefer-declaring-const-constructor */
+}
+
+class Redirected {
+  final int value;
+  const Redirected._(this.value);
+  Redirected(int value) : this._(value); /* expect: prefer-declaring-const-constructor */
+}

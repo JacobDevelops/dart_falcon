@@ -320,6 +320,17 @@ fn arguments_potentially_constant(
         })
 }
 
+pub(crate) fn potentially_constant(
+    expr: &Expr,
+    allowed: &HashSet<String>,
+    owner: &DeclarationIdentity,
+    fields: &HashMap<&str, &Expr>,
+    model: &SemanticModel<'_>,
+    signatures: &SignatureIndex,
+) -> bool {
+    potentially_constant_with_shadowed(expr, allowed, allowed, owner, fields, model, signatures)
+}
+
 fn potentially_constant_with_shadowed(
     expr: &Expr,
     allowed: &HashSet<String>,

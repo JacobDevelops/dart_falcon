@@ -68,7 +68,7 @@ class Base {
 
 class Derived extends Base {
   final int b;
-  Derived(this.b) : super(0);
+  Derived(this.b) : super(0); /* expect: prefer-declaring-const-constructor */
 }
 
 // Good: applies a mixin (mixin const-ness unknown).
@@ -83,4 +83,9 @@ class Service with Logger {
 class Clock {
   final DateTime stamp = DateTime.now();
   Clock();
+}
+
+class BodyForm {
+  final int value;
+  BodyForm(this.value) {}
 }
