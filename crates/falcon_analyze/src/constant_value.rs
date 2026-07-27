@@ -518,7 +518,9 @@ fn bool_pair(left: ConstantValue, right: ConstantValue) -> Option<(bool, bool)> 
     }
 }
 
-fn parse_int(value: &str) -> Option<i128> {
+/// Parse a Dart integer literal's source spelling, honouring `0x`/`0X` prefixes and
+/// `_` digit separators.
+pub fn parse_int(value: &str) -> Option<i128> {
     let value = value.replace('_', "");
     if let Some(hex) = value
         .strip_prefix("0x")
