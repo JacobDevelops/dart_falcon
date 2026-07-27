@@ -5,14 +5,14 @@
 //! forces callers to null-check a result that can never be null, spreading
 //! defensive code that adds no safety. Drop the `?` from the return type. Only
 //! the outer nullability counts, so `Future<T?>` and `List<int?>` are left
-//! alone. Without full type resolution the check is conservative: it fires only
-//! when the body has at least one `return` and every returned expression is a
-//! literal or constructor invocation — any return it cannot prove non-null (a
-//! variable, a call, `await`, or a bare `return;`) suppresses the report.
+//! alone. Without full type resolution the check is conservative.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_expr, walk_function_decl, walk_getter_decl, walk_method_decl, walk_stmt,
+};
 
 pub struct UnnecessaryNullableReturnType;
 
@@ -22,27 +22,49 @@ impl Rule for UnnecessaryNullableReturnType {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
-        diags
+        let mut collector = Collector {
+            diags: Vec::new(),
+            ctx,
+        };
+        collector.visit_program(program);
+        collector.diags
     }
 }
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Function(f) => check(f.return_type.as_ref(), f.body.as_ref(), diags, ctx),
-        TopLevelDecl::Class(c) => c.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::Mixin(m) => m.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::MixinClass(mc) => mc.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        _ => {}
-    }
+struct Collector<'a, 'ctx> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if let ClassMember::Method(m) = member {
-        check(m.return_type.as_ref(), m.body.as_ref(), diags, ctx);
+impl Visitor for Collector<'_, '_> {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        check(
+            node.return_type.as_ref(),
+            node.body.as_ref(),
+            &mut self.diags,
+            self.ctx,
+        );
+        walk_function_decl(self, node);
+    }
+
+    fn visit_method_decl(&mut self, node: &MethodDecl) {
+        check(
+            node.return_type.as_ref(),
+            node.body.as_ref(),
+            &mut self.diags,
+            self.ctx,
+        );
+        walk_method_decl(self, node);
+    }
+
+    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+        check(
+            node.return_type.as_ref(),
+            node.body.as_ref(),
+            &mut self.diags,
+            self.ctx,
+        );
+        walk_getter_decl(self, node);
     }
 }
 
@@ -61,8 +83,6 @@ fn check(
     }
 }
 
-/// pyramid_lint keys off `returnType.question` — only the *outer* `?` matters.
-/// `Future<T?>` or `List<int?>` are not themselves nullable and are ignored.
 fn is_outer_nullable(ty: &DartType) -> bool {
     match ty {
         DartType::Named(nt) => nt.is_nullable,
@@ -72,68 +92,51 @@ fn is_outer_nullable(ty: &DartType) -> bool {
     }
 }
 
-/// True only when the body has at least one return and *every* returned value is
-/// a provably non-null literal or constructor invocation. Without type
-/// resolution this is the conservative analogue of pyramid_lint's
-/// `type.isNullable` check: any return we cannot prove non-null (a variable,
-/// call, `await`, bare `return;`, …) suppresses the report.
 fn all_returns_provably_non_null(body: &FunctionBody) -> bool {
     match body {
-        FunctionBody::Block(b) => {
-            let mut count = 0usize;
-            let mut all_non_null = true;
-            scan_returns(&b.stmts, &mut count, &mut all_non_null);
-            count > 0 && all_non_null
+        FunctionBody::Block(block) => {
+            let mut scan = ReturnScan {
+                count: 0,
+                all_non_null: true,
+            };
+            for stmt in &block.stmts {
+                scan.visit_stmt(stmt);
+            }
+            scan.count > 0 && scan.all_non_null
         }
-        FunctionBody::Arrow(e, _) => is_provably_non_null(e),
+        FunctionBody::Arrow(expr, _) => is_provably_non_null(expr),
         FunctionBody::Native(_, _) => false,
     }
 }
 
-fn scan_returns(stmts: &[Stmt], count: &mut usize, all_non_null: &mut bool) {
-    for stmt in stmts {
-        scan_returns_stmt(stmt, count, all_non_null);
+struct ReturnScan {
+    count: usize,
+    all_non_null: bool,
+}
+
+impl Visitor for ReturnScan {
+    fn visit_stmt(&mut self, node: &Stmt) {
+        match node {
+            Stmt::Return(ret) => {
+                self.count += 1;
+                if !ret.value.as_ref().is_some_and(is_provably_non_null) {
+                    self.all_non_null = false;
+                }
+            }
+            // Returns in delayed nested functions do not contribute to the outer
+            // function's return contract.
+            Stmt::LocalFunc(_) => {}
+            _ => walk_stmt(self, node),
+        }
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        if !matches!(node, Expr::FuncExpr { .. }) {
+            walk_expr(self, node);
+        }
     }
 }
 
-fn scan_returns_stmt(stmt: &Stmt, count: &mut usize, all_non_null: &mut bool) {
-    match stmt {
-        Stmt::Return(ret) => {
-            *count += 1;
-            match &ret.value {
-                Some(v) if is_provably_non_null(v) => {}
-                _ => *all_non_null = false,
-            }
-        }
-        Stmt::Block(b) => scan_returns(&b.stmts, count, all_non_null),
-        Stmt::If(i) => {
-            scan_returns_stmt(&i.then_branch, count, all_non_null);
-            if let Some(eb) = &i.else_branch {
-                scan_returns_stmt(eb, count, all_non_null);
-            }
-        }
-        Stmt::While(w) => scan_returns_stmt(&w.body, count, all_non_null),
-        Stmt::DoWhile(d) => scan_returns_stmt(&d.body, count, all_non_null),
-        Stmt::For(f) => scan_returns_stmt(&f.body, count, all_non_null),
-        Stmt::TryCatch(tc) => {
-            scan_returns(&tc.body.stmts, count, all_non_null);
-            for catch in &tc.catches {
-                scan_returns(&catch.body.stmts, count, all_non_null);
-            }
-            if let Some(fin) = &tc.finally {
-                scan_returns(&fin.stmts, count, all_non_null);
-            }
-        }
-        Stmt::Switch(s) => {
-            for case in &s.cases {
-                scan_returns(&case.body, count, all_non_null);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Expressions whose value is provably non-null without type resolution.
 fn is_provably_non_null(expr: &Expr) -> bool {
     matches!(
         expr,

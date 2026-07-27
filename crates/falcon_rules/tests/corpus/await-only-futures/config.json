@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "await-only-futures": "warn"
+      }
+    }
+  }
+}

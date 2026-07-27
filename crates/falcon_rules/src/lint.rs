@@ -4,6 +4,8 @@
 
 pub mod complexity;
 pub mod correctness;
+pub(crate) mod lexical_usage;
 pub mod performance;
+pub(crate) mod semantic_scope;
 pub mod style;
 pub mod suspicious;

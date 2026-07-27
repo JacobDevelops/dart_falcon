@@ -19,3 +19,7 @@ bool? isValid() { /* expect: unnecessary-nullable-return-type */
   }
   return false;
 }
+
+class Holder {
+  String? get label => 'x'; /* expect: unnecessary-nullable-return-type */
+}

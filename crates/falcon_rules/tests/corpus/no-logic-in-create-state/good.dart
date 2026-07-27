@@ -32,3 +32,7 @@ class G5 extends StatefulWidget {
   @override
   State<G5> createState() => _G5State();
 }
+
+class _G1State extends State<G1> {}
+class _G2State extends State<G2> {}
+class _G5State extends State<G5> {}

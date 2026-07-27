@@ -170,3 +170,50 @@ class PatternAssignTarget {
     (a, b) = (1, 2);
   }
 }
+
+void sourceOrderAndNestedScopes(int value) {
+  print(value);
+  {
+    final value = 1;
+    print(value);
+  }
+}
+
+void capturedOutsideShadow(int value) {
+  final callback = () => value;
+  for (final value in [1]) {
+    print(value);
+  }
+  print(callback());
+}
+
+class FieldFormal {
+  final int value;
+
+  FieldFormal(this.value) {
+    print('constructed');
+  }
+}
+
+class InitializerUse {
+  final int value;
+
+  InitializerUse(int input) : value = input;
+}
+
+class Base {
+  Base({int? key});
+}
+
+class SuperFormal extends Base {
+  SuperFormal({super.key}) {
+    print('constructed');
+  }
+}
+
+void usedLocalFunctionParameter() {
+  void local(int value) {
+    print(value);
+  }
+  local(1);
+}

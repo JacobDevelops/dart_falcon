@@ -406,6 +406,7 @@ dependencies = [
  "falcon_syntax",
  "regex",
  "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]
