@@ -1,12 +1,10 @@
-//! Flags a function, method, or operator with more than the configured number
-//! of parameters.
+//! Flags callable declarations and function types with more than the configured
+//! number of parameters.
 //!
 //! A long parameter list is hard to call correctly and usually signals that
-//! some arguments belong together in an object. The rule counts all positional,
-//! optional, and named parameters. Matching dart_code_linter's
-//! number-of-parameters metric, constructors are not counted — so wide
-//! named-parameter constructors, the dominant Flutter and DI pattern, are
-//! exempt — and `copyWith` methods are skipped.
+//! some arguments belong together in an object. The rule counts required,
+//! optional-positional, and named parameters on functions, local functions,
+//! closures, methods, constructors, operators, setters, and function types.
 //!
 //! ## Options
 //!
@@ -16,6 +14,10 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_constructor_decl, walk_dart_type, walk_expr, walk_function_decl,
+    walk_method_decl, walk_stmt,
+};
 
 pub struct MaxParametersForFunction;
 
@@ -25,19 +27,16 @@ impl Rule for MaxParametersForFunction {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
-        diags
+        let mut collector = Collector {
+            threshold: max_parameters_option(ctx),
+            file: ctx.file_path.to_string_lossy().into_owned(),
+            diags: Vec::new(),
+        };
+        collector.visit_program(program);
+        collector.diags
     }
 }
 
-fn count_parameters(params: &FormalParamList) -> usize {
-    params.positional.len() + params.optional_positional.len() + params.named.len()
-}
-
-/// Read the `max_parameters` option (default 5). Malformed/missing → default.
 fn max_parameters_option(ctx: &AnalyzeContext) -> usize {
     crate::meta::meta_for("max-parameters-for-function")
         .and_then(|m| ctx.rule_options(m.group, "max-parameters-for-function"))
@@ -47,69 +46,90 @@ fn max_parameters_option(ctx: &AnalyzeContext) -> usize {
         .unwrap_or(5)
 }
 
-fn check_function_params(
-    params: &FormalParamList,
-    span: &Span,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
-    let total = count_parameters(params);
-    let threshold = max_parameters_option(ctx);
-    if total > threshold {
-        diags.push(Diagnostic::new(
+struct Collector {
+    threshold: usize,
+    file: String,
+    diags: Vec<Diagnostic>,
+}
+
+impl Collector {
+    fn check(&mut self, count: usize, span: &Span) {
+        if count <= self.threshold {
+            return;
+        }
+        self.diags.push(Diagnostic::new(
             "max-parameters-for-function",
             Severity::Warning,
-            format!("Function has too many parameters (max {threshold})."),
-            ctx.file_path.to_string_lossy().into_owned(),
+            format!("Function has too many parameters (max {}).", self.threshold),
+            self.file.clone(),
             DiagSpan {
                 start: span.start,
                 end: span.end,
             },
         ));
     }
-}
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            check_function_params(&f.params, &f.span, diags, ctx);
-        }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        _ => {}
+    fn check_formals(&mut self, params: &FormalParamList, span: &Span) {
+        self.check(
+            params.positional.len() + params.optional_positional.len() + params.named.len(),
+            span,
+        );
     }
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match member {
-        ClassMember::Method(m) => {
-            // dcl's number-of-parameters metric skips `copyWith` methods that
-            // return their own class — the canonical wide-parameter builder.
-            if m.name.name == "copyWith" {
-                return;
-            }
-            check_function_params(&m.params, &m.span, diags, ctx);
+impl Visitor for Collector {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        self.check_formals(&node.params, &node.span);
+        walk_function_decl(self, node);
+    }
+
+    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+        self.check_formals(&node.params, &node.span);
+        walk_constructor_decl(self, node);
+    }
+
+    fn visit_method_decl(&mut self, node: &MethodDecl) {
+        self.check_formals(&node.params, &node.span);
+        walk_method_decl(self, node);
+    }
+
+    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+        self.check(1, &node.span);
+        falcon_syntax::visitor::walk_setter_decl(self, node);
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) {
+        if let ClassMember::Operator(operator) = node {
+            self.check_formals(&operator.params, &operator.span);
         }
-        // Constructors are `ConstructorDeclaration` nodes, which the dcl metric
-        // does not support, so wide named-parameter constructors (the dominant
-        // Flutter/DI pattern) are not counted. Operators are method
-        // declarations but always have fixed, tiny arity.
-        ClassMember::Operator(op) => {
-            check_function_params(&op.params, &op.span, diags, ctx);
+        falcon_syntax::visitor::walk_class_member(self, node);
+    }
+
+    fn visit_dart_type(&mut self, node: &DartType) {
+        if let DartType::Function(function) = node {
+            self.check(function.params.len(), &function.span);
         }
-        _ => {}
+        walk_dart_type(self, node);
+    }
+
+    fn visit_formal_param(&mut self, node: &FormalParam) {
+        if let Some(params) = &node.function_params {
+            self.check_formals(params, &node.span);
+        }
+        falcon_syntax::visitor::walk_formal_param(self, node);
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::LocalFunc(function) = node {
+            self.check_formals(&function.params, &function.span);
+        }
+        walk_stmt(self, node);
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        if let Expr::FuncExpr { params, span, .. } = node {
+            self.check_formals(params, span);
+        }
+        walk_expr(self, node);
     }
 }

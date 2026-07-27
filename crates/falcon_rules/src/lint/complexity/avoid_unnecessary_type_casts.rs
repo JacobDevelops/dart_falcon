@@ -1,120 +1,12 @@
-//! Flags an `as` cast to a type the operand already has.
-//!
-//! Casting a variable to its own declared type does nothing at runtime and
-//! hides the fact that no conversion occurs; remove it. Lacking full type
-//! inference, the rule tracks the non-nullable declared types of local
-//! variables and class fields and reports `x as T` when `x`'s declared type
-//! matches `T` (same name and type arguments). A nullable-declared operand is
-//! never flagged, since a cast can still strip its nullability.
+//! Flags an `as` cast to the operand's resolved static type.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
-use falcon_syntax::ast::*;
-use std::collections::{HashMap, HashSet};
+use falcon_syntax::ast::Program;
+
+use crate::lint::semantic_type_operations::{TypeOperationKind, collect};
 
 pub struct AvoidUnnecessaryTypeCasts;
-
-impl AvoidUnnecessaryTypeCasts {
-    /// Declared types of the locals visible to `check_block`, which walks every
-    /// statement through the shared visitor — so this must too, or a local
-    /// declared in a loop or a `try` body goes untracked.
-    ///
-    /// The map is flat, with no lexical scoping. A name declared twice in one
-    /// body is therefore ambiguous, so it is dropped rather than guessed at: a
-    /// missed cast beats reporting a correct one as redundant.
-    fn collect_local_vars(&self, stmts: &[Stmt]) -> HashMap<String, DartType> {
-        let mut var_types = HashMap::new();
-        let mut seen: HashSet<String> = HashSet::new();
-
-        falcon_syntax::visitor::for_each_stmt_in_stmts(stmts, &mut |stmt| {
-            let Stmt::LocalVar(LocalVarDecl {
-                var_type,
-                declarators,
-                ..
-            }) = stmt
-            else {
-                return;
-            };
-            for declarator in declarators {
-                let name = &declarator.name.name;
-                if !seen.insert(name.clone()) {
-                    var_types.remove(name);
-                    continue;
-                }
-                if let Some(var_t) = var_type
-                    && let DartType::Named(named) = var_t
-                    && !named.is_nullable
-                {
-                    var_types.insert(name.clone(), var_t.clone());
-                }
-            }
-        });
-
-        var_types
-    }
-
-    fn collect_class_fields(class: &ClassDecl) -> HashMap<String, DartType> {
-        let mut map = HashMap::new();
-        for member in &class.members {
-            if let ClassMember::Field(field) = member
-                && let Some(field_type) = &field.field_type
-                && let DartType::Named(named) = field_type
-                && !named.is_nullable
-            {
-                for declarator in &field.declarators {
-                    map.insert(declarator.name.name.clone(), field_type.clone());
-                }
-            }
-        }
-        map
-    }
-
-    fn types_match(declared: &DartType, cast_type: &DartType) -> bool {
-        if let (DartType::Named(decl), DartType::Named(cast)) = (declared, cast_type) {
-            if decl.is_nullable {
-                return false;
-            }
-            let decl_name = decl.segments.first().map(|s| s.name.as_str());
-            let cast_name = cast.segments.first().map(|s| s.name.as_str());
-            if decl_name != cast_name {
-                return false;
-            }
-            if cast.type_args.len() != decl.type_args.len() {
-                return false;
-            }
-            if cast.type_args.is_empty() {
-                return true;
-            }
-            cast.type_args
-                .iter()
-                .zip(decl.type_args.iter())
-                .all(|(c, d)| {
-                    if let (DartType::Named(cn), DartType::Named(dn)) = (c, d) {
-                        cn.segments.first().map(|s| s.name.as_str())
-                            == dn.segments.first().map(|s| s.name.as_str())
-                    } else {
-                        false
-                    }
-                })
-        } else {
-            false
-        }
-    }
-
-    fn check_as_expr(
-        &self,
-        expr: &Expr,
-        dart_type: &DartType,
-        var_types: &HashMap<String, DartType>,
-    ) -> bool {
-        if let Expr::Ident(Identifier { name, .. }) = expr
-            && let Some(declared) = var_types.get(name)
-        {
-            return Self::types_match(declared, dart_type);
-        }
-        false
-    }
-}
 
 impl Rule for AvoidUnnecessaryTypeCasts {
     fn name(&self) -> &'static str {
@@ -122,70 +14,34 @@ impl Rule for AvoidUnnecessaryTypeCasts {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Function(func_decl) => {
-                    if let Some(FunctionBody::Block(block)) = &func_decl.body {
-                        let var_types = self.collect_local_vars(&block.stmts);
-                        self.check_block(block, &var_types, ctx, &mut diagnostics);
-                    }
+        let Some(analysis) = collect(program, ctx) else {
+            return Vec::new();
+        };
+        analysis
+            .operations
+            .into_iter()
+            .filter_map(|operation| {
+                if !matches!(operation.kind, TypeOperationKind::As)
+                    || operation.operand != operation.target
+                    || operation.operand.nullable()
+                    || matches!(
+                        operation.operand,
+                        ResolvedType::Unknown | ResolvedType::Dynamic
+                    )
+                {
+                    return None;
                 }
-                TopLevelDecl::Class(class_decl) => {
-                    let class_fields = Self::collect_class_fields(class_decl);
-                    for member in &class_decl.members {
-                        let body = match member {
-                            ClassMember::Method(m) => m.body.as_ref(),
-                            ClassMember::Getter(g) => g.body.as_ref(),
-                            _ => None,
-                        };
-                        if let Some(FunctionBody::Block(block)) = body {
-                            let mut var_types = class_fields.clone();
-                            var_types.extend(self.collect_local_vars(&block.stmts));
-                            self.check_block(block, &var_types, ctx, &mut diagnostics);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        diagnostics
-    }
-}
-
-impl AvoidUnnecessaryTypeCasts {
-    /// Report every redundant `as` cast anywhere in `block`. Traversal goes
-    /// through the exhaustive shared walker, so a cast cannot hide inside newer
-    /// syntax (a record-pattern declaration, a switch expression, a labeled
-    /// statement) the way a hand-rolled `_ => {}` walk allowed.
-    fn check_block(
-        &self,
-        block: &Block,
-        var_types: &HashMap<String, DartType>,
-        ctx: &AnalyzeContext,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
-        falcon_syntax::visitor::for_each_expr_in_stmts(&block.stmts, &mut |e| {
-            if let Expr::As {
-                expr,
-                dart_type,
-                span,
-            } = e
-                && self.check_as_expr(expr, dart_type, var_types)
-            {
-                diagnostics.push(Diagnostic::new(
-                    "avoid-unnecessary-type-casts",
+                Some(Diagnostic::new(
+                    self.name(),
                     Severity::Warning,
                     "Unnecessary type cast — variable is already known to be this type",
                     ctx.file_path.to_string_lossy().into_owned(),
                     DiagSpan {
-                        start: span.start,
-                        end: span.end,
+                        start: operation.span.start,
+                        end: operation.span.end,
                     },
-                ));
-            }
-        });
+                ))
+            })
+            .collect()
     }
 }
