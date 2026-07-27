@@ -26,7 +26,7 @@ class D extends ConsumerState<StatefulWidget> {
   @override
   void initState() {
     final a = 1;
-    super.initState(); /* expect: proper-super-init-state */
+    super.initState();
     print(a);
   }
 }

@@ -40,3 +40,8 @@ class Counter {
     print(newValue);
   }
 }
+
+void shadowedUnknownCallee() {
+  dynamic transform = () {};
+  transform();
+}

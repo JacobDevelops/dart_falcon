@@ -58,3 +58,9 @@ class DataLoader {
     });
   }
 }
+
+void namedCallback({required void Function() callback}) {}
+
+void badNamed() {
+  namedCallback(callback: () async {}); /* expect: avoid-passing-async-when-sync-expected */
+}

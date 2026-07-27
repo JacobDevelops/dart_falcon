@@ -6,5 +6,9 @@ void examples() {
   final d = RegExp('(abc'); /* expect: valid-regexps */
   final e = RegExp('a(b(c)'); /* expect: valid-regexps */
   final f = new RegExp('foo)'); /* expect: valid-regexps */
-  print([a, b, c, d, e, f]);
+  final g = RegExp('*abc'); /* expect: valid-regexps */
+  final h = RegExp('[z-a]'); /* expect: valid-regexps */
+  final i = RegExp(r'\xG0'); /* expect: valid-regexps */
+  final j = RegExp('a{3,2}'); /* expect: valid-regexps */
+  print([a, b, c, d, e, f, g, h, i, j]);
 }

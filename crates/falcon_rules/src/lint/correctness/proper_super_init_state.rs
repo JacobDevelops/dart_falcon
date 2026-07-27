@@ -1,14 +1,9 @@
-//! Require `super.initState()` to be the first call in `initState`.
-//!
-//! Flags an `initState` method whose first statement is not `super.initState()`,
-//! whether the call comes later or is missing altogether. The framework's
-//! `State.initState` establishes the base bookkeeping the object depends on, so
-//! a subclass must let it run before its own setup; initialization that touches
-//! `context` or framework state before `super.initState()` runs against an
-//! object that is not yet fully wired. Make `super.initState()` the first line
-//! of the method.
+//! Require `super.initState()` to be the first statement of a resolved Flutter
+//! `State` subclass's `initState` override.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, TypeTruth,
+};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
@@ -20,85 +15,87 @@ impl Rule for ProperSuperInitState {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+            return Vec::new();
+        };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let state = flutter_state();
         let mut diags = Vec::new();
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Class(c) if extends_state(&c.extends) => {
-                    for m in &c.members {
-                        check_member(m, &mut diags, ctx);
-                    }
+        for declaration in &program.declarations {
+            let TopLevelDecl::Class(class) = declaration else {
+                continue;
+            };
+            let Some(identity) = model.resolve_name(std::slice::from_ref(&class.name.name)) else {
+                continue;
+            };
+            if signatures.is_subtype_of(&interface(identity), &state, &model) != TypeTruth::Yes {
+                continue;
+            }
+            for member in &class.members {
+                let ClassMember::Method(method) = member else {
+                    continue;
+                };
+                if method.name.name != "initState" {
+                    continue;
                 }
-                TopLevelDecl::MixinClass(mc) if extends_state(&mc.extends) => {
-                    for m in &mc.members {
-                        check_member(m, &mut diags, ctx);
-                    }
+                let Some(FunctionBody::Block(block)) = &method.body else {
+                    continue;
+                };
+                if block
+                    .stmts
+                    .first()
+                    .is_some_and(is_super_init_state_statement)
+                {
+                    continue;
                 }
-                _ => {}
+                let report = block
+                    .stmts
+                    .iter()
+                    .find(|statement| is_super_init_state_statement(statement))
+                    .map(Stmt::span)
+                    .unwrap_or(&method.name.span);
+                diags.push(Diagnostic::new(
+                    "proper-super-init-state",
+                    Severity::Warning,
+                    "super.initState() should be called first in initState().",
+                    ctx.file_path.to_string_lossy().into_owned(),
+                    DiagSpan {
+                        start: report.start,
+                        end: report.end,
+                    },
+                ));
             }
         }
         diags
     }
 }
 
-/// True when a class extends a `State`-like base (its name ends with `State`,
-/// e.g. `State`, `ConsumerState`). This scopes the lifecycle check to widgets.
-fn extends_state(extends: &Option<DartType>) -> bool {
-    matches!(extends, Some(DartType::Named(nt))
-        if nt.segments.last().is_some_and(|s| s.name.ends_with("State")))
+fn is_super_init_state_statement(statement: &Stmt) -> bool {
+    let Stmt::Expr(ExprStmt { expr, .. }) = statement else {
+        return false;
+    };
+    matches!(expr,
+        Expr::Call { callee, args, .. }
+            if args.positional.is_empty()
+                && args.named.is_empty()
+                && matches!(callee.as_ref(),
+                    Expr::Field { object, field, .. }
+                        if matches!(object.as_ref(), Expr::Super { .. })
+                            && field.name == "initState"))
 }
 
-fn check_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if let ClassMember::Method(m) = member
-        && m.name.name == "initState"
-        && let Some(FunctionBody::Block(block)) = &m.body
-    {
-        check_init_state(block, &m.name.span, diags, ctx);
+fn interface(identity: DeclarationIdentity) -> ResolvedType {
+    ResolvedType::Interface {
+        identity,
+        arguments: Vec::new(),
+        nullable: false,
+        extension_type: false,
     }
 }
 
-fn check_init_state(
-    block: &Block,
-    name_span: &Span,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
-    let first_is_super = matches!(
-        block.stmts.first(),
-        Some(Stmt::Expr(ExprStmt { expr, .. })) if is_super_init_state_call(expr)
-    );
-    if first_is_super {
-        return;
+fn flutter_state() -> DeclarationIdentity {
+    DeclarationIdentity::Package {
+        package: "flutter".to_string(),
+        name: "State".to_string(),
     }
-
-    // Either super.initState() appears but is not first, or it is missing.
-    let report_span = block
-        .stmts
-        .iter()
-        .find_map(|s| match s {
-            Stmt::Expr(ExprStmt { expr, span }) if is_super_init_state_call(expr) => Some(span),
-            _ => None,
-        })
-        .unwrap_or(name_span);
-
-    diags.push(Diagnostic::new(
-        "proper-super-init-state",
-        Severity::Warning,
-        "super.initState() should be called first in initState().",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: report_span.start,
-            end: report_span.end,
-        },
-    ));
-}
-
-fn is_super_init_state_call(expr: &Expr) -> bool {
-    if let Expr::Call { callee, .. } = expr
-        && let Expr::Field { object, field, .. } = callee.as_ref()
-        && matches!(object.as_ref(), Expr::Super { .. })
-        && field.name == "initState"
-    {
-        return true;
-    }
-    false
 }

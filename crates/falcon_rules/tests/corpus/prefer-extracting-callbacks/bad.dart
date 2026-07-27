@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' as f;
 
 class MyWidget extends StatelessWidget {
   const MyWidget({super.key});
@@ -26,6 +27,16 @@ class MyState extends State<MyWidget> {
       child: const Text('tap'),
     );
   }
+}
+
+class PrefixedWidget extends f.StatelessWidget {
+  @override
+  f.Widget build(f.BuildContext context) => f.ElevatedButton(
+    onPressed: () { /* expect: prefer-extracting-callbacks */
+      final value = DateTime.now();
+      doSomething(value);
+    },
+  );
 }
 
 void doSomething(Object? x) {}

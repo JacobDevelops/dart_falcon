@@ -1,7 +1,7 @@
 //! Require `hashCode` and `==` to be overridden together.
 //!
-//! Flags a class, mixin, or mixin class that overrides the `==` operator without
-//! also defining `hashCode`, or defines `hashCode` without overriding `==`. The
+//! Flags a class that overrides the `==` operator without also defining
+//! `hashCode`, or defines `hashCode` without overriding `==`. The
 //! two are bound by a contract: any two objects that compare equal must return
 //! the same hash code. Overriding only one breaks that invariant, so the type
 //! misbehaves as a `Map` key or `Set` element — lookups miss and duplicates slip
@@ -22,13 +22,9 @@ impl Rule for HashAndEquals {
         let file = ctx.file_path.to_string_lossy().into_owned();
         let mut diags = Vec::new();
         for decl in &program.declarations {
-            let members = match decl {
-                TopLevelDecl::Class(c) => &c.members,
-                TopLevelDecl::Mixin(m) => &m.members,
-                TopLevelDecl::MixinClass(mc) => &mc.members,
-                _ => continue,
-            };
-            check_members(members, &file, &mut diags);
+            if let TopLevelDecl::Class(class) = decl {
+                check_members(&class.members, &file, &mut diags);
+            }
         }
         diags
     }
@@ -47,9 +43,15 @@ fn equals_span(members: &[ClassMember]) -> Option<&Span> {
 fn hashcode_span(members: &[ClassMember]) -> Option<&Span> {
     members.iter().find_map(|m| match m {
         ClassMember::Getter(g) if g.name.name == "hashCode" => Some(&g.span),
-        ClassMember::Method(mt) if mt.name.name == "hashCode" => Some(&mt.span),
-        ClassMember::Field(f) if f.declarators.iter().any(|d| d.name.name == "hashCode") => {
-            Some(&f.span)
+        ClassMember::Setter(s) if s.name.name == "hashCode" => Some(&s.span),
+        ClassMember::Method(method) if method.name.name == "hashCode" => Some(&method.span),
+        ClassMember::Field(field)
+            if field
+                .declarators
+                .iter()
+                .any(|declarator| declarator.name.name == "hashCode") =>
+        {
+            Some(&field.span)
         }
         _ => None,
     })

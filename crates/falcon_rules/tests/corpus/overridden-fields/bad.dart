@@ -1,3 +1,4 @@
-// Placeholder: violation examples with expect annotations will be added
-// when the rule is implemented.
-void main() {}
+class Base { int value = 0; }
+class Child extends Base {
+  int value = 1; /* expect: overridden-fields */
+}

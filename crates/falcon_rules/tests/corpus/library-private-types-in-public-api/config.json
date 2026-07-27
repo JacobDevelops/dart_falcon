@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "library-private-types-in-public-api": "warn"
+      }
+    }
+  }
+}

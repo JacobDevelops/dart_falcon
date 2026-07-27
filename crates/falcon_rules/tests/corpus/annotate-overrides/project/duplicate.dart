@@ -1,0 +1,3 @@
+class Base {
+  void unrelated() {}
+}

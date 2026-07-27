@@ -12,6 +12,8 @@ falcon_diagnostics = { path = "../falcon_diagnostics" }
 falcon_config = { path = "../falcon_config" }
 regex = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+marked-yaml = { workspace = true }
 
 [dev-dependencies]
 # In-process golden-corpus runner (tests/corpus_tests.rs) parses fixtures directly.

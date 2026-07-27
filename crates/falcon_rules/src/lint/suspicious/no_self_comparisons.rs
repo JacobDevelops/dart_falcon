@@ -1,16 +1,14 @@
-//! Flags a comparison whose two operands are identical.
+//! Flags proven self-comparisons of side-effect-free scalar values.
 //!
-//! An expression like `x == x` or `count < count` compares a value with itself,
-//! so `==`, `<=`, and `>=` are always true while `!=`, `<`, and `>` are always
-//! false. It is almost always a typo for a different variable or a leftover from
-//! a refactor, and the constant result masks the check that was intended.
-//! Operands are compared by source text with whitespace removed, covering `==`,
-//! `!=`, `<`, `>`, `<=`, and `>=`. Fix the operand that was meant to differ.
+//! Getter reads, index operations, calls, and user-defined operator receivers are
+//! intentionally excluded: evaluating the same syntax twice need not produce the
+//! same value, and equality/ordering may be overloaded.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+
+use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 pub struct NoSelfComparisons;
 
@@ -20,48 +18,53 @@ impl Rule for NoSelfComparisons {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let Some(state) = SemanticState::new(program, ctx) else {
+            return Vec::new();
+        };
         let mut collector = Collector {
-            diags: Vec::new(),
             file: ctx.file_path.to_string_lossy().into_owned(),
             source: ctx.source,
+            diags: Vec::new(),
         };
-        collector.visit_program(program);
+        visit_program(&mut collector, program, state);
         collector.diags
     }
 }
 
-struct Collector<'s> {
-    diags: Vec<Diagnostic>,
+struct Collector<'a> {
     file: String,
-    source: &'s str,
+    source: &'a str,
+    diags: Vec<Diagnostic>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::Binary {
+impl SemanticRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        let Expr::Binary {
             op,
             left,
             right,
             span,
         } = node
-            && is_comparison(op)
+        else {
+            return;
+        };
+        if !is_comparison(op)
+            || !proven_scalar_value(left, state)
+            || !proven_scalar_value(right, state)
+            || normalized(self.source, left.span()) != normalized(self.source, right.span())
         {
-            let l = strip_ws(&self.source[left.span().start..left.span().end]);
-            let r = strip_ws(&self.source[right.span().start..right.span().end]);
-            if !l.is_empty() && l == r && is_side_effect_free(left) && is_side_effect_free(right) {
-                self.diags.push(Diagnostic::new(
-                    "no-self-comparisons",
-                    Severity::Warning,
-                    "Both operands of this comparison are identical.",
-                    self.file.clone(),
-                    DiagSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
-                ));
-            }
+            return;
         }
-        walk_expr(self, node);
+        self.diags.push(Diagnostic::new(
+            "no-self-comparisons",
+            Severity::Warning,
+            "Both operands of this comparison are identical.",
+            self.file.clone(),
+            DiagSpan {
+                start: span.start,
+                end: span.end,
+            },
+        ));
     }
 }
 
@@ -77,49 +80,40 @@ fn is_comparison(op: &BinaryOp) -> bool {
     )
 }
 
-/// Collapse an operand's source text by removing all whitespace, so that
-/// formatting differences do not hide a structurally identical comparison.
-fn strip_ws(s: &str) -> String {
-    s.chars().filter(|c| !c.is_whitespace()).collect()
-}
-
-/// Two textually identical operands are only a self-comparison when evaluating
-/// them twice yields the same value. A call/constructor may return a different
-/// value each time (`list.removeLast() == list.removeLast()`), so any operand
-/// reaching an invocation is not treated as identical.
-fn is_side_effect_free(expr: &Expr) -> bool {
-    match expr {
+fn proven_scalar_value(expression: &Expr, state: &SemanticState<'_>) -> bool {
+    let syntactically_stable = match expression {
         Expr::Ident(_)
         | Expr::IntLit { .. }
         | Expr::DoubleLit { .. }
         | Expr::BoolLit { .. }
-        | Expr::NullLit { .. }
-        | Expr::SymbolLit { .. }
-        | Expr::This { .. }
-        | Expr::Super { .. } => true,
-        Expr::StringLit(s) => s
-            .interpolations
-            .iter()
-            .all(|i| is_side_effect_free(&i.expr)),
-        Expr::Field { object, .. } => is_side_effect_free(object),
-        Expr::Index { object, index, .. } => {
-            is_side_effect_free(object) && is_side_effect_free(index)
-        }
-        Expr::Unary { operand, .. } | Expr::NullAssert { operand, .. } => {
-            is_side_effect_free(operand)
-        }
-        Expr::Is { expr, .. } | Expr::As { expr, .. } => is_side_effect_free(expr),
-        Expr::Binary { left, right, .. } => is_side_effect_free(left) && is_side_effect_free(right),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
+        | Expr::NullLit { .. } => true,
+        Expr::StringLit(string) => string.interpolations.is_empty(),
+        Expr::Unary { operand, .. } => matches!(
+            operand.as_ref(),
+            Expr::Ident(_) | Expr::IntLit { .. } | Expr::DoubleLit { .. }
+        ),
+        _ => false,
+    };
+    syntactically_stable && scalar_type(&state.infer(expression))
+}
+
+fn scalar_type(ty: &ResolvedType) -> bool {
+    match ty {
+        ResolvedType::Null => true,
+        ResolvedType::Interface {
+            identity: DeclarationIdentity::Sdk { library, name },
             ..
         } => {
-            is_side_effect_free(condition)
-                && is_side_effect_free(then_expr)
-                && is_side_effect_free(else_expr)
+            library == "dart:core"
+                && matches!(name.as_str(), "bool" | "int" | "double" | "num" | "String")
         }
         _ => false,
     }
+}
+
+fn normalized(source: &str, span: &Span) -> String {
+    source[span.start..span.end.min(source.len())]
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect()
 }

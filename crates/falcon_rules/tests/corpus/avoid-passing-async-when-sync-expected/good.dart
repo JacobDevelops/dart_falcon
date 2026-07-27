@@ -93,3 +93,14 @@ void processItems(void Function(String) handler) {
 void goodProcess() {
   processItems((item) => print('Processing: $item'));
 }
+
+void shadowedCallee() {
+  void processSync(Future<void> Function() callback) {}
+  processSync(() async {});
+}
+
+void namedAsync({required Future<void> Function() callback}) {}
+
+void goodNamed() {
+  namedAsync(callback: () async {});
+}

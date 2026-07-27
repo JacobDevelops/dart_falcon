@@ -1,356 +1,16 @@
-//! Flags an `async` function literal passed where a synchronous callback is
-//! expected.
-//!
-//! When a parameter's type is a function that does not return a `Future`,
-//! passing an `async` closure hands back a `Future` the caller never awaits: the
-//! body runs out of order, its exceptions escape as unhandled errors rather than
-//! being caught, and any value it produces is silently lost. Pass a synchronous
-//! closure, or widen the parameter to a `Future`-returning function if
-//! asynchronous work is genuinely intended. Detection matches positional call
-//! arguments against the parameter types of functions and methods declared in
-//! the same file.
+//! Flags an `async` closure passed to a proven synchronous callback parameter.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use std::collections::{HashMap, HashSet};
+
+use falcon_analyze::{
+    AnalyzeContext, ResolvedSignature, ResolvedType, Rule, SemanticModel, SignatureIndex,
+    TypeEnvironment, TypeParameterScope, TypeTruth,
+};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use std::collections::HashMap;
+use falcon_syntax::visitor::{Visitor, bound_names, walk_expr, walk_pattern, walk_stmt};
 
 pub struct AvoidPassingAsyncWhenSyncExpected;
-
-impl AvoidPassingAsyncWhenSyncExpected {
-    fn is_non_future_function_type(dart_type: &DartType) -> bool {
-        match dart_type {
-            DartType::Function(func_type) => {
-                if let Some(return_type) = &func_type.return_type {
-                    !Self::is_future_type(return_type)
-                } else {
-                    true
-                }
-            }
-            DartType::Named(named) => named
-                .segments
-                .last()
-                .is_some_and(|seg| seg.name == "Function"),
-            _ => false,
-        }
-    }
-
-    fn is_future_type(dart_type: &DartType) -> bool {
-        match dart_type {
-            DartType::Named(named) => named
-                .segments
-                .last()
-                .is_some_and(|seg| seg.name == "Future"),
-            _ => false,
-        }
-    }
-
-    fn collect_function_params(program: &Program) -> HashMap<String, Vec<Option<DartType>>> {
-        let mut map = HashMap::new();
-
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Function(func) => {
-                    let param_types = func
-                        .params
-                        .positional
-                        .iter()
-                        .map(|p| p.param_type.clone())
-                        .chain(
-                            func.params
-                                .optional_positional
-                                .iter()
-                                .map(|p| p.param_type.clone()),
-                        )
-                        .collect();
-                    map.insert(func.name.name.clone(), param_types);
-                }
-                TopLevelDecl::Class(class) => {
-                    for member in &class.members {
-                        if let ClassMember::Method(method) = member {
-                            let param_types: Vec<Option<DartType>> = method
-                                .params
-                                .positional
-                                .iter()
-                                .map(|p| p.param_type.clone())
-                                .chain(
-                                    method
-                                        .params
-                                        .optional_positional
-                                        .iter()
-                                        .map(|p| p.param_type.clone()),
-                                )
-                                .collect();
-                            let method_key = format!("{}#{}", class.name.name, method.name.name);
-                            map.insert(method_key, param_types.clone());
-                            map.entry(method.name.name.clone()).or_insert(param_types);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        map
-    }
-
-    fn visit_exprs(expr: &Expr, f: &mut impl FnMut(&Expr)) {
-        f(expr);
-
-        match expr {
-            Expr::Unary { operand, .. } => Self::visit_exprs(operand, f),
-            Expr::PostfixIncDec { operand, .. } => Self::visit_exprs(operand, f),
-            Expr::Binary { left, right, .. } => {
-                Self::visit_exprs(left, f);
-                Self::visit_exprs(right, f);
-            }
-            Expr::Assign { target, value, .. } => {
-                Self::visit_exprs(target, f);
-                Self::visit_exprs(value, f);
-            }
-            Expr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                Self::visit_exprs(condition, f);
-                Self::visit_exprs(then_expr, f);
-                Self::visit_exprs(else_expr, f);
-            }
-            Expr::Is { expr, .. } => Self::visit_exprs(expr, f),
-            Expr::As { expr, .. } => Self::visit_exprs(expr, f),
-            Expr::Field { object, .. } => Self::visit_exprs(object, f),
-            Expr::Index { object, index, .. } => {
-                Self::visit_exprs(object, f);
-                Self::visit_exprs(index, f);
-            }
-            Expr::Call { callee, args, .. } => {
-                Self::visit_exprs(callee, f);
-                for arg in &args.positional {
-                    Self::visit_exprs(arg, f);
-                }
-                for named_arg in &args.named {
-                    Self::visit_exprs(&named_arg.value, f);
-                }
-            }
-            Expr::Cascade {
-                object, sections, ..
-            } => {
-                Self::visit_exprs(object, f);
-                for section in sections {
-                    for op in &section.ops {
-                        match op {
-                            CascadeOp::Call(_, _, args) => {
-                                for arg in &args.positional {
-                                    Self::visit_exprs(arg, f);
-                                }
-                                for named_arg in &args.named {
-                                    Self::visit_exprs(&named_arg.value, f);
-                                }
-                            }
-                            CascadeOp::Index(index, _) => {
-                                Self::visit_exprs(index, f);
-                            }
-                            CascadeOp::Assign(target, _, value) => {
-                                Self::visit_exprs(target, f);
-                                Self::visit_exprs(value, f);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            Expr::List { elements, .. } => {
-                for elem in elements {
-                    Self::visit_collection_element(elem, f);
-                }
-            }
-            Expr::Map {
-                entries, elements, ..
-            } => {
-                for entry in entries {
-                    Self::visit_exprs(&entry.key, f);
-                    Self::visit_exprs(&entry.value, f);
-                }
-                for e in map_element_exprs(elements) {
-                    Self::visit_exprs(e, f);
-                }
-            }
-            Expr::Set { elements, .. } => {
-                for elem in elements {
-                    Self::visit_collection_element(elem, f);
-                }
-            }
-            Expr::Record { fields, .. } => {
-                for field in fields {
-                    Self::visit_exprs(&field.value, f);
-                }
-            }
-            Expr::New { args, .. } => {
-                for arg in &args.positional {
-                    Self::visit_exprs(arg, f);
-                }
-                for named_arg in &args.named {
-                    Self::visit_exprs(&named_arg.value, f);
-                }
-            }
-            Expr::Await { expr, .. } => Self::visit_exprs(expr, f),
-            Expr::Throw { expr, .. } => Self::visit_exprs(expr, f),
-            Expr::Switch { subject, arms, .. } => {
-                Self::visit_exprs(subject, f);
-                for arm in arms {
-                    Self::visit_exprs(&arm.body, f);
-                }
-            }
-            Expr::NullAssert { operand, .. } => Self::visit_exprs(operand, f),
-            _ => {}
-        }
-    }
-
-    fn visit_collection_element(elem: &CollectionElement, f: &mut impl FnMut(&Expr)) {
-        match elem {
-            CollectionElement::Expr(expr) => Self::visit_exprs(expr, f),
-            CollectionElement::NullAware { expr, .. } => Self::visit_exprs(expr, f),
-            CollectionElement::Spread { expr, .. } => Self::visit_exprs(expr, f),
-            CollectionElement::If {
-                condition,
-                then_elem,
-                else_elem,
-                ..
-            } => {
-                if let IfCondition::Expr(cond_expr) = condition {
-                    Self::visit_exprs(cond_expr, f);
-                }
-                Self::visit_collection_element(then_elem, f);
-                if let Some(else_e) = else_elem {
-                    Self::visit_collection_element(else_e, f);
-                }
-            }
-            CollectionElement::For {
-                iterable, element, ..
-            } => {
-                Self::visit_exprs(iterable, f);
-                Self::visit_collection_element(element, f);
-            }
-            CollectionElement::CFor {
-                init,
-                condition,
-                updates,
-                element,
-                ..
-            } => {
-                match init {
-                    Some(ForInit::VarDecl(d)) => {
-                        for decl in &d.declarators {
-                            if let Some(e) = &decl.initializer {
-                                Self::visit_exprs(e, f);
-                            }
-                        }
-                    }
-                    Some(ForInit::ForIn { iterable, .. }) => {
-                        Self::visit_exprs(iterable, f);
-                    }
-                    Some(ForInit::PatternForIn { iterable, .. }) => {
-                        Self::visit_exprs(iterable, f);
-                    }
-                    Some(ForInit::Exprs(es)) => {
-                        for e in es {
-                            Self::visit_exprs(e, f);
-                        }
-                    }
-                    None => {}
-                }
-                if let Some(c) = condition {
-                    Self::visit_exprs(c, f);
-                }
-                for u in updates {
-                    Self::visit_exprs(u, f);
-                }
-                Self::visit_collection_element(element, f);
-            }
-        }
-    }
-
-    fn visit_stmts(stmts: &[Stmt], f: &mut impl FnMut(&Stmt)) {
-        for stmt in stmts {
-            f(stmt);
-            match stmt {
-                Stmt::Block(block) => Self::visit_stmts(&block.stmts, f),
-                Stmt::If(if_stmt) => {
-                    if let IfCondition::Expr(_) = &if_stmt.condition {}
-                    Self::visit_stmts(&[*if_stmt.then_branch.clone()], f);
-                    if let Some(else_branch) = &if_stmt.else_branch {
-                        Self::visit_stmts(&[*else_branch.clone()], f);
-                    }
-                }
-                Stmt::For(for_stmt) => {
-                    Self::visit_stmts(&[*for_stmt.body.clone()], f);
-                }
-                Stmt::While(while_stmt) => {
-                    Self::visit_stmts(&[*while_stmt.body.clone()], f);
-                }
-                Stmt::DoWhile(do_while_stmt) => {
-                    Self::visit_stmts(&[*do_while_stmt.body.clone()], f);
-                }
-                Stmt::Switch(switch_stmt) => {
-                    for switch_case in &switch_stmt.cases {
-                        Self::visit_stmts(&switch_case.body, f);
-                    }
-                }
-                Stmt::TryCatch(try_catch) => {
-                    Self::visit_stmts(&try_catch.body.stmts, f);
-                    for catch_clause in &try_catch.catches {
-                        Self::visit_stmts(&catch_clause.body.stmts, f);
-                    }
-                    if let Some(finally) = &try_catch.finally {
-                        Self::visit_stmts(&finally.stmts, f);
-                    }
-                }
-                Stmt::Expr(expr_stmt) => {
-                    Self::visit_exprs(&expr_stmt.expr, &mut |_| {});
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn get_callee_name(expr: &Expr) -> Option<String> {
-        match expr {
-            Expr::Ident(id) => Some(id.name.clone()),
-            Expr::Field { field, .. } => Some(field.name.clone()),
-            _ => None,
-        }
-    }
-
-    fn check_call(
-        callee_expr: &Expr,
-        args: &ArgList,
-        param_map: &HashMap<String, Vec<Option<DartType>>>,
-    ) -> Vec<Span> {
-        let mut violations = Vec::new();
-
-        if let Some(callee_name) = Self::get_callee_name(callee_expr)
-            && let Some(param_types) = param_map.get(&callee_name)
-        {
-            for (idx, arg) in args.positional.iter().enumerate() {
-                if let Expr::FuncExpr {
-                    is_async: true,
-                    span: func_span,
-                    ..
-                } = arg
-                    && idx < param_types.len()
-                    && let Some(Some(param_type)) = param_types.get(idx)
-                    && Self::is_non_future_function_type(param_type)
-                {
-                    violations.push(func_span.clone());
-                }
-            }
-        }
-
-        violations
-    }
-}
 
 impl Rule for AvoidPassingAsyncWhenSyncExpected {
     fn name(&self) -> &'static str {
@@ -358,71 +18,404 @@ impl Rule for AvoidPassingAsyncWhenSyncExpected {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-        let param_map = Self::collect_function_params(program);
-        let file_path = ctx.file_path.to_string_lossy().into_owned();
+        let Some(identities) = ctx.identities else {
+            return Vec::new();
+        };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let signatures = ctx
+            .signatures
+            .cloned()
+            .unwrap_or_else(|| SignatureIndex::from_program(program, &model));
+        let mut collector = Collector {
+            model,
+            signatures,
+            environment: TypeEnvironment::new(),
+            type_parameters: TypeParameterScope::default(),
+            names: vec![HashSet::new()],
+            current_type: None,
+            diagnostics: Vec::new(),
+            file: ctx.file_path.to_string_lossy().into_owned(),
+        };
+        collector.visit_program(program);
+        collector.diagnostics
+    }
+}
 
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Function(func) => {
-                    if let Some(FunctionBody::Block(block)) = &func.body {
-                        Self::visit_stmts(&block.stmts, &mut |stmt| {
-                            if let Stmt::Expr(expr_stmt) = stmt {
-                                Self::visit_exprs(&expr_stmt.expr, &mut |expr| {
-                                    if let Expr::Call { callee, args, .. } = expr {
-                                        let violations = Self::check_call(callee, args, &param_map);
-                                        for span in violations {
-                                            diagnostics.push(Diagnostic::new(
-                                                "avoid-passing-async-when-sync-expected",
-                                                Severity::Warning,
-                                                "Avoid passing an async function where a synchronous callback is expected",
-                                                file_path.clone(),
-                                                DiagSpan {
-                                                    start: span.start,
-                                                    end: span.end,
-                                                },
-                                            ));
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    }
+struct Collector<'a> {
+    model: SemanticModel<'a>,
+    signatures: SignatureIndex,
+    environment: TypeEnvironment,
+    type_parameters: TypeParameterScope,
+    names: Vec<HashSet<String>>,
+    current_type: Option<ResolvedType>,
+    diagnostics: Vec<Diagnostic>,
+    file: String,
+}
+
+impl Collector<'_> {
+    fn push(&mut self) {
+        self.environment.push_scope();
+        self.names.push(HashSet::new());
+    }
+
+    fn pop(&mut self) {
+        self.environment.pop_scope();
+        self.names.pop();
+    }
+
+    fn declare(&mut self, name: &str, ty: ResolvedType) {
+        self.environment.declare(name.to_string(), ty);
+        self.names
+            .last_mut()
+            .expect("lexical scope")
+            .insert(name.to_string());
+    }
+
+    fn bound(&self, name: &str) -> bool {
+        self.names.iter().rev().any(|scope| scope.contains(name))
+    }
+
+    fn infer(&self, expression: &Expr) -> ResolvedType {
+        self.environment.infer_with_signatures(
+            expression,
+            &self.model,
+            &self.signatures,
+            &self.type_parameters,
+        )
+    }
+
+    fn body(&mut self, body: &FunctionBody) {
+        match body {
+            FunctionBody::Block(block) => {
+                for statement in &block.stmts {
+                    self.visit_stmt(statement);
                 }
-                TopLevelDecl::Class(class) => {
-                    for member in &class.members {
-                        if let ClassMember::Method(method) = member
-                            && let Some(FunctionBody::Block(block)) = &method.body
-                        {
-                            Self::visit_stmts(&block.stmts, &mut |stmt| {
-                                if let Stmt::Expr(expr_stmt) = stmt {
-                                    Self::visit_exprs(&expr_stmt.expr, &mut |expr| {
-                                        if let Expr::Call { callee, args, .. } = expr {
-                                            let violations =
-                                                Self::check_call(callee, args, &param_map);
-                                            for span in violations {
-                                                diagnostics.push(Diagnostic::new(
-                                                        "avoid-passing-async-when-sync-expected",
-                                                        Severity::Warning,
-                                                        "Avoid passing an async function where a synchronous callback is expected",
-                                                        file_path.clone(),
-                                                        DiagSpan {
-                                                            start: span.start,
-                                                            end: span.end,
-                                                        },
-                                                    ));
-                                            }
-                                        }
-                                    });
-                                }
-                            });
-                        }
-                    }
+            }
+            FunctionBody::Arrow(expression, _) => self.visit_expr(expression),
+            FunctionBody::Native(_, _) => {}
+        }
+    }
+
+    fn function(
+        &mut self,
+        type_params: &[TypeParam],
+        params: &FormalParamList,
+        body: Option<&FunctionBody>,
+    ) {
+        self.push();
+        self.type_parameters.push(type_params, &self.model);
+        for param in params
+            .positional
+            .iter()
+            .chain(&params.optional_positional)
+            .chain(&params.named)
+        {
+            let ty = param
+                .param_type
+                .as_ref()
+                .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
+                .unwrap_or(ResolvedType::Dynamic);
+            self.declare(&param.name.name, ty);
+        }
+        if let Some(body) = body {
+            self.body(body);
+        }
+        self.type_parameters.pop();
+        self.pop();
+    }
+
+    fn local(&mut self, declaration: &LocalVarDecl) {
+        for declarator in &declaration.declarators {
+            if let Some(initializer) = &declarator.initializer {
+                self.visit_expr(initializer);
+            }
+            let ty = declaration
+                .var_type
+                .as_ref()
+                .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
+                .or_else(|| {
+                    declarator
+                        .initializer
+                        .as_ref()
+                        .map(|value| self.infer(value))
+                })
+                .unwrap_or(ResolvedType::Unknown);
+            self.declare(&declarator.name.name, ty);
+        }
+    }
+
+    fn pattern(&mut self, pattern: &Pattern) {
+        walk_pattern(self, pattern);
+        for name in bound_names(pattern) {
+            self.declare(&name.name, ResolvedType::Unknown);
+        }
+    }
+
+    fn for_init(&mut self, init: &ForInit) {
+        match init {
+            ForInit::VarDecl(declaration) => self.local(declaration),
+            ForInit::ForIn { name, iterable, .. } => {
+                self.visit_expr(iterable);
+                self.declare(&name.name, ResolvedType::Unknown);
+            }
+            ForInit::PatternForIn { pattern, iterable } => {
+                self.visit_expr(iterable);
+                self.pattern(pattern);
+            }
+            ForInit::Exprs(expressions) => {
+                for expression in expressions {
+                    self.visit_expr(expression);
                 }
-                _ => {}
             }
         }
+    }
 
-        diagnostics
+    fn resolved_signature(
+        &self,
+        callee: &Expr,
+        type_args: &[DartType],
+    ) -> Option<ResolvedSignature> {
+        let (signature, mut substitutions) = match callee {
+            Expr::Ident(identifier) if !self.bound(&identifier.name) => {
+                if let Some(current_type) = &self.current_type
+                    && let Some(resolved) =
+                        self.signatures
+                            .resolved_member(current_type, &identifier.name, &self.model)
+                {
+                    resolved
+                } else {
+                    let identity = self
+                        .model
+                        .resolve_value(std::slice::from_ref(&identifier.name))?;
+                    (self.signatures.function(&identity)?.clone(), HashMap::new())
+                }
+            }
+            Expr::Field { object, field, .. } => {
+                if let Expr::Ident(prefix) = object.as_ref()
+                    && !self.bound(&prefix.name)
+                    && let Some(identity) = self
+                        .model
+                        .resolve_value(&[prefix.name.clone(), field.name.clone()])
+                    && let Some(signature) = self.signatures.function(&identity)
+                {
+                    (signature.clone(), HashMap::new())
+                } else {
+                    let receiver = self.infer(object);
+                    self.signatures
+                        .resolved_member(&receiver, &field.name, &self.model)?
+                }
+            }
+            _ => return None,
+        };
+        substitutions.extend(signature.call_parameters.iter().zip(type_args).map(
+            |(parameter, argument)| {
+                (
+                    parameter.clone(),
+                    self.model.resolve_type_in(argument, &self.type_parameters),
+                )
+            },
+        ));
+        Some(ResolvedSignature {
+            owner_parameters: signature.owner_parameters,
+            call_parameters: signature.call_parameters,
+            positional: signature
+                .positional
+                .iter()
+                .map(|ty| self.model.substitute(ty, &substitutions))
+                .collect(),
+            named: signature
+                .named
+                .iter()
+                .map(|(name, ty)| (name.clone(), self.model.substitute(ty, &substitutions)))
+                .collect(),
+            return_type: self
+                .model
+                .substitute(&signature.return_type, &substitutions),
+        })
+    }
+
+    fn check_argument(&mut self, argument: &Expr, expected: &ResolvedType) {
+        let Expr::FuncExpr {
+            is_async: true,
+            span,
+            ..
+        } = argument
+        else {
+            return;
+        };
+        let ResolvedType::Function { return_type, .. } = expected else {
+            return;
+        };
+        if self.model.is_future_like(return_type) != TypeTruth::No {
+            return;
+        }
+        self.diagnostics.push(Diagnostic::new(
+            "avoid-passing-async-when-sync-expected",
+            Severity::Warning,
+            "Avoid passing an async function where a synchronous callback is expected",
+            self.file.clone(),
+            DiagSpan {
+                start: span.start,
+                end: span.end,
+            },
+        ));
+    }
+
+    fn check_call(&mut self, callee: &Expr, type_args: &[DartType], args: &ArgList) {
+        let Some(signature) = self.resolved_signature(callee, type_args) else {
+            return;
+        };
+        for (argument, expected) in args.positional.iter().zip(&signature.positional) {
+            self.check_argument(argument, expected);
+        }
+        for argument in &args.named {
+            if let Some(expected) = signature.named.get(&argument.name.name) {
+                self.check_argument(&argument.value, expected);
+            }
+        }
+    }
+}
+
+impl Visitor for Collector<'_> {
+    fn visit_class_decl(&mut self, node: &ClassDecl) {
+        let saved_type = self.current_type.clone();
+        self.type_parameters.push(&node.type_params, &self.model);
+        self.current_type = self
+            .model
+            .resolve_name(std::slice::from_ref(&node.name.name))
+            .map(|identity| ResolvedType::Interface {
+                identity,
+                arguments: node
+                    .type_params
+                    .iter()
+                    .filter_map(|parameter| self.type_parameters.lookup(&parameter.name.name))
+                    .collect(),
+                nullable: false,
+                extension_type: false,
+            });
+        for member in &node.members {
+            self.visit_class_member(member);
+        }
+        self.type_parameters.pop();
+        self.current_type = saved_type;
+    }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        self.function(&node.type_params, &node.params, node.body.as_ref());
+    }
+
+    fn visit_method_decl(&mut self, node: &MethodDecl) {
+        self.function(&node.type_params, &node.params, node.body.as_ref());
+    }
+
+    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+        self.function(&[], &node.params, node.body.as_ref());
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) {
+        match node {
+            Stmt::Block(block) => {
+                self.push();
+                for statement in &block.stmts {
+                    self.visit_stmt(statement);
+                }
+                self.pop();
+            }
+            Stmt::LocalVar(declaration) => self.local(declaration),
+            Stmt::LocalFunc(function) => {
+                self.declare(&function.name.name, ResolvedType::Unknown);
+                self.function(
+                    &function.type_params,
+                    &function.params,
+                    Some(&function.body),
+                );
+            }
+            Stmt::PatternDecl(declaration) => {
+                self.visit_expr(&declaration.init);
+                self.pattern(&declaration.pattern);
+            }
+            Stmt::If(statement) => match &statement.condition {
+                IfCondition::Expr(condition) => {
+                    self.visit_expr(condition);
+                    self.visit_stmt(&statement.then_branch);
+                    if let Some(branch) = &statement.else_branch {
+                        self.visit_stmt(branch);
+                    }
+                }
+                IfCondition::Case(value, pattern, guard) => {
+                    self.visit_expr(value);
+                    self.push();
+                    self.pattern(pattern);
+                    if let Some(guard) = guard {
+                        self.visit_expr(guard);
+                    }
+                    self.visit_stmt(&statement.then_branch);
+                    self.pop();
+                    if let Some(branch) = &statement.else_branch {
+                        self.visit_stmt(branch);
+                    }
+                }
+            },
+            Stmt::For(statement) => {
+                self.push();
+                if let Some(init) = &statement.init {
+                    self.for_init(init);
+                }
+                if let Some(condition) = &statement.condition {
+                    self.visit_expr(condition);
+                }
+                for update in &statement.update {
+                    self.visit_expr(update);
+                }
+                self.visit_stmt(&statement.body);
+                self.pop();
+            }
+            Stmt::TryCatch(statement) => {
+                for statement in &statement.body.stmts {
+                    self.visit_stmt(statement);
+                }
+                for catch in &statement.catches {
+                    self.push();
+                    if let Some(name) = &catch.exception_var {
+                        self.declare(&name.name, ResolvedType::Unknown);
+                    }
+                    if let Some(name) = &catch.stack_trace_var {
+                        self.declare(&name.name, ResolvedType::Unknown);
+                    }
+                    for statement in &catch.body.stmts {
+                        self.visit_stmt(statement);
+                    }
+                    self.pop();
+                }
+                if let Some(finally) = &statement.finally {
+                    for statement in &finally.stmts {
+                        self.visit_stmt(statement);
+                    }
+                }
+            }
+            _ => walk_stmt(self, node),
+        }
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        match node {
+            Expr::Call {
+                callee,
+                type_args,
+                args,
+                ..
+            } => self.check_call(callee, type_args, args),
+            Expr::FuncExpr {
+                type_params,
+                params,
+                body,
+                ..
+            } => {
+                self.function(type_params, params, Some(body));
+                return;
+            }
+            _ => {}
+        }
+        walk_expr(self, node);
     }
 }

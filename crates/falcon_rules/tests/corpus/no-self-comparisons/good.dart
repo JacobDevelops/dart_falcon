@@ -30,3 +30,14 @@ bool nowEqual() => DateTime.now() == DateTime.now();
 int nextId = 0;
 int gen() => nextId++;
 bool genEqual() => gen() == gen();
+
+int get changing => nextId++;
+bool getterEqual() => changing == changing;
+bool sameIndex(List<int> values) => values[0] == values[0];
+
+class WeirdEquality {
+  @override
+  bool operator ==(Object other) => false;
+
+  bool compare() => this == this;
+}

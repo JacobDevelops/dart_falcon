@@ -1,16 +1,14 @@
-//! Flags a switch `case` whose value duplicates an earlier case in the same
-//! switch.
-//!
-//! Two cases with the same constant value can never both be reachable — Dart
-//! dispatches to the first, so the later duplicate is dead code and usually
-//! signals a paste that was never edited to its intended value. Literal cases
-//! (null, bool, int, double, string, and their negations) and named constant
-//! references are compared by value, and the duplicate occurrence is reported.
-//! Give the redundant case its intended distinct value, or remove it.
+//! Flags semantically equal constant values within one switch.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use std::collections::{HashMap, HashSet};
+
+use falcon_analyze::{
+    AnalyzeContext, ConstantValue, DeclarationIdentity, Rule, SemanticModel, SignatureIndex,
+    evaluate_constant,
+};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_class_decl, walk_expr, walk_function_decl, walk_stmt};
 
 pub struct NoDuplicateCaseValues;
 
@@ -20,195 +18,220 @@ impl Rule for NoDuplicateCaseValues {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
-        diags
+        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+            return Vec::new();
+        };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let mut collector = Collector {
+            model: &model,
+            signatures,
+            owner: DeclarationIdentity::Project {
+                library: usize::MAX,
+                name: "<file>".to_string(),
+            },
+            fields: HashMap::new(),
+            file: ctx.file_path.to_string_lossy().into_owned(),
+            diags: Vec::new(),
+        };
+        collector.visit_program(program);
+        collector.diags
     }
 }
 
-fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    diags.push(Diagnostic::new(
-        "no-duplicate-case-values",
-        Severity::Warning,
-        "Duplicate case value in switch statement.",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
+struct Collector<'a> {
+    model: &'a SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    owner: DeclarationIdentity,
+    fields: HashMap<String, Expr>,
+    file: String,
+    diags: Vec<Diagnostic>,
 }
 
-fn pattern_value_key(pattern: &Pattern) -> Option<String> {
-    match pattern {
-        Pattern::Literal(lit) => match &lit.value {
-            LiteralPatternValue::Null => Some("null".to_string()),
-            LiteralPatternValue::Bool(b) => Some(b.to_string()),
-            LiteralPatternValue::Int(s) => Some(format!("int:{}", s)),
-            LiteralPatternValue::Double(s) => Some(format!("double:{}", s)),
-            LiteralPatternValue::String(s) => Some(format!("str:{}", s.value)),
-            LiteralPatternValue::NegInt(s) => Some(format!("negint:{}", s)),
-            LiteralPatternValue::NegDouble(s) => Some(format!("negdouble:{}", s)),
-        },
-        Pattern::Const(const_pat) => {
-            let name = const_pat
-                .name
+impl Visitor for Collector<'_> {
+    fn visit_class_decl(&mut self, node: &ClassDecl) {
+        let saved_owner = self.owner.clone();
+        let saved_fields = std::mem::take(&mut self.fields);
+        let Some(owner) = self
+            .model
+            .resolve_name(std::slice::from_ref(&node.name.name))
+        else {
+            walk_class_decl(self, node);
+            self.fields = saved_fields;
+            return;
+        };
+        self.owner = owner;
+        self.fields = node
+            .members
+            .iter()
+            .filter_map(|member| match member {
+                ClassMember::Field(field) if field.is_const => Some(field),
+                _ => None,
+            })
+            .flat_map(|field| {
+                field.declarators.iter().filter_map(|declarator| {
+                    declarator
+                        .initializer
+                        .as_ref()
+                        .map(|initializer| (declarator.name.name.clone(), initializer.clone()))
+                })
+            })
+            .collect();
+        walk_class_decl(self, node);
+        self.owner = saved_owner;
+        self.fields = saved_fields;
+    }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        let saved = self.owner.clone();
+        if let Some(owner) = self
+            .model
+            .resolve_value(std::slice::from_ref(&node.name.name))
+        {
+            self.owner = owner;
+        }
+        walk_function_decl(self, node);
+        self.owner = saved;
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::Switch(switch) = node {
+            let patterns = switch
+                .cases
                 .iter()
-                .map(|id| id.name.as_str())
-                .collect::<Vec<_>>()
-                .join(".");
-            Some(format!("const:{}", name))
+                .flat_map(|case| &case.cases)
+                .filter_map(|case| match case {
+                    SwitchCaseKind::Pattern(pattern, _) => Some(pattern.as_ref()),
+                    SwitchCaseKind::Default => None,
+                });
+            self.check_patterns(patterns);
         }
-        _ => None,
+        walk_stmt(self, node);
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        if let Expr::Switch { arms, .. } = node {
+            self.check_patterns(arms.iter().map(|arm| &arm.pattern));
+        }
+        walk_expr(self, node);
     }
 }
 
-fn check_switch_cases(switch_stmt: &SwitchStmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let mut seen_values: std::collections::HashMap<String, (Span, Box<Pattern>)> =
-        std::collections::HashMap::new();
-
-    for case in &switch_stmt.cases {
-        for case_kind in &case.cases {
-            if let SwitchCaseKind::Pattern(pattern, _) = case_kind
-                && let Some(key) = pattern_value_key(pattern)
-            {
-                if let Some((_first_span, _first_pattern)) = seen_values.get(&key) {
-                    // This is a duplicate; flag the current occurrence using the case span
-                    flag(&case.span, diags, ctx);
-                } else {
-                    seen_values.insert(key, (case.span.clone(), pattern.clone()));
+impl Collector<'_> {
+    fn check_patterns<'a>(&mut self, patterns: impl Iterator<Item = &'a Pattern>) {
+        let field_refs = self
+            .fields
+            .iter()
+            .map(|(name, value)| (name.as_str(), value))
+            .collect::<HashMap<_, _>>();
+        let mut seen = HashSet::<ConstantValue>::new();
+        for pattern in patterns {
+            for (value, span) in pattern_constants(
+                pattern,
+                &self.owner,
+                &field_refs,
+                self.model,
+                self.signatures,
+            ) {
+                if !seen.insert(value) {
+                    self.diags.push(Diagnostic::new(
+                        "no-duplicate-case-values",
+                        Severity::Warning,
+                        "Duplicate case value in switch statement.",
+                        self.file.clone(),
+                        DiagSpan {
+                            start: span.start,
+                            end: span.end,
+                        },
+                    ));
                 }
             }
         }
     }
 }
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            if let Some(body) = &f.body {
-                scan_body(body, diags, ctx);
-            }
+fn pattern_constants(
+    pattern: &Pattern,
+    owner: &DeclarationIdentity,
+    fields: &HashMap<&str, &Expr>,
+    model: &SemanticModel<'_>,
+    signatures: &SignatureIndex,
+) -> Vec<(ConstantValue, Span)> {
+    match pattern {
+        Pattern::Literal(literal) => literal_expression(literal)
+            .and_then(|expression| evaluate_constant(&expression, owner, fields, model, signatures))
+            .map(|value| vec![(value, literal.span.clone())])
+            .unwrap_or_default(),
+        Pattern::Const(constant) => {
+            let expression = constant
+                .expr
+                .as_deref()
+                .cloned()
+                .or_else(|| name_expression(&constant.name, &constant.span));
+            expression
+                .and_then(|expression| {
+                    evaluate_constant(&expression, owner, fields, model, signatures)
+                })
+                .map(|value| vec![(value, constant.span.clone())])
+                .unwrap_or_default()
         }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
-            }
+        Pattern::LogicalOr { left, right, .. } => {
+            let mut values = pattern_constants(left, owner, fields, model, signatures);
+            values.extend(pattern_constants(right, owner, fields, model, signatures));
+            values
         }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
+        Pattern::ParenPattern { inner, .. } => {
+            pattern_constants(inner, owner, fields, model, signatures)
         }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        _ => {}
+        _ => Vec::new(),
     }
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let body = match member {
-        ClassMember::Method(m) => m.body.as_ref(),
-        ClassMember::Constructor(c) => c.body.as_ref(),
-        ClassMember::Getter(g) => g.body.as_ref(),
-        ClassMember::Setter(s) => s.body.as_ref(),
-        _ => None,
-    };
-    if let Some(b) = body {
-        scan_body(b, diags, ctx);
-    }
+fn literal_expression(literal: &LiteralPattern) -> Option<Expr> {
+    let span = literal.span.clone();
+    Some(match &literal.value {
+        LiteralPatternValue::Null => Expr::NullLit { span },
+        LiteralPatternValue::Bool(value) => Expr::BoolLit {
+            value: *value,
+            span,
+        },
+        LiteralPatternValue::Int(value) => Expr::IntLit {
+            value: value.clone(),
+            span,
+        },
+        LiteralPatternValue::Double(value) => Expr::DoubleLit {
+            value: value.clone(),
+            span,
+        },
+        LiteralPatternValue::String(value) => Expr::StringLit(value.clone()),
+        LiteralPatternValue::NegInt(value) => Expr::Unary {
+            op: UnaryOp::Minus,
+            operand: Box::new(Expr::IntLit {
+                value: value.clone(),
+                span: span.clone(),
+            }),
+            span,
+        },
+        LiteralPatternValue::NegDouble(value) => Expr::Unary {
+            op: UnaryOp::Minus,
+            operand: Box::new(Expr::DoubleLit {
+                value: value.clone(),
+                span: span.clone(),
+            }),
+            span,
+        },
+    })
 }
 
-fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match body {
-        FunctionBody::Block(b) => {
-            scan_stmts(&b.stmts, diags, ctx);
-        }
-        FunctionBody::Arrow(e, _) => scan_expr(e, diags, ctx),
-        FunctionBody::Native(_, _) => {}
+fn name_expression(names: &[Identifier], span: &Span) -> Option<Expr> {
+    let (first, rest) = names.split_first()?;
+    let mut expression = Expr::Ident(first.clone());
+    for name in rest {
+        expression = Expr::Field {
+            object: Box::new(expression),
+            field: name.clone(),
+            is_null_safe: false,
+            span: span.clone(),
+        };
     }
-}
-
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for s in stmts {
-        scan_stmt(s, diags, ctx);
-    }
-}
-
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::Block(b) => {
-            scan_stmts(&b.stmts, diags, ctx);
-        }
-        Stmt::Expr(e) => scan_expr(&e.expr, diags, ctx),
-        Stmt::Return(r) => {
-            if let Some(v) = &r.value {
-                scan_expr(v, diags, ctx);
-            }
-        }
-        Stmt::LocalVar(lv) => {
-            for d in &lv.declarators {
-                if let Some(init) = &d.initializer {
-                    scan_expr(init, diags, ctx);
-                }
-            }
-        }
-        Stmt::If(i) => {
-            scan_stmt(&i.then_branch, diags, ctx);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx);
-            }
-        }
-        Stmt::While(w) => scan_stmt(&w.body, diags, ctx),
-        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx),
-        Stmt::For(f) => scan_stmt(&f.body, diags, ctx),
-        Stmt::Switch(sw) => {
-            check_switch_cases(sw, diags, ctx);
-            for case in &sw.cases {
-                scan_stmts(&case.body, diags, ctx);
-            }
-        }
-        Stmt::TryCatch(tc) => {
-            scan_stmts(&tc.body.stmts, diags, ctx);
-            for catch in &tc.catches {
-                scan_stmts(&catch.body.stmts, diags, ctx);
-            }
-            if let Some(fin) = &tc.finally {
-                scan_stmts(&fin.stmts, diags, ctx);
-            }
-        }
-        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx),
-        _ => {}
-    }
-}
-
-fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match expr {
-        Expr::FuncExpr { body, .. } => scan_body(body, diags, ctx),
-        Expr::Call { callee, args, .. } => {
-            scan_expr(callee, diags, ctx);
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx);
-            }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx);
-            }
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            scan_expr(condition, diags, ctx);
-            scan_expr(then_expr, diags, ctx);
-            scan_expr(else_expr, diags, ctx);
-        }
-        _ => {}
-    }
+    Some(expression)
 }

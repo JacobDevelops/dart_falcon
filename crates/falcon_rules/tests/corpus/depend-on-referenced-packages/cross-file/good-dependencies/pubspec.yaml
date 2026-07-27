@@ -1,0 +1,5 @@
+name: sample_app
+dependencies:
+  http: ^1.0.0
+dev_dependencies:
+  test: ^1.0.0

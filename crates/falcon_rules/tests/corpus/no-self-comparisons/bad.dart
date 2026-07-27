@@ -9,7 +9,7 @@ class Foo {
 
   bool check() => value >= value; /* expect: no-self-comparisons */
 
-  bool nested(List<int> a) => a[0] == a[0]; /* expect: no-self-comparisons */
+  bool nested(List<int> a) => a[0] == a[0];
 }
 
 void d(int x) {

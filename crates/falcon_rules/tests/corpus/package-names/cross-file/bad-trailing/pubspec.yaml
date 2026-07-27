@@ -1,0 +1,1 @@
+name: bad_name_ # /* expect: package-names */

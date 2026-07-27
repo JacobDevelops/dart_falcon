@@ -54,3 +54,20 @@ class InterpolationPrecision {
     return "value ${obj.param}";
   }
 }
+
+void shadowedByCallback(int value) { /* expect: avoid-unused-parameters */
+  [1].map((value) => value + 1).toList();
+}
+
+class ConstructorParameters {
+  ConstructorParameters(int unused) { /* expect: avoid-unused-parameters */
+    print('constructed');
+  }
+}
+
+void localFunctionParameters() {
+  void local(int used, int unused) { /* expect: avoid-unused-parameters */
+    print(used);
+  }
+  local(1, 2);
+}

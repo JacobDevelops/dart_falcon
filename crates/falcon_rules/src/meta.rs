@@ -225,12 +225,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         recommended: true,
         cross_file: false,
     },
-    // In the recommended preset now that the type-resolution layer backs it: the
-    // rule flags a boolean-literal comparison whose other operand is provably
-    // boolean (literals, negations, `is` checks, comparison/logical expressions)
-    // or a local/param the resolver infers to be a *non-nullable* `bool`. A
-    // `bool?` operand resolves to a nullable bool and stays exempt — `x == true`
-    // is its idiomatic null-safe form.
     RuleMeta {
         name: "no-boolean-literal-compare",
         source: RuleSource::DartCodeLinter("no-boolean-literal-compare"),
@@ -287,7 +281,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         recommended: true,
         cross_file: false,
     },
-    // ── correctness ─────────────────────────────────────────────────────────
     RuleMeta {
         name: "avoid-web-libraries-in-flutter",
         source: RuleSource::Lints("avoid_web_libraries_in_flutter"),
@@ -384,7 +377,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         recommended: true,
         cross_file: false,
     },
-    // Cross-file rules — run in the CLI and LSP cross-file passes.
     RuleMeta {
         name: "unused-files",
         source: RuleSource::DartCodeLinter("check-unused-files"),
@@ -431,7 +423,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         recommended: true,
         cross_file: false,
     },
-    // ── performance ─────────────────────────────────────────────────────────
     RuleMeta {
         name: "sized-box-for-whitespace",
         source: RuleSource::Lints("sized_box_for_whitespace"),
@@ -472,7 +463,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         recommended: true,
         cross_file: false,
     },
-    // ── style ─────────────────────────────────────────────────────────────
     RuleMeta {
         name: "sort-child-properties-last",
         source: RuleSource::Lints("sort_child_properties_last"),
@@ -1089,7 +1079,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         recommended: true,
         cross_file: false,
     },
-    // ── suspicious ──────────────────────────────────────────────────────────
     RuleMeta {
         name: "avoid-print",
         source: RuleSource::Lints("avoid_print"),
@@ -1263,7 +1252,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         recommended: true,
         cross_file: false,
     },
-    // ── official preset must-haves (1.0) — stubs pending implementation ────
     RuleMeta {
         name: "unrelated-type-equality-checks",
         source: RuleSource::Lints("unrelated_type_equality_checks"),
@@ -1445,7 +1433,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("depend_on_referenced_packages"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: true,
     },
     RuleMeta {
@@ -1453,7 +1441,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("package_names"),
         group: "style",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: true,
     },
     RuleMeta {
@@ -1461,7 +1449,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("secure_pubspec_urls"),
         group: "suspicious",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: true,
     },
 ];
