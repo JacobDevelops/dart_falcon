@@ -76,6 +76,14 @@ impl Collector {
             FunctionBody::Native(_, _) => {}
         }
     }
+    fn local(&mut self, declaration: &LocalVarDecl) {
+        for declarator in &declaration.declarators {
+            if let Some(initializer) = &declarator.initializer {
+                self.visit_expr(initializer);
+            }
+            self.declare(&declarator.name.name);
+        }
+    }
     fn function(&mut self, params: &FormalParamList, body: Option<&FunctionBody>) {
         self.push();
         self.params(params);
@@ -139,14 +147,7 @@ impl Visitor for Collector {
                 }
                 self.pop();
             }
-            Stmt::LocalVar(declaration) => {
-                for declarator in &declaration.declarators {
-                    if let Some(initializer) = &declarator.initializer {
-                        self.visit_expr(initializer);
-                    }
-                    self.declare(&declarator.name.name);
-                }
-            }
+            Stmt::LocalVar(declaration) => self.local(declaration),
             Stmt::LocalFunc(function) => {
                 self.declare(&function.name.name);
                 self.function(&function.params, Some(&function.body));
@@ -155,9 +156,7 @@ impl Visitor for Collector {
                 self.push();
                 if let Some(init) = &statement.init {
                     match init {
-                        ForInit::VarDecl(declaration) => {
-                            self.visit_stmt(&Stmt::LocalVar(declaration.clone()))
-                        }
+                        ForInit::VarDecl(declaration) => self.local(declaration),
                         ForInit::ForIn { name, iterable, .. } => {
                             self.visit_expr(iterable);
                             self.declare(&name.name);
@@ -185,9 +184,11 @@ impl Visitor for Collector {
                 self.pop();
             }
             Stmt::TryCatch(statement) => {
+                self.push();
                 for statement in &statement.body.stmts {
                     self.visit_stmt(statement);
                 }
+                self.pop();
                 for catch in &statement.catches {
                     self.push();
                     if let Some(name) = &catch.exception_var {
@@ -202,9 +203,11 @@ impl Visitor for Collector {
                     self.pop();
                 }
                 if let Some(finally) = &statement.finally {
+                    self.push();
                     for statement in &finally.stmts {
                         self.visit_stmt(statement);
                     }
+                    self.pop();
                 }
             }
             Stmt::PatternDecl(declaration) => {

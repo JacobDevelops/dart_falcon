@@ -1,6 +1,6 @@
 //! Flags instance fields that redeclare inherited concrete fields.
 
-use falcon_analyze::{AnalyzeContext, Rule, SemanticMemberKind, SignatureIndex};
+use falcon_analyze::{AnalyzeContext, IdentityIndex, Rule, SemanticMemberKind, SignatureIndex};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
@@ -12,27 +12,52 @@ impl Rule for OverriddenFields {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let (Some(_), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
         };
         let mut diags = Vec::new();
         for decl in &program.declarations {
             match decl {
-                TopLevelDecl::Class(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::Mixin(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::MixinClass(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::Enum(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::ExtensionType(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
+                TopLevelDecl::Class(node) => check_members(
+                    &node.name.name,
+                    &node.members,
+                    identities,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::Mixin(node) => check_members(
+                    &node.name.name,
+                    &node.members,
+                    identities,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::MixinClass(node) => check_members(
+                    &node.name.name,
+                    &node.members,
+                    identities,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::Enum(node) => check_members(
+                    &node.name.name,
+                    &node.members,
+                    identities,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::ExtensionType(node) => check_members(
+                    &node.name.name,
+                    &node.members,
+                    identities,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
                 TopLevelDecl::ClassTypeAlias(_)
                 | TopLevelDecl::Extension(_)
                 | TopLevelDecl::Function(_)
@@ -48,13 +73,13 @@ impl Rule for OverriddenFields {
 fn check_members(
     type_name: &str,
     members: &[ClassMember],
+    identities: &IdentityIndex,
     signatures: &SignatureIndex,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let Some(owner) = ctx.identities.and_then(|identities| {
-        identities.resolve_declaration(ctx.file_path, &[type_name.to_string()])
-    }) else {
+    let Some(owner) = identities.resolve_declaration(ctx.file_path, &[type_name.to_string()])
+    else {
         return;
     };
     for field in members.iter().filter_map(|member| match member {

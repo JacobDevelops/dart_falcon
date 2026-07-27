@@ -371,9 +371,11 @@ impl Visitor for Collector<'_> {
                 self.pop();
             }
             Stmt::TryCatch(statement) => {
+                self.push();
                 for statement in &statement.body.stmts {
                     self.visit_stmt(statement);
                 }
+                self.pop();
                 for catch in &statement.catches {
                     self.push();
                     if let Some(name) = &catch.exception_var {
@@ -388,9 +390,11 @@ impl Visitor for Collector<'_> {
                     self.pop();
                 }
                 if let Some(finally) = &statement.finally {
+                    self.push();
                     for statement in &finally.stmts {
                         self.visit_stmt(statement);
                     }
+                    self.pop();
                 }
             }
             _ => walk_stmt(self, node),

@@ -51,8 +51,16 @@ impl SemanticRuleVisitor for Collector<'_> {
         if !is_comparison(op)
             || !proven_scalar_value(left, state)
             || !proven_scalar_value(right, state)
-            || normalized(self.source, left.span()) != normalized(self.source, right.span())
         {
+            return;
+        }
+        let (Some(left_text), Some(right_text)) = (
+            normalized(self.source, left.span()),
+            normalized(self.source, right.span()),
+        ) else {
+            return;
+        };
+        if left_text != right_text {
             return;
         }
         self.diags.push(Diagnostic::new(
@@ -88,10 +96,14 @@ fn proven_scalar_value(expression: &Expr, state: &SemanticState<'_>) -> bool {
         | Expr::BoolLit { .. }
         | Expr::NullLit { .. } => true,
         Expr::StringLit(string) => string.interpolations.is_empty(),
-        Expr::Unary { operand, .. } => matches!(
-            operand.as_ref(),
-            Expr::Ident(_) | Expr::IntLit { .. } | Expr::DoubleLit { .. }
-        ),
+        // `++x`/`--x` mutate, so the two sides are not the same value.
+        Expr::Unary { op, operand, .. } => {
+            !matches!(op, UnaryOp::PlusPlus | UnaryOp::MinusMinus)
+                && matches!(
+                    operand.as_ref(),
+                    Expr::Ident(_) | Expr::IntLit { .. } | Expr::DoubleLit { .. }
+                )
+        }
         _ => false,
     };
     syntactically_stable && scalar_type(&state.infer(expression))
@@ -111,9 +123,14 @@ fn scalar_type(ty: &ResolvedType) -> bool {
     }
 }
 
-fn normalized(source: &str, span: &Span) -> String {
-    source[span.start..span.end.min(source.len())]
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect()
+/// `None` when the span is out of bounds or off a UTF-8 boundary, so a bad span
+/// cannot panic or make two different operands normalize alike.
+fn normalized(source: &str, span: &Span) -> Option<String> {
+    Some(
+        source
+            .get(span.start..span.end)?
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect(),
+    )
 }

@@ -9,3 +9,19 @@ void main() {
   list.forEach((e) => print(e)); /* expect: avoid-print */
   print('done'); /* expect: avoid-print */
 }
+
+// A local shadow declared in a try, catch or finally body is scoped to that
+// body and must not suppress the call after the statement.
+void scopedShadow() {
+  try {
+    void print(Object? value) {}
+    print('shadowed');
+  } catch (_) {
+    void print(Object? value) {}
+    print('shadowed');
+  } finally {
+    void print(Object? value) {}
+    print('shadowed');
+  }
+  print('real'); /* expect: avoid-print */
+}

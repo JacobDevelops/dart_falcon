@@ -4,6 +4,14 @@
 # infrastructure. The detector sees their catch-all arms, but those arms
 # delegate to walk_expr rather than swallowing the node, so they cannot go
 # blind and are pinned here permanently rather than awaiting migration.
+# Same exception, same reason, for the four suspicious-rule entries below:
+# avoid_ignoring_return_values, avoid_passing_async_when_sync_expected and
+# avoid_print implement falcon_syntax::visitor::Visitor and their visit_stmt
+# catch-alls are `_ => walk_stmt(self, node)`, so an unhandled variant recurses
+# through the shared exhaustive walker instead of stopping. They only override
+# the arms that open a lexical scope. avoid_ignoring_return_values::signature is
+# not a walker at all — the textual scan matches `substitute_signature(` as a
+# self-recursive call.
 cross_file/unnecessary_nullable.rs::visit_expr
 lint/complexity/avoid_nested_if.rs::count_ifs_including
 lint/complexity/avoid_nested_if.rs::walk
