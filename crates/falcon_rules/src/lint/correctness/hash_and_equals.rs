@@ -1,6 +1,6 @@
 //! Require `hashCode` and `==` to be overridden together.
 //!
-//! Flags a class that overrides the `==` operator without also defining
+//! Flags a class or mixin that overrides the `==` operator without also defining
 //! `hashCode`, or defines `hashCode` without overriding `==`. The
 //! two are bound by a contract: any two objects that compare equal must return
 //! the same hash code. Overriding only one breaks that invariant, so the type
@@ -22,9 +22,13 @@ impl Rule for HashAndEquals {
         let file = ctx.file_path.to_string_lossy().into_owned();
         let mut diags = Vec::new();
         for decl in &program.declarations {
-            if let TopLevelDecl::Class(class) = decl {
-                check_members(&class.members, &file, &mut diags);
-            }
+            let members = match decl {
+                TopLevelDecl::Class(class) => &class.members,
+                TopLevelDecl::Mixin(mixin) => &mixin.members,
+                TopLevelDecl::MixinClass(mixin) => &mixin.members,
+                _ => continue,
+            };
+            check_members(members, &file, &mut diags);
         }
         diags
     }
@@ -39,11 +43,11 @@ fn equals_span(members: &[ClassMember]) -> Option<&Span> {
 }
 
 /// The span of a `hashCode` override — as a getter, a field, or (defensively) a
-/// method — if the type declares one.
+/// method — if the type declares one. A `hashCode` *setter* does not override
+/// `Object.hashCode`, so it does not count.
 fn hashcode_span(members: &[ClassMember]) -> Option<&Span> {
     members.iter().find_map(|m| match m {
         ClassMember::Getter(g) if g.name.name == "hashCode" => Some(&g.span),
-        ClassMember::Setter(s) if s.name.name == "hashCode" => Some(&s.span),
         ClassMember::Method(method) if method.name.name == "hashCode" => Some(&method.span),
         ClassMember::Field(field)
             if field

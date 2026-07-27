@@ -327,6 +327,9 @@ impl Visitor for UsageCollector {
             }
             Stmt::PatternAssign(assignment) => {
                 walk_pattern(self, &assignment.pattern);
+                // Pattern-assignment targets are writes, not reads, but the names
+                // are declared elsewhere — counting them as uses keeps
+                // unused-variable rules from flagging a variable this writes to.
                 for name in bound_names(&assignment.pattern) {
                     self.use_name(&name.name);
                 }

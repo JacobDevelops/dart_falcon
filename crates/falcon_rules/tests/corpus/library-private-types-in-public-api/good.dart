@@ -21,8 +21,9 @@ extension on _Private {}
 extension type PublicExtensionType._(_Private _value) {}
 
 enum PublicEnum {
-  value;
-  const PublicEnum._(_Private value);
+  value._(null);
+  const PublicEnum._(_Private? value);
 }
 
-void publicNamedParameter({_Private? _private}) {}
+void publicNamedParameter({String? value}) {}
+void _privateNamedParameter({_Private? value}) {}

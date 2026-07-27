@@ -140,9 +140,8 @@ fn construction<'a>(
 }
 
 fn looks_like_unresolved_construction(expression: &Expr) -> bool {
-    matches!(expression, Expr::New { .. })
-        || matches!(expression, Expr::Call { callee, .. }
-            if expression_segments(callee).is_some())
+    matches!(expression, Expr::Call { callee, .. }
+        if expression_segments(callee).is_some())
 }
 
 fn expression_segments(expression: &Expr) -> Option<Vec<String>> {

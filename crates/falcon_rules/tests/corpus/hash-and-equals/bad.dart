@@ -11,7 +11,11 @@ class C {
 }
 
 mixin M {
-  @override bool operator ==(Object other) => true;
+  @override bool operator ==(Object other) => true; /* expect: hash-and-equals */
+}
+
+mixin class MC {
+  @override int get hashCode => 1; /* expect: hash-and-equals */
 }
 
 class D {
@@ -19,8 +23,10 @@ class D {
   @override bool operator ==(Object other) => other is D; /* expect: hash-and-equals */
 }
 
+// A `hashCode` setter does not override `Object.hashCode`, so `==` is still unpaired.
 class SetterHash {
-  set hashCode(int value) {} /* expect: hash-and-equals */
+  @override bool operator ==(Object other) => true; /* expect: hash-and-equals */
+  set hashCode(int value) {}
 }
 
 class EqualsBase {

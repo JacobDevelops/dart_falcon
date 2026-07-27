@@ -22,7 +22,11 @@ use crate::meta::meta_for;
 /// Per-file rules that consume resolver-backed project, type, identity, signature,
 /// or library facts. Drivers use this to preserve the single-file fast path when
 /// none are enabled and to build one shared semantic snapshot when any are active.
-const RESOLVER_DEPENDENT_RULES: &[&str] = &[
+///
+/// Public only so the corpus harness can drive the same list; go through
+/// [`rule_requires_resolution`] instead.
+#[doc(hidden)]
+pub const RESOLVER_DEPENDENT_RULES: &[&str] = &[
     "no-boolean-literal-compare",
     "avoid-unnecessary-type-assertions",
     "avoid-unnecessary-type-casts",
@@ -468,10 +472,17 @@ mod tests {
     use super::{config_warnings, rule_requires_resolution};
     use falcon_config::FalconConfig;
 
+    /// Every gated rule must name a registered rule (a typo would silently drop
+    /// it back onto the single-file fast path) and appear exactly once.
     #[test]
     fn resolver_gating_matches_current_semantic_consumers() {
+        let rules = super::all_rules();
+        let registered: std::collections::HashSet<&str> =
+            rules.iter().map(|rule| rule.name()).collect();
+        let mut seen = std::collections::HashSet::new();
         for rule in super::RESOLVER_DEPENDENT_RULES {
-            assert!(rule_requires_resolution(rule), "{rule}");
+            assert!(registered.contains(rule), "not a registered rule: {rule}");
+            assert!(seen.insert(rule), "duplicate entry: {rule}");
         }
         assert!(!rule_requires_resolution("avoid-dynamic"));
     }

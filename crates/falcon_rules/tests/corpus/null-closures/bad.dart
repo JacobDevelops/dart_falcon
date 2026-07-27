@@ -25,6 +25,7 @@ void bad(
   future.then(null, onError: null); /* expect: null-closures */ /* expect: null-closures */
   Future.microtask(null); /* expect: null-closures */
   Future.doWhile(null); /* expect: null-closures */
+  Future.delayed(Duration.zero, null); /* expect: null-closures */
   Timer.run(null); /* expect: null-closures */
   List.generate(2, null); /* expect: null-closures */
   scheduleMicrotask(null); /* expect: null-closures */

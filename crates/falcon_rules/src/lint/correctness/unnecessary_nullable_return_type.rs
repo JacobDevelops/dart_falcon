@@ -10,7 +10,9 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_decl, walk_method_decl, walk_stmt};
+use falcon_syntax::visitor::{
+    Visitor, walk_expr, walk_function_decl, walk_getter_decl, walk_method_decl, walk_stmt,
+};
 
 pub struct UnnecessaryNullableReturnType;
 
@@ -53,6 +55,16 @@ impl Visitor for Collector<'_, '_> {
             self.ctx,
         );
         walk_method_decl(self, node);
+    }
+
+    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+        check(
+            node.return_type.as_ref(),
+            node.body.as_ref(),
+            &mut self.diags,
+            self.ctx,
+        );
+        walk_getter_decl(self, node);
     }
 }
 

@@ -1,5 +1,9 @@
 # Hand-rolled AST walkers, pinned by tests/no_new_bespoke_walkers.rs.
 # This list may only shrink. Build new rules on falcon_syntax::visitor.
+# Exception: lexical_usage.rs and semantic_scope.rs are that shared walker
+# infrastructure. The detector sees their catch-all arms, but those arms
+# delegate to walk_expr rather than swallowing the node, so they cannot go
+# blind and are pinned here permanently rather than awaiting migration.
 cross_file/unnecessary_nullable.rs::visit_expr
 lint/complexity/avoid_nested_if.rs::count_ifs_including
 lint/complexity/avoid_nested_if.rs::walk

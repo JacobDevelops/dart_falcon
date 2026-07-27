@@ -27,7 +27,9 @@ impl Rule for UnnecessaryFlutterImports {
         let mut usage = Usage::default();
         visit_program(&mut usage, program, state);
 
-        let identities = ctx.identities.expect("semantic state requires identities");
+        let Some(identities) = ctx.identities else {
+            return Vec::new();
+        };
         let model = falcon_analyze::SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut type_usage = TypeUsage {
             model: &model,
@@ -180,7 +182,7 @@ fn import_is_used(import: &ImportDirective, usage: &Usage) -> bool {
             || usage.unknown.contains(&prefix.name);
     }
     usage.unprefixed.iter().any(|name| allows(import, name))
-        || (import.combinators.is_empty() && !usage.unknown.is_empty())
+        || usage.unknown.iter().any(|name| allows(import, name))
 }
 
 fn allows(import: &ImportDirective, name: &str) -> bool {

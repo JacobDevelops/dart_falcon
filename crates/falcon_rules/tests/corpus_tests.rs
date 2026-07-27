@@ -25,7 +25,7 @@ use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
 use falcon_rules::lint::style::class_members_ordering::ClassMembersOrdering;
 use falcon_rules::lint::style::use_design_system_item::UseDesignSystemItem;
-use falcon_rules::{all_cross_file_rules, all_rules};
+use falcon_rules::{RESOLVER_DEPENDENT_RULES, all_cross_file_rules, all_rules};
 
 fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus")
@@ -72,55 +72,6 @@ fn parse_expectations(source: &str) -> Vec<Expectation> {
     exps
 }
 
-const RESOLVER_DEPENDENT_RULES: &[&str] = &[
-    "no-boolean-literal-compare",
-    "avoid-unnecessary-type-assertions",
-    "avoid-unnecessary-type-casts",
-    "avoid-unrelated-type-assertions",
-    "avoid-print",
-    "valid-regexps",
-    "avoid-passing-async-when-sync-expected",
-    "avoid-ignoring-return-values",
-    "proper-controller-dispose",
-    "unnecessary-string-interpolations",
-    "prefer-is-empty",
-    "prefer-is-not-empty",
-    "prefer-iterable-where-type",
-    "prefer-collection-literals",
-    "prefer-final-fields",
-    "unrelated-type-equality-checks",
-    "collection-methods-unrelated-type",
-    "annotate-overrides",
-    "avoid-renaming-method-parameters",
-    "overridden-fields",
-    "use-key-in-widget-constructors",
-    "prefer-const-constructors-in-immutables",
-    "prefer-contains",
-    "prefer-interpolation-to-compose-strings",
-    "await-only-futures",
-    "null-check-on-nullable-type-parameter",
-    "null-closures",
-    "void-checks",
-    "implicit-call-tearoffs",
-    "library-annotations",
-    "type-literal-in-constant-pattern",
-    "avoid-types-as-parameter-names",
-    "exhaustive-cases",
-    "invalid-runtime-check-with-js-interop-types",
-    "use-build-context-synchronously",
-    "library-private-types-in-public-api",
-    "prefer-extracting-callbacks",
-    "no-logic-in-create-state",
-    "use-full-hex-values-for-flutter-colors",
-    "implementation-imports",
-    "avoid-non-null-assertion",
-    "no-self-comparisons",
-    "proper-super-init-state",
-    "no-duplicate-case-values",
-    "unnecessary-flutter-imports",
-    "prefer-declaring-const-constructor",
-];
-
 /// Run a single rule over `source`; return (rule-id, line) per diagnostic.
 fn run_rule(
     rule: &dyn Rule,
@@ -128,14 +79,14 @@ fn run_rule(
     source: &str,
     config: &FalconConfig,
 ) -> Vec<(String, usize)> {
-    let (program, _errors) = parse(source);
+    let (program, errors) = parse(source);
     let resolver_dependent = RESOLVER_DEPENDENT_RULES.contains(&rule.name());
     let index = resolver_dependent.then(|| ProjectIndex::from_program(&program));
     let types = resolver_dependent.then(|| TypeIndex::from_program(&program));
     let identity_sources = [IdentitySource {
         path: file,
         program: &program,
-        has_parse_errors: false,
+        has_parse_errors: !errors.is_empty(),
     }];
     let identities =
         resolver_dependent.then(|| IdentityIndex::from_project_files(&identity_sources, &[]));

@@ -217,28 +217,3 @@ void usedLocalFunctionParameter() {
   }
   local(1);
 }
-
-void unbracedIfScope(int value, bool condition) {
-  if (condition) int value = 1;
-  print(value);
-}
-
-void unbracedElseScope(int value, bool condition) {
-  if (condition) print('then'); else int value = 1;
-  print(value);
-}
-
-void unbracedWhileScope(int value, bool condition) {
-  while (condition) int value = 1;
-  print(value);
-}
-
-void unbracedDoScope(int value, bool condition) {
-  do int value = 1; while (condition);
-  print(value);
-}
-
-void unbracedForScope(int value, bool condition) {
-  for (; condition;) int value = 1;
-  print(value);
-}

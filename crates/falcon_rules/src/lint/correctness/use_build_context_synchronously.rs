@@ -17,12 +17,7 @@ impl Rule for UseBuildContextSynchronously {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        if ctx.file_path.components().any(|component| {
-            component
-                .as_os_str()
-                .to_str()
-                .is_some_and(|name| name == "test")
-        }) {
+        if is_test_file(ctx.file_path) {
             return Vec::new();
         }
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
@@ -146,6 +141,30 @@ impl Visitor for Collector<'_> {
         };
         self.function(&params, &[], node.body.as_ref());
     }
+}
+
+/// Test code drives `BuildContext` through pumped frames the analyzer can't
+/// model, so the rule skips it. Directory matching is relative to the package
+/// root — an absolute path component named `test` (a home directory, say) must
+/// not disable the rule for the whole project.
+fn is_test_file(path: &std::path::Path) -> bool {
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with("_test.dart"))
+    {
+        return true;
+    }
+    let Some(pubspec) = crate::cross_file::enclosing_pubspec(path) else {
+        return false;
+    };
+    let Some(root) = pubspec.parent() else {
+        return false;
+    };
+    let canonical = crate::cross_file::canonical_or_lexical(path);
+    canonical
+        .strip_prefix(root)
+        .is_ok_and(|relative| relative.components().any(|c| c.as_os_str() == "test"))
 }
 
 fn empty_params() -> FormalParamList {

@@ -96,17 +96,19 @@ fn extractable_pattern(expr: &Expr) -> Option<String> {
     let is_raw = raw.starts_with('r');
     let prefix = usize::from(is_raw);
     let rest = &raw[prefix..];
-    let delimiter = if rest.starts_with("'''") || rest.starts_with("\"\"\"") {
-        3
-    } else if rest.starts_with(['\'', '\"']) {
-        1
+    let quote = if rest.starts_with("'''") {
+        "'''"
+    } else if rest.starts_with("\"\"\"") {
+        "\"\"\""
+    } else if rest.starts_with('\'') {
+        "'"
+    } else if rest.starts_with('"') {
+        "\""
     } else {
         return None;
     };
-    if rest.len() < delimiter * 2 {
-        return None;
-    }
-    let content = &raw[prefix + delimiter..raw.len() - delimiter];
+    // Unterminated literals (parser error recovery) have no closing delimiter.
+    let content = rest.strip_prefix(quote)?.strip_suffix(quote)?;
     if !is_raw && content.contains('\\') {
         return None;
     }
@@ -142,12 +144,15 @@ fn valid_pattern(pattern: &str) -> bool {
         } else if ch == '\\' {
             escaped = true;
         } else if in_class {
-            if ch == ']' && index > class_start {
+            // ECMAScript: `]` always closes, so `[]` is an empty class, and a
+            // hyphen before `]` is a literal rather than a range.
+            if ch == ']' {
                 in_class = false;
                 can_quantify = true;
             } else if ch == '-'
                 && index > class_start
                 && index + 1 < chars.len()
+                && chars[index + 1] != ']'
                 && chars[index - 1] > chars[index + 1]
             {
                 return false;

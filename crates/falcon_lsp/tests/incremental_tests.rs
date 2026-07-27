@@ -561,8 +561,9 @@ fn workspace_package_import_resolves_and_refreshes_semantic_diagnostics() {
 }
 
 /// M5.4 gate: single-file incremental re-analyze (change + analyze) must
-/// complete in <100ms. Uses a generated ~600-line file so the bound is
-/// exercised on a realistically large document.
+/// complete in <100ms on a release build, <400ms under `cargo test`'s debug
+/// build. Uses a generated ~800-line file so the bound is exercised on a
+/// realistically large document.
 #[test]
 fn incremental_reanalyze_meets_latency_gate() {
     let mut source = String::from("class Generated {\n");

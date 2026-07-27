@@ -9,7 +9,7 @@ use falcon_analyze::{
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program, walk_stmt};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_program, walk_stmt, walk_top_level_decl};
 
 pub struct InvalidRuntimeCheckWithJsInteropTypes;
 
@@ -406,6 +406,16 @@ impl Visitor for Collector<'_> {
         walk_program(self, node);
     }
 
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        let Some(type_params) = declaration_type_params(node) else {
+            walk_top_level_decl(self, node);
+            return;
+        };
+        self.type_parameters.push(type_params, &self.model);
+        walk_top_level_decl(self, node);
+        self.type_parameters.pop();
+    }
+
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         self.type_parameters.push(&node.type_params, &self.model);
         self.function(&node.params, node.body.as_ref());
@@ -500,9 +510,26 @@ impl Visitor for Collector<'_> {
                     }
                 }
             }
-            Stmt::LocalFunc(_) => {}
+            Stmt::LocalFunc(function) => {
+                self.type_parameters
+                    .push(&function.type_params, &self.model);
+                self.function(&function.params, Some(&function.body));
+                self.type_parameters.pop();
+            }
             _ => walk_stmt(self, node),
         }
+    }
+}
+
+fn declaration_type_params(node: &TopLevelDecl) -> Option<&[TypeParam]> {
+    match node {
+        TopLevelDecl::Class(declaration) => Some(&declaration.type_params),
+        TopLevelDecl::Mixin(declaration) => Some(&declaration.type_params),
+        TopLevelDecl::MixinClass(declaration) => Some(&declaration.type_params),
+        TopLevelDecl::Enum(declaration) => Some(&declaration.type_params),
+        TopLevelDecl::Extension(declaration) => Some(&declaration.type_params),
+        TopLevelDecl::ExtensionType(declaration) => Some(&declaration.type_params),
+        _ => None,
     }
 }
 

@@ -212,6 +212,10 @@ impl Collector {
                 self.check_arguments(args, &[0], &[]);
                 true
             }
+            ("dart:async", "Future", Some("delayed")) => {
+                self.check_arguments(args, &[1], &[]);
+                true
+            }
             ("dart:async", "Timer", None | Some("periodic")) => {
                 self.check_arguments(args, &[1], &[]);
                 true

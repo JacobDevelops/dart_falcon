@@ -7,3 +7,7 @@ void check(ImportedVoid value, Box<void> box, VoidBox inherited) {
   inherited.add(1); /* expect: void-checks */
   inherited.field = 1; /* expect: void-checks */
 }
+
+void checkIndexAssignment(List<void> values) {
+  values[0] = 1; /* expect: void-checks */
+}

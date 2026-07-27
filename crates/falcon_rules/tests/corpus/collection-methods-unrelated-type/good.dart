@@ -1,11 +1,12 @@
 import 'dart:collection';
+import 'dart:core' as core;
 
 void good(
   Iterable<num> iterable,
   List<String> list,
   Set<int> set,
   Queue<String> queue,
-  Map<String, int> map,
+  core.Map<String, int> map,
   dynamic unknown,
 ) {
   iterable.contains(1);

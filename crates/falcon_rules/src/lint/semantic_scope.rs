@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use falcon_analyze::{
@@ -22,7 +23,9 @@ pub(crate) trait SemanticRuleVisitor {
 
 pub(crate) struct SemanticState<'a> {
     pub(crate) model: SemanticModel<'a>,
-    pub(crate) signatures: SignatureIndex,
+    /// Borrowed from the driver's project-wide index; owned only for the
+    /// single-file fallback built when the driver has none.
+    pub(crate) signatures: Cow<'a, SignatureIndex>,
     pub(crate) environment: TypeEnvironment,
     pub(crate) type_parameters: TypeParameterScope,
     expected: Vec<ResolvedType>,
@@ -38,8 +41,8 @@ impl<'a> SemanticState<'a> {
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let signatures = ctx
             .signatures
-            .cloned()
-            .unwrap_or_else(|| SignatureIndex::from_program(program, &model));
+            .map(Cow::Borrowed)
+            .unwrap_or_else(|| Cow::Owned(SignatureIndex::from_program(program, &model)));
         Some(Self {
             model,
             signatures,
@@ -832,6 +835,22 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
         };
         if let Some((type_parameters, members)) = scoped {
             self.with_fresh_environment(|walker| {
+                walker
+                    .state
+                    .type_parameters
+                    .push(type_parameters, &walker.state.model);
+                // Instantiate the enclosing type with its own type parameters, so
+                // member and constructor lookups have something to substitute.
+                let arguments: Vec<ResolvedType> = type_parameters
+                    .iter()
+                    .map(|param| {
+                        walker
+                            .state
+                            .type_parameters
+                            .lookup(&param.name.name)
+                            .unwrap_or(ResolvedType::Unknown)
+                    })
+                    .collect();
                 let previous_enclosing = walker.state.enclosing_type.replace(
                     enclosing_name
                         .and_then(|name| {
@@ -839,16 +858,12 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                         })
                         .map(|identity| ResolvedType::Interface {
                             identity,
-                            arguments: Vec::new(),
+                            arguments,
                             nullable: false,
                             extension_type: false,
                         })
                         .unwrap_or(ResolvedType::Unknown),
                 );
-                walker
-                    .state
-                    .type_parameters
-                    .push(type_parameters, &walker.state.model);
                 let previous_superclass = std::mem::replace(
                     &mut walker.state.superclass,
                     superclass.map(|superclass| {
@@ -983,7 +998,6 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                 walker.visit_body(body);
             }
         });
-        self.state.return_type.pop();
         self.state.return_type = saved_returns;
         self.state.expected = saved_expected;
         self.state.type_parameters.pop();
@@ -1044,8 +1058,11 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                 );
             }
             Stmt::PatternAssign(assignment) => {
-                self.visit_pattern(&assignment.pattern);
                 self.visit_expr(&assignment.value);
+                self.visit_matched_pattern(
+                    &assignment.pattern,
+                    self.state.infer(&assignment.value),
+                );
             }
             Stmt::If(statement) => self.visit_if_condition(
                 &statement.condition,

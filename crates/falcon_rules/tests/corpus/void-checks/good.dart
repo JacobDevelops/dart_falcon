@@ -12,7 +12,7 @@ class Box<T> {
 }
 
 void ordinaryVoid() {
-  return 1;
+  return;
 }
 
 void good(

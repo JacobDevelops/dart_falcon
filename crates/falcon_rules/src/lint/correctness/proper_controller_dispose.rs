@@ -2,7 +2,10 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
+    TypeTruth,
+};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, bound_names, walk_expr, walk_pattern, walk_stmt};
@@ -15,18 +18,18 @@ impl Rule for ProperControllerDispose {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(identities) = ctx.identities else {
+        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diagnostics = Vec::new();
         for declaration in &program.declarations {
-            let (extends, members) = match declaration {
-                TopLevelDecl::Class(class) => (&class.extends, class.members.as_slice()),
-                TopLevelDecl::MixinClass(class) => (&class.extends, class.members.as_slice()),
+            let (name, members) = match declaration {
+                TopLevelDecl::Class(class) => (&class.name.name, class.members.as_slice()),
+                TopLevelDecl::MixinClass(class) => (&class.name.name, class.members.as_slice()),
                 _ => continue,
             };
-            if !is_flutter_state(extends.as_ref(), &model) {
+            if !is_flutter_state(name, signatures, &model) {
                 continue;
             }
             check_class(members, &model, ctx, &mut diagnostics);
@@ -35,15 +38,22 @@ impl Rule for ProperControllerDispose {
     }
 }
 
-fn is_flutter_state(extends: Option<&DartType>, model: &SemanticModel<'_>) -> bool {
-    extends.is_some_and(|ty| {
-        matches!(model.resolve_type(ty), ResolvedType::Interface {
-            identity: DeclarationIdentity::Package { package, name }, ..
-        } if package == "flutter" && name == "State")
-    })
+fn is_flutter_state(name: &str, signatures: &SignatureIndex, model: &SemanticModel<'_>) -> bool {
+    let Some(identity) = model.resolve_name(&[name.to_string()]) else {
+        return false;
+    };
+    let ty = ResolvedType::Interface {
+        identity,
+        arguments: Vec::new(),
+        nullable: false,
+        extension_type: false,
+    };
+    let state = DeclarationIdentity::Package {
+        package: "flutter".to_string(),
+        name: "State".to_string(),
+    };
+    signatures.is_subtype_of(&ty, &state, model) == TypeTruth::Yes
 }
-
-use falcon_analyze::ResolvedType;
 
 fn check_class(
     members: &[ClassMember],

@@ -1,11 +1,16 @@
 import 'dart:async';
 import 'dart:core' as core;
 
-void good(Iterable<int> values, Future<int> future, dynamic maybeNull) {
+void good(
+  Iterable<int> values,
+  Future<int> future,
+  Completer<int> completer,
+  dynamic maybeNull,
+) {
   values.any((value) => value > 0);
   values.firstWhere((value) => true, orElse: () => 0);
   future.then((value) => value + 1, onError: (error) => 0);
-  future.complete(null);
+  completer.complete(null);
   Future.microtask(() => 1);
   scheduleMicrotask(() {});
   values.any(maybeNull);
