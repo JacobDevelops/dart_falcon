@@ -1,0 +1,5 @@
+name: sample_app
+dependencies:
+  declared: ^1.0.0
+dev_dependencies:
+  dev_only: ^1.0.0

@@ -1,0 +1,2 @@
+name: pubspec_only
+homepage: http://example.com # /* expect: secure-pubspec-urls */
