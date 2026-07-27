@@ -12,3 +12,7 @@ final c3 = Colors.red;
 final c4 = Color.fromARGB(255, 0, 0, 0);
 
 final c5 = Color(0xFFAABBCC);
+
+final c6 = const Color.fromARGB(255, 0, 0, 1);
+
+final c7 = const Color(0xFFAABBCC);

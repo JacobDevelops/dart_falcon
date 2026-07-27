@@ -28,3 +28,9 @@ class Api {
 
 // OK: .then() with simple arrow function
 Future<String> simpleFetch() => fetch().then((d) => d);
+
+// OK: arrow-bodied local function is a delayed scope, same as a top-level arrow body.
+void withArrowLocalFunction() {
+  void body() => reload().then((_) => notifyListeners());
+  body();
+}

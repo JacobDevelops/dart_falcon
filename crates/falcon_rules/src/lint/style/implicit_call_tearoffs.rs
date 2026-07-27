@@ -1,6 +1,6 @@
 //! Requires an explicit `.call` tear-off when a callable object is used as a function.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     AnalyzeContext, LocalTypes, MemberKind, MemberResult, ReceiverTypes, ResolvedType, Rule,
@@ -271,7 +271,12 @@ impl ProgramFacts {
 
     fn member_signature(&self, type_name: &str, name: &str, is_static: bool) -> Lookup<Signature> {
         let mut current = type_name;
+        let mut visited = HashSet::new();
         loop {
+            // A cyclic `extends` chain is invalid Dart but still parses.
+            if !visited.insert(current) {
+                return Lookup::Unknown;
+            }
             let Some(facts) = self.types.get(current) else {
                 return Lookup::Unknown;
             };
@@ -301,7 +306,11 @@ impl ProgramFacts {
 
     fn member_value(&self, type_name: &str, name: &str, is_static: bool) -> Lookup<ValueFact> {
         let mut current = type_name;
+        let mut visited = HashSet::new();
         loop {
+            if !visited.insert(current) {
+                return Lookup::Unknown;
+            }
             let Some(facts) = self.types.get(current) else {
                 return Lookup::Unknown;
             };
@@ -783,12 +792,7 @@ impl Collector<'_> {
     }
 
     fn with_enclosing_type(&mut self, name: Option<&str>, members: &[ClassMember]) {
-        let previous = self
-            .enclosing_type
-            .replace(name.unwrap_or_default().to_string());
-        if name.is_none() {
-            self.enclosing_type = None;
-        }
+        let previous = std::mem::replace(&mut self.enclosing_type, name.map(str::to_string));
         for member in members {
             self.visit_class_member(member);
         }

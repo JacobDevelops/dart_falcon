@@ -63,7 +63,10 @@ fn construction<'a>(
 ) -> Option<(DeclarationIdentity, String, &'a ArgList)> {
     match expression {
         Expr::New {
-            dart_type, args, ..
+            dart_type,
+            constructor_name,
+            args,
+            ..
         } => {
             let DartType::Named(named) = dart_type else {
                 return None;
@@ -73,7 +76,10 @@ fn construction<'a>(
                 .iter()
                 .map(|segment| segment.name.clone())
                 .collect::<Vec<_>>();
-            Some((model.resolve_name(&segments)?, "new".to_string(), args))
+            let constructor = constructor_name
+                .as_ref()
+                .map_or_else(|| "new".to_string(), |name| name.name.clone());
+            Some((model.resolve_name(&segments)?, constructor, args))
         }
         Expr::Call { callee, args, .. } => {
             let mut segments = expression_segments(callee)?;

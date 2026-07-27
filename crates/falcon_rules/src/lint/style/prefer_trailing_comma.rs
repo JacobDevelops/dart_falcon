@@ -30,7 +30,10 @@ impl Rule for PreferTrailingComma {
 
 fn line_of(source: &str, offset: usize) -> usize {
     let offset = offset.min(source.len());
-    source[..offset].bytes().filter(|&b| b == b'\n').count()
+    source.as_bytes()[..offset]
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count()
 }
 
 /// Returns the real closing `)` when a trailing comma is required.

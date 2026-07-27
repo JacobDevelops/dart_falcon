@@ -256,18 +256,18 @@ fn declared_names(program: &Program, ctx: &AnalyzeContext) -> HashSet<String> {
             .flat_map(|library| library.siblings().iter().copied()),
     );
     own.flat_map(|program| &program.declarations)
-        .filter_map(|decl| match decl {
-            TopLevelDecl::Class(decl) => Some(&decl.name.name),
-            TopLevelDecl::ClassTypeAlias(decl) => Some(&decl.name.name),
-            TopLevelDecl::Mixin(decl) => Some(&decl.name.name),
-            TopLevelDecl::MixinClass(decl) => Some(&decl.name.name),
-            TopLevelDecl::Enum(decl) => Some(&decl.name.name),
-            TopLevelDecl::Extension(decl) => decl.name.as_ref().map(|name| &name.name),
-            TopLevelDecl::ExtensionType(decl) => Some(&decl.name.name),
-            TopLevelDecl::Function(decl) => Some(&decl.name.name),
-            TopLevelDecl::Variable(decl) => decl.declarators.first().map(|d| &d.name.name),
-            TopLevelDecl::TypeAlias(decl) => Some(&decl.name.name),
-            TopLevelDecl::Error(_) => None,
+        .flat_map(|decl| match decl {
+            TopLevelDecl::Class(decl) => vec![&decl.name.name],
+            TopLevelDecl::ClassTypeAlias(decl) => vec![&decl.name.name],
+            TopLevelDecl::Mixin(decl) => vec![&decl.name.name],
+            TopLevelDecl::MixinClass(decl) => vec![&decl.name.name],
+            TopLevelDecl::Enum(decl) => vec![&decl.name.name],
+            TopLevelDecl::Extension(decl) => decl.name.iter().map(|name| &name.name).collect(),
+            TopLevelDecl::ExtensionType(decl) => vec![&decl.name.name],
+            TopLevelDecl::Function(decl) => vec![&decl.name.name],
+            TopLevelDecl::Variable(decl) => decl.declarators.iter().map(|d| &d.name.name).collect(),
+            TopLevelDecl::TypeAlias(decl) => vec![&decl.name.name],
+            TopLevelDecl::Error(_) => vec![],
         })
         .cloned()
         .collect()
@@ -315,4 +315,24 @@ fn flag(annotation: &Annotation, ctx: &AnalyzeContext, diags: &mut Vec<Diagnosti
             end: annotation.span.end,
         },
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::PathBuf;
+
+    /// Without a resolver the rule falls back to `declared_names` to decide whether
+    /// `pragma` is shadowed, so every declarator of a multi-name variable counts.
+    #[test]
+    fn shadowing_pragma_suppresses_late_trust_without_a_resolver() {
+        let source = "var other, pragma;\n@pragma('dart2js:late:trust')\nimport 'a.dart';\n";
+        let (program, _) = parse(source);
+        let config = FalconConfig::default();
+        let path = PathBuf::from("shadowed.dart");
+        let ctx = AnalyzeContext::new(&path, source, &config);
+        assert!(LibraryAnnotations.analyze(&program, &ctx).is_empty());
+    }
 }

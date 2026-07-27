@@ -117,21 +117,19 @@ impl ScopeCollector {
     }
 }
 
+/// Statement kinds that introduce bindings. `Block`, `Switch`, and `TryCatch` are
+/// absent: `visit_stmt` handles those before it classifies.
 enum StmtScope<'a> {
-    Block(&'a Block),
     LocalVar(&'a LocalVarDecl),
     PatternDecl(&'a PatternDeclaration),
     For(&'a ForStmt),
     IfCase(&'a IfStmt, &'a Pattern),
-    Switch(&'a SwitchStmt),
-    TryCatch(&'a TryCatchStmt),
     LocalFunc(&'a LocalFuncDecl),
     Other,
 }
 
 fn classify_stmt_scope(stmt: &Stmt) -> StmtScope<'_> {
     match stmt {
-        Stmt::Block(block) => StmtScope::Block(block),
         Stmt::LocalVar(local) => StmtScope::LocalVar(local),
         Stmt::PatternDecl(pattern) => StmtScope::PatternDecl(pattern),
         Stmt::For(for_stmt) => StmtScope::For(for_stmt),
@@ -139,8 +137,6 @@ fn classify_stmt_scope(stmt: &Stmt) -> StmtScope<'_> {
             IfCondition::Case(_, pattern, _) => StmtScope::IfCase(if_stmt, pattern),
             IfCondition::Expr(_) => StmtScope::Other,
         },
-        Stmt::Switch(switch) => StmtScope::Switch(switch),
-        Stmt::TryCatch(try_catch) => StmtScope::TryCatch(try_catch),
         Stmt::LocalFunc(local) => StmtScope::LocalFunc(local),
         _ => StmtScope::Other,
     }
@@ -252,11 +248,6 @@ impl Visitor for ScopeCollector {
 
         let mut pushed_end = None;
         match classify_stmt_scope(node) {
-            StmtScope::Block(block) => {
-                self.bind_local_functions(block);
-                self.block_ends.push(block.span.end);
-                pushed_end = Some(block.span.end);
-            }
             StmtScope::LocalVar(local) => {
                 if !suppress_local_var_binding {
                     for decl in &local.declarators {
@@ -292,26 +283,6 @@ impl Visitor for ScopeCollector {
             StmtScope::IfCase(if_stmt, pattern) => {
                 let scope = Span::new(pattern.span().end, if_stmt.then_branch.span().end);
                 self.bind_pattern(pattern, &scope);
-            }
-            StmtScope::Switch(switch) => {
-                for case in &switch.cases {
-                    for kind in &case.cases {
-                        if let SwitchCaseKind::Pattern(pattern, _) = kind {
-                            let scope = Span::new(pattern.span().end, case.span.end);
-                            self.bind_pattern(pattern, &scope);
-                        }
-                    }
-                }
-            }
-            StmtScope::TryCatch(try_catch) => {
-                for catch in &try_catch.catches {
-                    if let Some(name) = &catch.exception_var {
-                        self.bind(name, &catch.body.span);
-                    }
-                    if let Some(name) = &catch.stack_trace_var {
-                        self.bind(name, &catch.body.span);
-                    }
-                }
             }
             StmtScope::LocalFunc(local) => {
                 self.bind_params(&local.params, local.body.span());

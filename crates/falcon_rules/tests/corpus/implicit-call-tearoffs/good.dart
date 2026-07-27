@@ -105,3 +105,13 @@ void scopedShadowing(Callable callback) {
   }
   accept(callback.call);
 }
+
+// A cyclic `extends` chain is invalid Dart but still parses; the lookup must
+// terminate instead of walking the cycle forever.
+class CyclicA extends CyclicB {}
+
+class CyclicB extends CyclicA {}
+
+void cyclicHierarchy(CyclicA value, Callable callback) {
+  value.whatever(callback);
+}

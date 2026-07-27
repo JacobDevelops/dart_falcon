@@ -69,8 +69,8 @@ class Receiver {
     localFunction(callback, named: callback.call); /* expect: implicit-call-tearoffs */
     localFunction(callback.call, named: callback); /* expect: implicit-call-tearoffs */
 
-    void Function(Function) functionValue = localFunction;
-    functionValue(callback); /* expect: implicit-call-tearoffs */
+    void Function(Function, {required Function named}) functionValue = localFunction;
+    functionValue(callback, named: callback.call); /* expect: implicit-call-tearoffs */
 
     final inferredFunctionValue = localFunction;
     inferredFunctionValue(callback, named: callback.call); /* expect: implicit-call-tearoffs */

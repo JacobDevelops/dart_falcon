@@ -82,7 +82,9 @@ impl Visitor for Collector<'_, '_> {
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {
-        if !matches!(node, Stmt::LocalFunc(_)) {
+        if let Stmt::LocalFunc(local) = node {
+            self.with_body_suppression(Some(&local.body), |this| walk_stmt(this, node));
+        } else {
             walk_stmt(self, node);
         }
     }
