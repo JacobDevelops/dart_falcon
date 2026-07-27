@@ -60,3 +60,18 @@ void processDouble(double value) {
       break;
   }
 }
+
+const one = 1;
+const alias = one;
+
+int aliases(int value) => switch (value) {
+  1 => 0,
+  alias => 1, /* expect: no-duplicate-case-values */
+  _ => 2,
+};
+
+int escaped(String value) => switch (value) {
+  'a' => 0,
+  '\x61' => 1, /* expect: no-duplicate-case-values */
+  _ => 2,
+};

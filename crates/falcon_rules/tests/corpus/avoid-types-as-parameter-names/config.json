@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "avoid-types-as-parameter-names": "warn"
+      }
+    }
+  }
+}
