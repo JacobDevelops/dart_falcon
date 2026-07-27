@@ -1,6 +1,6 @@
 //! Prefers `contains` to `indexOf` comparisons used only as membership tests.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, parse_int};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
@@ -96,15 +96,15 @@ fn index_of_invocation(expr: &Expr) -> Option<IndexOfInvocation<'_>> {
     })
 }
 
-fn int_value(expr: &Expr) -> Option<i64> {
+fn int_value(expr: &Expr) -> Option<i128> {
     match expr {
-        Expr::IntLit { value, .. } => value.parse().ok(),
+        Expr::IntLit { value, .. } => parse_int(value),
         Expr::Unary {
             op: UnaryOp::Minus,
             operand,
             ..
         } => match operand.as_ref() {
-            Expr::IntLit { value, .. } => value.parse::<i64>().ok().map(|value| -value),
+            Expr::IntLit { value, .. } => parse_int(value).and_then(i128::checked_neg),
             _ => None,
         },
         _ => None,

@@ -275,8 +275,8 @@ fn constructor_const(
     signatures: &SignatureIndex,
 ) -> bool {
     matches!(identity,
-        DeclarationIdentity::Sdk { library, name }
-            if library == "dart:core" && name == "Object")
+        DeclarationIdentity::Sdk { library, name: declared }
+            if library == "dart:core" && declared == "Object" && name == "new")
         || signatures.declaration(identity).is_some_and(|facts| {
             facts
                 .constructors
