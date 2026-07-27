@@ -4,6 +4,14 @@
 # infrastructure. The detector sees their catch-all arms, but those arms
 # delegate to walk_expr rather than swallowing the node, so they cannot go
 # blind and are pinned here permanently rather than awaiting migration.
+# Same exception, same reason, for the four suspicious-rule entries below:
+# avoid_ignoring_return_values, avoid_passing_async_when_sync_expected and
+# avoid_print implement falcon_syntax::visitor::Visitor and their visit_stmt
+# catch-alls are `_ => walk_stmt(self, node)`, so an unhandled variant recurses
+# through the shared exhaustive walker instead of stopping. They only override
+# the arms that open a lexical scope. avoid_ignoring_return_values::signature is
+# not a walker at all — the textual scan matches `substitute_signature(` as a
+# self-recursive call.
 cross_file/unnecessary_nullable.rs::visit_expr
 lint/complexity/avoid_nested_if.rs::count_ifs_including
 lint/complexity/avoid_nested_if.rs::walk
@@ -28,6 +36,7 @@ lint/correctness/use_once_constructors_once_provider.rs::scan_stmt
 lint/correctness/valid_regexps.rs::expression_segments
 lint/lexical_usage.rs::visit_expr
 lint/semantic_scope.rs::visit_expr
+lint/semantic_type_operations.rs::visit_stmt
 lint/style/binary_expression_operand_order.rs::scan_expr
 lint/style/binary_expression_operand_order.rs::scan_stmt
 lint/style/boolean_prefixes.rs::scan_stmt
@@ -49,26 +58,12 @@ lint/style/use_design_system_item.rs::scan_expr
 lint/style/use_design_system_item.rs::scan_stmt
 lint/style/use_spacer_as_expanded_child.rs::scan_expr
 lint/style/use_spacer_as_expanded_child.rs::scan_stmt
-lint/suspicious/avoid_empty_else.rs::walk_expr
-lint/suspicious/avoid_empty_else.rs::walk_stmt
-lint/suspicious/avoid_ignoring_return_values.rs::scan_expr
-lint/suspicious/avoid_ignoring_return_values.rs::scan_stmt
-lint/suspicious/avoid_passing_async_when_sync_expected.rs::visit_exprs
-lint/suspicious/avoid_passing_async_when_sync_expected.rs::visit_stmts
-lint/suspicious/avoid_shadowing_type_parameters.rs::scan_expr
-lint/suspicious/avoid_shadowing_type_parameters.rs::scan_stmt
-lint/suspicious/avoid_throw_in_catch_block.rs::check_stmt
-lint/suspicious/avoid_throw_in_catch_block.rs::collect_throws
-lint/suspicious/control_flow_in_finally.rs::find_in_expr
-lint/suspicious/control_flow_in_finally.rs::find_in_stmt
-lint/suspicious/control_flow_in_finally.rs::scan_finally
+lint/suspicious/avoid_ignoring_return_values.rs::signature
+lint/suspicious/avoid_ignoring_return_values.rs::visit_stmt
+lint/suspicious/avoid_passing_async_when_sync_expected.rs::visit_stmt
+lint/suspicious/avoid_print.rs::visit_stmt
 lint/suspicious/empty_catches.rs::walk_expr
 lint/suspicious/empty_catches.rs::walk_stmt
 lint/suspicious/empty_statements.rs::walk_expr
 lint/suspicious/empty_statements.rs::walk_stmt
-lint/suspicious/no_duplicate_case_values.rs::scan_expr
-lint/suspicious/no_duplicate_case_values.rs::scan_stmt
-lint/suspicious/no_empty_block.rs::scan_expr
-lint/suspicious/no_empty_block.rs::scan_stmt
 lint/suspicious/no_equal_arguments.rs::is_literal
-lint/suspicious/no_self_comparisons.rs::is_side_effect_free

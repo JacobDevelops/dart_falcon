@@ -53,6 +53,39 @@ void testConditionalExpressionImpossible() {
   final result = "text" is int ? "yes" : "no"; /* expect: avoid-unrelated-type-assertions */
 }
 
+void testOldStyleFunctionFormal(String callback()) {
+  if (callback is String) { /* expect: avoid-unrelated-type-assertions */
+    print("function is string");
+  }
+}
+
+void testForInBindings() {
+  for (final value in <String>['x']) {
+    if (value is int) { /* expect: avoid-unrelated-type-assertions */
+      print("string is int");
+    }
+  }
+  for (String value in <String>['x']) {
+    if (value is int) { /* expect: avoid-unrelated-type-assertions */
+      print("string is int");
+    }
+  }
+  for (final [value] in <List<String>>[
+    ['x'],
+  ]) {
+    if (value is int) { /* expect: avoid-unrelated-type-assertions */
+      print("string is int");
+    }
+  }
+}
+
+class ConstructorInitializerCheck {
+  final bool impossible;
+
+  ConstructorInitializerCheck()
+      : impossible = "text" is int; /* expect: avoid-unrelated-type-assertions */
+}
+
 // Regression: the violation must still be found inside Dart 3 containers
 // (pattern declaration, labeled statement, switch expression and subject,
 // collection if/spread, record field).

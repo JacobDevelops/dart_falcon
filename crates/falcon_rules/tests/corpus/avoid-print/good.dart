@@ -27,3 +27,15 @@ class StringSink {
 }
 
 String describe() => 'ok';
+
+void shadowedByParameter(void Function(Object?) print) {
+  print('user function');
+}
+
+class HasPrintMember {
+  void print(Object? value) {}
+
+  void run() {
+    print('member');
+  }
+}

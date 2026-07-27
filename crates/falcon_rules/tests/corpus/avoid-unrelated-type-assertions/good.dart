@@ -50,3 +50,9 @@ void testValidUnionLikeType() {
     print("data is int or string");
   }
 }
+
+class T {}
+
+mixin M<T> {
+  bool unrelatedTypeParameterCheck(T value) => value is int;
+}

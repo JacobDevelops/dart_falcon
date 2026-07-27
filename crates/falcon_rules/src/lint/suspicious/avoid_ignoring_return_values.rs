@@ -1,19 +1,14 @@
-//! Flags a call whose non-void return value is discarded.
-//!
-//! A function that returns a value usually expects the caller to use it, so
-//! dropping the result often signals a bug — forgetting that immutable APIs like
-//! `String.replaceAll` or `List.map` return a new value instead of mutating in
-//! place, or ignoring a status code. When a project index is available the
-//! callee's declared return type decides: a known `void` return is safe to
-//! discard, a known non-void return is flagged, and only an unresolved return
-//! type falls back to a built-in allowlist of conventionally side-effecting
-//! names (logging, collection mutation, stream and sink writes, lifecycle hooks,
-//! navigation). Without an index every discarded call not on that allowlist is
-//! flagged. Assign the result, act on it, or make the discard explicit.
+//! Flags a discarded call whose resolved return type is non-void.
 
-use falcon_analyze::{AnalyzeContext, Rule, StaticType};
+use std::collections::HashSet;
+
+use falcon_analyze::{
+    AnalyzeContext, ResolvedSignature, ResolvedType, Rule, SemanticModel, SignatureIndex,
+    TypeEnvironment, TypeParameterScope,
+};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, bound_names, walk_expr, walk_pattern, walk_stmt};
 
 pub struct AvoidIgnoringReturnValues;
 
@@ -23,317 +18,382 @@ impl Rule for AvoidIgnoringReturnValues {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
-        diags
+        let Some(identities) = ctx.identities else {
+            return Vec::new();
+        };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let signatures = ctx
+            .signatures
+            .cloned()
+            .unwrap_or_else(|| SignatureIndex::from_program(program, &model));
+        let mut collector = Collector {
+            model,
+            signatures,
+            environment: TypeEnvironment::new(),
+            type_parameters: TypeParameterScope::default(),
+            names: vec![HashSet::new()],
+            current_type: None,
+            diagnostics: Vec::new(),
+            file: ctx.file_path.to_string_lossy().into_owned(),
+        };
+        collector.visit_program(program);
+        collector.diagnostics
     }
 }
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            if let Some(body) = &f.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        _ => {}
-    }
+struct Collector<'a> {
+    model: SemanticModel<'a>,
+    signatures: SignatureIndex,
+    environment: TypeEnvironment,
+    type_parameters: TypeParameterScope,
+    names: Vec<HashSet<String>>,
+    current_type: Option<ResolvedType>,
+    diagnostics: Vec<Diagnostic>,
+    file: String,
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let body = match member {
-        ClassMember::Method(m) => m.body.as_ref(),
-        ClassMember::Constructor(c) => c.body.as_ref(),
-        ClassMember::Getter(g) => g.body.as_ref(),
-        ClassMember::Setter(s) => s.body.as_ref(),
-        _ => None,
-    };
-    if let Some(b) = body {
-        scan_body(b, diags, ctx);
+impl Collector<'_> {
+    fn push(&mut self) {
+        self.environment.push_scope();
+        self.names.push(HashSet::new());
     }
-}
 
-fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match body {
-        FunctionBody::Block(b) => scan_stmts(&b.stmts, diags, ctx),
-        FunctionBody::Arrow(e, _) => scan_expr(e, diags, ctx),
-        FunctionBody::Native(_, _) => {}
+    fn pop(&mut self) {
+        self.environment.pop_scope();
+        self.names.pop();
     }
-}
 
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for s in stmts {
-        scan_stmt(s, diags, ctx);
+    fn declare(&mut self, name: &str, ty: ResolvedType) {
+        self.environment.declare(name.to_string(), ty);
+        self.names
+            .last_mut()
+            .expect("lexical scope")
+            .insert(name.to_string());
     }
-}
 
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::Expr(e) => {
-            check_ignored_return_value(&e.expr, diags, ctx);
-            scan_expr(&e.expr, diags, ctx);
-        }
-        Stmt::Return(r) => {
-            if let Some(v) = &r.value {
-                scan_expr(v, diags, ctx);
+    fn bound(&self, name: &str) -> bool {
+        self.names.iter().rev().any(|scope| scope.contains(name))
+    }
+
+    fn infer(&self, expression: &Expr) -> ResolvedType {
+        self.environment.infer_with_signatures(
+            expression,
+            &self.model,
+            &self.signatures,
+            &self.type_parameters,
+        )
+    }
+
+    fn body(&mut self, body: &FunctionBody) {
+        match body {
+            FunctionBody::Block(block) => {
+                for statement in &block.stmts {
+                    self.visit_stmt(statement);
+                }
             }
+            FunctionBody::Arrow(expression, _) => self.visit_expr(expression),
+            FunctionBody::Native(_, _) => {}
         }
-        Stmt::LocalVar(lv) => {
-            for d in &lv.declarators {
-                if let Some(init) = &d.initializer {
-                    scan_expr(init, diags, ctx);
+    }
+
+    fn function(
+        &mut self,
+        type_params: &[TypeParam],
+        params: &FormalParamList,
+        body: Option<&FunctionBody>,
+    ) {
+        self.push();
+        self.type_parameters.push(type_params, &self.model);
+        for param in params
+            .positional
+            .iter()
+            .chain(&params.optional_positional)
+            .chain(&params.named)
+        {
+            let ty = param
+                .param_type
+                .as_ref()
+                .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
+                .unwrap_or(ResolvedType::Dynamic);
+            self.declare(&param.name.name, ty);
+        }
+        if let Some(body) = body {
+            self.body(body);
+        }
+        self.type_parameters.pop();
+        self.pop();
+    }
+
+    fn local(&mut self, declaration: &LocalVarDecl) {
+        for declarator in &declaration.declarators {
+            if let Some(initializer) = &declarator.initializer {
+                self.visit_expr(initializer);
+            }
+            let ty = declaration
+                .var_type
+                .as_ref()
+                .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
+                .or_else(|| {
+                    declarator
+                        .initializer
+                        .as_ref()
+                        .map(|value| self.infer(value))
+                })
+                .unwrap_or(ResolvedType::Unknown);
+            self.declare(&declarator.name.name, ty);
+        }
+    }
+
+    fn pattern(&mut self, pattern: &Pattern) {
+        walk_pattern(self, pattern);
+        for name in bound_names(pattern) {
+            self.declare(&name.name, ResolvedType::Unknown);
+        }
+    }
+
+    fn for_init(&mut self, init: &ForInit) {
+        match init {
+            ForInit::VarDecl(declaration) => self.local(declaration),
+            ForInit::ForIn { name, iterable, .. } => {
+                self.visit_expr(iterable);
+                self.declare(&name.name, ResolvedType::Unknown);
+            }
+            ForInit::PatternForIn { pattern, iterable } => {
+                self.visit_expr(iterable);
+                self.pattern(pattern);
+            }
+            ForInit::Exprs(expressions) => {
+                for expression in expressions {
+                    self.visit_expr(expression);
                 }
             }
         }
-        Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx),
-        Stmt::If(i) => {
-            if let IfCondition::Expr(e) = &i.condition {
-                scan_expr(e, diags, ctx);
+    }
+
+    fn signature(&self, callee: &Expr) -> Option<ResolvedSignature> {
+        match callee {
+            Expr::Ident(identifier) if !self.bound(&identifier.name) => {
+                if let Some(current_type) = &self.current_type
+                    && let Some((signature, substitutions)) =
+                        self.signatures
+                            .resolved_member(current_type, &identifier.name, &self.model)
+                {
+                    return Some(substitute_signature(signature, &substitutions, &self.model));
+                }
+                let identity = self
+                    .model
+                    .resolve_value(std::slice::from_ref(&identifier.name))?;
+                self.signatures.function(&identity).cloned()
             }
-            scan_stmt(&i.then_branch, diags, ctx);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx);
+            Expr::Field { object, field, .. } => {
+                if let Expr::Ident(prefix) = object.as_ref()
+                    && !self.bound(&prefix.name)
+                    && let Some(identity) = self
+                        .model
+                        .resolve_value(&[prefix.name.clone(), field.name.clone()])
+                    && let Some(signature) = self.signatures.function(&identity)
+                {
+                    return Some(signature.clone());
+                }
+                let receiver = self.infer(object);
+                let (signature, substitutions) =
+                    self.signatures
+                        .resolved_member(&receiver, &field.name, &self.model)?;
+                Some(substitute_signature(signature, &substitutions, &self.model))
             }
+            _ => None,
         }
-        Stmt::While(w) => {
-            scan_expr(&w.condition, diags, ctx);
-            scan_stmt(&w.body, diags, ctx);
+    }
+
+    fn check_discarded(&mut self, expression: &Expr) {
+        let Expr::Call { callee, span, .. } = expression else {
+            return;
+        };
+        let Some(signature) = self.signature(callee) else {
+            return;
+        };
+        if matches!(
+            signature.return_type,
+            ResolvedType::Unknown | ResolvedType::Dynamic
+        ) || self.model.void_context(&signature.return_type)
+        {
+            return;
         }
-        Stmt::DoWhile(d) => {
-            scan_stmt(&d.body, diags, ctx);
-            scan_expr(&d.condition, diags, ctx);
+        self.diagnostics.push(Diagnostic::new(
+            "avoid-ignoring-return-values",
+            Severity::Warning,
+            "The return value is not being used",
+            self.file.clone(),
+            DiagSpan {
+                start: span.start,
+                end: span.end,
+            },
+        ));
+    }
+}
+
+impl Visitor for Collector<'_> {
+    fn visit_class_decl(&mut self, node: &ClassDecl) {
+        let saved_type = self.current_type.clone();
+        self.type_parameters.push(&node.type_params, &self.model);
+        self.current_type = self
+            .model
+            .resolve_name(std::slice::from_ref(&node.name.name))
+            .map(|identity| ResolvedType::Interface {
+                identity,
+                arguments: node
+                    .type_params
+                    .iter()
+                    .filter_map(|parameter| self.type_parameters.lookup(&parameter.name.name))
+                    .collect(),
+                nullable: false,
+                extension_type: false,
+            });
+        for member in &node.members {
+            self.visit_class_member(member);
         }
-        Stmt::For(f) => {
-            if let Some(ForInit::VarDecl(lv)) = &f.init {
-                for d in &lv.declarators {
-                    if let Some(init) = &d.initializer {
-                        scan_expr(init, diags, ctx);
+        self.type_parameters.pop();
+        self.current_type = saved_type;
+    }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        self.function(&node.type_params, &node.params, node.body.as_ref());
+    }
+
+    fn visit_method_decl(&mut self, node: &MethodDecl) {
+        self.function(&node.type_params, &node.params, node.body.as_ref());
+    }
+
+    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+        self.function(&[], &node.params, node.body.as_ref());
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) {
+        match node {
+            Stmt::Expr(statement) => {
+                self.check_discarded(&statement.expr);
+                self.visit_expr(&statement.expr);
+            }
+            Stmt::Block(block) => {
+                self.push();
+                for statement in &block.stmts {
+                    self.visit_stmt(statement);
+                }
+                self.pop();
+            }
+            Stmt::LocalVar(declaration) => self.local(declaration),
+            Stmt::LocalFunc(function) => {
+                self.declare(&function.name.name, ResolvedType::Unknown);
+                self.function(
+                    &function.type_params,
+                    &function.params,
+                    Some(&function.body),
+                );
+            }
+            Stmt::PatternDecl(declaration) => {
+                self.visit_expr(&declaration.init);
+                self.pattern(&declaration.pattern);
+            }
+            Stmt::If(statement) => match &statement.condition {
+                IfCondition::Expr(condition) => {
+                    self.visit_expr(condition);
+                    self.visit_stmt(&statement.then_branch);
+                    if let Some(branch) = &statement.else_branch {
+                        self.visit_stmt(branch);
                     }
                 }
-            }
-            if let Some(cond) = &f.condition {
-                scan_expr(cond, diags, ctx);
-            }
-            for u in &f.update {
-                scan_expr(u, diags, ctx);
-            }
-            scan_stmt(&f.body, diags, ctx);
-        }
-        Stmt::TryCatch(tc) => {
-            scan_stmts(&tc.body.stmts, diags, ctx);
-            for catch in &tc.catches {
-                scan_stmts(&catch.body.stmts, diags, ctx);
-            }
-            if let Some(fin) = &tc.finally {
-                scan_stmts(&fin.stmts, diags, ctx);
-            }
-        }
-        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx),
-        Stmt::Assert(a) => {
-            scan_expr(&a.condition, diags, ctx);
-            if let Some(msg) = &a.message {
-                scan_expr(msg, diags, ctx);
-            }
-        }
-        Stmt::Throw(t) => scan_expr(&t.value, diags, ctx),
-        _ => {}
-    }
-}
-
-/// Method/function names that overwhelmingly denote side effects (their return
-/// value, if any, is conventionally discarded). Without type resolution falcon
-/// cannot know a call's real return type, so this static list is the best
-/// heuristic to suppress the dominant false positives seen on real code:
-/// lifecycle hooks, collection mutation, logging, stream/sink writes, disposal,
-/// and navigation. Derived from adopter-codebase sampling + dart_code_linter's
-/// known-void exemptions. The allowlist only matters for names the project
-/// index cannot resolve; resolved return types take precedence.
-const SIDE_EFFECT_NAMES: &[&str] = &[
-    // logging / debug
-    "print",
-    "printSync",
-    "log",
-    "info",
-    "warn",
-    "warning",
-    "debug",
-    "error",
-    "fine",
-    "severe",
-    // collection mutation
-    "add",
-    "addAll",
-    "insert",
-    "insertAll",
-    "remove",
-    "removeAt",
-    "removeLast",
-    "removeWhere",
-    "removeRange",
-    "retainWhere",
-    "clear",
-    "sort",
-    "shuffle",
-    "fillRange",
-    "setAll",
-    "setRange",
-    "forEach",
-    "putIfAbsent",
-    "update",
-    "updateAll",
-    // listeners / notifiers / streams / sinks
-    "addListener",
-    "removeListener",
-    "notifyListeners",
-    "emit",
-    "sink",
-    "write",
-    "writeln",
-    "writeAll",
-    "complete",
-    "completeError",
-    "cancel",
-    "close",
-    "flush",
-    "send",
-    "seek",
-    // widget / framework lifecycle
-    "setState",
-    "initState",
-    "dispose",
-    "didChangeDependencies",
-    "didUpdateWidget",
-    "deactivate",
-    "markNeedsBuild",
-    "addPostFrameCallback",
-    "unawaited",
-    // navigation
-    "pop",
-    "push",
-    "pushNamed",
-    "pushReplacement",
-    "popUntil",
-    "maybePop",
-    "showDialog",
-    // misc common side effects
-    "save",
-    "delete",
-    "reset",
-    "start",
-    "stop",
-    "play",
-    "pause",
-    "throwWithStackTrace",
-];
-
-fn is_side_effect_name(name: &str) -> bool {
-    SIDE_EFFECT_NAMES.contains(&name)
-}
-
-/// Base name of a call's callee, for side-effect matching. Handles both bare
-/// identifiers (`foo()`) and member calls (`x.foo()`).
-fn callee_name(expr: &Expr) -> Option<&str> {
-    match expr {
-        Expr::Ident(id) => Some(id.name.as_str()),
-        Expr::Field { field, .. } => Some(field.name.as_str()),
-        _ => None,
-    }
-}
-
-fn check_ignored_return_value(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let name = match expr {
-        Expr::Call { callee, .. } => callee_name(callee),
-        Expr::Field { field, .. } => Some(field.name.as_str()),
-        _ => return,
-    };
-    if !is_ignored_value(name, ctx) {
-        return;
-    }
-    diags.push(Diagnostic::new(
-        "avoid-ignoring-return-values",
-        Severity::Warning,
-        "The return value is not being used",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: expr.span().start,
-            end: expr.span().end,
-        },
-    ));
-}
-
-/// Decide whether a discarded call/field access is worth flagging.
-///
-/// With a project index ([`AnalyzeContext::project`]), the callee's declared
-/// return type decides it: a known `void` return is safe to discard (suppress),
-/// a known non-void return is worth flagging, and only when the return type is
-/// `Unknown` (name absent, ambiguous, or inference lost) does it fall back to the
-/// receiver-less [`SIDE_EFFECT_NAMES`] allowlist. Without an index it keeps the
-/// original conservative behavior: flag anything not on the allowlist.
-fn is_ignored_value(name: Option<&str>, ctx: &AnalyzeContext) -> bool {
-    let allowlist_says_ignore = || !name.is_some_and(is_side_effect_name);
-    match ctx.project {
-        Some(index) => match name {
-            Some(n) => match index.return_type(n) {
-                StaticType::Void => false,
-                StaticType::Unknown => allowlist_says_ignore(),
-                _ => true,
+                IfCondition::Case(value, pattern, guard) => {
+                    self.visit_expr(value);
+                    self.push();
+                    self.pattern(pattern);
+                    if let Some(guard) = guard {
+                        self.visit_expr(guard);
+                    }
+                    self.visit_stmt(&statement.then_branch);
+                    self.pop();
+                    if let Some(branch) = &statement.else_branch {
+                        self.visit_stmt(branch);
+                    }
+                }
             },
-            // No simple callee name to resolve — keep the conservative default.
-            None => true,
-        },
-        None => allowlist_says_ignore(),
+            Stmt::For(statement) => {
+                self.push();
+                if let Some(init) = &statement.init {
+                    self.for_init(init);
+                }
+                if let Some(condition) = &statement.condition {
+                    self.visit_expr(condition);
+                }
+                for update in &statement.update {
+                    self.visit_expr(update);
+                }
+                self.visit_stmt(&statement.body);
+                self.pop();
+            }
+            Stmt::TryCatch(statement) => {
+                self.push();
+                for statement in &statement.body.stmts {
+                    self.visit_stmt(statement);
+                }
+                self.pop();
+                for catch in &statement.catches {
+                    self.push();
+                    if let Some(name) = &catch.exception_var {
+                        self.declare(&name.name, ResolvedType::Unknown);
+                    }
+                    if let Some(name) = &catch.stack_trace_var {
+                        self.declare(&name.name, ResolvedType::Unknown);
+                    }
+                    for statement in &catch.body.stmts {
+                        self.visit_stmt(statement);
+                    }
+                    self.pop();
+                }
+                if let Some(finally) = &statement.finally {
+                    self.push();
+                    for statement in &finally.stmts {
+                        self.visit_stmt(statement);
+                    }
+                    self.pop();
+                }
+            }
+            _ => walk_stmt(self, node),
+        }
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        if let Expr::FuncExpr {
+            type_params,
+            params,
+            body,
+            ..
+        } = node
+        {
+            self.function(type_params, params, Some(body));
+        } else {
+            walk_expr(self, node);
+        }
     }
 }
 
-fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match expr {
-        Expr::Call { callee, args, .. } => {
-            scan_expr(callee, diags, ctx);
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx);
-            }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx);
-            }
-        }
-        Expr::Field { object, .. } => scan_expr(object, diags, ctx),
-        Expr::Assign { target, value, .. } => {
-            scan_expr(target, diags, ctx);
-            scan_expr(value, diags, ctx);
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            scan_expr(condition, diags, ctx);
-            scan_expr(then_expr, diags, ctx);
-            scan_expr(else_expr, diags, ctx);
-        }
-        Expr::FuncExpr { body, .. } => scan_body(body, diags, ctx),
-        Expr::Await { expr, .. } => scan_expr(expr, diags, ctx),
-        Expr::Binary { left, right, .. } => {
-            scan_expr(left, diags, ctx);
-            scan_expr(right, diags, ctx);
-        }
-        _ => {}
+fn substitute_signature(
+    signature: ResolvedSignature,
+    substitutions: &std::collections::HashMap<falcon_analyze::TypeParameterId, ResolvedType>,
+    model: &SemanticModel<'_>,
+) -> ResolvedSignature {
+    ResolvedSignature {
+        owner_parameters: signature.owner_parameters,
+        call_parameters: signature.call_parameters,
+        positional: signature
+            .positional
+            .iter()
+            .map(|ty| model.substitute(ty, substitutions))
+            .collect(),
+        named: signature
+            .named
+            .iter()
+            .map(|(name, ty)| (name.clone(), model.substitute(ty, substitutions)))
+            .collect(),
+        return_type: model.substitute(&signature.return_type, substitutions),
     }
 }
