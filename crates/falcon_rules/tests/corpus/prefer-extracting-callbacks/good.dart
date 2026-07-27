@@ -13,6 +13,8 @@ class NotAWidget {
 class MyWidget extends StatelessWidget {
   const MyWidget({super.key});
 
+  final int mode = 0;
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -32,6 +34,24 @@ class MyWidget extends StatelessWidget {
           builder: (BuildContext context) {
             final theme = Theme.of(context);
             return Text('$theme');
+          },
+        ),
+        // Untyped builder parameter: unresolved, still treated as a builder.
+        Builder(
+          builder: (context) {
+            final label = 'value';
+            return Text(label);
+          },
+        ),
+        // Widget returned only from nested branches still counts as a builder.
+        Builder(
+          builder: (BuildContext context) {
+            switch (mode) {
+              case 0:
+                return const Text('a');
+              default:
+                return const Text('b');
+            }
           },
         ),
       ],

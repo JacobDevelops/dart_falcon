@@ -10,7 +10,7 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 pub struct PreferExtractingCallbacks;
 
@@ -96,7 +96,7 @@ struct CallbackCollector<'a, 'b> {
 
 impl Visitor for CallbackCollector<'_, '_> {
     fn visit_expr(&mut self, node: &Expr) {
-        if let Some((constructed, _, args)) = construction(node, self.model)
+        if let Some((constructed, args)) = construction(node, self.model)
             && self
                 .signatures
                 .is_subtype_of(&constructed, self.widget, self.model)
@@ -158,7 +158,8 @@ impl CallbackCollector<'_, '_> {
         let Some(first) = first else {
             return true;
         };
-        first.param_type.as_ref().is_some_and(|ty| {
+        // An untyped `(context, index) {}` is still a builder; only a resolved non-context type rules it out.
+        first.param_type.as_ref().is_none_or(|ty| {
             self.model.resolve_type(ty) == interface(flutter_identity("BuildContext"))
         })
     }
@@ -174,14 +175,43 @@ fn body_returns_widget(
         FunctionBody::Arrow(expression, _) => {
             expression_is_widget(expression, model, signatures, widget)
         }
-        FunctionBody::Block(block) => block.stmts.iter().any(|statement| match statement {
-            Stmt::Return(ReturnStmt {
-                value: Some(value), ..
-            }) => expression_is_widget(value, model, signatures, widget),
-            _ => false,
-        }),
+        FunctionBody::Block(block) => {
+            let mut finder = ReturnsWidget {
+                model,
+                signatures,
+                widget,
+                found: false,
+            };
+            for statement in &block.stmts {
+                finder.visit_stmt(statement);
+            }
+            finder.found
+        }
         FunctionBody::Native(..) => false,
     }
+}
+
+struct ReturnsWidget<'a> {
+    model: &'a SemanticModel<'a>,
+    signatures: &'a SignatureIndex,
+    widget: &'a DeclarationIdentity,
+    found: bool,
+}
+
+impl Visitor for ReturnsWidget<'_> {
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::Return(ReturnStmt {
+            value: Some(value), ..
+        }) = node
+            && expression_is_widget(value, self.model, self.signatures, self.widget)
+        {
+            self.found = true;
+        }
+        walk_stmt(self, node);
+    }
+
+    // Statements only reach expressions through nested closures, whose returns aren't this body's.
+    fn visit_expr(&mut self, _node: &Expr) {}
 }
 
 fn expression_is_widget(
@@ -191,29 +221,25 @@ fn expression_is_widget(
     widget: &DeclarationIdentity,
 ) -> bool {
     construction(expression, model)
-        .is_some_and(|(ty, _, _)| signatures.is_subtype_of(&ty, widget, model) == TypeTruth::Yes)
+        .is_some_and(|(ty, _)| signatures.is_subtype_of(&ty, widget, model) == TypeTruth::Yes)
 }
 
 fn construction<'a>(
     expression: &'a Expr,
     model: &SemanticModel<'_>,
-) -> Option<(ResolvedType, String, &'a ArgList)> {
+) -> Option<(ResolvedType, &'a ArgList)> {
     match expression {
         Expr::New {
             dart_type, args, ..
-        } => Some((
-            model.resolve_type(dart_type).with_nullable(false),
-            "new".to_string(),
-            args,
-        )),
+        } => Some((model.resolve_type(dart_type).with_nullable(false), args)),
         Expr::Call { callee, args, .. } => {
             let mut segments = expression_segments(callee)?;
             if let Some(identity) = model.resolve_name(&segments) {
-                return Some((interface(identity), "new".to_string(), args));
+                return Some((interface(identity), args));
             }
-            let constructor = segments.pop()?;
+            segments.pop()?;
             let identity = model.resolve_name(&segments)?;
-            Some((interface(identity), constructor, args))
+            Some((interface(identity), args))
         }
         _ => None,
     }
@@ -259,12 +285,10 @@ fn is_long_enough(span: &Span, source: &str, cfg: &Cfg) -> bool {
         None => true,
         Some(limit) => {
             let end = span.end.min(source.len());
-            source[span.start..end]
-                .bytes()
-                .filter(|byte| *byte == b'\n')
-                .count()
-                + 1
-                > limit
+            let Some(text) = source.get(span.start..end) else {
+                return false;
+            };
+            text.bytes().filter(|byte| *byte == b'\n').count() + 1 > limit
         }
     }
 }
