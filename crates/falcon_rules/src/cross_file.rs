@@ -17,7 +17,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use falcon_analyze::ProjectFile;
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::ast::{ExportDirective, ImportDirective, PartDirective, Program};
+use marked_yaml::{Node as MarkedNode, parse_yaml};
+use serde_yaml::Value;
 
 /// Resolved package identity: the `name:` from pubspec.yaml and the absolute
 /// `lib/` directory that `package:<name>/...` URIs resolve against.
@@ -75,6 +78,184 @@ pub fn enclosing_pubspec(path: &Path) -> Option<PathBuf> {
         dir = d.parent();
     }
     None
+}
+
+/// Locate a parsed YAML string in its original source using the same mapping keys
+/// and sequence indexes in a parser that preserves scalar source markers.
+pub fn yaml_string_span(source: &str, root: &Value, target: &Value) -> Option<DiagSpan> {
+    let mut path = Vec::new();
+    yaml_value_path(root, target, &mut path)?;
+    let marked = parse_yaml(0, source).ok()?;
+    let node = marked_node_at_path(&marked, &path)?;
+    if node.as_scalar()?.as_str() != target.as_str()? {
+        return None;
+    }
+    let character = node.span().start()?.character();
+    let start = character_to_byte(source, character)?;
+    scalar_source_span(source, start)
+}
+
+#[derive(Debug)]
+enum YamlPathSegment {
+    Key(String),
+    Index(usize),
+}
+
+fn yaml_value_path(root: &Value, target: &Value, path: &mut Vec<YamlPathSegment>) -> Option<()> {
+    if std::ptr::eq(root, target) {
+        return Some(());
+    }
+    match root {
+        Value::Mapping(entries) => {
+            for (key, value) in entries {
+                // Non-string keys aren't addressable by `marked_node_at_path`, so
+                // skip them instead of abandoning the whole search.
+                let Some(key) = key.as_str() else { continue };
+                path.push(YamlPathSegment::Key(key.to_owned()));
+                if yaml_value_path(value, target, path).is_some() {
+                    return Some(());
+                }
+                path.pop();
+            }
+        }
+        Value::Sequence(values) => {
+            for (index, value) in values.iter().enumerate() {
+                path.push(YamlPathSegment::Index(index));
+                if yaml_value_path(value, target, path).is_some() {
+                    return Some(());
+                }
+                path.pop();
+            }
+        }
+        Value::Tagged(tagged) => return yaml_value_path(&tagged.value, target, path),
+        _ => {}
+    }
+    None
+}
+
+fn marked_node_at_path<'a>(
+    root: &'a MarkedNode,
+    path: &[YamlPathSegment],
+) -> Option<&'a MarkedNode> {
+    path.iter().try_fold(root, |node, segment| match segment {
+        YamlPathSegment::Key(key) => node.as_mapping()?.get_node(key),
+        YamlPathSegment::Index(index) => node.as_sequence()?.get(*index),
+    })
+}
+
+fn character_to_byte(source: &str, character: usize) -> Option<usize> {
+    source
+        .char_indices()
+        .map(|(index, _)| index)
+        .chain(std::iter::once(source.len()))
+        .nth(character)
+}
+
+fn scalar_source_span(source: &str, start: usize) -> Option<DiagSpan> {
+    if let Some(span) = enclosing_block_scalar(source, start) {
+        return Some(span);
+    }
+    let bytes = source.as_bytes();
+    let end = match bytes.get(start)? {
+        b'\'' => quoted_scalar_end(bytes, start, b'\'', true)?,
+        b'"' => quoted_scalar_end(bytes, start, b'"', false)?,
+        _ => plain_scalar_end(bytes, start),
+    };
+    (end > start).then_some(DiagSpan { start, end })
+}
+
+fn quoted_scalar_end(bytes: &[u8], start: usize, quote: u8, doubled_escape: bool) -> Option<usize> {
+    let mut index = start + 1;
+    while index < bytes.len() {
+        if !doubled_escape && bytes[index] == b'\\' {
+            index = (index + 2).min(bytes.len());
+            continue;
+        }
+        if bytes[index] == quote {
+            if doubled_escape && bytes.get(index + 1) == Some(&quote) {
+                index += 2;
+                continue;
+            }
+            return Some(index + 1);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn plain_scalar_end(bytes: &[u8], start: usize) -> usize {
+    let mut end = start;
+    while end < bytes.len() {
+        let byte = bytes[end];
+        if matches!(byte, b'\r' | b'\n' | b',' | b']' | b'}')
+            || (byte == b'#' && end > start && bytes[end - 1].is_ascii_whitespace())
+            || (byte == b':'
+                && bytes.get(end + 1).is_none_or(|next| {
+                    next.is_ascii_whitespace() || matches!(next, b',' | b']' | b'}')
+                }))
+        {
+            break;
+        }
+        end += 1;
+    }
+    while end > start && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    end
+}
+
+fn enclosing_block_scalar(source: &str, value_start: usize) -> Option<DiagSpan> {
+    let value_line_start = source[..value_start]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let value_indent = source[value_line_start..value_start]
+        .bytes()
+        .take_while(u8::is_ascii_whitespace)
+        .count();
+    let mut search_end = value_line_start.saturating_sub(1);
+
+    loop {
+        let line_start = source[..search_end]
+            .rfind('\n')
+            .map_or(0, |index| index + 1);
+        let line = &source[line_start..search_end];
+        if !line.trim().is_empty() {
+            let indent = line.bytes().take_while(u8::is_ascii_whitespace).count();
+            let marker = line.find(':').and_then(|colon| {
+                let rest = line[colon + 1..].trim_start();
+                matches!(rest.as_bytes().first(), Some(b'|' | b'>'))
+                    .then(|| colon + 1 + line[colon + 1..].len() - rest.len())
+            });
+            if indent < value_indent {
+                let marker = marker?;
+                let mut scalar_end = search_end;
+                let mut next = search_end + usize::from(search_end < source.len());
+                while next < source.len() {
+                    let next_end = source[next..]
+                        .find('\n')
+                        .map_or(source.len(), |length| next + length);
+                    let next_line = &source[next..next_end];
+                    let next_indent = next_line
+                        .bytes()
+                        .take_while(u8::is_ascii_whitespace)
+                        .count();
+                    if !next_line.trim().is_empty() && next_indent <= indent {
+                        break;
+                    }
+                    scalar_end = next_end;
+                    next = next_end + usize::from(next_end < source.len());
+                }
+                return Some(DiagSpan {
+                    start: line_start + marker,
+                    end: scalar_end,
+                });
+            }
+        }
+        if line_start == 0 {
+            return None;
+        }
+        search_end = line_start - 1;
+    }
 }
 
 /// Discover the enclosing package by walking up from the analyzed files to the
@@ -337,5 +518,46 @@ mod tests {
         assert!(!has_lib_component(Path::new("/proj/test/helpers.dart")));
         assert!(!has_lib_component(Path::new("/proj/bin/script.dart")));
         assert!(!has_lib_component(Path::new("/proj/tool/gen.dart")));
+    }
+
+    #[test]
+    fn yaml_string_span_covers_quoted_and_block_scalars() {
+        let source = "quoted: 'BadName'\nblock: |\n  Bad-Block\nnext: value\n";
+        let root: Value = serde_yaml::from_str(source).unwrap();
+        let mapping = root.as_mapping().unwrap();
+        for (key, expected) in [("quoted", "'BadName'"), ("block", "|\n  Bad-Block")] {
+            let value = mapping.get(Value::String(key.to_string())).unwrap();
+            let span = yaml_string_span(source, &root, value).unwrap();
+            assert_eq!(&source[span.start..span.end], expected);
+        }
+    }
+
+    #[test]
+    fn yaml_string_span_uses_structured_path_instead_of_matching_text() {
+        let source = "# homepage: http://same.example\ndescription: http://same.example\nhomepage: http://same.example\n";
+        let root: Value = serde_yaml::from_str(source).unwrap();
+        let homepage = root
+            .as_mapping()
+            .unwrap()
+            .get(Value::String("homepage".to_string()))
+            .unwrap();
+        let span = yaml_string_span(source, &root, homepage).unwrap();
+        assert_eq!(&source[span.start..span.end], "http://same.example");
+        assert_eq!(source[..span.start].lines().count(), 3);
+    }
+
+    #[test]
+    fn yaml_string_span_covers_escaped_and_folded_scalars() {
+        let source = "prefix: café\nescaped: \"http:\\/\\/example.com\"\nfolded: >\n  git://example.com/\n  repository.git\nnext: value\n";
+        let root: Value = serde_yaml::from_str(source).unwrap();
+        let mapping = root.as_mapping().unwrap();
+        for (key, expected) in [
+            ("escaped", "\"http:\\/\\/example.com\""),
+            ("folded", ">\n  git://example.com/\n  repository.git"),
+        ] {
+            let value = mapping.get(Value::String(key.to_string())).unwrap();
+            let span = yaml_string_span(source, &root, value).unwrap();
+            assert_eq!(&source[span.start..span.end], expected);
+        }
     }
 }

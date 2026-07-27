@@ -1433,7 +1433,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("depend_on_referenced_packages"),
         group: "correctness",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: true,
     },
     RuleMeta {
@@ -1441,7 +1441,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("package_names"),
         group: "style",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: true,
     },
     RuleMeta {
@@ -1449,7 +1449,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         source: RuleSource::Lints("secure_pubspec_urls"),
         group: "suspicious",
         domains: NONE,
-        recommended: true,
+        recommended: false,
         cross_file: true,
     },
 ];
