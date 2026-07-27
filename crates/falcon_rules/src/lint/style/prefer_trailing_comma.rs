@@ -1,16 +1,15 @@
 //! Flags multi-line argument lists that are missing a trailing comma.
 //!
 //! A trailing comma is required only when the argument list is already broken
-//! across lines — that is, when the last significant token sits on an earlier line
-//! than the closing `)`. This mirrors the Dart 3.x tall-style formatter, which adds
-//! a trailing comma when it splits a list one element per line and omits it when the
-//! final argument hugs the bracket, so the rule stays silent on single-line calls,
-//! trailing-closure arguments, and method chains. Adding the comma keeps diffs small
-//! and lets the formatter preserve the one-argument-per-line layout.
+//! across lines — when the last significant token sits on an earlier line than
+//! the closing `)`. This mirrors the Dart 3.x tall-style formatter.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_annotation, walk_constructor_decl, walk_enum_decl, walk_expr,
+};
 
 pub struct PreferTrailingComma;
 
@@ -20,60 +19,47 @@ impl Rule for PreferTrailingComma {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
-        diags
+        let mut collector = Collector {
+            diags: Vec::new(),
+            ctx,
+        };
+        collector.visit_program(program);
+        collector.diags
     }
 }
 
 fn line_of(source: &str, offset: usize) -> usize {
-    let c = offset.min(source.len());
-    source[..c].bytes().filter(|&b| b == b'\n').count()
+    let offset = offset.min(source.len());
+    source.as_bytes()[..offset]
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count()
 }
 
-/// A trailing comma is required exactly when the argument list is already split
-/// across lines — i.e. the last significant character before the closing
-/// delimiter is on an earlier line than the delimiter and is not itself a comma.
-///
-/// This mirrors the Dart 3.x tall-style formatter, which adds a trailing comma
-/// when it breaks a list one element per line (closing bracket on its own line)
-/// and omits it when the final argument hugs the bracket (single trailing
-/// closure, block-like argument, method chain, single-line list). Scanning the
-/// source directly avoids depending on how the parser bounds argument spans.
-///
-/// The scan skips comments and string contents so that a trailing line comment
-/// after the final comma (`foo(\n  a, // note\n)`) is not mistaken for the last
-/// significant token — the comma before it still counts. It also locates the
-/// real closing `)` by paren-depth matching rather than trusting `args_span.end`,
-/// which the parser over-extends past the bracket into trailing trivia (e.g. the
-/// newline + indentation before the next `.method` in a chain).
-/// Returns the offset of the real closing `)` when a trailing comma is required,
-/// or `None` otherwise.
+/// Returns the real closing `)` when a trailing comma is required.
 fn needs_trailing_comma(source: &str, args_span: &Span) -> Option<usize> {
-    let b = source.as_bytes();
+    let bytes = source.as_bytes();
     let end = args_span.end.min(source.len());
-    // Advance to the opening `(` of the argument list.
     let mut i = args_span.start;
-    while i < end && b[i] != b'(' {
+    while i < end && bytes[i] != b'(' {
         i += 1;
     }
     if i >= end {
         return None;
     }
+
     let mut depth = 0usize;
-    let mut last_sig: Option<usize> = None;
-    let mut close: Option<usize> = None;
+    let mut last_sig = None;
+    let mut close = None;
     while i < end {
-        let c = b[i];
-        match c {
+        let byte = bytes[i];
+        match byte {
             b'\'' | b'"' => {
                 last_sig = Some(i);
-                let quote = c;
+                let quote = byte;
                 i += 1;
                 while i < end {
-                    match b[i] {
+                    match bytes[i] {
                         b'\\' => i += 2,
                         q if q == quote => {
                             last_sig = Some(i);
@@ -84,14 +70,14 @@ fn needs_trailing_comma(source: &str, args_span: &Span) -> Option<usize> {
                     }
                 }
             }
-            b'/' if i + 1 < end && b[i + 1] == b'/' => {
-                while i < end && b[i] != b'\n' {
+            b'/' if i + 1 < end && bytes[i + 1] == b'/' => {
+                while i < end && bytes[i] != b'\n' {
                     i += 1;
                 }
             }
-            b'/' if i + 1 < end && b[i + 1] == b'*' => {
+            b'/' if i + 1 < end && bytes[i + 1] == b'*' => {
                 i += 2;
-                while i + 1 < end && !(b[i] == b'*' && b[i + 1] == b'/') {
+                while i + 1 < end && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
                     i += 1;
                 }
                 i += 2;
@@ -111,176 +97,93 @@ fn needs_trailing_comma(source: &str, args_span: &Span) -> Option<usize> {
                 i += 1;
             }
             _ => {
-                if !c.is_ascii_whitespace() {
+                if !byte.is_ascii_whitespace() {
                     last_sig = Some(i);
                 }
                 i += 1;
             }
         }
     }
+
     match (last_sig, close) {
-        (Some(j), Some(close)) if b[j] != b',' && line_of(source, j) < line_of(source, close) => {
+        (Some(last), Some(close))
+            if bytes[last] != b',' && line_of(source, last) < line_of(source, close) =>
+        {
             Some(close)
         }
         _ => None,
     }
 }
 
-fn check_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if args.positional.is_empty() && args.named.is_empty() {
-        return;
-    }
-    let Some(close) = needs_trailing_comma(ctx.source, &args.span) else {
-        return;
-    };
-    // Diagnostic points to the real closing `)`.
-    let diag_pos = close;
-    diags.push(Diagnostic::new(
-        "prefer-trailing-comma",
-        Severity::Warning,
-        "Add a trailing comma to the argument list",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: diag_pos,
-            end: diag_pos + 1,
-        },
-    ));
+struct Collector<'a, 'ctx> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
 }
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            if let Some(body) = &f.body {
-                scan_body(body, diags, ctx);
-            }
+impl Collector<'_, '_> {
+    fn check_args(&mut self, args: &ArgList) {
+        if args.positional.is_empty() && args.named.is_empty() {
+            return;
         }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        _ => {}
+        let Some(close) = needs_trailing_comma(self.ctx.source, &args.span) else {
+            return;
+        };
+        self.diags.push(Diagnostic::new(
+            "prefer-trailing-comma",
+            Severity::Warning,
+            "Add a trailing comma to the argument list",
+            self.ctx.file_path.to_string_lossy().into_owned(),
+            DiagSpan {
+                start: close,
+                end: close + 1,
+            },
+        ));
     }
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let body = match member {
-        ClassMember::Method(m) => m.body.as_ref(),
-        ClassMember::Constructor(c) => c.body.as_ref(),
-        ClassMember::Getter(g) => g.body.as_ref(),
-        ClassMember::Setter(s) => s.body.as_ref(),
-        _ => None,
-    };
-    if let Some(b) = body {
-        scan_body(b, diags, ctx);
+impl Visitor for Collector<'_, '_> {
+    fn visit_annotation(&mut self, node: &Annotation) {
+        if let Some(args) = &node.args {
+            self.check_args(args);
+        }
+        walk_annotation(self, node);
     }
-}
 
-fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match body {
-        FunctionBody::Block(b) => scan_stmts(&b.stmts, diags, ctx),
-        FunctionBody::Arrow(e, _) => scan_expr(e, diags, ctx),
-        FunctionBody::Native(_, _) => {}
-    }
-}
-
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for s in stmts {
-        scan_stmt(s, diags, ctx);
-    }
-}
-
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::Expr(e) => scan_expr(&e.expr, diags, ctx),
-        Stmt::Return(r) => {
-            if let Some(v) = &r.value {
-                scan_expr(v, diags, ctx);
+    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+        for initializer in &node.initializers {
+            match initializer {
+                ConstructorInitializer::SuperCall { args, .. }
+                | ConstructorInitializer::ThisCall { args, .. } => self.check_args(args),
+                ConstructorInitializer::FieldInit { .. }
+                | ConstructorInitializer::Assert { .. } => {}
             }
         }
-        Stmt::LocalVar(lv) => {
-            for d in &lv.declarators {
-                if let Some(init) = &d.initializer {
-                    scan_expr(init, diags, ctx);
+        walk_constructor_decl(self, node);
+    }
+
+    fn visit_enum_decl(&mut self, node: &EnumDecl) {
+        for variant in &node.variants {
+            if let Some(args) = &variant.args {
+                self.check_args(args);
+            }
+        }
+        walk_enum_decl(self, node);
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        match node {
+            Expr::Call { args, .. } | Expr::New { args, .. } => self.check_args(args),
+            Expr::Cascade { sections, .. } => {
+                for section in sections {
+                    for op in &section.ops {
+                        if let CascadeOp::Call(_, _, args) = op {
+                            self.check_args(args);
+                        }
+                    }
                 }
             }
+            _ => {}
         }
-        Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx),
-        Stmt::If(i) => {
-            scan_stmt(&i.then_branch, diags, ctx);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx);
-            }
-        }
-        Stmt::While(w) => scan_stmt(&w.body, diags, ctx),
-        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx),
-        Stmt::For(f) => scan_stmt(&f.body, diags, ctx),
-        Stmt::TryCatch(tc) => {
-            scan_stmts(&tc.body.stmts, diags, ctx);
-            for catch in &tc.catches {
-                scan_stmts(&catch.body.stmts, diags, ctx);
-            }
-            if let Some(fin) = &tc.finally {
-                scan_stmts(&fin.stmts, diags, ctx);
-            }
-        }
-        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx),
-        _ => {}
-    }
-}
-
-fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match expr {
-        Expr::Call { callee, args, .. } => {
-            check_args(args, diags, ctx);
-            scan_expr(callee, diags, ctx);
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx);
-            }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx);
-            }
-        }
-        Expr::New { args, .. } => {
-            check_args(args, diags, ctx);
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx);
-            }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx);
-            }
-        }
-        Expr::Binary { left, right, .. } => {
-            scan_expr(left, diags, ctx);
-            scan_expr(right, diags, ctx);
-        }
-        Expr::Field { object, .. } => scan_expr(object, diags, ctx),
-        Expr::Assign { target, value, .. } => {
-            scan_expr(target, diags, ctx);
-            scan_expr(value, diags, ctx);
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            scan_expr(condition, diags, ctx);
-            scan_expr(then_expr, diags, ctx);
-            scan_expr(else_expr, diags, ctx);
-        }
-        Expr::FuncExpr { body, .. } => scan_body(body, diags, ctx),
-        Expr::Await { expr, .. } => scan_expr(expr, diags, ctx),
-        _ => {}
+        walk_expr(self, node);
     }
 }

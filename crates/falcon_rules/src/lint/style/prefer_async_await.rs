@@ -2,15 +2,20 @@
 //!
 //! Chaining callbacks with `Future.then` nests logic inside closures and scatters
 //! error handling across `onError`/`catchError`, whereas `async`/`await` lets
-//! asynchronous code read top-to-bottom with ordinary `try`/`catch`. The rule
-//! walks statement and expression trees looking for any method call named `then`,
-//! reporting each one; it treats function-literal arguments as opaque and does
-//! not descend into lambda bodies. Matching is purely syntactic on the `then`
-//! name, so it does not confirm the receiver is actually a `Future`.
+//! asynchronous code read top-to-bottom with ordinary `try`/`catch`. Function
+//! literals passed to a chain are treated as delayed scopes and remain opaque.
+//!
+//! Matching is currently syntactic on the `then` name. Resolver-backed Future
+//! identity is required before unrelated user-defined `then` methods can be
+//! excluded reliably.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_function_decl,
+    walk_getter_decl, walk_method_decl, walk_setter_decl, walk_stmt,
+};
 
 pub struct PreferAsyncAwait;
 
@@ -20,142 +25,90 @@ impl Rule for PreferAsyncAwait {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Function(func) => {
-                    if let Some(FunctionBody::Block(block)) = &func.body {
-                        scan_stmts(&block.stmts, &mut diags, ctx);
-                    }
-                }
-                TopLevelDecl::Class(class) => {
-                    for member in &class.members {
-                        scan_member(member, &mut diags, ctx);
-                    }
-                }
-                TopLevelDecl::Mixin(mixin) => {
-                    for member in &mixin.members {
-                        scan_member(member, &mut diags, ctx);
-                    }
-                }
-                TopLevelDecl::MixinClass(mc) => {
-                    for member in &mc.members {
-                        scan_member(member, &mut diags, ctx);
-                    }
-                }
-                _ => {}
-            }
-        }
-        diags
+        let mut collector = Collector {
+            diags: Vec::new(),
+            ctx,
+            suppress: false,
+        };
+        collector.visit_program(program);
+        collector.diags
     }
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let body = match member {
-        ClassMember::Method(m) => m.body.as_ref(),
-        ClassMember::Constructor(c) => c.body.as_ref(),
-        ClassMember::Getter(g) => g.body.as_ref(),
-        ClassMember::Setter(s) => s.body.as_ref(),
-        _ => None,
-    };
-    if let Some(FunctionBody::Block(block)) = body {
-        scan_stmts(&block.stmts, diags, ctx);
+struct Collector<'a, 'ctx> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
+    suppress: bool,
+}
+
+impl Collector<'_, '_> {
+    fn with_body_suppression(&mut self, body: Option<&FunctionBody>, walk: impl FnOnce(&mut Self)) {
+        let previous = self.suppress;
+        self.suppress |= matches!(body, Some(FunctionBody::Arrow(..)));
+        walk(self);
+        self.suppress = previous;
     }
 }
 
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for stmt in stmts {
-        scan_stmt(stmt, diags, ctx);
+impl Visitor for Collector<'_, '_> {
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        self.with_body_suppression(node.body.as_ref(), |this| walk_function_decl(this, node));
     }
-}
 
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::Expr(expr_stmt) => scan_expr(&expr_stmt.expr, diags, ctx),
-        Stmt::Return(ret) => {
-            if let Some(expr) = &ret.value {
-                scan_expr(expr, diags, ctx);
-            }
-        }
-        Stmt::LocalVar(local) => {
-            for decl in &local.declarators {
-                if let Some(init) = &decl.initializer {
-                    scan_expr(init, diags, ctx);
-                }
-            }
-        }
-        Stmt::Block(block) => scan_stmts(&block.stmts, diags, ctx),
-        Stmt::If(if_stmt) => {
-            scan_stmt(&if_stmt.then_branch, diags, ctx);
-            if let Some(else_b) = &if_stmt.else_branch {
-                scan_stmt(else_b, diags, ctx);
-            }
-        }
-        Stmt::While(s) => scan_stmt(&s.body, diags, ctx),
-        Stmt::DoWhile(s) => scan_stmt(&s.body, diags, ctx),
-        Stmt::For(s) => scan_stmt(&s.body, diags, ctx),
-        Stmt::TryCatch(s) => {
-            scan_stmts(&s.body.stmts, diags, ctx);
-            for catch in &s.catches {
-                scan_stmts(&catch.body.stmts, diags, ctx);
-            }
-            if let Some(fin) = &s.finally {
-                scan_stmts(&fin.stmts, diags, ctx);
-            }
-        }
-        _ => {}
+    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+        self.with_body_suppression(node.body.as_ref(), |this| walk_constructor_decl(this, node));
     }
-}
 
-fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match expr {
-        Expr::Call {
-            callee, args, span, ..
-        } => {
-            if let Expr::Field { field, object, .. } = callee.as_ref() {
-                if field.name == "then" {
-                    diags.push(Diagnostic::new(
-                        "prefer-async-await",
-                        Severity::Warning,
-                        "Prefer async/await over .then() chains",
-                        ctx.file_path.to_string_lossy().into_owned(),
-                        DiagSpan {
-                            start: span.start,
-                            end: span.end,
-                        },
-                    ));
-                }
-                scan_expr(object, diags, ctx);
-            } else {
-                scan_expr(callee, diags, ctx);
-            }
-            for arg in &args.positional {
-                // Skip FuncExpr bodies — treat lambdas as opaque
-                if !matches!(arg, Expr::FuncExpr { .. }) {
-                    scan_expr(arg, diags, ctx);
-                }
-            }
+    fn visit_method_decl(&mut self, node: &MethodDecl) {
+        self.with_body_suppression(node.body.as_ref(), |this| walk_method_decl(this, node));
+    }
+
+    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+        self.with_body_suppression(node.body.as_ref(), |this| walk_getter_decl(this, node));
+    }
+
+    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+        self.with_body_suppression(node.body.as_ref(), |this| walk_setter_decl(this, node));
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) {
+        if let ClassMember::Operator(operator) = node {
+            self.with_body_suppression(operator.body.as_ref(), |this| {
+                walk_class_member(this, node)
+            });
+        } else {
+            walk_class_member(self, node);
         }
-        Expr::Field { object, .. } => scan_expr(object, diags, ctx),
-        Expr::Await { expr: inner, .. } => scan_expr(inner, diags, ctx),
-        Expr::Binary { left, right, .. } => {
-            scan_expr(left, diags, ctx);
-            scan_expr(right, diags, ctx);
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::LocalFunc(local) = node {
+            self.with_body_suppression(Some(&local.body), |this| walk_stmt(this, node));
+        } else {
+            walk_stmt(self, node);
         }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            scan_expr(condition, diags, ctx);
-            scan_expr(then_expr, diags, ctx);
-            scan_expr(else_expr, diags, ctx);
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::FuncExpr { .. }) {
+            return;
         }
-        Expr::Assign { target, value, .. } => {
-            scan_expr(target, diags, ctx);
-            scan_expr(value, diags, ctx);
+        if !self.suppress
+            && let Expr::Call { callee, span, .. } = node
+            && let Expr::Field { field, .. } = callee.as_ref()
+            && field.name == "then"
+        {
+            self.diags.push(Diagnostic::new(
+                "prefer-async-await",
+                Severity::Warning,
+                "Prefer async/await over .then() chains",
+                self.ctx.file_path.to_string_lossy().into_owned(),
+                DiagSpan {
+                    start: span.start,
+                    end: span.end,
+                },
+            ));
         }
-        _ => {}
+        walk_expr(self, node);
     }
 }

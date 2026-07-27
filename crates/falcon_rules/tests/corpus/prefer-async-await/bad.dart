@@ -27,3 +27,10 @@ class Api {
 void refresh() {
   reload().then((_) => notifyListeners()); /* expect: prefer-async-await */
 }
+
+void withLocalFunction() {
+  void body() {
+    reload().then((_) => notifyListeners()); /* expect: prefer-async-await */
+  }
+  body();
+}

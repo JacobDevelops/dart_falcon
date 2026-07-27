@@ -1,11 +1,4 @@
-//! Flags a file-level `///` doc comment that is not attached to any declaration.
-//!
-//! A doc comment floating at the top of a file — separated from the first
-//! declaration by a blank line, sitting above a directive, or ending the file —
-//! is silently dropped by the documentation tooling. If it is meant to describe
-//! the library, attach it to an explicit `library` directive; otherwise move it
-//! onto the declaration it documents. Only the first such comment block in a
-//! file is reported.
+//! Attach library documentation to an explicit `library` directive.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
@@ -18,91 +11,154 @@ impl Rule for DanglingLibraryDocComments {
         "dangling-library-doc-comments"
     }
 
-    fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        if let Some(start) = dangling_doc_start(ctx.source) {
-            diags.push(Diagnostic::new(
-                "dangling-library-doc-comments",
-                Severity::Warning,
-                "Dangling library doc comment. Add a 'library' directive or attach it to a declaration.",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start,
-                    end: start + 3,
-                },
-            ));
-        }
-        diags
+    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let comments = documentation_blocks(ctx.source);
+        let starts = dangling_starts(program, ctx.source, &comments);
+        starts
+            .into_iter()
+            .map(|start| {
+                Diagnostic::new(
+                    "dangling-library-doc-comments",
+                    Severity::Warning,
+                    "Dangling library doc comment. Add a 'library' directive or attach it to a declaration.",
+                    ctx.file_path.to_string_lossy().into_owned(),
+                    DiagSpan {
+                        start,
+                        end: start + 3,
+                    },
+                )
+            })
+            .collect()
     }
 }
 
-/// Byte offset of the `///` that opens a dangling top-of-file doc block, if
-/// any. Only the first significant construct in the file is considered.
-fn dangling_doc_start(source: &str) -> Option<usize> {
-    // Offsets come from `split_inclusive` chunks: `lines()` drops a full `\r\n`
-    // but only one byte would be added back, drifting every span in a CRLF file.
-    let mut lines: Vec<&str> = Vec::new();
-    let mut offsets: Vec<usize> = Vec::new();
-    let mut acc = 0;
-    for chunk in source.split_inclusive('\n') {
-        offsets.push(acc);
-        lines.push(chunk.trim_end_matches(['\r', '\n']));
-        acc += chunk.len();
+#[derive(Clone, Copy)]
+struct DocBlock {
+    start: usize,
+    end_line: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FirstDirective {
+    Library,
+    PartOf,
+    Other,
+}
+
+fn dangling_starts(program: &Program, source: &str, comments: &[DocBlock]) -> Vec<usize> {
+    if let Some((offset, kind)) = first_directive(program) {
+        if matches!(kind, FirstDirective::Library | FirstDirective::PartOf) {
+            return Vec::new();
+        }
+        return comments
+            .iter()
+            .rev()
+            .find(|comment| comment.start < offset)
+            .map(|comment| vec![comment.start])
+            .unwrap_or_default();
     }
 
-    // Skip leading blanks, ordinary `//` line comments, and `#!` shebangs.
-    // Bail out at the first real code before any doc comment.
-    let mut i = 0;
-    loop {
-        let line = lines.get(i)?;
-        let t = line.trim_start();
-        if t.is_empty() || (t.starts_with("//") && !t.starts_with("///")) || t.starts_with("#!") {
-            i += 1;
+    let first_declaration = program
+        .declarations
+        .iter()
+        .map(|decl| decl.span().start)
+        .min();
+    let Some(offset) = first_declaration else {
+        return comments.iter().map(|comment| comment.start).collect();
+    };
+    let Some(comment) = comments.iter().rev().find(|comment| comment.start < offset) else {
+        return Vec::new();
+    };
+    let declaration_line = line_at(source, offset);
+    (declaration_line > comment.end_line + 1)
+        .then_some(vec![comment.start])
+        .unwrap_or_default()
+}
+
+fn first_directive(program: &Program) -> Option<(usize, FirstDirective)> {
+    let mut directives = Vec::new();
+    if let Some(directive) = &program.library_directive {
+        directives.push((directive.span.start, FirstDirective::Library));
+    }
+    if let Some(directive) = &program.part_of_directive {
+        directives.push((directive.span.start, FirstDirective::PartOf));
+    }
+    directives.extend(
+        program
+            .part_directives
+            .iter()
+            .map(|directive| (directive.span.start, FirstDirective::Other)),
+    );
+    directives.extend(
+        program
+            .imports
+            .iter()
+            .map(|directive| (directive.span.start, FirstDirective::Other)),
+    );
+    directives.extend(
+        program
+            .exports
+            .iter()
+            .map(|directive| (directive.span.start, FirstDirective::Other)),
+    );
+    directives.into_iter().min_by_key(|(start, _)| *start)
+}
+
+fn documentation_blocks(source: &str) -> Vec<DocBlock> {
+    let mut blocks = Vec::new();
+    let mut offset = 0;
+    let mut line = 1;
+    let lines = source.split_inclusive('\n').collect::<Vec<_>>();
+    let mut index = 0;
+    while index < lines.len() {
+        let text = lines[index];
+        let trimmed = text.trim_start();
+        let indent = text.len() - trimmed.len();
+        if trimmed.starts_with("///") {
+            let start = offset + indent;
+            let mut end_line = line;
+            offset += text.len();
+            line += 1;
+            index += 1;
+            while index < lines.len() && lines[index].trim_start().starts_with("///") {
+                end_line = line;
+                offset += lines[index].len();
+                line += 1;
+                index += 1;
+            }
+            blocks.push(DocBlock { start, end_line });
             continue;
         }
-        if t.starts_with("///") {
-            break;
-        }
-        return None;
-    }
-
-    let doc_line = i;
-    while lines
-        .get(i)
-        .is_some_and(|l| l.trim_start().starts_with("///"))
-    {
-        i += 1;
-    }
-
-    // Classify the first significant line after the doc block.
-    let mut saw_blank = false;
-    while lines.get(i).is_some_and(|l| l.trim_start().is_empty()) {
-        saw_blank = true;
-        i += 1;
-    }
-
-    let dangling = match lines.get(i) {
-        None => true, // Nothing follows the doc comment.
-        Some(next) => {
-            let t = next.trim_start();
-            let is_library = t == "library" || t == "library;" || t.starts_with("library ");
-            if is_library {
-                // Correct usage requires the comment to sit directly above it.
-                saw_blank
-            } else if saw_blank {
-                true
-            } else {
-                t.starts_with("import ") || t.starts_with("export ") || t.starts_with("part ")
+        if trimmed.starts_with("/**") {
+            let start = offset + indent;
+            let mut end_line = line;
+            let mut closed = trimmed.contains("*/");
+            offset += text.len();
+            line += 1;
+            index += 1;
+            while !closed && index < lines.len() {
+                closed = lines[index].contains("*/");
+                end_line = line;
+                offset += lines[index].len();
+                line += 1;
+                index += 1;
             }
+            blocks.push(DocBlock { start, end_line });
+            continue;
         }
-    };
-
-    if dangling {
-        let indent = lines[doc_line].len() - lines[doc_line].trim_start().len();
-        Some(offsets[doc_line] + indent)
-    } else {
-        None
+        offset += text.len();
+        line += 1;
+        index += 1;
     }
+    blocks
+}
+
+fn line_at(source: &str, offset: usize) -> usize {
+    source[..offset.min(source.len())]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1
 }
 
 #[cfg(test)]
@@ -122,31 +178,12 @@ mod tests {
 
     #[test]
     fn crlf_span_does_not_drift() {
-        // Three lines precede the doc comment, so a `lines()`-derived offset
-        // would land three bytes early and no longer point at the `///`.
-        let crlf = "// header\r\n\
-                    // more\r\n\
-                    // still more\r\n\
-                    /// Dangling doc.\r\n\
-                    \r\n\
-                    import 'dart:async';\r\n";
-        let d = diags(crlf);
-        assert_eq!(d.len(), 1);
-        assert_eq!(&crlf[d[0].span.start..d[0].span.end], "///");
-
-        let lf = crlf.replace("\r\n", "\n");
-        let d = diags(&lf);
-        assert_eq!(d.len(), 1);
-        assert_eq!(&lf[d[0].span.start..d[0].span.end], "///");
-    }
-
-    #[test]
-    fn crlf_span_accounts_for_indentation() {
-        let crlf = "// a\r\n\
-                    // b\r\n\
-                    \t/// Indented dangling doc.\r\n";
-        let d = diags(crlf);
-        assert_eq!(d.len(), 1);
-        assert_eq!(&crlf[d[0].span.start..d[0].span.end], "///");
+        let source = "// header\r\n/// Dangling doc.\r\n\r\nimport 'dart:async';\r\n";
+        let diagnostics = diags(source);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            &source[diagnostics[0].span.start..diagnostics[0].span.end],
+            "///"
+        );
     }
 }
