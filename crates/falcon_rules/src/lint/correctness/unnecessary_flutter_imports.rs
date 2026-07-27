@@ -1,17 +1,17 @@
-//! Disallow Flutter framework imports that the file does not use.
+//! Disallow unused Flutter framework and `dart:async` imports.
 //!
-//! Flags an `import` of `package:flutter/...` or `dart:async` when the file
-//! contains no reference to any Flutter or async symbol. Such an import
-//! contributes nothing but noise and a misleading dependency signal, usually a
-//! leftover after the code that needed it was deleted. Remove it. Detection is
-//! heuristic: usage is inferred from a curated list of framework identifiers —
-//! widgets, `BuildContext`, `Future`/`Stream`, `foundation` helpers such as
-//! `kDebugMode` and `ChangeNotifier`, and the `async`/`await` keywords — rather
-//! than from resolved imports.
+//! Usage is based on resolved symbol identity and import combinators. Unknown
+//! unprefixed names conservatively keep an unrestricted import, avoiding guesses
+//! from capitalization or substrings.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use std::collections::HashSet;
+
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_annotation, walk_dart_type};
+
+use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 pub struct UnnecessaryFlutterImports;
 
@@ -21,15 +21,29 @@ impl Rule for UnnecessaryFlutterImports {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
+        let Some(state) = SemanticState::new(program, ctx) else {
+            return Vec::new();
+        };
+        let mut usage = Usage::default();
+        visit_program(&mut usage, program, state);
 
-        // Check if any Flutter symbols are actually used in the source
-        let has_flutter_usage = has_flutter_usage(ctx.source);
+        let identities = ctx.identities.expect("semantic state requires identities");
+        let model = falcon_analyze::SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let mut type_usage = TypeUsage {
+            model: &model,
+            unprefixed: &mut usage.unprefixed,
+            prefixed: &mut usage.prefixed,
+            unknown: &mut usage.unknown,
+        };
+        type_usage.visit_program(program);
 
-        // Flag all Flutter and dart:async imports if they're not being used
-        for import in &program.imports {
-            if is_unnecessary_import(&import.uri.value) && !has_flutter_usage {
-                diags.push(Diagnostic::new(
+        program
+            .imports
+            .iter()
+            .filter(|import| import_targets_framework(import))
+            .filter(|import| !import_is_used(import, &usage))
+            .map(|import| {
+                Diagnostic::new(
                     "unnecessary-flutter-imports",
                     Severity::Warning,
                     "Unnecessary Flutter import. Remove unused imports.",
@@ -38,112 +52,143 @@ impl Rule for UnnecessaryFlutterImports {
                         start: import.span.start,
                         end: import.span.end,
                     },
-                ));
+                )
+            })
+            .collect()
+    }
+}
+
+#[derive(Default)]
+struct Usage {
+    unprefixed: HashSet<String>,
+    prefixed: HashSet<(String, String)>,
+    unknown: HashSet<String>,
+}
+
+impl SemanticRuleVisitor for Usage {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        match node {
+            Expr::Ident(identifier) if !state.environment.is_bound(&identifier.name) => {
+                let names = [identifier.name.clone()];
+                match state.model.resolve_imported_member(&names) {
+                    Some(identity) if framework_identity(&identity) => {
+                        self.unprefixed.insert(identifier.name.clone());
+                    }
+                    None if state.model.resolve_name(&names).is_none()
+                        && state.model.resolve_value(&names).is_none()
+                        && state.model.resolve_sdk_member(&names).is_none() =>
+                    {
+                        self.unknown.insert(identifier.name.clone());
+                    }
+                    _ => {}
+                }
+            }
+            Expr::Field { object, field, .. } => {
+                if let Expr::Ident(prefix) = object.as_ref()
+                    && !state.environment.is_bound(&prefix.name)
+                {
+                    let names = [prefix.name.clone(), field.name.clone()];
+                    match state.model.resolve_imported_member(&names) {
+                        Some(identity) if framework_identity(&identity) => {
+                            self.prefixed
+                                .insert((prefix.name.clone(), field.name.clone()));
+                        }
+                        None => {
+                            self.unknown.insert(prefix.name.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+struct TypeUsage<'a, 'model> {
+    model: &'a falcon_analyze::SemanticModel<'model>,
+    unprefixed: &'a mut HashSet<String>,
+    prefixed: &'a mut HashSet<(String, String)>,
+    unknown: &'a mut HashSet<String>,
+}
+
+impl Visitor for TypeUsage<'_, '_> {
+    fn visit_dart_type(&mut self, node: &DartType) {
+        if let DartType::Named(named) = node {
+            let segments = named
+                .segments
+                .iter()
+                .map(|segment| segment.name.clone())
+                .collect::<Vec<_>>();
+            match self.model.resolve_type(node) {
+                ResolvedType::Interface { identity, .. } if framework_identity(&identity) => {
+                    if let [name] = segments.as_slice() {
+                        self.unprefixed.insert(name.clone());
+                    } else if let [prefix, name] = segments.as_slice() {
+                        self.prefixed.insert((prefix.clone(), name.clone()));
+                    }
+                }
+                ResolvedType::Unknown => {
+                    if let Some(first) = segments.first() {
+                        self.unknown.insert(first.clone());
+                    }
+                }
+                _ => {}
             }
         }
-
-        diags
+        walk_dart_type(self, node);
     }
-}
 
-fn is_unnecessary_import(uri: &str) -> bool {
-    uri.contains("package:flutter") || uri.contains("dart:async")
-}
-
-fn has_flutter_usage(source: &str) -> bool {
-    // Check for common Flutter symbols that indicate real usage
-    let flutter_symbols = [
-        "runApp",
-        "StatelessWidget",
-        "StatefulWidget",
-        "MaterialApp",
-        "Scaffold",
-        "AppBar",
-        "Center",
-        "Text",
-        "Widget",
-        "BuildContext",
-        "State",
-        "Future",
-        "Stream",
-        "async",
-        "await",
-        "debugPrint",
-        "Color",
-        "EdgeInsets",
-        "SizedBox",
-        "Column",
-        "Row",
-        "Container",
-        "FloatingActionButton",
-        "ElevatedButton",
-        "TextField",
-        "ListView",
-        "GridView",
-        // package:flutter/foundation.dart symbols that material.dart does not
-        // necessarily re-export — importing foundation for any of these is not
-        // redundant (e.g. AsyncCallback is not re-exported by material).
-        "immutable",
-        "kDebugMode",
-        "kReleaseMode",
-        "kProfileMode",
-        "kIsWeb",
-        "kIsWasm",
-        "defaultTargetPlatform",
-        "TargetPlatform",
-        "listEquals",
-        "mapEquals",
-        "setEquals",
-        "ChangeNotifier",
-        "ValueNotifier",
-        "ValueListenable",
-        "Listenable",
-        "protected",
-        "visibleForTesting",
-        "mustCallSuper",
-        "nonVirtual",
-        "describeIdentity",
-        "VoidCallback",
-        "AsyncCallback",
-        "AsyncValueGetter",
-        "AsyncValueSetter",
-        "ValueGetter",
-        "ValueSetter",
-        "ValueChanged",
-        "compute",
-        "Diagnosticable",
-        "DiagnosticsProperty",
-    ];
-
-    let source_without_imports = remove_import_lines(source);
-
-    for &symbol in &flutter_symbols {
-        if source_without_imports.contains(symbol) {
-            return true;
+    fn visit_annotation(&mut self, node: &Annotation) {
+        let segments = node
+            .name
+            .iter()
+            .map(|segment| segment.name.clone())
+            .collect::<Vec<_>>();
+        if let Some(identity) = self.model.resolve_imported_member(&segments)
+            && framework_identity(&identity)
+        {
+            if let [name] = segments.as_slice() {
+                self.unprefixed.insert(name.clone());
+            } else if let [prefix, name] = segments.as_slice() {
+                self.prefixed.insert((prefix.clone(), name.clone()));
+            }
         }
+        walk_annotation(self, node);
     }
-
-    // Also check if any symbols are preceded by `extends ` or `implements ` or other type usage
-    if source_without_imports.contains("extends StatelessWidget")
-        || source_without_imports.contains("extends StatefulWidget")
-        || source_without_imports.contains("implements Widget")
-        || source_without_imports.contains("const MyApp")
-        || source_without_imports.contains("async ")
-    {
-        return true;
-    }
-
-    false
 }
 
-fn remove_import_lines(source: &str) -> String {
-    let mut result = String::new();
-    for line in source.lines() {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with("import ") && !trimmed.starts_with("export ") {
-            result.push_str(line);
-            result.push('\n');
-        }
+fn framework_identity(identity: &DeclarationIdentity) -> bool {
+    matches!(identity,
+        DeclarationIdentity::Package { package, .. } if package == "flutter")
+        || matches!(identity,
+            DeclarationIdentity::Sdk { library, .. } if library == "dart:async")
+}
+
+fn import_targets_framework(import: &ImportDirective) -> bool {
+    std::iter::once(&import.uri)
+        .chain(import.configurable_uris.iter().map(|uri| &uri.uri))
+        .any(|uri| uri.value.starts_with("package:flutter/") || uri.value == "dart:async")
+}
+
+fn import_is_used(import: &ImportDirective, usage: &Usage) -> bool {
+    if let Some(prefix) = &import.as_name {
+        return usage
+            .prefixed
+            .iter()
+            .any(|(used_prefix, name)| used_prefix == &prefix.name && allows(import, name))
+            || usage.unknown.contains(&prefix.name);
     }
-    result
+    usage.unprefixed.iter().any(|name| allows(import, name))
+        || (import.combinators.is_empty() && !usage.unknown.is_empty())
+}
+
+fn allows(import: &ImportDirective, name: &str) -> bool {
+    import
+        .combinators
+        .iter()
+        .all(|combinator| match combinator {
+            ImportCombinator::Show(names, _) => names.iter().any(|shown| shown.name == name),
+            ImportCombinator::Hide(names, _) => names.iter().all(|hidden| hidden.name != name),
+        })
 }

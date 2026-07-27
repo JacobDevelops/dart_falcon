@@ -1,13 +1,9 @@
-//! Disallow importing another package's private `src/` files.
+//! Disallow importing another package's private `src/` libraries.
 //!
-//! Flags a `package:` import that reaches into another package's `src/`
-//! directory, such as `import 'package:other/src/internal.dart'`. Everything
-//! under a package's `lib/src/` is private implementation detail, not part of
-//! its public API, and may change or vanish in any release without notice.
-//! Depending on it couples your code to internals the author never promised to
-//! keep stable. Import only the package's public libraries — the files directly
-//! under `lib/`. Imports into your own package's `src/` are allowed; the owning
-//! package is inferred from the file's path.
+//! The rule follows the analyzer's package-URI semantics: it runs only for a
+//! library under the enclosing package's `lib/` directory, compares package
+//! identities from `pubspec.yaml`, and checks every default and configurable
+//! import URI. Export directives are not imports and are intentionally ignored.
 
 use std::path::Path;
 
@@ -23,55 +19,63 @@ impl Rule for ImplementationImports {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        // ponytail: own package is inferred purely from the file path
-        // (`<pkg>/lib/...`), never from pubspec. Files with no `lib` segment on
-        // their path (e.g. corpus fixtures) get `None`, so every
-        // `package:X/src/...` import is treated as another package's.
-        let own = own_package(ctx.file_path);
-
+        let Some(own_package) = source_package(ctx.file_path) else {
+            return Vec::new();
+        };
+        let file = ctx.file_path.to_string_lossy().into_owned();
         let mut diags = Vec::new();
         for import in &program.imports {
-            if let Some(pkg) = other_package_src_import(&import.uri.value, own.as_deref()) {
-                diags.push(Diagnostic::new(
-                    "implementation-imports",
-                    Severity::Warning,
-                    format!("Don't import implementation files from another package ('{pkg}')."),
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: import.uri.span.start,
-                        end: import.uri.span.end,
-                    },
-                ));
+            check_uri(&import.uri, &own_package, &file, &mut diags);
+            for configurable in &import.configurable_uris {
+                check_uri(&configurable.uri, &own_package, &file, &mut diags);
             }
         }
         diags
     }
 }
 
-/// The package name for a file living at `<pkg>/lib/...`, if the path has a
-/// `lib` segment.
-fn own_package(path: &Path) -> Option<String> {
-    let comps: Vec<&str> = path
-        .components()
-        .filter_map(|c| c.as_os_str().to_str())
-        .collect();
-    comps
-        .iter()
-        .position(|c| *c == "lib")
-        .filter(|&i| i > 0)
-        .map(|i| comps[i - 1].to_string())
+fn source_package(path: &Path) -> Option<String> {
+    let pubspec = crate::cross_file::enclosing_pubspec(path)?;
+    let root = pubspec.parent()?;
+    let canonical = crate::cross_file::canonical_or_lexical(path);
+    let relative = canonical.strip_prefix(root).ok()?;
+    if relative.components().next()?.as_os_str() != "lib" {
+        return None;
+    }
+    let source = std::fs::read_to_string(pubspec).ok()?;
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&source).ok()?;
+    yaml.as_mapping()?
+        .get(serde_yaml::Value::String("name".to_string()))?
+        .as_str()
+        .map(str::to_string)
 }
 
-/// If `uri` is `package:X/src/...` for a package `X` other than `own`, returns
-/// `X`. Otherwise `None` (own package, non-`src`, or not a `package:` URI).
-fn other_package_src_import<'a>(uri: &'a str, own: Option<&str>) -> Option<&'a str> {
+fn check_uri(uri: &StringLitNode, own: &str, file: &str, diags: &mut Vec<Diagnostic>) {
+    let Some(package) = implementation_package(&uri.value) else {
+        return;
+    };
+    if package == own {
+        return;
+    }
+    diags.push(Diagnostic::new(
+        "implementation-imports",
+        Severity::Warning,
+        format!("Don't import implementation files from another package ('{package}')."),
+        file.to_string(),
+        DiagSpan {
+            start: uri.span.start,
+            end: uri.span.end,
+        },
+    ));
+}
+
+fn implementation_package(uri: &str) -> Option<&str> {
     let rest = uri.strip_prefix("package:")?;
-    let (pkg, path) = rest.split_once('/')?;
-    if !path.starts_with("src/") {
+    let path = rest.split(['?', '#']).next()?;
+    let mut segments = path.split('/');
+    let package = segments.next()?;
+    if package.is_empty() || segments.next()? != "src" || segments.next().is_none() {
         return None;
     }
-    if Some(pkg) == own {
-        return None;
-    }
-    Some(pkg)
+    Some(package)
 }

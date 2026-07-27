@@ -33,3 +33,9 @@ class W5 extends StatefulWidget {
     return _W5State()..counter = 0;
   }
 }
+
+class _W1State extends State<W1> {}
+class _W2State extends State<W2> { void init() {} }
+class _W3State extends State<W3> {}
+class _W4State extends State<W4> { _W4State(Object value); }
+class _W5State extends State<W5> { int counter = 0; }

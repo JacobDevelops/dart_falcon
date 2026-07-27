@@ -1,20 +1,9 @@
-//! Disallow `RegExp` patterns that are structurally invalid.
-//!
-//! Flags a `RegExp` constructed from a string literal whose pattern is
-//! unmistakably broken — unbalanced `(`/`)` groups, an unterminated `[...]`
-//! character class, or a trailing backslash. Such a pattern throws a
-//! `FormatException` the moment the `RegExp` is built, so catching it statically
-//! turns a runtime crash into a lint. The check is deliberately conservative: it
-//! inspects only literal, non-interpolated patterns and applies a structural
-//! test rather than a full regex parse, so it never false-positives on the
-//! JavaScript-flavored constructs (lookahead, backreferences, named groups) that
-//! Dart's `RegExp` accepts. Interpolated patterns, and non-raw literals
-//! containing backslash escapes, are skipped.
+//! Disallow statically known invalid `dart:core` regular expressions.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct ValidRegexps;
 
@@ -24,102 +13,36 @@ impl Rule for ValidRegexps {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let Some(identities) = ctx.identities else {
+            return Vec::new();
+        };
         let mut collector = Collector {
-            diags: Vec::new(),
+            diagnostics: Vec::new(),
             file: ctx.file_path.to_string_lossy().into_owned(),
+            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
         };
         collector.visit_program(program);
-        collector.diags
+        collector.diagnostics
     }
 }
 
-fn first_positional(args: &ArgList) -> Option<&Expr> {
-    args.positional.first()
-}
-
-/// The literal pattern of a `RegExp` first argument, if it can be analyzed. Returns `None`
-/// for non-literals, interpolated strings, or non-raw strings containing backslash escapes
-/// (whose true pattern depends on Dart-level escape resolution — skipped to stay sound).
-fn extractable_pattern(expr: &Expr) -> Option<String> {
-    let Expr::StringLit(node) = expr else {
-        return None;
-    };
-    let raw = &node.raw;
-    let is_raw = raw.as_bytes().first() == Some(&b'r');
-    let prefix = usize::from(is_raw);
-    let rest = &raw[prefix..];
-    let dlen = if rest.starts_with("'''") || rest.starts_with("\"\"\"") {
-        3
-    } else if rest.starts_with('\'') || rest.starts_with('"') {
-        1
-    } else {
-        return None;
-    };
-    let closing = &rest[..dlen];
-    if rest.len() < 2 * dlen || !rest[dlen..].ends_with(closing) {
-        return None;
-    }
-    let content = &raw[prefix + dlen..raw.len() - dlen];
-    if content.contains('$') {
-        return None; // interpolated: pattern not statically known
-    }
-    if !is_raw && content.contains('\\') {
-        return None; // Dart escapes would need resolving first
-    }
-    Some(content.to_string())
-}
-
-/// Conservative structural check: balanced `()`, terminated `[...]`, no trailing backslash.
-fn is_structurally_valid(pattern: &str) -> bool {
-    let bytes = pattern.as_bytes();
-    let mut paren_depth: i32 = 0;
-    let mut in_class = false;
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => {
-                if i + 1 >= bytes.len() {
-                    return false; // trailing backslash
-                }
-                i += 2;
-                continue;
-            }
-            b'[' if !in_class => in_class = true,
-            b']' if in_class => in_class = false,
-            b'(' if !in_class => paren_depth += 1,
-            b')' if !in_class => {
-                paren_depth -= 1;
-                if paren_depth < 0 {
-                    return false; // unmatched close paren
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    paren_depth == 0 && !in_class
-}
-
-fn is_regexp_type(dart_type: &DartType) -> bool {
-    matches!(dart_type, DartType::Named(n) if n.segments.last().is_some_and(|s| s.name == "RegExp"))
-}
-
-struct Collector {
-    diags: Vec<Diagnostic>,
+struct Collector<'a> {
+    diagnostics: Vec<Diagnostic>,
     file: String,
+    model: SemanticModel<'a>,
 }
 
-impl Collector {
+impl Collector<'_> {
     fn check(&mut self, args: &ArgList) {
-        if let Some(arg) = first_positional(args)
-            && let Some(pattern) = extractable_pattern(arg)
-            && !is_structurally_valid(&pattern)
-        {
-            let span = arg.span();
-            self.diags.push(Diagnostic::new(
+        let Some(argument) = args.positional.first() else {
+            return;
+        };
+        if extractable_pattern(argument).is_some_and(|pattern| !valid_pattern(&pattern)) {
+            let span = argument.span();
+            self.diagnostics.push(Diagnostic::new(
                 "valid-regexps",
                 Severity::Warning,
-                "Invalid regular expression: unbalanced groups or character class.",
+                "Invalid regular expression.",
                 self.file.clone(),
                 DiagSpan {
                     start: span.start,
@@ -128,29 +51,183 @@ impl Collector {
             ));
         }
     }
+
+    fn sdk_regexp_name(&self, expression: &Expr) -> bool {
+        let segments = expression_segments(expression);
+        matches!(segments.as_deref().and_then(|segments| self.model.resolve_name(segments)), Some(DeclarationIdentity::Sdk { library, name }) if library == "dart:core" && name == "RegExp")
+    }
 }
 
-impl Visitor for Collector {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         match node {
-            Expr::Call { callee, args, .. } => {
-                if let Expr::Ident(id) = callee.as_ref()
-                    && id.name == "RegExp"
-                {
-                    self.check(args);
-                }
-            }
+            Expr::Call { callee, args, .. } if self.sdk_regexp_name(callee) => self.check(args),
             Expr::New {
                 dart_type, args, ..
-            } if is_regexp_type(dart_type) => {
-                self.check(args);
+            } if matches!(self.model.resolve_type(dart_type), ResolvedType::Interface { identity: DeclarationIdentity::Sdk { library, name }, .. } if library == "dart:core" && name == "RegExp") => {
+                self.check(args)
             }
             _ => {}
         }
         walk_expr(self, node);
     }
+}
+
+fn expression_segments(expression: &Expr) -> Option<Vec<String>> {
+    match expression {
+        Expr::Ident(identifier) => Some(vec![identifier.name.clone()]),
+        Expr::Field { object, field, .. } => {
+            let mut segments = expression_segments(object)?;
+            segments.push(field.name.clone());
+            Some(segments)
+        }
+        _ => None,
+    }
+}
+
+fn extractable_pattern(expr: &Expr) -> Option<String> {
+    let Expr::StringLit(node) = expr else {
+        return None;
+    };
+    if !node.interpolations.is_empty() {
+        return None;
+    }
+    let raw = &node.raw;
+    let is_raw = raw.starts_with('r');
+    let prefix = usize::from(is_raw);
+    let rest = &raw[prefix..];
+    let delimiter = if rest.starts_with("'''") || rest.starts_with("\"\"\"") {
+        3
+    } else if rest.starts_with(['\'', '\"']) {
+        1
+    } else {
+        return None;
+    };
+    if rest.len() < delimiter * 2 {
+        return None;
+    }
+    let content = &raw[prefix + delimiter..raw.len() - delimiter];
+    if !is_raw && content.contains('\\') {
+        return None;
+    }
+    Some(content.to_string())
+}
+
+fn valid_pattern(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut groups = 0usize;
+    let mut in_class = false;
+    let mut class_start = 0usize;
+    let mut escaped = false;
+    let mut can_quantify = false;
+    let mut index = 0usize;
+    while index < chars.len() {
+        let ch = chars[index];
+        if escaped {
+            if ch == 'x' && !has_hex(&chars, index + 1, 2) {
+                return false;
+            }
+            if ch == 'u' && !has_hex(&chars, index + 1, 4) {
+                return false;
+            }
+            index += if ch == 'x' {
+                2
+            } else if ch == 'u' {
+                4
+            } else {
+                0
+            };
+            escaped = false;
+            can_quantify = true;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if in_class {
+            if ch == ']' && index > class_start {
+                in_class = false;
+                can_quantify = true;
+            } else if ch == '-'
+                && index > class_start
+                && index + 1 < chars.len()
+                && chars[index - 1] > chars[index + 1]
+            {
+                return false;
+            }
+        } else {
+            match ch {
+                '[' => {
+                    in_class = true;
+                    class_start = index + 1;
+                    can_quantify = false;
+                }
+                '(' => {
+                    groups += 1;
+                    can_quantify = false;
+                }
+                ')' => {
+                    if groups == 0 {
+                        return false;
+                    }
+                    groups -= 1;
+                    can_quantify = true;
+                }
+                '|' => can_quantify = false,
+                '*' | '+' => {
+                    if !can_quantify {
+                        return false;
+                    }
+                    can_quantify = false;
+                }
+                '?' if index > 0 && chars[index - 1] == '(' => can_quantify = false,
+                '?' if can_quantify => can_quantify = false,
+                '?' if index > 0 && matches!(chars[index - 1], '*' | '+' | '?' | '}') => {
+                    can_quantify = false;
+                }
+                '?' => return false,
+                '{' => {
+                    if !can_quantify {
+                        return false;
+                    }
+                    let Some(close) = chars[index + 1..]
+                        .iter()
+                        .position(|candidate| *candidate == '}')
+                        .map(|offset| index + 1 + offset)
+                    else {
+                        return false;
+                    };
+                    let parts: Vec<_> = chars[index + 1..close]
+                        .split(|candidate| *candidate == ',')
+                        .collect();
+                    if parts.is_empty()
+                        || parts.len() > 2
+                        || parts[0].is_empty()
+                        || parts
+                            .iter()
+                            .flat_map(|part| part.iter())
+                            .any(|candidate| !candidate.is_ascii_digit())
+                    {
+                        return false;
+                    }
+                    let minimum: usize = parts[0].iter().collect::<String>().parse().unwrap_or(0);
+                    if parts.len() == 2 && !parts[1].is_empty() {
+                        let maximum: usize =
+                            parts[1].iter().collect::<String>().parse().unwrap_or(0);
+                        if maximum < minimum {
+                            return false;
+                        }
+                    }
+                    index = close;
+                    can_quantify = false;
+                }
+                _ => can_quantify = true,
+            }
+        }
+        index += 1;
+    }
+    !escaped && !in_class && groups == 0
+}
+
+fn has_hex(chars: &[char], start: usize, count: usize) -> bool {
+    chars
+        .get(start..start + count)
+        .is_some_and(|digits| digits.iter().all(|digit| digit.is_ascii_hexdigit()))
 }

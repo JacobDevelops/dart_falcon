@@ -1,15 +1,4 @@
 //! Disallow declared parameters that are never used.
-//!
-//! Flags a function or method parameter whose name never appears in the body. An
-//! unused parameter is usually a leftover from a refactor or a sign the
-//! implementation drifted from its signature; either way it misleads callers
-//! about what the function actually consumes. Remove it, or rename it to `_` — an
-//! all-underscore name (`_`, `__`, …) is the convention for a deliberately
-//! ignored parameter and is never flagged. Parameters of `@override` methods and
-//! of `noSuchMethod` are exempt because their signatures are dictated by the
-//! supertype, as are constructor field (`this.x`) and super (`super.x`)
-//! parameters. The check reaches into functions and the members of classes,
-//! mixins, mixin classes, enums, extensions, and extension types.
 
 /// The `avoid-unused-parameters` rule.
 pub use dcl::AvoidUnusedParameters;
@@ -18,7 +7,11 @@ mod dcl {
     use falcon_analyze::{AnalyzeContext, Rule};
     use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
     use falcon_syntax::ast::*;
-    use std::collections::HashSet;
+    use falcon_syntax::visitor::{
+        Visitor, walk_constructor_decl, walk_function_decl, walk_method_decl, walk_stmt,
+    };
+
+    use crate::lint::lexical_usage::{used_constructor_parameters, used_parameters};
 
     pub struct AvoidUnusedParameters;
 
@@ -28,526 +21,91 @@ mod dcl {
         }
 
         fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-            let mut diags = Vec::new();
+            let mut collector = Collector {
+                ctx,
+                diagnostics: Vec::new(),
+            };
+            collector.visit_program(program);
+            collector.diagnostics
+        }
+    }
 
-            for decl in &program.declarations {
-                match decl {
-                    TopLevelDecl::Function(func) => {
-                        if let Some(body) = &func.body {
-                            check_function_params(&func.params, body, &mut diags, ctx);
-                        }
-                    }
-                    // Every member-bearing declaration kind is checked. Mixin,
-                    // mixin class, enum, and extension type were folded in from
-                    // the pyramid twin.
-                    TopLevelDecl::Class(c) => check_members(&c.members, &mut diags, ctx),
-                    TopLevelDecl::Mixin(m) => check_members(&m.members, &mut diags, ctx),
-                    TopLevelDecl::MixinClass(mc) => check_members(&mc.members, &mut diags, ctx),
-                    TopLevelDecl::Enum(e) => check_members(&e.members, &mut diags, ctx),
-                    TopLevelDecl::Extension(e) => check_members(&e.members, &mut diags, ctx),
-                    TopLevelDecl::ExtensionType(e) => check_members(&e.members, &mut diags, ctx),
-                    _ => {}
-                }
-            }
+    struct Collector<'a, 'ctx> {
+        ctx: &'a AnalyzeContext<'ctx>,
+        diagnostics: Vec<Diagnostic>,
+    }
 
-            // Check every method member of a declaration, skipping `@override`
-            // methods (parameter list dictated by the supertype) and
-            // `noSuchMethod` (receives an `Invocation` it may ignore).
-            fn check_members(
-                members: &[ClassMember],
-                diags: &mut Vec<Diagnostic>,
-                ctx: &AnalyzeContext,
-            ) {
-                for member in members {
-                    if let ClassMember::Method(method) = member
-                        && let Some(body) = &method.body
-                        && method.name.name != "noSuchMethod"
-                        && !is_override(&method.annotations)
-                    {
-                        check_function_params(&method.params, body, diags, ctx);
-                    }
-                }
-            }
+    impl Collector<'_, '_> {
+        fn check(&mut self, params: &FormalParamList, body: Option<&FunctionBody>, exempt: bool) {
+            let Some(body) = body.filter(|_| !exempt) else {
+                return;
+            };
+            self.report(params, &used_parameters(params, body));
+        }
 
-            // A parameter whose name is only underscores (`_`, `__`, …) is a
-            // conventional "intentionally unused" marker and is never flagged.
-            fn is_ignorable_name(name: &str) -> bool {
-                !name.is_empty() && name.bytes().all(|b| b == b'_')
-            }
-
-            // `@override` methods must keep the parameter list dictated by the
-            // supertype, so an unused parameter there is not the author's to remove.
-            fn is_override(annotations: &[Annotation]) -> bool {
-                annotations
-                    .iter()
-                    .any(|a| a.name.last().is_some_and(|id| id.name == "override"))
-            }
-
-            fn check_function_params(
-                params: &FormalParamList,
-                body: &FunctionBody,
-                diags: &mut Vec<Diagnostic>,
-                ctx: &AnalyzeContext,
-            ) {
-                let mut param_names = HashSet::new();
-
-                for param in params
-                    .positional
-                    .iter()
-                    .chain(&params.optional_positional)
-                    .chain(&params.named)
+        fn report(&mut self, params: &FormalParamList, used: &std::collections::HashSet<usize>) {
+            for param in params
+                .positional
+                .iter()
+                .chain(&params.optional_positional)
+                .chain(&params.named)
+            {
+                let name = &param.name.name;
+                if param.is_field
+                    || param.is_super
+                    || (!name.is_empty() && name.bytes().all(|byte| byte == b'_'))
+                    || used.contains(&param.name.span.start)
                 {
-                    if !is_ignorable_name(&param.name.name) && !param.is_field && !param.is_super {
-                        param_names.insert((param.name.name.clone(), param.name.span.clone()));
-                    }
+                    continue;
                 }
-
-                let referenced = collect_referenced_names(body);
-
-                for (name, span) in param_names {
-                    if !referenced.contains(name.as_str()) {
-                        diags.push(Diagnostic::new(
-                            "avoid-unused-parameters",
-                            Severity::Warning,
-                            format!("Parameter '{}' is declared but not used", name),
-                            ctx.file_path.to_string_lossy().into_owned(),
-                            DiagSpan {
-                                start: span.start,
-                                end: span.end,
-                            },
-                        ));
-                    }
-                }
-            }
-
-            fn collect_referenced_names(body: &FunctionBody) -> HashSet<String> {
-                let mut names = HashSet::new();
-
-                match body {
-                    FunctionBody::Block(block) => {
-                        collect_from_stmts(&block.stmts, &mut names);
-                    }
-                    FunctionBody::Arrow(expr, _) => {
-                        collect_from_expr(expr, &mut names);
-                    }
-                    FunctionBody::Native(_, _) => {}
-                }
-
-                names
-            }
-
-            fn collect_from_stmts(stmts: &[Stmt], names: &mut HashSet<String>) {
-                for stmt in stmts {
-                    collect_from_stmt(stmt, names);
-                }
-            }
-
-            // Complete single-statement walker. Every statement kind that can hold an
-            // expression or nested statement must recurse, otherwise a referenced
-            // parameter is missed and the rule falsely reports it as unused (e.g. a
-            // parameter used only inside a closure body, a switch case, or the
-            // single-statement `then` branch of an `if`).
-            fn collect_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
-                match stmt {
-                    Stmt::Block(block) => collect_from_stmts(&block.stmts, names),
-                    Stmt::If(if_stmt) => {
-                        match &if_stmt.condition {
-                            IfCondition::Expr(expr) => collect_from_expr(expr, names),
-                            IfCondition::Case(expr, _, guard) => {
-                                collect_from_expr(expr, names);
-                                if let Some(g) = guard {
-                                    collect_from_expr(g, names);
-                                }
-                            }
-                        }
-                        collect_from_stmt(&if_stmt.then_branch, names);
-                        if let Some(else_stmt) = &if_stmt.else_branch {
-                            collect_from_stmt(else_stmt, names);
-                        }
-                    }
-                    Stmt::For(for_stmt) => {
-                        if let Some(ForInit::VarDecl(var)) = &for_stmt.init {
-                            for decl in &var.declarators {
-                                if let Some(init) = &decl.initializer {
-                                    collect_from_expr(init, names);
-                                }
-                            }
-                        } else if let Some(
-                            ForInit::ForIn { iterable, .. }
-                            | ForInit::PatternForIn { iterable, .. },
-                        ) = &for_stmt.init
-                        {
-                            collect_from_expr(iterable, names);
-                        } else if let Some(ForInit::Exprs(exprs)) = &for_stmt.init {
-                            for expr in exprs {
-                                collect_from_expr(expr, names);
-                            }
-                        }
-                        if let Some(cond) = &for_stmt.condition {
-                            collect_from_expr(cond, names);
-                        }
-                        for upd in &for_stmt.update {
-                            collect_from_expr(upd, names);
-                        }
-                        collect_from_stmt(&for_stmt.body, names);
-                    }
-                    Stmt::While(while_stmt) => {
-                        collect_from_expr(&while_stmt.condition, names);
-                        collect_from_stmt(&while_stmt.body, names);
-                    }
-                    Stmt::DoWhile(do_while_stmt) => {
-                        collect_from_expr(&do_while_stmt.condition, names);
-                        collect_from_stmt(&do_while_stmt.body, names);
-                    }
-                    Stmt::Switch(switch_stmt) => {
-                        collect_from_expr(&switch_stmt.subject, names);
-                        for case in &switch_stmt.cases {
-                            collect_from_stmts(&case.body, names);
-                        }
-                    }
-                    Stmt::TryCatch(try_catch) => {
-                        collect_from_stmts(&try_catch.body.stmts, names);
-                        for catch in &try_catch.catches {
-                            collect_from_stmts(&catch.body.stmts, names);
-                        }
-                        if let Some(finally) = &try_catch.finally {
-                            collect_from_stmts(&finally.stmts, names);
-                        }
-                    }
-                    Stmt::Return(return_stmt) => {
-                        if let Some(value) = &return_stmt.value {
-                            collect_from_expr(value, names);
-                        }
-                    }
-                    Stmt::Throw(throw_stmt) => collect_from_expr(&throw_stmt.value, names),
-                    Stmt::LocalVar(local_var) => {
-                        for decl in &local_var.declarators {
-                            if let Some(init) = &decl.initializer {
-                                collect_from_expr(init, names);
-                            }
-                        }
-                    }
-                    // Dart 3 destructuring: only the initializer holds reads — the
-                    // pattern itself binds names rather than referencing them.
-                    Stmt::PatternDecl(decl) => collect_from_expr(&decl.init, names),
-                    // A pattern assignment writes to names that already exist, so
-                    // its targets count as uses just like an `Expr::Assign` target.
-                    Stmt::PatternAssign(assign) => {
-                        for ident in falcon_syntax::visitor::bound_names(&assign.pattern) {
-                            names.insert(ident.name.clone());
-                        }
-                        collect_from_expr(&assign.value, names);
-                    }
-                    Stmt::Labeled(labeled) => collect_from_stmt(&labeled.stmt, names),
-                    Stmt::Expr(expr_stmt) => collect_from_expr(&expr_stmt.expr, names),
-                    Stmt::Assert(assert_stmt) => {
-                        collect_from_expr(&assert_stmt.condition, names);
-                        if let Some(msg) = &assert_stmt.message {
-                            collect_from_expr(msg, names);
-                        }
-                    }
-                    Stmt::Yield(yield_stmt) => collect_from_expr(&yield_stmt.value, names),
-                    Stmt::LocalFunc(local_func) => match &local_func.body {
-                        FunctionBody::Block(block) => collect_from_stmts(&block.stmts, names),
-                        FunctionBody::Arrow(expr, _) => collect_from_expr(expr, names),
-                        FunctionBody::Native(_, _) => {}
+                self.diagnostics.push(Diagnostic::new(
+                    "avoid-unused-parameters",
+                    Severity::Warning,
+                    format!("Parameter '{name}' is declared but not used"),
+                    self.ctx.file_path.to_string_lossy().into_owned(),
+                    DiagSpan {
+                        start: param.name.span.start,
+                        end: param.name.span.end,
                     },
-                    _ => {}
-                }
+                ));
             }
+        }
+    }
 
-            fn collect_from_expr(expr: &Expr, names: &mut HashSet<String>) {
-                match expr {
-                    Expr::Ident(ident) => {
-                        names.insert(ident.name.clone());
-                    }
-                    Expr::StringLit(lit) => {
-                        // Interpolated expressions are parsed by the parser, so
-                        // walk them directly rather than scanning the raw text.
-                        // The old char scan also collected field and method
-                        // names, which could silently suppress a real report.
-                        for interp in &lit.interpolations {
-                            collect_from_expr(&interp.expr, names);
-                        }
-                    }
-                    Expr::Unary { operand, .. } => {
-                        collect_from_expr(operand, names);
-                    }
-                    Expr::PostfixIncDec { operand, .. } => {
-                        collect_from_expr(operand, names);
-                    }
-                    Expr::Binary { left, right, .. } => {
-                        collect_from_expr(left, names);
-                        collect_from_expr(right, names);
-                    }
-                    Expr::Assign { target, value, .. } => {
-                        collect_from_expr(target, names);
-                        collect_from_expr(value, names);
-                    }
-                    Expr::Conditional {
-                        condition,
-                        then_expr,
-                        else_expr,
-                        ..
-                    } => {
-                        collect_from_expr(condition, names);
-                        collect_from_expr(then_expr, names);
-                        collect_from_expr(else_expr, names);
-                    }
-                    Expr::Is { expr, .. } => {
-                        collect_from_expr(expr, names);
-                    }
-                    Expr::As { expr, .. } => {
-                        collect_from_expr(expr, names);
-                    }
-                    Expr::Field { object, .. } => {
-                        collect_from_expr(object, names);
-                    }
-                    Expr::Index { object, index, .. } => {
-                        collect_from_expr(object, names);
-                        collect_from_expr(index, names);
-                    }
-                    Expr::Call { callee, args, .. } => {
-                        collect_from_expr(callee, names);
-                        for arg in &args.positional {
-                            collect_from_expr(arg, names);
-                        }
-                        for named_arg in &args.named {
-                            collect_from_expr(&named_arg.value, names);
-                        }
-                    }
-                    Expr::Cascade {
-                        object, sections, ..
-                    } => {
-                        collect_from_expr(object, names);
-                        for section in sections {
-                            for op in &section.ops {
-                                match op {
-                                    CascadeOp::Field(_, _) => {}
-                                    CascadeOp::Index(index, _) => collect_from_expr(index, names),
-                                    CascadeOp::Call(_, _, args) => {
-                                        for arg in &args.positional {
-                                            collect_from_expr(arg, names);
-                                        }
-                                        for named_arg in &args.named {
-                                            collect_from_expr(&named_arg.value, names);
-                                        }
-                                    }
-                                    CascadeOp::Assign(target, _, value) => {
-                                        collect_from_expr(target, names);
-                                        collect_from_expr(value, names);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Expr::List { elements, .. } => {
-                        for elem in elements {
-                            collect_from_collection_elem(elem, names);
-                        }
-                    }
-                    Expr::Map {
-                        entries, elements, ..
-                    } => {
-                        for entry in entries {
-                            collect_from_expr(&entry.key, names);
-                            collect_from_expr(&entry.value, names);
-                        }
-                        // Comprehension maps (`{ for (..) k: v }`) put everything in
-                        // `elements` and leave `entries` empty; walk them so a param
-                        // used only in a map-comprehension iterable counts as used.
-                        for element in elements {
-                            collect_from_map_element(element, names);
-                        }
-                    }
-                    Expr::Set { elements, .. } => {
-                        for elem in elements {
-                            collect_from_collection_elem(elem, names);
-                        }
-                    }
-                    Expr::Record { fields, .. } => {
-                        for field in fields {
-                            collect_from_expr(&field.value, names);
-                        }
-                    }
-                    Expr::FuncExpr { body, .. } => match body.as_ref() {
-                        FunctionBody::Block(block) => collect_from_stmts(&block.stmts, names),
-                        FunctionBody::Arrow(expr, _) => collect_from_expr(expr, names),
-                        FunctionBody::Native(_, _) => {}
-                    },
-                    Expr::New { args, .. } => {
-                        for arg in &args.positional {
-                            collect_from_expr(arg, names);
-                        }
-                        for named_arg in &args.named {
-                            collect_from_expr(&named_arg.value, names);
-                        }
-                    }
-                    Expr::Await { expr, .. } => {
-                        collect_from_expr(expr, names);
-                    }
-                    Expr::Throw { expr, .. } => {
-                        collect_from_expr(expr, names);
-                    }
-                    Expr::Switch { subject, arms, .. } => {
-                        collect_from_expr(subject, names);
-                        for arm in arms {
-                            if let Some(guard) = &arm.guard {
-                                collect_from_expr(guard, names);
-                            }
-                            collect_from_expr(&arm.body, names);
-                        }
-                    }
-                    Expr::NullAssert { operand, .. } => {
-                        collect_from_expr(operand, names);
-                    }
-                    // Bare generic tear-off `fn<int>` — the target is the read.
-                    Expr::GenericInstantiation { target, .. } => {
-                        collect_from_expr(target, names);
-                    }
-                    _ => {}
-                }
+    impl Visitor for Collector<'_, '_> {
+        fn visit_function_decl(&mut self, node: &FunctionDecl) {
+            self.check(&node.params, node.body.as_ref(), false);
+            walk_function_decl(self, node);
+        }
+
+        fn visit_method_decl(&mut self, node: &MethodDecl) {
+            let exempt = node.name.name == "noSuchMethod"
+                || node.annotations.iter().any(|annotation| {
+                    annotation
+                        .name
+                        .last()
+                        .is_some_and(|name| name.name == "override")
+                });
+            self.check(&node.params, node.body.as_ref(), exempt);
+            walk_method_decl(self, node);
+        }
+
+        fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+            if node.body.is_none() && node.initializers.is_empty() {
+                walk_constructor_decl(self, node);
+                return;
             }
+            let used =
+                used_constructor_parameters(&node.params, &node.initializers, node.body.as_ref());
+            self.report(&node.params, &used);
+            walk_constructor_decl(self, node);
+        }
 
-            fn collect_from_collection_elem(elem: &CollectionElement, names: &mut HashSet<String>) {
-                match elem {
-                    CollectionElement::Expr(expr) => {
-                        collect_from_expr(expr, names);
-                    }
-                    CollectionElement::Spread { expr, .. } => {
-                        collect_from_expr(expr, names);
-                    }
-                    CollectionElement::NullAware { expr, .. } => {
-                        collect_from_expr(expr, names);
-                    }
-                    CollectionElement::If {
-                        condition,
-                        then_elem,
-                        else_elem,
-                        ..
-                    } => {
-                        if let IfCondition::Expr(cond_expr) = condition {
-                            collect_from_expr(cond_expr, names);
-                        }
-                        collect_from_collection_elem(then_elem, names);
-                        if let Some(else_el) = else_elem {
-                            collect_from_collection_elem(else_el, names);
-                        }
-                    }
-                    CollectionElement::For {
-                        iterable, element, ..
-                    } => {
-                        collect_from_expr(iterable, names);
-                        collect_from_collection_elem(element, names);
-                    }
-                    CollectionElement::CFor {
-                        init,
-                        condition,
-                        updates,
-                        element,
-                        ..
-                    } => {
-                        match init {
-                            Some(ForInit::VarDecl(d)) => {
-                                for decl in &d.declarators {
-                                    if let Some(e) = &decl.initializer {
-                                        collect_from_expr(e, names);
-                                    }
-                                }
-                            }
-                            Some(ForInit::ForIn { iterable, .. }) => {
-                                collect_from_expr(iterable, names);
-                            }
-                            Some(ForInit::PatternForIn { iterable, .. }) => {
-                                collect_from_expr(iterable, names);
-                            }
-                            Some(ForInit::Exprs(es)) => {
-                                for e in es {
-                                    collect_from_expr(e, names);
-                                }
-                            }
-                            None => {}
-                        }
-                        if let Some(c) = condition {
-                            collect_from_expr(c, names);
-                        }
-                        for u in updates {
-                            collect_from_expr(u, names);
-                        }
-                        collect_from_collection_elem(element, names);
-                    }
-                }
+        fn visit_stmt(&mut self, node: &Stmt) {
+            if let Stmt::LocalFunc(function) = node {
+                self.check(&function.params, Some(&function.body), false);
             }
-
-            fn collect_from_map_element(elem: &MapElement, names: &mut HashSet<String>) {
-                match elem {
-                    MapElement::Entry(entry) => {
-                        collect_from_expr(&entry.key, names);
-                        collect_from_expr(&entry.value, names);
-                    }
-                    MapElement::Spread { expr, .. } => {
-                        collect_from_expr(expr, names);
-                    }
-                    MapElement::If {
-                        condition,
-                        then_entry,
-                        else_entry,
-                        ..
-                    } => {
-                        if let IfCondition::Expr(cond_expr) = condition {
-                            collect_from_expr(cond_expr, names);
-                        }
-                        collect_from_map_element(then_entry, names);
-                        if let Some(else_el) = else_entry {
-                            collect_from_map_element(else_el, names);
-                        }
-                    }
-                    MapElement::For {
-                        iterable, entry, ..
-                    } => {
-                        collect_from_expr(iterable, names);
-                        collect_from_map_element(entry, names);
-                    }
-                    MapElement::CFor {
-                        init,
-                        condition,
-                        updates,
-                        entry,
-                        ..
-                    } => {
-                        match init {
-                            Some(ForInit::VarDecl(d)) => {
-                                for decl in &d.declarators {
-                                    if let Some(e) = &decl.initializer {
-                                        collect_from_expr(e, names);
-                                    }
-                                }
-                            }
-                            Some(ForInit::ForIn { iterable, .. }) => {
-                                collect_from_expr(iterable, names);
-                            }
-                            Some(ForInit::PatternForIn { iterable, .. }) => {
-                                collect_from_expr(iterable, names);
-                            }
-                            Some(ForInit::Exprs(es)) => {
-                                for e in es {
-                                    collect_from_expr(e, names);
-                                }
-                            }
-                            None => {}
-                        }
-                        if let Some(c) = condition {
-                            collect_from_expr(c, names);
-                        }
-                        for u in updates {
-                            collect_from_expr(u, names);
-                        }
-                        collect_from_map_element(entry, names);
-                    }
-                }
-            }
-
-            diags
+            walk_stmt(self, node);
         }
     }
 }

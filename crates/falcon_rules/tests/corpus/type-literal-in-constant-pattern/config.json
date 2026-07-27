@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "type-literal-in-constant-pattern": "warn"
+      }
+    }
+  }
+}

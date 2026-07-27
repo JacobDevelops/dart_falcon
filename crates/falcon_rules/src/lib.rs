@@ -23,13 +23,52 @@ use crate::meta::meta_for;
 /// or library facts. Drivers use this to preserve the single-file fast path when
 /// none are enabled and to build one shared semantic snapshot when any are active.
 const RESOLVER_DEPENDENT_RULES: &[&str] = &[
+    "no-boolean-literal-compare",
+    "avoid-unnecessary-type-assertions",
+    "avoid-unnecessary-type-casts",
+    "avoid-unrelated-type-assertions",
+    "avoid-print",
+    "valid-regexps",
+    "avoid-passing-async-when-sync-expected",
     "avoid-ignoring-return-values",
+    "proper-controller-dispose",
     "unnecessary-string-interpolations",
     "prefer-is-empty",
     "prefer-is-not-empty",
     "prefer-iterable-where-type",
     "prefer-collection-literals",
     "prefer-final-fields",
+    "unrelated-type-equality-checks",
+    "collection-methods-unrelated-type",
+    "annotate-overrides",
+    "avoid-renaming-method-parameters",
+    "overridden-fields",
+    "use-key-in-widget-constructors",
+    "prefer-const-constructors-in-immutables",
+    "prefer-contains",
+    "prefer-interpolation-to-compose-strings",
+    "await-only-futures",
+    "null-check-on-nullable-type-parameter",
+    "null-closures",
+    "void-checks",
+    "implicit-call-tearoffs",
+    "library-annotations",
+    "type-literal-in-constant-pattern",
+    "avoid-types-as-parameter-names",
+    "exhaustive-cases",
+    "invalid-runtime-check-with-js-interop-types",
+    "use-build-context-synchronously",
+    "library-private-types-in-public-api",
+    "prefer-extracting-callbacks",
+    "no-logic-in-create-state",
+    "use-full-hex-values-for-flutter-colors",
+    "implementation-imports",
+    "avoid-non-null-assertion",
+    "no-self-comparisons",
+    "proper-super-init-state",
+    "no-duplicate-case-values",
+    "unnecessary-flutter-imports",
+    "prefer-declaring-const-constructor",
 ];
 
 /// Whether a per-file rule needs resolver-backed semantic context.
@@ -431,21 +470,10 @@ mod tests {
 
     #[test]
     fn resolver_gating_matches_current_semantic_consumers() {
-        for rule in [
-            "avoid-ignoring-return-values",
-            "unnecessary-string-interpolations",
-            "prefer-is-empty",
-            "prefer-is-not-empty",
-            "prefer-iterable-where-type",
-            "prefer-collection-literals",
-            "prefer-final-fields",
-        ] {
+        for rule in super::RESOLVER_DEPENDENT_RULES {
             assert!(rule_requires_resolution(rule), "{rule}");
         }
-
-        for rule in ["avoid-dynamic", "await-only-futures", "exhaustive-cases"] {
-            assert!(!rule_requires_resolution(rule), "{rule}");
-        }
+        assert!(!rule_requires_resolution("avoid-dynamic"));
     }
 
     /// `config_warnings` flags unknown/misgrouped rules in the base config *and*
