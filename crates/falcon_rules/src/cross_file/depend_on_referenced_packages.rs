@@ -92,8 +92,8 @@ fn parse_manifest(source: &str) -> Option<PackageManifest> {
     let mapping = root.as_mapping()?;
     Some(PackageManifest {
         name: mapping_string(mapping, "name")?.to_owned(),
-        dependencies: mapping_keys(mapping, "dependencies"),
-        dev_dependencies: mapping_keys(mapping, "dev_dependencies"),
+        dependencies: mapping_keys(mapping, "dependencies")?,
+        dev_dependencies: mapping_keys(mapping, "dev_dependencies")?,
     })
 }
 
@@ -101,18 +101,21 @@ fn mapping_string<'a>(mapping: &'a Mapping, key: &str) -> Option<&'a str> {
     mapping.get(Value::String(key.to_string()))?.as_str()
 }
 
-fn mapping_keys(mapping: &Mapping, key: &str) -> HashSet<String> {
-    mapping
-        .get(Value::String(key.to_string()))
-        .and_then(Value::as_mapping)
-        .map(|entries| {
+/// Dependency-section keys. `None` when the section exists but isn't a mapping —
+/// a malformed manifest, which callers skip rather than treat as "no dependencies"
+/// and report every import as undeclared.
+fn mapping_keys(mapping: &Mapping, key: &str) -> Option<HashSet<String>> {
+    match mapping.get(Value::String(key.to_string())) {
+        None | Some(Value::Null) => Some(HashSet::new()),
+        Some(Value::Mapping(entries)) => Some(
             entries
                 .keys()
                 .filter_map(Value::as_str)
                 .map(ToOwned::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
+                .collect(),
+        ),
+        Some(_) => None,
+    }
 }
 
 fn imported_package(uri: &str) -> Option<&str> {
@@ -161,6 +164,9 @@ mod tests {
     fn malformed_package_identity_skips_manifest() {
         assert!(parse_manifest("dependencies: {http: ^1.0.0}\n").is_none());
         assert!(parse_manifest("name: [not, a, string]\n").is_none());
+        assert!(parse_manifest("name: pkg\ndependencies: [http]\n").is_none());
+        assert!(parse_manifest("name: pkg\ndev_dependencies: oops\n").is_none());
+        assert!(parse_manifest("name: pkg\ndependencies:\n").is_some());
     }
 
     #[test]

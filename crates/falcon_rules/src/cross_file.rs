@@ -108,7 +108,9 @@ fn yaml_value_path(root: &Value, target: &Value, path: &mut Vec<YamlPathSegment>
     match root {
         Value::Mapping(entries) => {
             for (key, value) in entries {
-                let key = key.as_str()?;
+                // Non-string keys aren't addressable by `marked_node_at_path`, so
+                // skip them instead of abandoning the whole search.
+                let Some(key) = key.as_str() else { continue };
                 path.push(YamlPathSegment::Key(key.to_owned()));
                 if yaml_value_path(value, target, path).is_some() {
                     return Some(());

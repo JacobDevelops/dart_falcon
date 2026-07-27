@@ -128,14 +128,14 @@ fn run_rule(
     source: &str,
     config: &FalconConfig,
 ) -> Vec<(String, usize)> {
-    let (program, _errors) = parse(source);
+    let (program, errors) = parse(source);
     let resolver_dependent = RESOLVER_DEPENDENT_RULES.contains(&rule.name());
     let index = resolver_dependent.then(|| ProjectIndex::from_program(&program));
     let types = resolver_dependent.then(|| TypeIndex::from_program(&program));
     let identity_sources = [IdentitySource {
         path: file,
         program: &program,
-        has_parse_errors: false,
+        has_parse_errors: !errors.is_empty(),
     }];
     let identities =
         resolver_dependent.then(|| IdentityIndex::from_project_files(&identity_sources, &[]));
