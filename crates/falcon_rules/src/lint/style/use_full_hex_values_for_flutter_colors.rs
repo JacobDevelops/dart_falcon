@@ -1,15 +1,7 @@
-//! Flags a `Color` constructed from a hexadecimal literal with fewer than eight digits.
-//!
-//! Flutter's `Color` takes a 32-bit `0xAARRGGBB` value where the leading two
-//! digits are the alpha channel. A shorter literal such as `0xFFFFFF` silently
-//! drops the alpha byte to `0x00`, producing a fully transparent color rather
-//! than the opaque one the author almost certainly intended. Spelling out all
-//! eight digits makes the alpha channel explicit and the value unambiguous. The
-//! rule fires only on a `Color(...)` call with a single positional integer-literal
-//! argument in `0x`/`0X` form whose hex-digit count (ignoring `_` separators) is
-//! between one and seven.
+//! Require an eight-digit hexadecimal integer for the canonical Flutter Color
+//! default constructor.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -22,31 +14,33 @@ impl Rule for UseFullHexValuesForFlutterColors {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let Some(identities) = ctx.identities else {
+            return Vec::new();
+        };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut collector = Collector {
-            diags: Vec::new(),
+            model: &model,
             file: ctx.file_path.to_string_lossy().into_owned(),
+            diags: Vec::new(),
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
-    diags: Vec<Diagnostic>,
+struct Collector<'a> {
+    model: &'a SemanticModel<'a>,
     file: String,
+    diags: Vec<Diagnostic>,
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::Call {
-            callee, args, span, ..
-        } = node
-            && let Expr::Ident(id) = callee.as_ref()
-            && id.name == "Color"
-            && args.named.is_empty()
-            && args.positional.len() == 1
-            && let Expr::IntLit { value, .. } = &args.positional[0]
-            && is_short_hex(value)
+        if let Some((identity, constructor, args)) = construction(node, self.model)
+            && constructor == "new"
+            && is_color(&identity)
+            && let Some(Expr::IntLit { value, span }) = args.positional.first()
+            && !is_full_hex(value)
         {
             self.diags.push(Diagnostic::new(
                 "use-full-hex-values-for-flutter-colors",
@@ -63,15 +57,71 @@ impl Visitor for Collector {
     }
 }
 
-/// True when `value` is a hex integer literal (`0x`/`0X`) whose hex-digit count
-/// (ignoring `_` separators) is under 8, i.e. an alpha-less/short color value.
-fn is_short_hex(value: &str) -> bool {
-    let Some(digits) = value
-        .strip_prefix("0x")
-        .or_else(|| value.strip_prefix("0X"))
-    else {
-        return false;
-    };
-    let count = digits.chars().filter(|c| c.is_ascii_hexdigit()).count();
-    count > 0 && count < 8
+fn construction<'a>(
+    expression: &'a Expr,
+    model: &SemanticModel<'_>,
+) -> Option<(DeclarationIdentity, String, &'a ArgList)> {
+    match expression {
+        Expr::New {
+            dart_type,
+            constructor_name,
+            args,
+            ..
+        } => {
+            let DartType::Named(named) = dart_type else {
+                return None;
+            };
+            let segments = named
+                .segments
+                .iter()
+                .map(|segment| segment.name.clone())
+                .collect::<Vec<_>>();
+            let constructor = constructor_name
+                .as_ref()
+                .map_or_else(|| "new".to_string(), |name| name.name.clone());
+            Some((model.resolve_name(&segments)?, constructor, args))
+        }
+        Expr::Call { callee, args, .. } => {
+            let mut segments = expression_segments(callee)?;
+            if let Some(identity) = model.resolve_name(&segments) {
+                return Some((identity, "new".to_string(), args));
+            }
+            let constructor = segments.pop()?;
+            Some((model.resolve_name(&segments)?, constructor, args))
+        }
+        _ => None,
+    }
+}
+
+fn expression_segments(expression: &Expr) -> Option<Vec<String>> {
+    let mut current = expression;
+    let mut segments = Vec::new();
+    loop {
+        match current {
+            Expr::Ident(identifier) => {
+                segments.push(identifier.name.clone());
+                segments.reverse();
+                return Some(segments);
+            }
+            Expr::Field { object, field, .. } => {
+                segments.push(field.name.clone());
+                current = object;
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn is_color(identity: &DeclarationIdentity) -> bool {
+    matches!(identity,
+        DeclarationIdentity::Sdk { library, name }
+            if library == "dart:ui" && name == "Color")
+        || matches!(identity,
+            DeclarationIdentity::Package { package, name }
+                if package == "flutter" && name == "Color")
+}
+
+fn is_full_hex(value: &str) -> bool {
+    let normalized = value.replace('_', "").to_ascii_lowercase();
+    normalized.starts_with("0x") && normalized.len() == 10
 }

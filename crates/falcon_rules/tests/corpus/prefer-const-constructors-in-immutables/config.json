@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "prefer-const-constructors-in-immutables": "warn"
+      }
+    }
+  }
+}

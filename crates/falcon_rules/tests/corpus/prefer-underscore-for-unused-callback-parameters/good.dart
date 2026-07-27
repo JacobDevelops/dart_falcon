@@ -43,3 +43,27 @@ void interpolatedRead(List<int> items) {
   items.map((value) => "n=$value").toList();
   items.map((value) => "n=${value + 1}").toList();
 }
+
+void sourceOrderCallback(List<int> items) {
+  items.forEach((value) {
+    print(value);
+    {
+      final value = 1;
+      print(value);
+    }
+  });
+}
+
+void capturedCallback(List<int> items) {
+  items.forEach((value) {
+    final nested = () => value;
+    print(nested());
+  });
+}
+
+void unbracedCallbackScope(List<int> items) {
+  items.forEach((value) {
+    if (items.isEmpty) int value = 0;
+    print(value);
+  });
+}

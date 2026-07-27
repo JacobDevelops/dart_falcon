@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "implicit-call-tearoffs": "warn"
+      }
+    }
+  }
+}

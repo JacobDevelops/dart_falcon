@@ -37,3 +37,12 @@ void example6() {
     print(value);
   });
 }
+
+void shadowedCallback(List<int> items) {
+  items.forEach((value) { /* expect: prefer-underscore-for-unused-callback-parameters */
+    final nested = (value) => value + 1;
+    for (final value in items) {
+      print(nested(value));
+    }
+  });
+}

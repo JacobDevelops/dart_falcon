@@ -1,2 +1,6 @@
-// Placeholder: compliant code, no annotations.
-void main() {}
+class Base { void method() {} }
+class Child extends Base {
+  @override
+  void method() {}
+  static void helper() {}
+}
