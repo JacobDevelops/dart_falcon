@@ -35,3 +35,25 @@ class E {
   }
   void helper() {}
 }
+
+class ScopedBindings {
+  int value = 0;
+
+  void catchesAndLoops() {
+    try {
+      throw 1;
+    } catch (value) {
+      print(this.value + value.hashCode);
+    }
+    for (final value in [1]) {
+      print(this.value + value);
+    }
+    if (Object() case final value) {
+      print(this.value + value.hashCode);
+    }
+  }
+
+  void closures() {
+    ((value) => print(this.value + value))(1);
+  }
+}
