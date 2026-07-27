@@ -1,0 +1,3 @@
+class PublicApi {}
+
+void publicFunction() {}

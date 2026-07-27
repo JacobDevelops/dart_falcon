@@ -1,0 +1,8 @@
+name: secure_fixture
+homepage: https://example.com
+dependencies:
+  nested_git:
+    git:
+      url: https://example.com/repository.git
+  ssh_git:
+    git: git@github.com:example/repository.git
