@@ -25,3 +25,18 @@ class Example {
 void configure(int x, int y, int z, double scale, bool enabled, String name) { /* expect: max-parameters-for-function */
   print('$x, $y, $z, $scale, $enabled, $name');
 }
+
+class Wide {
+  Wide(int a, int b, int c, int d, int e, int f); /* expect: max-parameters-for-function */
+
+  Wide copyWith({int? a, int? b, int? c, int? d, int? e, int? f}) => this; /* expect: max-parameters-for-function */
+}
+
+typedef WideCallback = void Function(int a, int b, int c, int d, int e, int f); /* expect: max-parameters-for-function */
+
+void nested() {
+  void local(int a, int b, int c, int d, int e, int f) {} /* expect: max-parameters-for-function */
+  final callback = (int a, int b, int c, int d, int e, int f) {}; /* expect: max-parameters-for-function */
+}
+
+void accepts(void callback(int a, int b, int c, int d, int e, int f)) {} /* expect: max-parameters-for-function */
