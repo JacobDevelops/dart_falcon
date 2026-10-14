@@ -11,7 +11,7 @@ const KEYWORDS = new Set([
   'true', 'try', 'typedef', 'var', 'void', 'while', 'with', 'yield',
 ])
 
-export function escapeHtml(s: string): string {
+function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -48,7 +48,7 @@ export function highlightDart(code: string): string {
   return out
 }
 
-export function highlightJson(code: string): string {
+function highlightJson(code: string): string {
   const re =
     /("(?:\\.|[^"\\])*")(\s*:)|("(?:\\.|[^"\\])*")|(\b(?:true|false|null)\b)|(-?\d+(?:\.\d+)?)/g
   let out = ''

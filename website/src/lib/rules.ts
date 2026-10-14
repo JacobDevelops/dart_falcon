@@ -1,6 +1,8 @@
 import rulesJson from '../data/rules.json'
 import domainsJson from '../data/domains.json'
 
+export const REPO_URL = 'https://github.com/JacobDevelops/dart_falcon'
+
 export type RuleGroup =
   | 'complexity'
   | 'correctness'
@@ -104,15 +106,12 @@ export interface GroupedRules extends GroupMeta {
   rules: Rule[]
 }
 
-/** Single-file rules grouped and ordered for the index page. */
-export function groupedRules(): GroupedRules[] {
-  return GROUPS.map((g) => ({
-    ...g,
-    rules: rules
-      .filter((r) => r.group === g.id && !r.crossFile)
-      .sort((a, b) => a.name.localeCompare(b.name)),
-  })).filter((g) => g.rules.length > 0)
-}
+export const groupedRules: GroupedRules[] = GROUPS.map((g) => ({
+  ...g,
+  rules: rules
+    .filter((r) => r.group === g.id && !r.crossFile)
+    .sort((a, b) => a.name.localeCompare(b.name)),
+})).filter((g) => g.rules.length > 0)
 
 export const crossFileRules: Rule[] = rules
   .filter((r) => r.crossFile)

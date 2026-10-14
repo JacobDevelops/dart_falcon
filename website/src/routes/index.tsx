@@ -3,27 +3,27 @@ import { Fragment } from 'react'
 import { CodeBlock } from '../components/CodeBlock'
 import { Tabs } from '../components/Tabs'
 import { highlightDart } from '../lib/highlight'
-import { rules, recommendedCount, heroRule } from '../lib/rules'
-
+import { rules, recommendedCount, heroRule, REPO_URL } from '../lib/rules'
+import cli from '../data/cli.json'
 export const Route = createFileRoute('/')({
   component: Home,
 })
 
 const INSTALL_BINARY = `# download the prebuilt static binary (Linux x86_64)
-curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-0.3.0-x86_64-linux.tar.gz | tar -xz
+curl -fsSL ${REPO_URL}/releases/latest/download/falcon-${cli.version}-x86_64-linux.tar.gz | tar -xz
 sudo mv falcon /usr/local/bin/
 
 # lint your project — no Dart SDK required
 falcon check lib/`
 
 const INSTALL_CARGO = `# build from source with a stable Rust toolchain
-cargo install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
+cargo install --git ${REPO_URL} dart_falcon
 
 falcon check lib/`
 
 const INSTALL_MISE = `# mise.toml
 [tools]
-"github:JacobDevelops/dart_falcon" = { version = "0.3.0", matching = "falcon-" }
+"github:${REPO_URL.slice('https://github.com/'.length)}" = { version = "${cli.version}", matching = "falcon-" }
 
 # then run: mise install
 # lint with: mise exec -- falcon check lib/`

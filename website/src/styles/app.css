@@ -119,10 +119,6 @@ code, pre, kbd {
   display: block;
 }
 
-.brand .tld {
-  color: var(--amber);
-}
-
 .nav-links {
   display: flex;
   gap: 22px;
@@ -417,7 +413,7 @@ code, pre, kbd {
   margin-bottom: 12px;
 }
 
-/* ---------- code block + copy ---------- */
+/* ---------- code block ---------- */
 .codeblock {
   background: var(--bg-deep);
   border: 1px solid var(--border);
@@ -619,12 +615,6 @@ code, pre, kbd {
 }
 
 /* ---------- rule detail ---------- */
-.detail-head {
-  border-bottom: 1px solid var(--border-soft);
-  padding-bottom: 20px;
-  margin-bottom: 26px;
-}
-
 .crumbs {
   font-size: 13px;
   color: var(--faint);
@@ -633,59 +623,6 @@ code, pre, kbd {
 
 .crumbs a:hover {
   color: var(--muted);
-}
-
-.detail-head h1 {
-  font-family: var(--mono);
-  font-size: 1.8rem;
-  letter-spacing: -0.02em;
-  margin: 0 0 12px;
-  word-break: break-word;
-}
-
-.detail-badges {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.meta-table {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px 20px;
-  font-size: 14px;
-  margin-top: 16px;
-}
-
-.meta-table dt {
-  color: var(--faint);
-}
-
-.meta-table dd {
-  margin: 0;
-  color: var(--text);
-}
-
-.meta-table a {
-  color: var(--amber-bright);
-}
-
-.meta-table a:hover {
-  text-decoration: underline;
-}
-
-.detail-section {
-  margin: 34px 0;
-}
-
-.detail-section h2 {
-  font-size: 1.2rem;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 14px;
 }
 
 .dot-good {
@@ -700,50 +637,6 @@ code, pre, kbd {
   height: 9px;
   border-radius: 50%;
   background: var(--red);
-}
-
-.example-invalid .codeblock {
-  border-color: rgba(248, 113, 113, 0.35);
-}
-
-.example-valid .codeblock {
-  border-color: rgba(74, 222, 128, 0.28);
-}
-
-.diag-list {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.diag {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  background: var(--red-dim);
-  border: 1px solid rgba(248, 113, 113, 0.25);
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 13.5px;
-}
-
-.diag .loc {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--red);
-  white-space: nowrap;
-}
-
-.diag .msg {
-  color: #f6dede;
-}
-
-.fixture-name {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--amber);
-  margin: 16px 0 6px;
 }
 
 /* ---------- markdown prose ---------- */
@@ -866,13 +759,6 @@ code, pre, kbd {
   padding: 32px 0;
   color: var(--faint);
   font-size: 14px;
-}
-
-.footer-inner {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  flex-wrap: wrap;
 }
 
 .footer a {
@@ -1351,9 +1237,6 @@ code, pre, kbd {
   .footer-cols {
     grid-template-columns: 1fr;
   }
-}
-
-@media (max-width: 560px) {
   .wrap {
     padding: 0 16px;
   }

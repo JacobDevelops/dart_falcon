@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { DocsLayout } from '../../components/DocsLayout'
+import { RuleRow } from '../../components/RuleRow'
 import { domains, getRule } from '../../lib/rules'
 
 export const Route = createFileRoute('/linter/domains')({
@@ -42,24 +43,7 @@ function Domains() {
           <div className="domain-rules">
             {domain.rules.map((name) => {
               const rule = getRule(name)
-              return (
-                <Link
-                  to="/linter/rules/$rule"
-                  params={{ rule: name }}
-                  className="rule-row"
-                  key={name}
-                >
-                  <div className="rule-row-top">
-                    <span className="rule-name">{name}</span>
-                    {rule?.recommended ? (
-                      <span className="badge badge-rec">rec</span>
-                    ) : null}
-                  </div>
-                  {rule?.description ? (
-                    <p className="rule-desc">{rule.description}</p>
-                  ) : null}
-                </Link>
-              )
+              return <RuleRow key={name} name={name} rule={rule} domain />
             })}
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { DocsLayout } from '../../components/DocsLayout'
+import { ValueList } from '../../components/ValueList'
 import configJson from '../../data/config-reference.json'
 
 export const Route = createFileRoute('/reference/configuration')({
@@ -21,12 +22,7 @@ function topLevel(path: string): string {
   return path.split('.')[0].replace(/\[\]$/, '')
 }
 
-// Preserve first-seen order of top-level sections.
-const sections: string[] = []
-for (const key of config) {
-  const top = topLevel(key.path)
-  if (!sections.includes(top)) sections.push(top)
-}
+const sections = [...new Set(config.map((key) => topLevel(key.path)))]
 
 function KeyEntry({ entry }: { entry: ConfigKey }) {
   const isRulePath = entry.path.includes('<rule>')
@@ -43,17 +39,7 @@ function KeyEntry({ entry }: { entry: ConfigKey }) {
             default: <code>{JSON.stringify(entry.default)}</code>
           </span>
         ) : null}
-        {entry.allowedValues && entry.allowedValues.length > 0 ? (
-          <span className="flag-tag">
-            values:{' '}
-            {entry.allowedValues.map((v, i) => (
-              <span key={v}>
-                {i > 0 ? ' | ' : ''}
-                <code>{v}</code>
-              </span>
-            ))}
-          </span>
-        ) : null}
+        <ValueList values={entry.allowedValues} />
         {isRulePath ? (
           <span className="flag-tag">
             <Link to="/linter/rules">browse rule ids →</Link>

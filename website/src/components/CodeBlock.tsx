@@ -4,12 +4,11 @@ interface Props {
   code: string
   filename?: string
   lang?: string
-  className?: string
 }
 
-export function CodeBlock({ code, filename, lang = 'dart', className }: Props) {
+export function CodeBlock({ code, filename, lang = 'dart' }: Props) {
   return (
-    <div className={`codeblock${className ? ` ${className}` : ''}`}>
+    <div className="codeblock">
       {filename ? (
         <div className="codeblock-head">
           <span>{filename}</span>

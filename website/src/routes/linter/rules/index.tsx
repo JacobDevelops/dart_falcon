@@ -1,11 +1,11 @@
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { DocsLayout } from '../../../components/DocsLayout'
+import { RuleRow } from '../../../components/RuleRow'
 import {
   groupedRules,
   crossFileRules,
   rules,
   recommendedCount,
-  type Rule,
 } from '../../../lib/rules'
 
 export const Route = createFileRoute('/linter/rules/')({
@@ -14,7 +14,7 @@ export const Route = createFileRoute('/linter/rules/')({
 })
 
 function RulesIndex() {
-  const groups = groupedRules()
+  const groups = groupedRules
   return (
     <DocsLayout aside={<GroupNav />}>
       <div className="rules-head">
@@ -22,9 +22,9 @@ function RulesIndex() {
         <p>
           {rules.length} rules across {groups.length} groups, {recommendedCount}{' '}
           recommended. {crossFileRules.length} run across the whole{' '}
-          <Link to="/linter/domains" className="inline-link">
+          <a href="#cross-file" className="inline-link">
             project graph
-          </Link>
+          </a>
           .
         </p>
       </div>
@@ -40,7 +40,7 @@ function RulesIndex() {
           </div>
           <p className="blurb">{g.blurb}</p>
           {g.rules.map((r) => (
-            <RuleRow key={r.name} rule={r} />
+            <RuleRow key={r.name} name={r.name} rule={r} />
           ))}
         </section>
       ))}
@@ -59,7 +59,7 @@ function RulesIndex() {
             project, run in falcon's whole-project pass.
           </p>
           {crossFileRules.map((r) => (
-            <RuleRow key={r.name} rule={r} />
+            <RuleRow key={r.name} name={r.name} rule={r} />
           ))}
         </section>
       ) : null}
@@ -67,34 +67,8 @@ function RulesIndex() {
   )
 }
 
-function RuleRow({ rule }: { rule: Rule }) {
-  return (
-    <Link
-      to="/linter/rules/$rule"
-      params={{ rule: rule.name }}
-      className="rule-row"
-    >
-      <div className="rule-row-top">
-        <span className="rule-name">{rule.name}</span>
-        {rule.recommended ? (
-          <span className="badge badge-rec">recommended</span>
-        ) : null}
-        {rule.crossFile ? (
-          <span className="badge badge-cross">cross-file</span>
-        ) : null}
-        {rule.domains.map((d) => (
-          <span className="tag" key={d}>
-            {d}
-          </span>
-        ))}
-      </div>
-      {rule.description ? <p className="rule-desc">{rule.description}</p> : null}
-    </Link>
-  )
-}
-
 function GroupNav() {
-  const groups = groupedRules()
+  const groups = groupedRules
   return (
     <nav className="toc" aria-label="Rule groups">
       <h4>On this page</h4>

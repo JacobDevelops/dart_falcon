@@ -11,8 +11,7 @@ interface NavGroup {
   items: NavItem[]
 }
 
-// The single source of truth for the docs IA: Guides → Linter → Reference.
-const NAV: NavGroup[] = [
+export const NAV: NavGroup[] = [
   {
     heading: 'Guides',
     items: [

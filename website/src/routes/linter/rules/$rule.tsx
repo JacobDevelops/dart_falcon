@@ -4,14 +4,13 @@ import { CodeBlock } from '../../../components/CodeBlock'
 import { DocsLayout } from '../../../components/DocsLayout'
 import { Tabs } from '../../../components/Tabs'
 import { DiagnosticFrame } from '../../../components/DiagnosticFrame'
+import { RuleBadges } from '../../../components/RuleRow'
 import {
   getRule,
   groupLabel,
   type Rule,
   type RuleDiagnostic,
 } from '../../../lib/rules'
-
-marked.setOptions({ gfm: true })
 
 export const Route = createFileRoute('/linter/rules/$rule')({
   head: ({ params }) => ({
@@ -153,26 +152,14 @@ function RuleDetail() {
         </p>
         <h1 className="rule-title">{rule.name}</h1>
 
-        {/* Metadata summary block */}
         <div className="rule-summary">
           <code className="category-path">{categoryPath(rule)}</code>
           <div className="rule-summary-badges">
-            {rule.recommended ? (
-              <span className="badge badge-rec">recommended</span>
-            ) : null}
-            {rule.crossFile ? (
-              <span className="badge badge-cross">cross-file</span>
-            ) : null}
-            {rule.domains.map((d) => (
-              <span className="tag" key={d}>
-                {d}
-              </span>
-            ))}
+            <RuleBadges rule={rule} />
           </div>
           <SourceCrosswalk rule={rule} />
         </div>
 
-        {/* Cross-file callout */}
         {rule.crossFile ? (
           <div className="callout callout-cross">
             <strong>Cross-file rule.</strong> This rule runs in falcon's
@@ -183,7 +170,6 @@ function RuleDetail() {
           </div>
         ) : null}
 
-        {/* Full rule docs */}
         {docsHtml ? (
           <article
             className="prose rule-docs"
@@ -191,7 +177,6 @@ function RuleDetail() {
           />
         ) : null}
 
-        {/* Invalid */}
         {hasInvalid ? (
           <section className="rule-section example-invalid">
             <h2>
@@ -205,7 +190,6 @@ function RuleDetail() {
           </section>
         ) : null}
 
-        {/* Valid */}
         {rule.examples.good ? (
           <section className="rule-section example-valid">
             <h2>
@@ -215,7 +199,6 @@ function RuleDetail() {
           </section>
         ) : null}
 
-        {/* How to configure */}
         <section className="rule-section">
           <h2>How to configure</h2>
           <p style={{ color: 'var(--muted)', marginTop: 0 }}>
@@ -236,7 +219,6 @@ function RuleDetail() {
           />
         </section>
 
-        {/* Related */}
         <section className="rule-section related">
           <h2>Related</h2>
           <ul>

@@ -6,7 +6,7 @@
     "sync-docs": "bun run scripts/sync-docs.ts",
     "predev": "bun run sync-docs",
     "prebuild": "bun run sync-docs",
-    "dev": "vite dev --port 3000",
+    "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "bun run build && wrangler deploy",

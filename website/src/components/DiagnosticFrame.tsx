@@ -25,21 +25,9 @@ export function DiagnosticFrame({
   const { line, column, message, file } = diagnostic
   const idx = line - 1
 
-  // Defensive: if the line is out of range, show just the message.
-  if (idx < 0 || idx >= lines.length) {
-    return (
-      <div className="diag-frame">
-        <div className="diag-frame-msg">
-          {file ? <span className="diag-frame-file">{file}</span> : null}
-          {message}
-        </div>
-      </div>
-    )
-  }
-
+  const inRange = idx >= 0 && idx < lines.length
   const start = Math.max(0, idx - CONTEXT)
-  const gw = gutterWidth(line)
-  const caretPad = ' '.repeat(Math.max(0, column - 1))
+  const gutter = `${gutterWidth(line) + 1}ch`
 
   return (
     <div className="diag-frame">
@@ -47,30 +35,32 @@ export function DiagnosticFrame({
         {file ? <span className="diag-frame-file">{file}</span> : null}
         {message}
       </div>
-      <div className="diag-frame-code">
-        {lines.slice(start, idx + 1).map((text, i) => {
-          const n = start + i + 1
-          const isTarget = n === line
-          return (
-            <div className={`fline${isTarget ? ' target' : ''}`} key={n}>
-              <span className="fgutter" style={{ width: `${gw + 1}ch` }}>
-                {n}
-              </span>
-              <code
-                className="fcode"
-                dangerouslySetInnerHTML={{ __html: highlightDart(text) || ' ' }}
-              />
-            </div>
-          )
-        })}
-        <div className="fline caret-line" aria-hidden="true">
-          <span className="fgutter" style={{ width: `${gw + 1}ch` }} />
-          <code className="fcode fcaret">
-            {caretPad}
-            <span className="caret">∙</span>
-          </code>
+      {inRange ? (
+        <div className="diag-frame-code">
+          {lines.slice(start, idx + 1).map((text, i) => {
+            const n = start + i + 1
+            const isTarget = n === line
+            return (
+              <div className={`fline${isTarget ? ' target' : ''}`} key={n}>
+                <span className="fgutter" style={{ width: gutter }}>
+                  {n}
+                </span>
+                <code
+                  className="fcode"
+                  dangerouslySetInnerHTML={{ __html: highlightDart(text) || ' ' }}
+                />
+              </div>
+            )
+          })}
+          <div className="fline caret-line" aria-hidden="true">
+            <span className="fgutter" style={{ width: gutter }} />
+            <code className="fcode fcaret">
+              {' '.repeat(Math.max(0, column - 1))}
+              <span className="caret">∙</span>
+            </code>
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   )
 }

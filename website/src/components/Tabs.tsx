@@ -11,7 +11,7 @@ export interface TabItem {
  * cross-file fixture files. Follows the WAI-ARIA tabs pattern: roving arrow-key
  * focus, Home/End, and aria-controls wiring.
  */
-export function Tabs({ tabs, className }: { tabs: TabItem[]; className?: string }) {
+export function Tabs({ tabs }: { tabs: TabItem[] }) {
   const [active, setActive] = useState(0)
   const base = useId()
 
@@ -28,7 +28,7 @@ export function Tabs({ tabs, className }: { tabs: TabItem[]; className?: string 
   }
 
   return (
-    <div className={`tabs${className ? ` ${className}` : ''}`}>
+    <div className="tabs">
       <div className="tablist" role="tablist">
         {tabs.map((t, i) => (
           <button

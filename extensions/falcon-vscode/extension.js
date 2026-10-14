@@ -1,4 +1,4 @@
-// Falcon VS Code extension: minimal LSP client (Phase 1, plan M5.3).
+// Falcon VS Code extension: minimal LSP client.
 //
 // Launches `falcon lsp` over stdio for Dart documents and surfaces the
 // diagnostics it publishes. falcon.json edits are forwarded to the server
@@ -9,7 +9,7 @@ const { LanguageClient } = require('vscode-languageclient/node');
 
 let client;
 
-function activate(context) {
+function activate() {
   const binaryPath =
     workspace.getConfiguration('falcon').get('binaryPath') || 'falcon';
 
@@ -33,12 +33,11 @@ function activate(context) {
     clientOptions
   );
 
-  context.subscriptions.push({ dispose: () => client && client.stop() });
   client.start();
 }
 
 function deactivate() {
-  return client ? client.stop() : undefined;
+  return client?.stop();
 }
 
 module.exports = { activate, deactivate };

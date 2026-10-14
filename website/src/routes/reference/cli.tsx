@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { DocsLayout } from '../../components/DocsLayout'
 import { CodeBlock } from '../../components/CodeBlock'
+import { ValueList } from '../../components/ValueList'
 import cliJson from '../../data/cli.json'
 
 export const Route = createFileRoute('/reference/cli')({
@@ -63,17 +64,7 @@ function FlagEntry({ arg }: { arg: CliArg }) {
               default: <code>{arg.default}</code>
             </span>
           ) : null}
-          {arg.possibleValues.length > 0 ? (
-            <span className="flag-tag">
-              values:{' '}
-              {arg.possibleValues.map((v, i) => (
-                <span key={v}>
-                  {i > 0 ? ' | ' : ''}
-                  <code>{v}</code>
-                </span>
-              ))}
-            </span>
-          ) : null}
+          <ValueList values={arg.possibleValues} />
         </div>
       </div>
     </div>

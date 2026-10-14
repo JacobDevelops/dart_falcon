@@ -7,6 +7,8 @@ import {
   Link,
 } from '@tanstack/react-router'
 import appCss from '../styles/app.css?url'
+import { NAV } from '../components/DocsLayout'
+import { rules, REPO_URL } from '../lib/rules'
 
 export const Route = createRootRoute({
   head: () => ({
@@ -17,7 +19,7 @@ export const Route = createRootRoute({
       {
         name: 'description',
         content:
-          'falcon is a fast, standalone Dart & Flutter linter written in Rust. No Dart SDK required. 148 rules, Biome-inspired config.',
+          `falcon is a fast, standalone Dart & Flutter linter written in Rust. No Dart SDK required. ${rules.length} rules, Biome-inspired config.`,
       },
       { name: 'theme-color', content: '#101828' },
     ],
@@ -68,7 +70,7 @@ function SiteNav() {
           </Link>
           <a
             className="nav-gh"
-            href="https://github.com/JacobDevelops/dart_falcon"
+            href={REPO_URL}
             target="_blank"
             rel="noreferrer"
           >
@@ -87,30 +89,19 @@ function SiteFooter() {
         <div className="footer-brand">
           falcon — a fast Dart &amp; Flutter linter, written in Rust.
         </div>
-        <div className="footer-group">
-          <h5>Guides</h5>
-          <Link to="/docs/getting-started">Getting started</Link>
-          <Link to="/docs/installation">Installation</Link>
-          <Link to="/docs/configuration">Configuration</Link>
-          <Link to="/docs/suppressions">Suppressions</Link>
-        </div>
-        <div className="footer-group">
-          <h5>Linter</h5>
-          <Link to="/linter/rules">Rules</Link>
-          <Link to="/linter/domains">Domains</Link>
-        </div>
-        <div className="footer-group">
-          <h5>Reference</h5>
-          <Link to="/reference/cli">CLI</Link>
-          <Link to="/reference/configuration">Configuration keys</Link>
-          <a
-            href="https://github.com/JacobDevelops/dart_falcon"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub
-          </a>
-        </div>
+        {NAV.map((group) => (
+          <div className="footer-group" key={group.heading}>
+            <h5>{group.heading}</h5>
+            {group.items.map((item) => (
+              <Link to={item.to} key={item.to}>{item.label}</Link>
+            ))}
+            {group.heading === 'Reference' ? (
+              <a href={REPO_URL} target="_blank" rel="noreferrer">
+                GitHub
+              </a>
+            ) : null}
+          </div>
+        ))}
       </div>
     </footer>
   )
