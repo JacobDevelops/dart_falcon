@@ -10,9 +10,9 @@
 //! runs of quotes. Remove the redundant backslash.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_program};
+use falcon_syntax::visitor::Visitor;
 
 pub struct UnnecessaryStringEscapes;
 
@@ -24,7 +24,7 @@ impl Rule for UnnecessaryStringEscapes {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
@@ -41,16 +41,12 @@ fn is_meaningful_escape(c: u8, quote: u8) -> bool {
         || c == b'\r'
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
+impl Visitor for Collector<'_> {
     fn visit_string_lit(&mut self, node: &StringLitNode) {
         let Some(lit) = StringLitNode::delimiter(&node.raw) else {
             return;
@@ -66,11 +62,9 @@ impl Visitor for Collector {
                     let c = bytes[i + 1];
                     if !is_meaningful_escape(c, lit.quote) {
                         let start = node.span.start + lit.content_offset + i;
-                        self.diags.push(Diagnostic::new(
+                        self.diags.push(self.ctx.diagnostic(
                             "unnecessary-string-escapes",
-                            Severity::Warning,
                             "Unnecessary escape; the backslash can be removed.",
-                            self.file.clone(),
                             DiagSpan {
                                 start,
                                 end: start + 2,

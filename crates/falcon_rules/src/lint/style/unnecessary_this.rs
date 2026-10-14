@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, bound_names, walk_expr, walk_pattern, walk_stmt};
 
@@ -307,15 +307,10 @@ impl Visitor for Collector<'_, '_> {
             && !self.bound(&field.name)
         {
             let span = object.span();
-            self.diagnostics.push(Diagnostic::new(
+            self.diagnostics.push(self.ctx.diagnostic(
                 "unnecessary-this",
-                Severity::Warning,
                 "Unnecessary 'this.' qualifier.",
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         if let Expr::FuncExpr { params, body, .. } = node {

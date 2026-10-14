@@ -10,7 +10,7 @@
 //! excluded reliably.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_function_decl,
@@ -98,15 +98,10 @@ impl Visitor for Collector<'_, '_> {
             && let Expr::Field { field, .. } = callee.as_ref()
             && field.name == "then"
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "prefer-async-await",
-                Severity::Warning,
                 "Prefer async/await over .then() chains",
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         walk_expr(self, node);

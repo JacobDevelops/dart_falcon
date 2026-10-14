@@ -14,7 +14,7 @@
 //! this.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -70,15 +70,10 @@ fn check_function(
     }
     max = closures.max;
     if max > threshold {
-        diags.push(Diagnostic::new(
+        diags.push(ctx.diagnostic(
             "maximum-nesting-level",
-            Severity::Warning,
             format!("Function has a nesting level of {max} (max {threshold})."),
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: name_span.start,
-                end: name_span.end,
-            },
+            *name_span,
         ));
     }
 }

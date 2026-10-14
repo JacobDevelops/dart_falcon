@@ -7,7 +7,7 @@
 //! checked.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -28,7 +28,11 @@ impl Rule for AvoidReturnTypesOnSetters {
                     if matches!(func.kind, falcon_syntax::ast::FunctionKind::Setter(_))
                         && func.return_type.is_some() =>
                 {
-                    push(&mut diags, ctx, &func.name.span);
+                    diags.push(ctx.diagnostic(
+                        "avoid-return-types-on-setters",
+                        "Avoid return types on setters.".to_string(),
+                        func.name.span,
+                    ));
                 }
                 TopLevelDecl::Class(c) => check_members(&c.members, ctx, &mut diags),
                 TopLevelDecl::Mixin(m) => check_members(&m.members, ctx, &mut diags),
@@ -49,7 +53,11 @@ fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<
         if let ClassMember::Setter(setter) = member
             && setter_has_return_type(setter, ctx.source)
         {
-            push(diags, ctx, &setter.name.span);
+            diags.push(ctx.diagnostic(
+                "avoid-return-types-on-setters",
+                "Avoid return types on setters.".to_string(),
+                setter.name.span,
+            ));
         }
     }
 }
@@ -112,17 +120,4 @@ fn strip_comments(region: &str) -> String {
     }
     out.push_str(&region[kept_from..]);
     out
-}
-
-fn push(diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, span: &Span) {
-    diags.push(Diagnostic::new(
-        "avoid-return-types-on-setters",
-        Severity::Warning,
-        "Avoid return types on setters.".to_string(),
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
 }

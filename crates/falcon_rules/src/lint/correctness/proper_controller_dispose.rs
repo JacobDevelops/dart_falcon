@@ -6,7 +6,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
     TypeTruth,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, bound_names, walk_expr, walk_pattern, walk_stmt};
 
@@ -132,16 +132,7 @@ fn check_class(
         };
         for declarator in &field.declarators {
             if owned.contains(&declarator.name.name) && !disposed.contains(&declarator.name.name) {
-                diagnostics.push(Diagnostic::new(
-                    "proper-controller-dispose",
-                    Severity::Warning,
-                    "This controller is never disposed; dispose it in the State's dispose() method.",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: declarator.name.span.start,
-                        end: declarator.name.span.end,
-                    },
-                ));
+                diagnostics.push(ctx.diagnostic("proper-controller-dispose", "This controller is never disposed; dispose it in the State's dispose() method.", declarator.name.span));
             }
         }
     }

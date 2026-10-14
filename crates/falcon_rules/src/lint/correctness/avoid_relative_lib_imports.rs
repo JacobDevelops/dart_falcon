@@ -10,7 +10,7 @@
 //! instead.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AvoidRelativeLibImports;
@@ -24,15 +24,10 @@ impl Rule for AvoidRelativeLibImports {
         let mut diags = Vec::new();
         for import in &program.imports {
             if reaches_into_lib(&import.uri.value) {
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "avoid-relative-lib-imports",
-                    Severity::Warning,
                     "Avoid relative imports for files in 'lib'.",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: import.uri.span.start,
-                        end: import.uri.span.end,
-                    },
+                    import.uri.span,
                 ));
             }
         }

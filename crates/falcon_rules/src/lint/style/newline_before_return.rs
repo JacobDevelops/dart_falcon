@@ -9,7 +9,7 @@
 //! more newlines, so intervening spaces and tabs do not matter.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct NewlineBeforeReturn;
@@ -55,15 +55,10 @@ fn check_stmts_for_return(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &Ana
         if let Stmt::Return(ret) = stmt
             && !has_blank_line_before(ctx.source, ret.span.start)
         {
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "newline-before-return",
-                Severity::Warning,
                 "Add a blank line before return statement",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: ret.span.start,
-                    end: ret.span.end,
-                },
+                ret.span,
             ));
         }
     }

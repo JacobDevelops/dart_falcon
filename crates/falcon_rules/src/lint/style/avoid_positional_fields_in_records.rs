@@ -8,7 +8,7 @@
 //! generic is still reported.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AvoidPositionalFieldsInRecords;
@@ -29,19 +29,6 @@ impl Rule for AvoidPositionalFieldsInRecords {
 
 const MESSAGE: &str = "Avoid positional fields in records. Use named fields instead.";
 
-fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    diags.push(Diagnostic::new(
-        "avoid-positional-fields-in-records",
-        Severity::Warning,
-        MESSAGE,
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
-}
-
 /// Flag any record *type* that declares positional fields, recursing through
 /// type arguments and nested record/function types.
 fn check_type(ty: Option<&DartType>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
@@ -49,7 +36,7 @@ fn check_type(ty: Option<&DartType>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
     match ty {
         DartType::Record(rec) => {
             if !rec.positional.is_empty() {
-                flag(&rec.span, diags, ctx);
+                diags.push(ctx.diagnostic("avoid-positional-fields-in-records", MESSAGE, rec.span));
             }
             for p in &rec.positional {
                 check_type(Some(p), diags, ctx);
@@ -100,7 +87,11 @@ fn check_declarators(
             && !has_type
             && record_literal_has_positional(init)
         {
-            flag(init.span(), diags, ctx);
+            diags.push(ctx.diagnostic(
+                "avoid-positional-fields-in-records",
+                MESSAGE,
+                *(init.span()),
+            ));
         }
     }
 }

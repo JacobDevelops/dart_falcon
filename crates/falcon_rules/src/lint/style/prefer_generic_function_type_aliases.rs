@@ -11,7 +11,7 @@
 //! appearing in text is not mistaken for a declaration.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::Program;
 
 pub struct PreferGenericFunctionTypeAliases;
@@ -36,11 +36,9 @@ impl Rule for PreferGenericFunctionTypeAliases {
                 let kw_start = i;
                 i += "typedef".len();
                 if old_style_ahead(bytes, i) {
-                    diags.push(Diagnostic::new(
+                    diags.push(ctx.diagnostic(
                         "prefer-generic-function-type-aliases",
-                        Severity::Warning,
                         "Use the generic function type syntax in typedefs.".to_string(),
-                        ctx.file_path.to_string_lossy().into_owned(),
                         DiagSpan {
                             start: kw_start,
                             end: kw_start + "typedef".len(),

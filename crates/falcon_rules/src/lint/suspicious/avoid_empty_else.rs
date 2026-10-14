@@ -8,7 +8,7 @@
 //! alternative branch is needed.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
@@ -41,15 +41,10 @@ impl Visitor for Collector<'_, '_> {
             && matches!(else_branch.as_ref(), Stmt::Empty(_))
         {
             let span = else_branch.span();
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "avoid-empty-else",
-                Severity::Warning,
                 "Empty `else` clause — remove the `else` or give it a body",
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         walk_stmt(self, node);

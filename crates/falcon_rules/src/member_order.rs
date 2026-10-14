@@ -5,7 +5,7 @@
 //! flag any member that appears earlier than one that should precede it.
 
 use falcon_analyze::AnalyzeContext;
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 /// Read a rule's option `key` as a list of lowercase category tokens.
@@ -107,16 +107,7 @@ pub fn check_sequence(
         match max_seen {
             Some(prev) if rank < prev => {
                 let span = member.span();
-                diags.push(Diagnostic::new(
-                    rule_name,
-                    Severity::Warning,
-                    message,
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
-                ));
+                diags.push(ctx.diagnostic(rule_name, message, *span));
             }
             _ => max_seen = Some(rank),
         }

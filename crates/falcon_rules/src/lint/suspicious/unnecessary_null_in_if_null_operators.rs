@@ -7,7 +7,7 @@
 //! `??` along with it.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -21,19 +21,19 @@ impl Rule for UnnecessaryNullInIfNullOperators {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Binary {
             op: BinaryOp::NullCoalesce,
@@ -44,15 +44,10 @@ impl Visitor for Collector {
             && (matches!(left.as_ref(), Expr::NullLit { .. })
                 || matches!(right.as_ref(), Expr::NullLit { .. }))
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "unnecessary-null-in-if-null-operators",
-                Severity::Warning,
                 "Unnecessary null in an if-null ('??') operator.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         walk_expr(self, node);

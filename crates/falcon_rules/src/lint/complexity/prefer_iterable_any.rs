@@ -6,9 +6,9 @@
 //! `.where(...)` call.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct PreferIterableAny;
 
@@ -49,19 +49,6 @@ fn is_where_is_not_empty(expr: &Expr) -> Option<Span> {
     None
 }
 
-fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    diags.push(Diagnostic::new(
-        "prefer-iterable-any",
-        Severity::Warning,
-        "Use .any() instead of .where().isNotEmpty.",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
-}
-
 /// Detection runs on every expression the shared walker reaches. The walker is
 /// exhaustive over the AST, so a violation cannot hide inside newer syntax.
 struct Collector<'a> {
@@ -70,13 +57,13 @@ struct Collector<'a> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_expr(&mut self, node: &Expr) {
         if let Some(span) = is_where_is_not_empty(node) {
-            flag(&span, &mut self.diags, self.ctx);
+            self.diags.push(self.ctx.diagnostic(
+                "prefer-iterable-any",
+                "Use .any() instead of .where().isNotEmpty.",
+                span,
+            ));
         }
         walk_expr(self, node);
     }

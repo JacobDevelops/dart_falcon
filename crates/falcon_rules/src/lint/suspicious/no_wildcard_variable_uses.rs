@@ -9,7 +9,7 @@
 //! binding a real name if you actually need its value.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -46,16 +46,10 @@ impl Visitor for WildcardUseVisitor<'_, '_> {
         if let Expr::Ident(id) = node
             && is_wildcard(&id.name)
         {
-            self.diags.push(Diagnostic::new(
-                "no-wildcard-variable-uses",
-                Severity::Warning,
-                MESSAGE,
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: id.span.start,
-                    end: id.span.end,
-                },
-            ));
+            self.diags.push(
+                self.ctx
+                    .diagnostic("no-wildcard-variable-uses", MESSAGE, id.span),
+            );
         }
         walk_expr(self, node);
     }

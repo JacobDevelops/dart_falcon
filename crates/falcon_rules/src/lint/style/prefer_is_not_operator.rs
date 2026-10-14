@@ -7,7 +7,7 @@
 //! already uses `is!` produces no negation to flag.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -21,19 +21,19 @@ impl Rule for PreferIsNotOperator {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Unary {
             op: UnaryOp::Bang,
@@ -42,15 +42,10 @@ impl Visitor for Collector {
         } = node
             && matches!(operand.as_ref(), Expr::Is { negated: false, .. })
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "prefer-is-not-operator",
-                Severity::Warning,
                 "Prefer using the 'is!' operator.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         walk_expr(self, node);

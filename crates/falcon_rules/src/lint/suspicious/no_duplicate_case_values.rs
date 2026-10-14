@@ -6,7 +6,7 @@ use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, Rule, SemanticModel, SignatureIndex,
     evaluate_constant,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_class_decl, walk_expr, walk_function_decl, walk_stmt};
 
@@ -30,7 +30,7 @@ impl Rule for NoDuplicateCaseValues {
                 name: "<file>".to_string(),
             },
             fields: HashMap::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
@@ -43,7 +43,7 @@ struct Collector<'a> {
     signatures: &'a SignatureIndex,
     owner: DeclarationIdentity,
     fields: HashMap<String, Expr>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
 
@@ -137,15 +137,10 @@ impl Collector<'_> {
                 self.signatures,
             ) {
                 if !seen.insert(value) {
-                    self.diags.push(Diagnostic::new(
+                    self.diags.push(self.ctx.diagnostic(
                         "no-duplicate-case-values",
-                        Severity::Warning,
                         "Duplicate case value in switch statement.",
-                        self.file.clone(),
-                        DiagSpan {
-                            start: span.start,
-                            end: span.end,
-                        },
+                        span,
                     ));
                 }
             }

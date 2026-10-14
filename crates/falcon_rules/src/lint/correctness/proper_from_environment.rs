@@ -9,7 +9,7 @@
 //! const — a `const` variable initializer or an annotation argument.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_top_level_decl};
 
@@ -23,7 +23,7 @@ impl Rule for ProperFromEnvironment {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             in_const: false,
         };
         collector.visit_program(program);
@@ -31,15 +31,15 @@ impl Rule for ProperFromEnvironment {
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     /// True while visiting a const context (const initializer / const literal /
     /// const construction), where `*.fromEnvironment` is evaluated at compile time.
     in_const: bool,
 }
 
-impl Collector {
+impl Collector<'_> {
     fn visit_initializers(&mut self, declarators: &[VarDeclarator], is_const: bool) {
         let prev = self.in_const;
         self.in_const = self.in_const || is_const;
@@ -52,22 +52,13 @@ impl Collector {
     }
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Some((span, is_const_ctor)) = from_environment_invocation(node)
             && !is_const_ctor
             && !self.in_const
         {
-            self.diags.push(Diagnostic::new(
-                "proper-from-environment",
-                Severity::Warning,
-                "*.fromEnvironment must be used in a const context, otherwise it returns the default at runtime.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
-            ));
+            self.diags.push(self.ctx.diagnostic("proper-from-environment", "*.fromEnvironment must be used in a const context, otherwise it returns the default at runtime.", *span));
         }
 
         let prev = self.in_const;

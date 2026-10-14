@@ -6,10 +6,10 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, Rule, SemanticModel,
     SignatureIndex, TypeEnvironment, TypeParameterId, TypeParameterScope, TypeTruth,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, for_each_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, for_each_expr};
 
 pub struct UseKeyInWidgetConstructors;
 
@@ -25,7 +25,7 @@ impl Rule for UseKeyInWidgetConstructors {
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             model,
             signatures,
         };
@@ -36,7 +36,7 @@ impl Rule for UseKeyInWidgetConstructors {
 
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
 }
@@ -77,10 +77,11 @@ impl Collector<'_> {
             })
             .collect::<Vec<_>>();
         if constructors.is_empty() {
-            self.report(
-                &class.name.span,
+            self.diagnostics.push(self.ctx.diagnostic(
+                "use-key-in-widget-constructors",
                 "Public widgets should have a constructor with a named 'key' parameter.",
-            );
+                class.name.span,
+            ));
             return;
         }
 
@@ -160,10 +161,11 @@ impl Collector<'_> {
                 }
             }
             if known_target {
-                self.report(
-                    &constructor.span,
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "use-key-in-widget-constructors",
                     "Public widget constructors should accept and forward a named 'key' parameter.",
-                );
+                    constructor.span,
+                ));
             }
         }
     }
@@ -245,26 +247,9 @@ impl Collector<'_> {
                     && parameter.name.name == "key"
             })
     }
-
-    fn report(&mut self, span: &Span, message: &str) {
-        self.diagnostics.push(Diagnostic::new(
-            "use-key-in-widget-constructors",
-            Severity::Warning,
-            message,
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_class_decl(&mut self, node: &ClassDecl) {
         self.check_class(node);
     }

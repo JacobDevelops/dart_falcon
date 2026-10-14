@@ -23,7 +23,7 @@ mod dcl {
     use std::collections::HashSet;
 
     use falcon_analyze::{AnalyzeContext, Rule};
-    use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+    use falcon_diagnostics::Diagnostic;
     use falcon_syntax::ast::*;
     use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt, walk_top_level_decl};
 
@@ -142,15 +142,10 @@ mod dcl {
             {
                 return;
             }
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "no-magic-number",
-                Severity::Warning,
                 "Avoid using magic numbers. Extract them to named constants or variables.",
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
     }

@@ -7,7 +7,7 @@
 //! statement of the form `return await <expr>;`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AvoidRedundantAsync;
@@ -50,16 +50,7 @@ fn check_function_async(func_decl: &FunctionDecl, ctx: &AnalyzeContext) -> Optio
     }
 
     if is_redundant_async_body(&func_decl.body) {
-        return Some(Diagnostic::new(
-            "avoid-redundant-async",
-            Severity::Warning,
-            "Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly",
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: func_decl.name.span.start,
-                end: func_decl.name.span.end,
-            },
-        ));
+        return Some(ctx.diagnostic("avoid-redundant-async", "Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly", func_decl.name.span));
     }
 
     None
@@ -71,16 +62,7 @@ fn check_method_async(method_decl: &MethodDecl, ctx: &AnalyzeContext) -> Option<
     }
 
     if is_redundant_async_body(&method_decl.body) {
-        return Some(Diagnostic::new(
-            "avoid-redundant-async",
-            Severity::Warning,
-            "Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly",
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: method_decl.name.span.start,
-                end: method_decl.name.span.end,
-            },
-        ));
+        return Some(ctx.diagnostic("avoid-redundant-async", "Unnecessary 'async' modifier — remove 'async' and 'await' to return the Future directly", method_decl.name.span));
     }
 
     None

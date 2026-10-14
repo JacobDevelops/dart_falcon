@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct ImplementationImports;
@@ -22,12 +22,11 @@ impl Rule for ImplementationImports {
         let Some(own_package) = source_package(ctx.file_path) else {
             return Vec::new();
         };
-        let file = ctx.file_path.to_string_lossy().into_owned();
         let mut diags = Vec::new();
         for import in &program.imports {
-            check_uri(&import.uri, &own_package, &file, &mut diags);
+            check_uri(&import.uri, &own_package, ctx, &mut diags);
             for configurable in &import.configurable_uris {
-                check_uri(&configurable.uri, &own_package, &file, &mut diags);
+                check_uri(&configurable.uri, &own_package, ctx, &mut diags);
             }
         }
         diags
@@ -50,22 +49,17 @@ fn source_package(path: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
-fn check_uri(uri: &StringLitNode, own: &str, file: &str, diags: &mut Vec<Diagnostic>) {
+fn check_uri(uri: &StringLitNode, own: &str, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
     let Some(package) = implementation_package(&uri.value) else {
         return;
     };
     if package == own {
         return;
     }
-    diags.push(Diagnostic::new(
+    diags.push(ctx.diagnostic(
         "implementation-imports",
-        Severity::Warning,
         format!("Don't import implementation files from another package ('{package}')."),
-        file.to_string(),
-        DiagSpan {
-            start: uri.span.start,
-            end: uri.span.end,
-        },
+        uri.span,
     ));
 }
 

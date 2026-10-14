@@ -1,7 +1,7 @@
 //! Prefers `contains` to `indexOf` comparisons used only as membership tests.
 
 use falcon_analyze::{AnalyzeContext, Rule, parse_int};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
@@ -19,19 +19,19 @@ impl Rule for PreferContains {
         };
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         visit_program(&mut collector, program, state);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl SemanticRuleVisitor for Collector {
+impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::Binary {
             op,
@@ -55,15 +55,10 @@ impl SemanticRuleVisitor for Collector {
             .instantiated_supertype(&receiver, "dart:core", "List", &state.model)
             .is_some();
         if invocation.argument_count == 1 && (is_string || is_list) {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "prefer-contains",
-                Severity::Warning,
                 "Use 'contains' instead of comparing the result of 'indexOf'.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
     }

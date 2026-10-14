@@ -8,7 +8,7 @@
 //! in an object with a clear owner rather than a free-floating global.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AvoidMutableGlobalVariables;
@@ -26,15 +26,10 @@ impl Rule for AvoidMutableGlobalVariables {
                 // pyramid_lint only flags top-level variables that are neither
                 // `const` nor `final` (`isConstOrFinal` skips the declaration).
                 if var_decl.keyword == falcon_syntax::ast::VarKeyword::Var {
-                    diags.push(Diagnostic::new(
+                    diags.push(ctx.diagnostic(
                         "avoid-mutable-global-variables",
-                        Severity::Warning,
                         "Avoid mutable global variables. Use const or final instead.",
-                        ctx.file_path.to_string_lossy().into_owned(),
-                        DiagSpan {
-                            start: var_decl.span.start,
-                            end: var_decl.span.end,
-                        },
+                        var_decl.span,
                     ));
                 }
             }

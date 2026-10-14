@@ -1,7 +1,7 @@
 //! Flags unused closure parameters that are not named with underscores.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -17,19 +17,19 @@ impl Rule for PreferUnderscoreForUnusedCallbackParameters {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diagnostics
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::FuncExpr {
             params, body, span, ..
@@ -42,15 +42,10 @@ impl Visitor for Collector {
                     || name.bytes().all(|byte| byte == b'_')
                     || used.contains(&param.name.span.start))
             }) {
-                self.diagnostics.push(Diagnostic::new(
+                self.diagnostics.push(self.ctx.diagnostic(
                     "prefer-underscore-for-unused-callback-parameters",
-                    Severity::Warning,
                     "Unused callback parameter should be named '_'.",
-                    self.file.clone(),
-                    DiagSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
+                    *span,
                 ));
             }
         }

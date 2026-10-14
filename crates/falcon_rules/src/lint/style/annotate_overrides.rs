@@ -1,7 +1,7 @@
 //! Requires `@override` on members that override an inherited declaration.
 
 use falcon_analyze::{AnalyzeContext, MemberFacts, Rule, SemanticMemberKind, SignatureIndex};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AnnotateOverrides;
@@ -139,15 +139,10 @@ fn check_members(
                         .any(|fact| compatible(kind, has_getter, has_setter, fact))
                 });
             if !has_override(annotations) && overrides {
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "annotate-overrides",
-                    Severity::Warning,
                     "Annotate overridden members with '@override'.",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
+                    *span,
                 ));
             }
         }

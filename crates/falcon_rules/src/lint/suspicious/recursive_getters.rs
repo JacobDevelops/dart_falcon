@@ -9,7 +9,7 @@
 //! expression is left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct RecursiveGetters;
@@ -65,15 +65,10 @@ fn check(
     };
     let Some(expr) = expr else { return };
     if let Some(span) = self_reference(expr, name) {
-        diags.push(Diagnostic::new(
+        diags.push(ctx.diagnostic(
             "recursive-getters",
-            Severity::Warning,
             "Recursive getter — this getter unconditionally returns itself",
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 }

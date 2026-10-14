@@ -14,7 +14,7 @@
 //! 3rd and later. Values below `2` are clamped to `2`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct PreferMovingToVariable;
@@ -74,15 +74,10 @@ fn check_stmts(
                     let occurrence = *counts.entry(src).and_modify(|c| *c += 1).or_insert(1);
                     if occurrence >= threshold {
                         let span = init.span();
-                        diags.push(Diagnostic::new(
+                        diags.push(ctx.diagnostic(
                             "prefer-moving-to-variable",
-                            Severity::Warning,
                             "Duplicate expression — extract to a shared variable",
-                            ctx.file_path.to_string_lossy().into_owned(),
-                            DiagSpan {
-                                start: span.start,
-                                end: span.end,
-                            },
+                            *span,
                         ));
                     }
                 }

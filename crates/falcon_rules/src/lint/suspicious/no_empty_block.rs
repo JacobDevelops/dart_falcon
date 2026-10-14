@@ -8,7 +8,7 @@
 //! closing brace.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_function_decl,
@@ -120,11 +120,9 @@ fn flag_if_empty(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContex
         return;
     }
     let close_byte = block.span.start + close_pos;
-    diags.push(Diagnostic::new(
+    diags.push(ctx.diagnostic(
         "no-empty-block",
-        Severity::Warning,
         "Avoid empty blocks — add a comment explaining the intent or remove the block",
-        ctx.file_path.to_string_lossy().into_owned(),
         DiagSpan {
             start: close_byte,
             end: close_byte + 1,

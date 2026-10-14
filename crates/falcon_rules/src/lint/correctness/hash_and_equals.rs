@@ -8,7 +8,7 @@
 //! through. Override both and derive them from the same fields.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct HashAndEquals;
@@ -19,7 +19,6 @@ impl Rule for HashAndEquals {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let file = ctx.file_path.to_string_lossy().into_owned();
         let mut diags = Vec::new();
         for decl in &program.declarations {
             let members = match decl {
@@ -28,7 +27,7 @@ impl Rule for HashAndEquals {
                 TopLevelDecl::MixinClass(mixin) => &mixin.members,
                 _ => continue,
             };
-            check_members(members, &file, &mut diags);
+            check_members(members, ctx, &mut diags);
         }
         diags
     }
@@ -61,7 +60,7 @@ fn hashcode_span(members: &[ClassMember]) -> Option<&Span> {
     })
 }
 
-fn check_members(members: &[ClassMember], file: &str, diags: &mut Vec<Diagnostic>) {
+fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
     let eq = equals_span(members);
     let hash = hashcode_span(members);
     let (span, message) = match (eq, hash) {
@@ -72,14 +71,5 @@ fn check_members(members: &[ClassMember], file: &str, diags: &mut Vec<Diagnostic
         ),
         _ => return,
     };
-    diags.push(Diagnostic::new(
-        "hash-and-equals",
-        Severity::Warning,
-        message,
-        file.to_string(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
+    diags.push(ctx.diagnostic("hash-and-equals", message, *span));
 }

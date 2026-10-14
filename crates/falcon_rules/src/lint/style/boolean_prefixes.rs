@@ -16,7 +16,7 @@
 //! rather than replacing them.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct BooleanPrefixes;
@@ -58,19 +58,6 @@ fn resolve_prefixes(ctx: &AnalyzeContext) -> Vec<String> {
     prefixes
 }
 
-fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    diags.push(Diagnostic::new(
-        "boolean-prefixes",
-        Severity::Warning,
-        MESSAGE,
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
-}
-
 fn is_bool_type(ty: Option<&DartType>) -> bool {
     matches!(ty, Some(DartType::Named(nt)) if nt.segments.len() == 1 && nt.segments[0].name == "bool")
 }
@@ -98,7 +85,7 @@ fn check_name(
     prefixes: &[String],
 ) {
     if !has_valid_boolean_prefix(&name.name, prefixes) {
-        flag(&name.span, diags, ctx);
+        diags.push(ctx.diagnostic("boolean-prefixes", MESSAGE, name.span));
     }
 }
 

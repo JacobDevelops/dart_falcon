@@ -1,7 +1,7 @@
 //! Enforces `lowercase_with_underscores` for source file names.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::Program;
 
 pub struct FileNames;
@@ -21,11 +21,9 @@ impl Rule for FileNames {
         if stem.split('.').all(valid_name) {
             return Vec::new();
         }
-        vec![Diagnostic::new(
+        vec![ctx.diagnostic(
             "file-names",
-            Severity::Warning,
             "Name source files using lowercase_with_underscores.",
-            ctx.file_path.to_string_lossy().into_owned(),
             DiagSpan { start: 0, end: 0 },
         )]
     }

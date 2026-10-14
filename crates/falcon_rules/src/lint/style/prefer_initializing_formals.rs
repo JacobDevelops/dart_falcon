@@ -16,7 +16,7 @@
 //! formal.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use std::collections::HashSet;
@@ -108,20 +108,11 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
             continue;
         }
         if positional.contains(param) || (named.contains(param) && *param == field.name) {
-            push(diags, ctx, &field.span);
+            diags.push(ctx.diagnostic(
+                "prefer-initializing-formals",
+                "Use an initializing formal to assign a parameter to a field.".to_string(),
+                field.span,
+            ));
         }
     }
-}
-
-fn push(diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, span: &Span) {
-    diags.push(Diagnostic::new(
-        "prefer-initializing-formals",
-        Severity::Warning,
-        "Use an initializing formal to assign a parameter to a field.".to_string(),
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
 }

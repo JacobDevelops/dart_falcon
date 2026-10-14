@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -29,14 +29,22 @@ impl Rule for LibraryAnnotations {
                     && is_library_annotation(annotation, program, &library_annotations, ctx))
                     || late_trust_pragma(annotation, &declared_names, ctx)
                 {
-                    flag(annotation, ctx, &mut diags);
+                    diags.push(ctx.diagnostic(
+                        "library-annotations",
+                        "Attach library annotations to a library directive.",
+                        annotation.span,
+                    ));
                 }
             }
         }
         for declaration in &program.declarations {
             for annotation in declaration_annotations(declaration) {
                 if late_trust_pragma(annotation, &declared_names, ctx) {
-                    flag(annotation, ctx, &mut diags);
+                    diags.push(ctx.diagnostic(
+                        "library-annotations",
+                        "Attach library annotations to a library directive.",
+                        annotation.span,
+                    ));
                 }
             }
         }
@@ -302,19 +310,6 @@ fn late_trust_pragma(
             .is_some_and(|arg| {
                 matches!(arg, Expr::StringLit(string) if string.value == "dart2js:late:trust")
             })
-}
-
-fn flag(annotation: &Annotation, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    diags.push(Diagnostic::new(
-        "library-annotations",
-        Severity::Warning,
-        "Attach library annotations to a library directive.",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: annotation.span.start,
-            end: annotation.span.end,
-        },
-    ));
 }
 
 #[cfg(test)]

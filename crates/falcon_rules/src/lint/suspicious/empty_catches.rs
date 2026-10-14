@@ -8,7 +8,7 @@
 //! its exception to `_`, an explicit "I am ignoring this" marker.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 pub struct EmptyCatches;
@@ -47,11 +47,9 @@ fn check_catch(catch: &CatchClause, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeCo
         return;
     }
     let close_byte = catch.body.span.start + close;
-    diags.push(Diagnostic::new(
+    diags.push(ctx.diagnostic(
         "empty-catches",
-        Severity::Warning,
         "Empty catch block — handle the exception, add a comment, or name it `_`",
-        ctx.file_path.to_string_lossy().into_owned(),
         DiagSpan {
             start: close_byte,
             end: close_byte + 1,

@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
-use falcon_syntax::ast::StringLitNode;
+use falcon_diagnostics::{Diagnostic, Severity};
+
 use serde_yaml::{Mapping, Value};
 
 use super::{canonical_or_lexical, enclosing_pubspec};
@@ -73,7 +73,7 @@ impl CrossFileRule for DependOnReferencedPackages {
                         "The imported package '{package}' isn't a dependency of the importing package."
                     ),
                     file.path.to_string_lossy().into_owned(),
-                    uri_span(uri),
+                    uri.span,
                 ));
             }
         }
@@ -138,13 +138,6 @@ fn is_public_or_executable(file: &Path, pubspec: &Path) -> bool {
             relative.to_str(),
             Some("hook/build.dart" | "hook/link.dart")
         )
-}
-
-fn uri_span(uri: &StringLitNode) -> DiagSpan {
-    DiagSpan {
-        start: uri.span.start,
-        end: uri.span.end,
-    }
 }
 
 #[cfg(test)]

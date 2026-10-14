@@ -388,6 +388,7 @@ dependencies = [
 name = "falcon_diagnostics"
 version = "0.3.0"
 dependencies = [
+ "falcon_syntax",
  "lsp-types",
  "serde",
  "serde_json",

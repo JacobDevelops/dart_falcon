@@ -6,7 +6,7 @@
 //! map literal, including null-aware spreads (`...?x.toList()`).
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -20,34 +20,19 @@ impl Rule for UnnecessaryToListInSpreads {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
-    fn push(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "unnecessary-to-list-in-spreads",
-            Severity::Warning,
-            "Unnecessary 'toList()' in a spread.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-}
-
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         match node {
             Expr::List { elements, .. } | Expr::Set { elements, .. } => {
@@ -55,7 +40,11 @@ impl Visitor for Collector {
                     if let CollectionElement::Spread { expr, .. } = elem
                         && let Some(span) = to_list_call_span(expr)
                     {
-                        self.push(span);
+                        self.diags.push(self.ctx.diagnostic(
+                            "unnecessary-to-list-in-spreads",
+                            "Unnecessary 'toList()' in a spread.",
+                            *span,
+                        ));
                     }
                 }
             }
@@ -64,7 +53,11 @@ impl Visitor for Collector {
                     if let MapElement::Spread { expr, .. } = elem
                         && let Some(span) = to_list_call_span(expr)
                     {
-                        self.push(span);
+                        self.diags.push(self.ctx.diagnostic(
+                            "unnecessary-to-list-in-spreads",
+                            "Unnecessary 'toList()' in a spread.",
+                            *span,
+                        ));
                     }
                 }
             }

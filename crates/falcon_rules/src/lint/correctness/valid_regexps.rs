@@ -1,7 +1,7 @@
 //! Disallow statically known invalid `dart:core` regular expressions.
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -18,7 +18,7 @@ impl Rule for ValidRegexps {
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             model: SemanticModel::new(ctx.file_path, identities, ctx.types),
         };
         collector.visit_program(program);
@@ -28,7 +28,7 @@ impl Rule for ValidRegexps {
 
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
 }
 
@@ -39,15 +39,10 @@ impl Collector<'_> {
         };
         if extractable_pattern(argument).is_some_and(|pattern| !valid_pattern(&pattern)) {
             let span = argument.span();
-            self.diagnostics.push(Diagnostic::new(
+            self.diagnostics.push(self.ctx.diagnostic(
                 "valid-regexps",
-                Severity::Warning,
                 "Invalid regular expression.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
     }

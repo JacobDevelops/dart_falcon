@@ -7,7 +7,7 @@
 //! rename such as `Point(x: px)` is left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_pattern};
 
@@ -21,7 +21,7 @@ impl Rule for AvoidRedundantPatternFieldNames {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             source: ctx.source,
         };
         collector.visit_program(program);
@@ -31,23 +31,8 @@ impl Rule for AvoidRedundantPatternFieldNames {
 
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'s AnalyzeContext<'s>,
     source: &'s str,
-}
-
-impl Collector<'_> {
-    fn flag(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "avoid-redundant-pattern-field-names",
-            Severity::Warning,
-            "Redundant field name in pattern; use the shorthand (e.g. `:x`).",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
 }
 
 impl Visitor for Collector<'_> {
@@ -56,7 +41,11 @@ impl Visitor for Collector<'_> {
             Pattern::Object(obj) => {
                 for field in &obj.fields {
                     if is_redundant_field_source(self.source, &field.span) {
-                        self.flag(&field.span);
+                        self.diags.push(self.ctx.diagnostic(
+                            "avoid-redundant-pattern-field-names",
+                            "Redundant field name in pattern; use the shorthand (e.g. `:x`).",
+                            field.span,
+                        ));
                     }
                 }
             }
@@ -65,7 +54,11 @@ impl Visitor for Collector<'_> {
                     // A record shorthand `(:x)` parses with `name: None`; only an
                     // explicitly named field can be redundant.
                     if field.name.is_some() && is_redundant_field_source(self.source, &field.span) {
-                        self.flag(&field.span);
+                        self.diags.push(self.ctx.diagnostic(
+                            "avoid-redundant-pattern-field-names",
+                            "Redundant field name in pattern; use the shorthand (e.g. `:x`).",
+                            field.span,
+                        ));
                     }
                 }
             }

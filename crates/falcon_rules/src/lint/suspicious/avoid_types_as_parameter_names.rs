@@ -1,9 +1,9 @@
 //! Flags parameters whose names resolve to existing types.
 
 use falcon_analyze::{AnalyzeContext, NameIdentity, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_formal_param, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_formal_param};
 
 pub struct AvoidTypesAsParameterNames;
 
@@ -18,7 +18,7 @@ impl Rule for AvoidTypesAsParameterNames {
         };
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             identities,
             file_path: ctx.file_path,
         };
@@ -29,7 +29,7 @@ impl Rule for AvoidTypesAsParameterNames {
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     identities: &'a falcon_analyze::IdentityIndex,
     file_path: &'a std::path::Path,
 }
@@ -41,21 +41,12 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_formal_param(&mut self, node: &FormalParam) {
         if self.resolves_to_type(&node.name.name) {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "avoid-types-as-parameter-names",
-                Severity::Warning,
                 "Avoid using an existing type as a parameter name.",
-                self.file.clone(),
-                DiagSpan {
-                    start: node.name.span.start,
-                    end: node.name.span.end,
-                },
+                node.name.span,
             ));
         }
         walk_formal_param(self, node);

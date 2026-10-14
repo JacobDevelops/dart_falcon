@@ -12,7 +12,7 @@
 //! lines.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 pub struct MaxLinesForFile;
@@ -40,11 +40,9 @@ impl Rule for MaxLinesForFile {
 
         if line_count > threshold {
             // Report on line 1 (byte offset 0). Message states the actual threshold.
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "max-lines-for-file",
-                Severity::Warning,
                 format!("File exceeds the maximum number of lines ({threshold})."),
-                ctx.file_path.to_string_lossy().into_owned(),
                 DiagSpan { start: 0, end: 0 },
             ));
         }

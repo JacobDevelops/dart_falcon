@@ -8,7 +8,7 @@
 //! or annotations.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 pub struct UnnecessaryLibraryName;
@@ -23,11 +23,9 @@ impl Rule for UnnecessaryLibraryName {
         if let Some(lib) = &program.library_directive
             && let (Some(first), Some(last)) = (lib.name.first(), lib.name.last())
         {
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "unnecessary-library-name",
-                Severity::Warning,
                 "Library names are not necessary.",
-                ctx.file_path.to_string_lossy().into_owned(),
                 DiagSpan {
                     start: first.span.start,
                     end: last.span.end,

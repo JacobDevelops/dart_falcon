@@ -9,7 +9,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
     TypeTruth,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct NoLogicInCreateState;
@@ -60,15 +60,10 @@ impl Rule for NoLogicInCreateState {
                 if body_result(body, &model, signatures, &state) != BodyResult::Violation {
                     continue;
                 }
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "no-logic-in-create-state",
-                    Severity::Warning,
                     "Avoid logic in createState; it should only return a new State instance.",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: method.name.span.start,
-                        end: method.name.span.end,
-                    },
+                    method.name.span,
                 ));
             }
         }

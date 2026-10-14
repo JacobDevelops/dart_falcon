@@ -8,7 +8,7 @@
 //! 3 collection elements by requiring a complete, `)`-terminated construction.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -22,7 +22,7 @@ impl Rule for AvoidSingleChildColumnOrRow {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             source: ctx.source,
         };
         collector.visit_program(program);
@@ -32,7 +32,7 @@ impl Rule for AvoidSingleChildColumnOrRow {
 
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'s AnalyzeContext<'s>,
     source: &'s str,
 }
 
@@ -50,15 +50,10 @@ impl Visitor for Collector<'_> {
                     && elements.len() == 1
                     && matches!(elements[0], CollectionElement::Expr(_))
                 {
-                    self.diags.push(Diagnostic::new(
+                    self.diags.push(self.ctx.diagnostic(
                         "avoid-single-child-column-or-row",
-                        Severity::Warning,
                         "Avoid a Column/Row/Flex with a single child; use the child directly.",
-                        self.file.clone(),
-                        DiagSpan {
-                            start: span.start,
-                            end: span.end,
-                        },
+                        *span,
                     ));
                 }
             }

@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -152,15 +152,10 @@ fn check_param(
     let Some(target) = target else { return };
 
     if same_type(ctx.source, target, annotation) {
-        diags.push(Diagnostic::new(
+        diags.push(ctx.diagnostic(
             "type-init-formals",
-            Severity::Warning,
             "Don't type annotate initializing formals.".to_string(),
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: annotation.span().start,
-                end: annotation.span().end,
-            },
+            *annotation.span(),
         ));
     }
 }

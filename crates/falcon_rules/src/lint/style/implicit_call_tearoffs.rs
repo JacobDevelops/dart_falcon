@@ -6,7 +6,7 @@ use falcon_analyze::{
     AnalyzeContext, LocalTypes, MemberKind, MemberResult, ReceiverTypes, ResolvedType, Rule,
     SemanticMemberKind, StaticType, TypeIndex,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
@@ -23,7 +23,7 @@ impl Rule for ImplicitCallTearoffs {
         let facts = ProgramFacts::from_program(program);
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             types: ctx.types,
             facts,
             locals: LocalTypes::new(),
@@ -37,7 +37,7 @@ impl Rule for ImplicitCallTearoffs {
         if let Some(state) = SemanticState::new(program, ctx) {
             let mut supplemental = SemanticCollector {
                 diags: Vec::new(),
-                file: ctx.file_path.to_string_lossy().into_owned(),
+                ctx,
             };
             visit_program(&mut supplemental, program, state);
             for diagnostic in supplemental.diags {
@@ -378,7 +378,7 @@ impl LocalValues {
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     types: Option<&'a TypeIndex>,
     facts: ProgramFacts,
     locals: LocalTypes,
@@ -438,15 +438,10 @@ impl Collector<'_> {
     fn check(&mut self, expr: &Expr) {
         if self.callable_object(expr) {
             let span = expr.span();
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "implicit-call-tearoffs",
-                Severity::Warning,
                 "Explicitly tear off the 'call' method.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
     }
@@ -1272,12 +1267,12 @@ impl Visitor for Collector<'_> {
     }
 }
 
-struct SemanticCollector {
+struct SemanticCollector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl SemanticRuleVisitor for SemanticCollector {
+impl SemanticRuleVisitor for SemanticCollector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if matches!(node, Expr::Field { field, .. } if field.name == "call") {
             return;
@@ -1306,15 +1301,10 @@ impl SemanticRuleVisitor for SemanticCollector {
             return;
         }
         let span = node.span();
-        self.diags.push(Diagnostic::new(
+        self.diags.push(self.ctx.diagnostic(
             "implicit-call-tearoffs",
-            Severity::Warning,
             "Explicitly tear off the 'call' method.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 }

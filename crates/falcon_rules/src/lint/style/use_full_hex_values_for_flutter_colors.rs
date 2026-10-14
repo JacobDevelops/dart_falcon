@@ -2,7 +2,7 @@
 //! default constructor.
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -20,7 +20,7 @@ impl Rule for UseFullHexValuesForFlutterColors {
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut collector = Collector {
             model: &model,
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
@@ -30,7 +30,7 @@ impl Rule for UseFullHexValuesForFlutterColors {
 
 struct Collector<'a> {
     model: &'a SemanticModel<'a>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
 
@@ -42,15 +42,10 @@ impl Visitor for Collector<'_> {
             && let Some(Expr::IntLit { value, span }) = args.positional.first()
             && !is_full_hex(value)
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "use-full-hex-values-for-flutter-colors",
-                Severity::Warning,
                 "Use the full 8-digit hexadecimal value (0xAARRGGBB) for a Color.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         walk_expr(self, node);

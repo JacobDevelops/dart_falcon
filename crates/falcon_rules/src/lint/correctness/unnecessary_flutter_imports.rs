@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_annotation, walk_dart_type};
 
@@ -45,15 +45,10 @@ impl Rule for UnnecessaryFlutterImports {
             .filter(|import| import_targets_framework(import))
             .filter(|import| !import_is_used(import, &usage))
             .map(|import| {
-                Diagnostic::new(
+                ctx.diagnostic(
                     "unnecessary-flutter-imports",
-                    Severity::Warning,
                     "Unnecessary Flutter import. Remove unused imports.",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: import.span.start,
-                        end: import.span.end,
-                    },
+                    import.span,
                 )
             })
             .collect()

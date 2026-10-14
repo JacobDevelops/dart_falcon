@@ -8,7 +8,7 @@
 //! `xs?.forEach(...)`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -22,50 +22,39 @@ impl Rule for AvoidFunctionLiteralsInForeachCalls {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
-    fn push(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "avoid-function-literals-in-foreach-calls",
-            Severity::Warning,
-            "Avoid using a function literal in a 'forEach' call; use a for-in loop instead.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-}
-
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Call { callee, args, .. } = node
-            && let Expr::Field {
-                field,
-                is_null_safe: false,
-                ..
-            } = &**callee
-            && field.name == "forEach"
-            && args.positional.len() == 1
-            && args.named.is_empty()
-            && let Expr::FuncExpr { params, .. } = &args.positional[0]
-            // A single-parameter callback marks an Iterable.forEach; Map.forEach
-            // takes two parameters and is intentionally left alone.
-            && matches!(params.params.as_slice(), [param] if param.kind == falcon_syntax::ast::ParamKind::Positional)
+        && let Expr::Field {
+            field,
+            is_null_safe: false,
+            ..
+        } = &**callee
+        && field.name == "forEach"
+        && args.positional.len() == 1
+        && args.named.is_empty()
+        && let Expr::FuncExpr { params, .. } = &args.positional[0]
+        // A single-parameter callback marks an Iterable.forEach; Map.forEach
+        // takes two parameters and is intentionally left alone.
+        && matches!(params.params.as_slice(), [param] if param.kind == falcon_syntax::ast::ParamKind::Positional)
         {
-            self.push(&field.span);
+            self.diags.push(self.ctx.diagnostic(
+                "avoid-function-literals-in-foreach-calls",
+                "Avoid using a function literal in a 'forEach' call; use a for-in loop instead.",
+                field.span,
+            ));
         }
         walk_expr(self, node);
     }

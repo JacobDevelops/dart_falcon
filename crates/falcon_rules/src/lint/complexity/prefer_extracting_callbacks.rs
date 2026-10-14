@@ -8,7 +8,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
     TypeTruth,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
@@ -73,7 +73,7 @@ impl Rule for PreferExtractingCallbacks {
                 widget: &widget,
                 cfg: &cfg,
                 source: ctx.source,
-                file: ctx.file_path.to_string_lossy().into_owned(),
+                ctx,
                 diags: &mut diags,
             };
             for member in &class.members {
@@ -90,7 +90,7 @@ struct CallbackCollector<'a, 'b> {
     widget: &'a DeclarationIdentity,
     cfg: &'a Cfg,
     source: &'a str,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     diags: &'b mut Vec<Diagnostic>,
 }
 
@@ -134,15 +134,10 @@ impl CallbackCollector<'_, '_> {
         {
             return;
         }
-        self.diags.push(Diagnostic::new(
+        self.diags.push(self.ctx.diagnostic(
             "prefer-extracting-callbacks",
-            Severity::Warning,
             "Prefer extracting the callback to a separate widget method.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 

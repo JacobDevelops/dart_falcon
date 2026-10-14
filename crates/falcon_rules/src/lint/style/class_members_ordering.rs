@@ -17,7 +17,7 @@
 //! token it qualifies for; members matching no token are ignored.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::member_order::{category_rank, check_sequence, read_string_list};
@@ -142,13 +142,7 @@ fn check_members(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Ana
         let before_larger = i > 3 && cat < max_left[i];
         if after_smaller || before_larger {
             let span = member.span();
-            diags.push(Diagnostic::new(
-                NAME,
-                Severity::Warning,
-                "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan { start: span.start, end: span.end },
-            ));
+            diags.push(ctx.diagnostic(NAME, "Class members should be ordered: static const → static fields → instance final → instance var → constructors → public getters/setters → public methods → private members", *span));
         }
     }
 }

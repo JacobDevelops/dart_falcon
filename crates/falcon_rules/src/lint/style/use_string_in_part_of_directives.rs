@@ -7,7 +7,7 @@
 //! The rule reports only the named form (a non-empty dotted name with no string URI).
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct UseStringInPartOfDirectives;
@@ -23,15 +23,10 @@ impl Rule for UseStringInPartOfDirectives {
             && part_of.uri.is_none()
             && !part_of.name.is_empty()
         {
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "use-string-in-part-of-directives",
-                Severity::Warning,
                 "Use a string to refer to the containing library in a part-of directive.",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: part_of.span.start,
-                    end: part_of.span.end,
-                },
+                part_of.span,
             ));
         }
         diags

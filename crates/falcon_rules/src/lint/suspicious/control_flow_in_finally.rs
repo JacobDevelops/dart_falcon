@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
@@ -36,19 +36,6 @@ impl Rule for ControlFlowInFinally {
             .dedup_by_key(|diagnostic| diagnostic.span.start);
         finder.diags
     }
-}
-
-fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    diags.push(Diagnostic::new(
-        "control-flow-in-finally",
-        Severity::Warning,
-        "Avoid control flow (return/break/continue) that escapes a finally block",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
 }
 
 struct Finder<'a, 'ctx> {
@@ -140,13 +127,21 @@ impl FinallyScanner<'_, '_, '_> {
 impl Visitor for FinallyScanner<'_, '_, '_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
-            Stmt::Return(ret) => flag(&ret.span, self.diags, self.ctx),
+            Stmt::Return(ret) => self.diags.push(self.ctx.diagnostic(
+                "control-flow-in-finally",
+                "Avoid control flow (return/break/continue) that escapes a finally block",
+                ret.span,
+            )),
             Stmt::Break(brk) => {
                 let stays_inside = brk.label.as_ref().map_or(self.breakable > 0, |label| {
                     self.break_labels.contains(&label.name)
                 });
                 if !stays_inside {
-                    flag(&brk.span, self.diags, self.ctx);
+                    self.diags.push(self.ctx.diagnostic(
+                        "control-flow-in-finally",
+                        "Avoid control flow (return/break/continue) that escapes a finally block",
+                        brk.span,
+                    ));
                 }
             }
             Stmt::Continue(cont) => {
@@ -154,7 +149,11 @@ impl Visitor for FinallyScanner<'_, '_, '_> {
                     self.loop_labels.contains(&label.name)
                 });
                 if !stays_inside {
-                    flag(&cont.span, self.diags, self.ctx);
+                    self.diags.push(self.ctx.diagnostic(
+                        "control-flow-in-finally",
+                        "Avoid control flow (return/break/continue) that escapes a finally block",
+                        cont.span,
+                    ));
                 }
             }
             Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_) => {

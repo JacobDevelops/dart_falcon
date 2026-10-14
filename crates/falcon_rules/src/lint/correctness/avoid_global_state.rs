@@ -10,7 +10,7 @@
 //! parameters rather than hanging it off globals.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AvoidGlobalState;
@@ -25,7 +25,11 @@ impl Rule for AvoidGlobalState {
         for decl in &program.declarations {
             match decl {
                 TopLevelDecl::Variable(var) if is_mutable(var.keyword, var.is_late) => {
-                    diags.push(make_diag(ctx, &var.span));
+                    diags.push(ctx.diagnostic(
+                        "avoid-global-state",
+                        "Avoid mutable global state — use const or final declarations instead",
+                        var.span,
+                    ));
                 }
                 TopLevelDecl::Class(class) => check_static_fields(&class.members, &mut diags, ctx),
                 TopLevelDecl::Mixin(mixin) => check_static_fields(&mixin.members, &mut diags, ctx),
@@ -47,20 +51,11 @@ fn check_static_fields(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx
             && field.is_static
             && is_mutable(field.keyword, field.is_late)
         {
-            diags.push(make_diag(ctx, &field.span));
+            diags.push(ctx.diagnostic(
+                "avoid-global-state",
+                "Avoid mutable global state — use const or final declarations instead",
+                field.span,
+            ));
         }
     }
-}
-
-fn make_diag(ctx: &AnalyzeContext, span: &Span) -> Diagnostic {
-    Diagnostic::new(
-        "avoid-global-state",
-        Severity::Warning,
-        "Avoid mutable global state — use const or final declarations instead",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    )
 }

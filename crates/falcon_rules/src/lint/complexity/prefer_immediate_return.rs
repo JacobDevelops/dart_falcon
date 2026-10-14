@@ -7,7 +7,7 @@
 //! into blocks and `if`, loop, and try/catch bodies to check nested statements.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct PreferImmediateReturn;
@@ -72,15 +72,10 @@ fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext
                 && let Some(Expr::Ident(ident)) = &ret.value
                 && &ident.name == var_name
             {
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "prefer-immediate-return",
-                    Severity::Warning,
                     "Prefer returning the value directly instead of assigning to a variable first",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: local.span.start,
-                        end: local.span.end,
-                    },
+                    local.span,
                 ));
             }
         }

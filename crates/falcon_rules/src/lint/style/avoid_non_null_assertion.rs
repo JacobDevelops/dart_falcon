@@ -1,7 +1,7 @@
 //! Flags the null-assertion operator `!` except on a resolved `Map` index.
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
@@ -18,7 +18,7 @@ impl Rule for AvoidNonNullAssertion {
             return Vec::new();
         };
         let mut collector = Collector {
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             diags: Vec::new(),
         };
         visit_program(&mut collector, program, state);
@@ -26,12 +26,12 @@ impl Rule for AvoidNonNullAssertion {
     }
 }
 
-struct Collector {
-    file: String,
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
 
-impl SemanticRuleVisitor for Collector {
+impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::NullAssert { operand, span } = node else {
             return;
@@ -49,15 +49,10 @@ impl SemanticRuleVisitor for Collector {
                 return;
             }
         }
-        self.diags.push(Diagnostic::new(
+        self.diags.push(self.ctx.diagnostic(
             "avoid-non-null-assertion",
-            Severity::Warning,
             "Avoid using the null assertion operator '!'",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 }

@@ -7,7 +7,7 @@
 //! no identifier to check and are skipped.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct CamelCaseExtensions;
@@ -24,16 +24,7 @@ impl Rule for CamelCaseExtensions {
                 && let Some(name) = &ext.name
                 && !is_upper_camel_case(&name.name)
             {
-                diags.push(Diagnostic::new(
-                    "camel-case-extensions",
-                    Severity::Warning,
-                    MESSAGE,
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: name.span.start,
-                        end: name.span.end,
-                    },
-                ));
+                diags.push(ctx.diagnostic("camel-case-extensions", MESSAGE, name.span));
             }
         }
         diags

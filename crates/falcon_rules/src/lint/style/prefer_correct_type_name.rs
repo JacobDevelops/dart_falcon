@@ -10,7 +10,7 @@
 //! such as an acronym written in all caps.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct PreferCorrectTypeName;
@@ -66,18 +66,13 @@ fn check_type_name(name_ident: &Identifier, diags: &mut Vec<Diagnostic>, ctx: &A
         && !name.contains('$');
 
     if !is_valid {
-        diags.push(Diagnostic::new(
+        diags.push(ctx.diagnostic(
             "prefer-correct-type-name",
-            Severity::Warning,
             format!(
                 "Type name '{}' should be in UpperCamelCase and between 3 and 40 characters.",
                 name
             ),
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: name_ident.span.start,
-                end: name_ident.span.end,
-            },
+            name_ident.span,
         ));
     }
 }

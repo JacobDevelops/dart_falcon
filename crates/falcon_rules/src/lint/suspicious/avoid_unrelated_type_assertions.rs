@@ -1,7 +1,7 @@
 //! Flags an `is` check proven impossible by canonical resolved types.
 
 use falcon_analyze::{AnalyzeContext, Rule, TypeTruth};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::Program;
 
 use crate::lint::semantic_type_operations::{TypeOperationKind, collect};
@@ -30,15 +30,10 @@ impl Rule for AvoidUnrelatedTypeAssertions {
                 {
                     return None;
                 }
-                Some(Diagnostic::new(
+                Some(ctx.diagnostic(
                     self.name(),
-                    Severity::Warning,
                     "Type assertion can never be true — types are unrelated",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: operation.span.start,
-                        end: operation.span.end,
-                    },
+                    operation.span,
                 ))
             })
             .collect()

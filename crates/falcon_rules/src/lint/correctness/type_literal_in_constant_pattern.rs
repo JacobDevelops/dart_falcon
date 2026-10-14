@@ -3,12 +3,12 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, IdentityIndex, LocalTypes, NameIdentity, Rule, StaticType};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_class_decl, walk_class_member, walk_enum_decl, walk_expr, walk_extension_decl,
-    walk_local_var, walk_mixin_decl, walk_pattern, walk_program, walk_stmt, walk_top_level_decl,
+    walk_local_var, walk_mixin_decl, walk_pattern, walk_stmt, walk_top_level_decl,
 };
 
 pub struct TypeLiteralInConstantPattern;
@@ -24,7 +24,7 @@ impl Rule for TypeLiteralInConstantPattern {
         };
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             file_path: ctx.file_path,
             identities,
             locals: LocalTypes::new(),
@@ -37,7 +37,7 @@ impl Rule for TypeLiteralInConstantPattern {
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     file_path: &'a std::path::Path,
     identities: &'a IdentityIndex,
     locals: LocalTypes,
@@ -98,15 +98,10 @@ impl Collector<'_> {
             return;
         }
         let span = &name.last().expect("non-empty constant name").span;
-        self.diags.push(Diagnostic::new(
+        self.diags.push(self.ctx.diagnostic(
             "type-literal-in-constant-pattern",
-            Severity::Warning,
             "Use a type pattern or wrap the type literal in 'const (...)'.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 
@@ -232,10 +227,6 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         match node {
             TopLevelDecl::MixinClass(declaration) => {

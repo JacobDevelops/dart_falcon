@@ -9,7 +9,7 @@
 //! present.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -23,34 +23,19 @@ impl Rule for PreferForElementsToMapFromIterable {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
-    fn push(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "prefer-for-elements-to-map-from-iterable",
-            Severity::Warning,
-            "Use a map literal with a 'for' element instead of 'Map.fromIterable'.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-}
-
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         match node {
             // `Map.fromIterable(...)` — parsed as a call on a `Map.fromIterable`
@@ -64,7 +49,11 @@ impl Visitor for Collector {
                     && has_named(args, "key")
                     && has_named(args, "value")
                 {
-                    self.push(&field.span);
+                    self.diags.push(self.ctx.diagnostic(
+                        "prefer-for-elements-to-map-from-iterable",
+                        "Use a map literal with a 'for' element instead of 'Map.fromIterable'.",
+                        field.span,
+                    ));
                 }
             }
             // `new Map.fromIterable(...)`.
@@ -80,7 +69,11 @@ impl Visitor for Collector {
                 && has_named(args, "key")
                 && has_named(args, "value") =>
             {
-                self.push(span);
+                self.diags.push(self.ctx.diagnostic(
+                    "prefer-for-elements-to-map-from-iterable",
+                    "Use a map literal with a 'for' element instead of 'Map.fromIterable'.",
+                    *span,
+                ));
             }
             _ => {}
         }

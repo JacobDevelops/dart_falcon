@@ -9,7 +9,7 @@
 //! visible at the construction site.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -23,19 +23,19 @@ impl Rule for ProperExpandedAndFlexible {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         // Only flag when we can positively see an illegal parent context: an
         // Expanded/Flexible passed as the `child:` of a non-Flex widget. A Flex
@@ -49,15 +49,10 @@ impl Visitor for Collector {
                     && let Some((child, _, child_span)) = widget_construction(&named.value)
                     && matches!(child, "Expanded" | "Flexible")
                 {
-                    self.diags.push(Diagnostic::new(
+                    self.diags.push(self.ctx.diagnostic(
                         "proper-expanded-and-flexible",
-                        Severity::Warning,
                         "Expanded and Flexible must be direct children of a Row, Column, or Flex.",
-                        self.file.clone(),
-                        DiagSpan {
-                            start: child_span.start,
-                            end: child_span.end,
-                        },
+                        *child_span,
                     ));
                 }
             }

@@ -4,10 +4,10 @@ use falcon_analyze::{
     AnalyzeContext, BuildContextFlowAnalyzer, DeclarationIdentity, ResolvedType, Rule,
     SemanticModel, SignatureIndex, TypeTruth,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_class_decl, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_class_decl};
 
 pub struct UseBuildContextSynchronously;
 
@@ -26,7 +26,7 @@ impl Rule for UseBuildContextSynchronously {
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             model: &model,
             signatures,
             state_class: false,
@@ -38,7 +38,7 @@ impl Rule for UseBuildContextSynchronously {
 
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     model: &'a SemanticModel<'a>,
     signatures: &'a SignatureIndex,
     state_class: bool,
@@ -57,15 +57,10 @@ impl Collector<'_> {
         let spans = BuildContextFlowAnalyzer::new(self.model, self.signatures, self.state_class)
             .analyze(params, type_params, body);
         for span in spans {
-            self.diagnostics.push(Diagnostic::new(
+            self.diagnostics.push(self.ctx.diagnostic(
                 "use-build-context-synchronously",
-                Severity::Warning,
                 "Do not use a BuildContext across an async gap without a matching mounted check.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                span,
             ));
         }
     }
@@ -92,10 +87,6 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_class_decl(&mut self, node: &ClassDecl) {
         let saved = self.state_class;
         self.state_class = self.is_state_class(node);

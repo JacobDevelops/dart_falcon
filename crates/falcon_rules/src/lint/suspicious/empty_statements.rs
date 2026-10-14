@@ -9,7 +9,7 @@
 //! never reported. A real `null;` expression statement is not an empty statement.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct EmptyStatements;
@@ -44,15 +44,10 @@ fn walk_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext)
 
 fn walk_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let Stmt::Empty(span) = stmt {
-        diags.push(Diagnostic::new(
+        diags.push(ctx.diagnostic(
             "empty-statements",
-            Severity::Warning,
             "Unnecessary empty statement — remove the `;` or replace it with a block",
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
         return;
     }

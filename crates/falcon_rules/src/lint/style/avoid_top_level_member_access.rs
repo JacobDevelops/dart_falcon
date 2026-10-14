@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, bound_names, walk_class_member, walk_constructor_decl, walk_expr, walk_field_decl,
@@ -320,19 +320,6 @@ struct Collector<'a, 'ctx> {
 }
 
 impl Collector<'_, '_> {
-    fn flag(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "avoid-top-level-member-access",
-            Severity::Warning,
-            "Avoid using non-const top-level members",
-            self.ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-
     fn is_bound(&self, name: &str, offset: usize) -> bool {
         self.bindings.get(name).is_some_and(|scopes| {
             scopes
@@ -346,7 +333,11 @@ impl Visitor for Collector<'_, '_> {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(var) = node {
             if var.keyword == falcon_syntax::ast::VarKeyword::Var {
-                self.flag(&var.span);
+                self.diags.push(self.ctx.diagnostic(
+                    "avoid-top-level-member-access",
+                    "Avoid using non-const top-level members",
+                    var.span,
+                ));
             }
             // A top-level initializer is part of the declaration itself, not an
             // access from executable code.
@@ -360,7 +351,11 @@ impl Visitor for Collector<'_, '_> {
             && node.keyword != falcon_syntax::ast::VarKeyword::Final
             && node.keyword != falcon_syntax::ast::VarKeyword::Const
         {
-            self.flag(&node.span);
+            self.diags.push(self.ctx.diagnostic(
+                "avoid-top-level-member-access",
+                "Avoid using non-const top-level members",
+                node.span,
+            ));
         }
         walk_field_decl(self, node);
     }
@@ -370,7 +365,11 @@ impl Visitor for Collector<'_, '_> {
             && self.top_level_vars.contains(&id.name)
             && !self.is_bound(&id.name, id.span.start)
         {
-            self.flag(&id.span);
+            self.diags.push(self.ctx.diagnostic(
+                "avoid-top-level-member-access",
+                "Avoid using non-const top-level members",
+                id.span,
+            ));
         }
         walk_expr(self, node);
     }

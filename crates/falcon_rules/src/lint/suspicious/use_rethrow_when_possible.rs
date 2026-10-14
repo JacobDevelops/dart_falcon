@@ -9,9 +9,9 @@
 //! nested closure or a nested `try`/`catch` are skipped.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program, walk_stmt};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 pub struct UseRethrowWhenPossible;
 
@@ -23,30 +23,26 @@ impl Rule for UseRethrowWhenPossible {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
+impl Visitor for Collector<'_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         if let Stmt::TryCatch(tc) = node {
             for catch in &tc.catches {
                 if let Some(var) = &catch.exception_var {
                     let mut scan = CatchScan {
                         target: &var.name,
-                        file: &self.file,
+                        ctx: self.ctx,
                         diags: &mut self.diags,
                     };
                     for stmt in &catch.body.stmts {
@@ -69,30 +65,19 @@ fn is_target(expr: &Expr, target: &str) -> bool {
 /// nested try/catch statements, where `rethrow` would not apply to `target`.
 struct CatchScan<'a> {
     target: &'a str,
-    file: &'a str,
+    ctx: &'a AnalyzeContext<'a>,
     diags: &'a mut Vec<Diagnostic>,
-}
-
-impl CatchScan<'_> {
-    fn flag(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "use-rethrow-when-possible",
-            Severity::Warning,
-            "Use `rethrow` to re-throw the caught exception and preserve its stack trace.",
-            self.file.to_string(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
 }
 
 impl Visitor for CatchScan<'_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
             Stmt::Throw(t) if is_target(&t.value, self.target) => {
-                self.flag(&t.span);
+                self.diags.push(self.ctx.diagnostic(
+                    "use-rethrow-when-possible",
+                    "Use `rethrow` to re-throw the caught exception and preserve its stack trace.",
+                    t.span,
+                ));
             }
             // Do not descend: a different exception binding / rethrow not valid here.
             Stmt::TryCatch(_) | Stmt::LocalFunc(_) => {}
@@ -103,7 +88,11 @@ impl Visitor for CatchScan<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         match node {
             Expr::Throw { expr, span } if is_target(expr, self.target) => {
-                self.flag(span);
+                self.diags.push(self.ctx.diagnostic(
+                    "use-rethrow-when-possible",
+                    "Use `rethrow` to re-throw the caught exception and preserve its stack trace.",
+                    *span,
+                ));
             }
             // Closures capture the exception but `rethrow` is illegal inside them.
             Expr::FuncExpr { .. } => {}

@@ -8,7 +8,7 @@
 //! static or top-level variable does carry meaning. Drop the `late` keyword.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -59,15 +59,10 @@ fn flag_initialized(
 ) {
     for decl in declarators {
         if decl.initializer.is_some() {
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "unnecessary-late",
-                Severity::Warning,
                 "Unnecessary 'late' on an already-lazy static or top-level variable.".to_string(),
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: decl.name.span.start,
-                    end: decl.name.span.end,
-                },
+                decl.name.span,
             ));
         }
     }

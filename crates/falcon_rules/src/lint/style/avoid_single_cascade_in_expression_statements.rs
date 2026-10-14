@@ -6,7 +6,7 @@
 //! more sections are the idiomatic form and are not flagged.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
@@ -20,33 +20,28 @@ impl Rule for AvoidSingleCascadeInExpressionStatements {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         if let Stmt::Expr(e) = node
             && let Expr::Cascade { sections, span, .. } = &e.expr
             && sections.len() == 1
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "avoid-single-cascade-in-expression-statements",
-                Severity::Warning,
                 "Single cascade in an expression statement — use `.` instead of `..`",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         walk_stmt(self, node);

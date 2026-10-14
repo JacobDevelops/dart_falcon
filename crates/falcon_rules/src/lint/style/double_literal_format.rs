@@ -8,9 +8,9 @@
 //! digit would turn the `double` into an `int`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct DoubleLiteralFormat;
 
@@ -56,16 +56,7 @@ fn check_double(value: &str, span: &Span, diags: &mut Vec<Diagnostic>, ctx: &Ana
     } else {
         return;
     };
-    diags.push(Diagnostic::new(
-        "double-literal-format",
-        Severity::Warning,
-        message,
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
+    diags.push(ctx.diagnostic("double-literal-format", message, *span));
 }
 
 /// Every double literal in the file, wherever it appears. The shared walker is
@@ -76,10 +67,6 @@ struct Collector<'a> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::DoubleLit { value, span } = node {
             check_double(value, span, &mut self.diags, self.ctx);

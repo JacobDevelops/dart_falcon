@@ -9,7 +9,7 @@
 //! and top-level variables.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{self, Visitor};
@@ -43,15 +43,10 @@ impl Collector<'_, '_> {
         }
         for decl in declarators {
             if decl.initializer.is_none() {
-                self.diags.push(Diagnostic::new(
+                self.diags.push(self.ctx.diagnostic(
                     "prefer-typing-uninitialized-variables",
-                    Severity::Warning,
                     "Prefer typing uninitialized variables and fields.".to_string(),
-                    self.ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: decl.name.span.start,
-                        end: decl.name.span.end,
-                    },
+                    decl.name.span,
                 ));
             }
         }

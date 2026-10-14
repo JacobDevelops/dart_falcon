@@ -10,7 +10,7 @@
 //! frame.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_constructor_decl, walk_expr, walk_function_decl, walk_getter_decl,
@@ -27,7 +27,7 @@ impl Rule for AvoidReturningNullForVoid {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             void_stack: Vec::new(),
         };
         collector.visit_program(program);
@@ -35,29 +35,16 @@ impl Rule for AvoidReturningNullForVoid {
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     /// Void-ness of each enclosing function boundary. The innermost frame decides
     /// whether a `return null;` is flagged; a nested function pushes its own frame
     /// so it is judged by its own return type.
     void_stack: Vec<bool>,
 }
 
-impl Collector {
-    fn flag(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "avoid-returning-null-for-void",
-            Severity::Warning,
-            "Don't return null from a function with a void return type.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-
+impl Collector<'_> {
     /// An arrow body `=> null` of a void function is the expression form of
     /// `return null;`, so check it at the function boundary.
     fn check_arrow(&mut self, body: Option<&FunctionBody>, is_void: bool) {
@@ -67,7 +54,11 @@ impl Collector {
         if let Some(FunctionBody::Arrow(expr, _)) = body
             && matches!(expr.as_ref(), Expr::NullLit { .. })
         {
-            self.flag(expr.span());
+            self.diags.push(self.ctx.diagnostic(
+                "avoid-returning-null-for-void",
+                "Don't return null from a function with a void return type.",
+                *(expr.span()),
+            ));
         }
     }
 }
@@ -84,7 +75,7 @@ fn is_void_return(rt: &Option<DartType>) -> bool {
     }
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         let is_void = is_void_return(&node.return_type);
         self.check_arrow(node.body.as_ref(), is_void);
@@ -130,7 +121,11 @@ impl Visitor for Collector {
                 if self.void_stack.last() == Some(&true)
                     && matches!(&r.value, Some(Expr::NullLit { .. }))
                 {
-                    self.flag(&r.span);
+                    self.diags.push(self.ctx.diagnostic(
+                        "avoid-returning-null-for-void",
+                        "Don't return null from a function with a void return type.",
+                        r.span,
+                    ));
                 }
                 walk_stmt(self, node);
             }

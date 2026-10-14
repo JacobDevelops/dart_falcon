@@ -10,7 +10,7 @@
 //! with `Spacer()`, moving any `flex:` across.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct UseSpacerAsExpandedChild;
@@ -223,15 +223,10 @@ fn check_expanded(
     }
     for named in &args.named {
         if named.name.name == "child" && is_empty_spacer_widget(&named.value) {
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "use-spacer-as-expanded-child",
-                Severity::Warning,
                 "Use Spacer() instead of an Expanded with an empty Container or SizedBox child.",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
             return;
         }

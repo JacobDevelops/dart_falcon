@@ -7,7 +7,7 @@
 //! body nests two further `if`s is reported.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AvoidNestedIf;
@@ -122,13 +122,7 @@ fn walk(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match stmt {
         Stmt::If(if_stmt) => {
             if if_descendants_of_then(&if_stmt.then_branch) >= MAX_NESTING_LEVEL {
-                diags.push(Diagnostic::new(
-                    "avoid-nested-if",
-                    Severity::Warning,
-                    "Avoid nesting if statements. Consider combining conditions or using early returns.",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan { start: if_stmt.span.start, end: if_stmt.span.end },
-                ));
+                diags.push(ctx.diagnostic("avoid-nested-if", "Avoid nesting if statements. Consider combining conditions or using early returns.", if_stmt.span));
             }
             walk(&if_stmt.then_branch, diags, ctx);
             if let Some(eb) = &if_stmt.else_branch {

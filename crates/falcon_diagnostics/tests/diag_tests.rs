@@ -1,6 +1,4 @@
-use falcon_diagnostics::{
-    ContextLine, Diagnostic, Severity, Span, byte_to_line_col, byte_to_lsp_position,
-};
+use falcon_diagnostics::{Diagnostic, Severity, Span, byte_to_line_col, byte_to_lsp_position};
 
 #[test]
 fn test_diagnostic_new() {
@@ -8,75 +6,10 @@ fn test_diagnostic_new() {
     let diag = Diagnostic::new("DCL001", Severity::Error, "test message", "test.dart", span);
 
     assert_eq!(diag.rule, "DCL001");
-    assert_eq!(diag.code, "DCL001");
     assert_eq!(diag.severity, Severity::Error);
     assert_eq!(diag.message, "test message");
     assert_eq!(diag.file_path, "test.dart");
-    assert_eq!(diag.span.start, 5);
-    assert_eq!(diag.span.end, 10);
-    assert!(diag.suggestions.is_empty());
-    assert!(diag.context_lines.is_empty());
-}
-
-#[test]
-fn test_diagnostic_with_code() {
-    let span = Span { start: 0, end: 5 };
-    let diag = Diagnostic::new("DCL001", Severity::Warning, "test", "file.dart", span)
-        .with_code("CUSTOM001");
-
-    assert_eq!(diag.code, "CUSTOM001");
-    assert_eq!(diag.rule, "DCL001");
-}
-
-#[test]
-fn test_diagnostic_with_message() {
-    let span = Span { start: 0, end: 5 };
-    let diag = Diagnostic::new("DCL001", Severity::Error, "original", "file.dart", span)
-        .with_message("updated message");
-
-    assert_eq!(diag.message, "updated message");
-    assert_eq!(diag.rule, "DCL001");
-}
-
-#[test]
-fn test_diagnostic_with_suggestion() {
-    let span = Span { start: 0, end: 5 };
-    let diag = Diagnostic::new("DCL001", Severity::Info, "test", "file.dart", span)
-        .with_suggestion("fix this", Some("replacement".to_string()))
-        .with_suggestion("another fix", None);
-
-    assert_eq!(diag.suggestions.len(), 2);
-    assert_eq!(diag.suggestions[0].message, "fix this");
-    assert_eq!(
-        diag.suggestions[0].replacement,
-        Some("replacement".to_string())
-    );
-    assert_eq!(diag.suggestions[1].message, "another fix");
-    assert_eq!(diag.suggestions[1].replacement, None);
-}
-
-#[test]
-fn test_diagnostic_with_context_lines() {
-    let span = Span { start: 0, end: 5 };
-    let lines = vec![
-        ContextLine {
-            line_number: 1,
-            content: "void main() {".to_string(),
-            is_primary: false,
-        },
-        ContextLine {
-            line_number: 2,
-            content: "  doSomething();".to_string(),
-            is_primary: true,
-        },
-    ];
-    let diag = Diagnostic::new("DCL001", Severity::Error, "test", "file.dart", span)
-        .with_context_lines(lines);
-
-    assert_eq!(diag.context_lines.len(), 2);
-    assert!(!diag.context_lines[0].is_primary);
-    assert!(diag.context_lines[1].is_primary);
-    assert_eq!(diag.context_lines[1].content, "  doSomething();");
+    assert_eq!(diag.span, span);
 }
 
 #[test]
@@ -140,17 +73,20 @@ fn test_format_text_warning() {
 fn test_format_json_has_rule() {
     let span = Span { start: 0, end: 5 };
     let diag = Diagnostic::new("DCL001", Severity::Error, "test", "file.dart", span);
-    let json = diag.format_json();
+    let json = serde_json::to_value(&diag).unwrap();
 
     assert!(json.get("rule").is_some());
     assert_eq!(json.get("rule").unwrap().as_str(), Some("DCL001"));
+    assert!(json.get("code").is_none());
+    assert!(json.get("suggestions").is_none());
+    assert!(json.get("context_lines").is_none());
 }
 
 #[test]
 fn test_format_json_has_severity() {
     let span = Span { start: 0, end: 5 };
     let diag = Diagnostic::new("DCL001", Severity::Warning, "test", "file.dart", span);
-    let json = diag.format_json();
+    let json = serde_json::to_value(&diag).unwrap();
 
     assert!(json.get("severity").is_some());
 }
@@ -161,7 +97,7 @@ fn test_format_json_carries_resolved_line_col() {
     let span = Span { start: 5, end: 6 }; // 'd' on line 3, col 1
     let mut diag = Diagnostic::new("DCL001", Severity::Error, "m", "f.dart", span);
     diag.resolve_position(source);
-    let json = diag.format_json();
+    let json = serde_json::to_value(&diag).unwrap();
 
     // Byte span stays alongside the navigable line/col.
     assert_eq!(
@@ -202,13 +138,12 @@ fn test_format_lsp_severity_warning() {
 fn test_format_lsp_code() {
     let source = "void main() {}";
     let span = Span { start: 0, end: 4 };
-    let diag = Diagnostic::new("DCL001", Severity::Error, "test", "file.dart", span)
-        .with_code("CUSTOM002");
+    let diag = Diagnostic::new("DCL001", Severity::Error, "test", "file.dart", span);
     let lsp_diag = diag.format_lsp(source);
 
     match &lsp_diag.code {
         Some(lsp_types::NumberOrString::String(code)) => {
-            assert_eq!(code, "CUSTOM002");
+            assert_eq!(code, "DCL001");
         }
         _ => panic!("Expected String code"),
     }
@@ -238,10 +173,10 @@ fn test_format_lsp_line_col_second_line() {
 }
 
 #[test]
-fn test_format_lsp_note_as_information() {
+fn test_format_lsp_info_as_information() {
     let source = "void main() {}";
     let span = Span { start: 0, end: 4 };
-    let diag = Diagnostic::new("DCL001", Severity::Note, "note msg", "file.dart", span);
+    let diag = Diagnostic::new("DCL001", Severity::Info, "info msg", "file.dart", span);
     let lsp_diag = diag.format_lsp(source);
 
     assert_eq!(
@@ -255,7 +190,6 @@ fn test_severity_display() {
     assert_eq!(format!("{}", Severity::Error), "error");
     assert_eq!(format!("{}", Severity::Warning), "warning");
     assert_eq!(format!("{}", Severity::Info), "info");
-    assert_eq!(format!("{}", Severity::Note), "note");
 }
 
 #[test]
@@ -288,4 +222,11 @@ fn test_byte_to_lsp_position_clamped_to_end() {
     let pos = byte_to_lsp_position(source, 999);
     assert_eq!(pos.line, 0);
     assert_eq!(pos.character, 3);
+}
+
+#[test]
+fn test_diagnostic_accepts_syntax_span() {
+    let span = falcon_syntax::ast::Span { start: 5, end: 10 };
+    let diag = Diagnostic::new("rule", Severity::Warning, "message", "file.dart", span);
+    assert_eq!(diag.span, Span { start: 5, end: 10 });
 }

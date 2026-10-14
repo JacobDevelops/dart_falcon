@@ -12,7 +12,7 @@
 //! cases exceeds this.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
@@ -64,18 +64,13 @@ impl Visitor for Collector<'_, '_> {
         if let Stmt::Switch(switch_stmt) = node
             && count_non_default_cases(switch_stmt) > self.threshold
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "max-switch-cases",
-                Severity::Warning,
                 format!(
                     "Switch statement has too many cases (max {}).",
                     self.threshold
                 ),
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: switch_stmt.span.start,
-                    end: switch_stmt.span.end,
-                },
+                switch_stmt.span,
             ));
         }
         walk_stmt(self, node);

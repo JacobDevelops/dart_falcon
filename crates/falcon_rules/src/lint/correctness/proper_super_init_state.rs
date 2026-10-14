@@ -4,7 +4,7 @@
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, TypeTruth,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct ProperSuperInitState;
@@ -54,15 +54,10 @@ impl Rule for ProperSuperInitState {
                     .find(|statement| is_super_init_state_statement(statement))
                     .map(Stmt::span)
                     .unwrap_or(&method.name.span);
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "proper-super-init-state",
-                    Severity::Warning,
                     "super.initState() should be called first in initState().",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: report.start,
-                        end: report.end,
-                    },
+                    *report,
                 ));
             }
         }

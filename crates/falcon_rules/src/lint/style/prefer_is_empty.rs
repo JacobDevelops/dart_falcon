@@ -25,10 +25,10 @@ use falcon_analyze::{
     AnalyzeContext, LocalTypes, MemberResult, ReceiverTypes, Rule, StaticType, SubtypeResult,
     TypeIndex,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_class_decl, walk_enum_decl, walk_expr, walk_mixin_decl, walk_program, walk_stmt,
+    Visitor, walk_class_decl, walk_enum_decl, walk_expr, walk_mixin_decl, walk_stmt,
 };
 
 pub struct PreferIsEmpty;
@@ -41,7 +41,7 @@ impl Rule for PreferIsEmpty {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             lt: LocalTypes::new(),
             types: ctx.types,
             enclosing: None,
@@ -53,7 +53,7 @@ impl Rule for PreferIsEmpty {
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     lt: LocalTypes,
     types: Option<&'a TypeIndex>,
     enclosing: Option<String>,
@@ -95,10 +95,6 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_class_decl(&mut self, node: &ClassDecl) {
         let saved = self.enclosing.replace(node.name.name.clone());
         walk_class_decl(self, node);
@@ -248,15 +244,10 @@ impl Visitor for Collector<'_> {
                 if let Some(receiver) = empty_comparison_receiver(op, left, right)
                     && !self.suppressed(receiver)
                 {
-                    self.diags.push(Diagnostic::new(
+                    self.diags.push(self.ctx.diagnostic(
                         "prefer-is-empty",
-                        Severity::Warning,
                         "Use 'isEmpty' instead of comparing 'length' to 0.",
-                        self.file.clone(),
-                        DiagSpan {
-                            start: span.start,
-                            end: span.end,
-                        },
+                        *span,
                     ));
                 }
                 walk_expr(self, node);

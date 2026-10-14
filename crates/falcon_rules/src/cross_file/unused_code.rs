@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::lexer::Lexer;
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
 
@@ -109,10 +109,7 @@ impl CrossFileRule for UnusedCode {
                         cand.kind, cand.name
                     ),
                     f.path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: cand.span.start,
-                        end: cand.span.end,
-                    },
+                    cand.span,
                 ));
             }
         }

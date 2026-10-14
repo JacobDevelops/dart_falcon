@@ -12,7 +12,7 @@
 //! such as `Container`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AvoidReturningWidgets;
@@ -31,16 +31,7 @@ impl Rule for AvoidReturningWidgets {
                     if let Some(ret_type) = &f.return_type
                         && contains_widget_type(ret_type)
                     {
-                        diags.push(Diagnostic::new(
-                                "avoid-returning-widgets",
-                                Severity::Warning,
-                                "Functions should not return Widget directly; extract to a separate widget class",
-                                ctx.file_path.to_string_lossy().into_owned(),
-                                DiagSpan {
-                                    start: f.span.start,
-                                    end: f.span.end,
-                                },
-                            ));
+                        diags.push(ctx.diagnostic("avoid-returning-widgets", "Functions should not return Widget directly; extract to a separate widget class", f.span));
                     }
                 }
                 TopLevelDecl::Class(c) => {
@@ -126,15 +117,10 @@ fn check_class_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &A
                 && m.name.name != "build"
                 && !has_override_annotation(&m.annotations)
             {
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "avoid-returning-widgets",
-                    Severity::Warning,
                     "Methods should not return Widget directly; extract to a separate widget class",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: m.name.span.start,
-                        end: m.name.span.end,
-                    },
+                    m.name.span,
                 ));
             }
         }
@@ -144,15 +130,10 @@ fn check_class_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &A
                 && g.name.name != "build"
                 && !has_override_annotation(&g.annotations)
             {
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "avoid-returning-widgets",
-                    Severity::Warning,
                     "Getters should not return Widget directly; extract to a separate widget class",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: g.span.start,
-                        end: g.span.end,
-                    },
+                    g.span,
                 ));
             }
         }

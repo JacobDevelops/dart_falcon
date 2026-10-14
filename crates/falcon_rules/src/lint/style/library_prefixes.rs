@@ -7,7 +7,7 @@
 //! is what makes a prefix invalid.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct LibraryPrefixes;
@@ -23,16 +23,7 @@ impl Rule for LibraryPrefixes {
             if let Some(prefix) = &import.as_name
                 && !is_valid_library_prefix(&prefix.name)
             {
-                diags.push(Diagnostic::new(
-                    "library-prefixes",
-                    Severity::Warning,
-                    MESSAGE,
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: prefix.span.start,
-                        end: prefix.span.end,
-                    },
-                ));
+                diags.push(ctx.diagnostic("library-prefixes", MESSAGE, prefix.span));
             }
         }
         diags

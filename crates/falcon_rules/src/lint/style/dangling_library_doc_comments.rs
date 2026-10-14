@@ -1,7 +1,7 @@
 //! Attach library documentation to an explicit `library` directive.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 pub struct DanglingLibraryDocComments;
@@ -17,16 +17,10 @@ impl Rule for DanglingLibraryDocComments {
         starts
             .into_iter()
             .map(|start| {
-                Diagnostic::new(
-                    "dangling-library-doc-comments",
-                    Severity::Warning,
-                    "Dangling library doc comment. Add a 'library' directive or attach it to a declaration.",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start,
-                        end: start + 3,
-                    },
-                )
+                ctx.diagnostic("dangling-library-doc-comments", "Dangling library doc comment. Add a 'library' directive or attach it to a declaration.", DiagSpan {
+                    start,
+                    end: start + 3,
+                })
             })
             .collect()
     }

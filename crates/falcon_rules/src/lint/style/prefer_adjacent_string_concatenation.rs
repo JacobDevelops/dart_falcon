@@ -8,9 +8,9 @@
 //! also reads naturally when splitting a long string across lines.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct PreferAdjacentStringConcatenation;
 
@@ -22,23 +22,19 @@ impl Rule for PreferAdjacentStringConcatenation {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Binary {
             op: BinaryOp::Add,
@@ -49,15 +45,10 @@ impl Visitor for Collector {
             && matches!(left.as_ref(), Expr::StringLit(_))
             && matches!(right.as_ref(), Expr::StringLit(_))
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "prefer-adjacent-string-concatenation",
-                Severity::Warning,
                 "Use adjacent string literals instead of the `+` operator.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         walk_expr(self, node);

@@ -9,7 +9,7 @@
 //! scopes and are not treated as part of the surrounding catch.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
@@ -74,15 +74,10 @@ impl Visitor for CatchScan<'_, '_> {
             return;
         }
         if let Stmt::Throw(throw_stmt) = node {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "avoid-throw-in-catch-block",
-                Severity::Warning,
                 "Avoid throwing exceptions within catch blocks",
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: throw_stmt.span.start,
-                    end: throw_stmt.span.end,
-                },
+                throw_stmt.span,
             ));
         }
         walk_stmt(self, node);

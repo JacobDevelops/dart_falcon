@@ -7,9 +7,9 @@
 //! there the `.new` is required to reference the constructor as a value.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_constructor_decl, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_constructor_decl, walk_expr};
 
 pub struct UnnecessaryConstructorName;
 
@@ -21,44 +21,29 @@ impl Rule for UnnecessaryConstructorName {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
-    fn flag(&mut self, span: &falcon_syntax::ast::Span) {
-        self.diags.push(Diagnostic::new(
-            "unnecessary-constructor-name",
-            Severity::Warning,
-            "Unnecessary `.new`; the default constructor can be invoked without it.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-}
-
-impl Visitor for Collector {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
+impl Visitor for Collector<'_> {
     // `class A { A.new(); }` — declaring the default constructor as `.new`.
     fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
         if let Some(name) = &node.constructor_name
             && name.name == "new"
         {
-            self.flag(&name.span);
+            self.diags.push(self.ctx.diagnostic(
+                "unnecessary-constructor-name",
+                "Unnecessary `.new`; the default constructor can be invoked without it.",
+                name.span,
+            ));
         }
         walk_constructor_decl(self, node);
     }
@@ -72,7 +57,11 @@ impl Visitor for Collector {
                 if let Expr::Field { field, .. } = callee.as_ref()
                     && field.name == "new"
                 {
-                    self.flag(&field.span);
+                    self.diags.push(self.ctx.diagnostic(
+                        "unnecessary-constructor-name",
+                        "Unnecessary `.new`; the default constructor can be invoked without it.",
+                        field.span,
+                    ));
                 }
             }
             // `new X.new(...)` / `const X.new(...)` — redundant named constructor.
@@ -80,7 +69,11 @@ impl Visitor for Collector {
                 constructor_name: Some(name),
                 ..
             } if name.name == "new" => {
-                self.flag(&name.span);
+                self.diags.push(self.ctx.diagnostic(
+                    "unnecessary-constructor-name",
+                    "Unnecessary `.new`; the default constructor can be invoked without it.",
+                    name.span,
+                ));
             }
             _ => {}
         }

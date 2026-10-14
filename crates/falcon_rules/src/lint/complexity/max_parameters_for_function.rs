@@ -12,7 +12,7 @@
 //! exceeds this.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_constructor_decl, walk_dart_type, walk_expr, walk_function_decl,
@@ -29,7 +29,7 @@ impl Rule for MaxParametersForFunction {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             threshold: max_parameters_option(ctx),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
@@ -46,26 +46,21 @@ fn max_parameters_option(ctx: &AnalyzeContext) -> usize {
         .unwrap_or(5)
 }
 
-struct Collector {
+struct Collector<'a> {
     threshold: usize,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
 
-impl Collector {
+impl Collector<'_> {
     fn check(&mut self, count: usize, span: &Span) {
         if count <= self.threshold {
             return;
         }
-        self.diags.push(Diagnostic::new(
+        self.diags.push(self.ctx.diagnostic(
             "max-parameters-for-function",
-            Severity::Warning,
             format!("Function has too many parameters (max {}).", self.threshold),
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 
@@ -74,7 +69,7 @@ impl Collector {
     }
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         if let Some(params) = node.params() {
             self.check_formals(params, &node.span);

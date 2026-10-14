@@ -12,7 +12,7 @@
 //! than this many lines.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 pub struct MaxLinesForFunction;
@@ -62,11 +62,9 @@ fn check_function_lines(
     let threshold = max_lines_option(ctx);
 
     if lines > threshold {
-        diags.push(Diagnostic::new(
+        diags.push(ctx.diagnostic(
             "max-lines-for-function",
-            Severity::Warning,
             format!("Function exceeds the maximum number of lines ({threshold})."),
-            ctx.file_path.to_string_lossy().into_owned(),
             DiagSpan {
                 start: span.start,
                 end: span.start,

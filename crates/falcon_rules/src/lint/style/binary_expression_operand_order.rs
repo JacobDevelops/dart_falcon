@@ -8,7 +8,7 @@
 //! against another literal (as in `null == null`) is left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct BinaryExpressionOperandOrder;
@@ -195,16 +195,7 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             let should_flag = left_is_literal && !(left_is_null && right_is_literal);
 
             if should_check_operator(op) && should_flag {
-                diags.push(Diagnostic::new(
-                    "binary-expression-operand-order",
-                    Severity::Warning,
-                    "Avoid placing literal or constant operand on the left side of a binary expression",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
-                ));
+                diags.push(ctx.diagnostic("binary-expression-operand-order", "Avoid placing literal or constant operand on the left side of a binary expression", *span));
             }
             scan_expr(left, diags, ctx);
             scan_expr(right, diags, ctx);

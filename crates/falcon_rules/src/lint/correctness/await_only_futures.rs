@@ -1,7 +1,7 @@
 //! Await only values proven to be future-like.
 
 use falcon_analyze::{AnalyzeContext, Rule, TypeTruth};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -20,19 +20,19 @@ impl Rule for AwaitOnlyFutures {
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         visit_program(&mut collector, program, state);
         collector.diagnostics
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl SemanticRuleVisitor for Collector {
+impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::Await { expr, span } = node else {
             return;
@@ -42,15 +42,10 @@ impl SemanticRuleVisitor for Collector {
         }
         let ty = state.infer(expr);
         if state.model.is_future_like(&ty) == TypeTruth::No {
-            self.diagnostics.push(Diagnostic::new(
+            self.diagnostics.push(self.ctx.diagnostic(
                 "await-only-futures",
-                Severity::Warning,
                 "Await only futures or other future-like values.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
     }

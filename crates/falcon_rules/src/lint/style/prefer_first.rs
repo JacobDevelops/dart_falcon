@@ -8,9 +8,9 @@
 //! literal, so it does not confirm the receiver exposes a `first` getter.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct PreferFirst;
 
@@ -37,23 +37,14 @@ struct Collector<'a> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Index { index, span, .. } = node
             && is_zero(index)
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "prefer-first",
-                Severity::Warning,
                 "Prefer .first over [0] to access the first element",
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         walk_expr(self, node);

@@ -8,9 +8,9 @@
 //! front. Prefer `.of` unless you specifically need `.from`'s dynamic widening.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct PreferIterableOf;
 
@@ -80,19 +80,6 @@ fn is_from_static_call(callee: &Expr) -> bool {
     false
 }
 
-fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    diags.push(Diagnostic::new(
-        "prefer-iterable-of",
-        Severity::Warning,
-        "Prefer using the 'of' constructor instead of 'from'.",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
-}
-
 /// Detection runs through the exhaustive shared walker, so a violation cannot
 /// hide inside newer syntax the way a hand-rolled `_ => {}` walk allowed.
 struct Collector<'a> {
@@ -101,10 +88,6 @@ struct Collector<'a> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_expr(&mut self, node: &Expr) {
         match node {
             Expr::New {
@@ -113,10 +96,18 @@ impl Visitor for Collector<'_> {
                 span,
                 ..
             } if is_from_constructor(dart_type, constructor_name) => {
-                flag(span, &mut self.diags, self.ctx);
+                self.diags.push(self.ctx.diagnostic(
+                    "prefer-iterable-of",
+                    "Prefer using the 'of' constructor instead of 'from'.",
+                    *span,
+                ));
             }
             Expr::Call { callee, span, .. } if is_from_static_call(callee) => {
-                flag(span, &mut self.diags, self.ctx);
+                self.diags.push(self.ctx.diagnostic(
+                    "prefer-iterable-of",
+                    "Prefer using the 'of' constructor instead of 'from'.",
+                    *span,
+                ));
             }
             _ => {}
         }

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -22,7 +22,7 @@ impl Rule for PreferInterpolationToComposeStrings {
         };
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             nested_chain_spans: HashSet::new(),
         };
         visit_program(&mut collector, program, state);
@@ -30,13 +30,13 @@ impl Rule for PreferInterpolationToComposeStrings {
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     nested_chain_spans: HashSet<(usize, usize)>,
 }
 
-impl SemanticRuleVisitor for Collector {
+impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::Binary {
             op: BinaryOp::Add,
@@ -62,15 +62,10 @@ impl SemanticRuleVisitor for Collector {
             let mut nested = NestedAdditions(&mut self.nested_chain_spans);
             nested.visit_expr(left);
             nested.visit_expr(right);
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "prefer-interpolation-to-compose-strings",
-                Severity::Warning,
                 "Use string interpolation to compose strings and values.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
     }

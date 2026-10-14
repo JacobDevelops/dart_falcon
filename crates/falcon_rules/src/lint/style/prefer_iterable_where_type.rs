@@ -24,10 +24,10 @@ use falcon_analyze::{
     AnalyzeContext, LocalTypes, MemberResult, ReceiverTypes, Rule, StaticType, SubtypeResult,
     TypeIndex,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_class_decl, walk_enum_decl, walk_expr, walk_mixin_decl, walk_program, walk_stmt,
+    Visitor, walk_class_decl, walk_enum_decl, walk_expr, walk_mixin_decl, walk_stmt,
 };
 
 pub struct PreferIterableWhereType;
@@ -40,7 +40,7 @@ impl Rule for PreferIterableWhereType {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             lt: LocalTypes::new(),
             types: ctx.types,
             enclosing: None,
@@ -52,26 +52,13 @@ impl Rule for PreferIterableWhereType {
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     lt: LocalTypes,
     types: Option<&'a TypeIndex>,
     enclosing: Option<String>,
 }
 
 impl Collector<'_> {
-    fn push(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "prefer-iterable-where-type",
-            Severity::Warning,
-            "Use 'whereType<T>()' instead of 'where' with an 'is' check.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-
     /// Whether the diagnostic on `receiver.where((e) => e is T)` should be
     /// *suppressed* because `receiver`'s type is positively proven to be no
     /// `Iterable` and to lack a `whereType` member. A lost or `Unknown` fact
@@ -107,10 +94,6 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_class_decl(&mut self, node: &ClassDecl) {
         let saved = self.enclosing.replace(node.name.name.clone());
         walk_class_decl(self, node);
@@ -259,7 +242,11 @@ impl Visitor for Collector<'_> {
                     && is_is_check_closure(&args.positional[0])
                     && !self.suppressed(object)
                 {
-                    self.push(&field.span);
+                    self.diags.push(self.ctx.diagnostic(
+                        "prefer-iterable-where-type",
+                        "Use 'whereType<T>()' instead of 'where' with an 'is' check.",
+                        field.span,
+                    ));
                 }
                 walk_expr(self, node);
             }

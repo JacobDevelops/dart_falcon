@@ -8,7 +8,7 @@
 //! wildcard names are permitted.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_enum_decl, walk_field_decl, walk_local_var, walk_top_level_decl,
@@ -24,7 +24,7 @@ impl Rule for ConstantIdentifierNames {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
@@ -53,24 +53,18 @@ fn is_lower_camel_case(name: &str) -> bool {
     rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '$')
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
+impl Collector<'_> {
     fn check(&mut self, name: &Identifier) {
         if !is_lower_camel_case(&name.name) {
-            self.diags.push(Diagnostic::new(
-                "constant-identifier-names",
-                Severity::Warning,
-                MESSAGE,
-                self.file.clone(),
-                DiagSpan {
-                    start: name.span.start,
-                    end: name.span.end,
-                },
-            ));
+            self.diags.push(
+                self.ctx
+                    .diagnostic("constant-identifier-names", MESSAGE, name.span),
+            );
         }
     }
 
@@ -81,7 +75,7 @@ impl Collector {
     }
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(v) = node
             && v.keyword == falcon_syntax::ast::VarKeyword::Const

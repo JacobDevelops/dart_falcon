@@ -10,10 +10,10 @@
 //! zero.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_expr, walk_field_decl, walk_local_var, walk_program, walk_top_level_decl,
+    Visitor, walk_expr, walk_field_decl, walk_local_var, walk_top_level_decl,
 };
 
 pub struct UnnecessaryConst;
@@ -26,7 +26,7 @@ impl Rule for UnnecessaryConst {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             const_depth: 0,
         };
         collector.visit_program(program);
@@ -47,17 +47,13 @@ fn const_marker_span(expr: &Expr) -> Option<&Span> {
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     const_depth: usize,
 }
 
-impl Visitor for Collector {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
+impl Visitor for Collector<'_> {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(v) = node
             && v.keyword == falcon_syntax::ast::VarKeyword::Const
@@ -93,15 +89,10 @@ impl Visitor for Collector {
     fn visit_expr(&mut self, node: &Expr) {
         if let Some(span) = const_marker_span(node) {
             if self.const_depth > 0 {
-                self.diags.push(Diagnostic::new(
+                self.diags.push(self.ctx.diagnostic(
                     "unnecessary-const",
-                    Severity::Warning,
                     "Unnecessary `const` keyword inside an already-const context.",
-                    self.file.clone(),
-                    DiagSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
+                    *span,
                 ));
             }
             self.const_depth += 1;

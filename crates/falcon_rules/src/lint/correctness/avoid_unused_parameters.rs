@@ -5,7 +5,7 @@ pub use dcl::AvoidUnusedParameters;
 
 mod dcl {
     use falcon_analyze::{AnalyzeContext, Rule};
-    use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+    use falcon_diagnostics::Diagnostic;
     use falcon_syntax::ast::*;
     use falcon_syntax::visitor::{
         Visitor, walk_constructor_decl, walk_function_decl, walk_method_decl, walk_stmt,
@@ -52,15 +52,10 @@ mod dcl {
                 {
                     continue;
                 }
-                self.diagnostics.push(Diagnostic::new(
+                self.diagnostics.push(self.ctx.diagnostic(
                     "avoid-unused-parameters",
-                    Severity::Warning,
                     format!("Parameter '{name}' is declared but not used"),
-                    self.ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: param.name.span.start,
-                        end: param.name.span.end,
-                    },
+                    param.name.span,
                 ));
             }
         }

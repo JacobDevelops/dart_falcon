@@ -8,9 +8,9 @@
 //! textually equal.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct PreferConstBorderRadius;
 
@@ -46,10 +46,7 @@ fn check_border_radius_only_call(
         let end_line = source[..span.end].chars().filter(|&c| c == '\n').count();
 
         let report_span = if start_line == end_line {
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            }
+            *span
         } else {
             let opening_line_end = source[span.start..]
                 .find('\n')
@@ -58,23 +55,21 @@ fn check_border_radius_only_call(
             let opening_line_text = &source[span.start..opening_line_end];
 
             if opening_line_text.contains("*/") {
-                DiagSpan {
+                Span {
                     start: span.start,
                     end: span.start + 1,
                 }
             } else {
-                DiagSpan {
+                Span {
                     start: span.end - 1,
                     end: span.end,
                 }
             }
         };
 
-        diags.push(Diagnostic::new(
+        diags.push(ctx.diagnostic(
             "prefer-const-border-radius",
-            Severity::Warning,
             "BorderRadius.only() with all equal radii should use BorderRadius.circular().",
-            ctx.file_path.to_string_lossy().into_owned(),
             report_span,
         ));
     }
@@ -136,10 +131,6 @@ struct Collector<'a> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Call {
             callee, args, span, ..

@@ -6,7 +6,7 @@
 //! is reported; a constructor whose body does something is left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 pub struct EmptyConstructorBodies;
@@ -48,11 +48,9 @@ fn check_constructor(ctor: &ConstructorDecl, diags: &mut Vec<Diagnostic>, ctx: &
     if !block.stmts.is_empty() {
         return;
     }
-    diags.push(Diagnostic::new(
+    diags.push(ctx.diagnostic(
         "empty-constructor-bodies",
-        Severity::Warning,
         "Empty constructor body — use `;` instead of `{}`",
-        ctx.file_path.to_string_lossy().into_owned(),
         DiagSpan {
             start: block.span.start,
             end: block.span.start + 1,

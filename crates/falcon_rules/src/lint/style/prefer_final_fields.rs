@@ -23,7 +23,7 @@
 //! standalone file with no part directives keeps the exact single-file behavior.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{self, Visitor};
@@ -125,15 +125,10 @@ fn check_class(
             };
 
             if ok {
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "prefer-final-fields",
-                    Severity::Warning,
                     format!("The private field '{name}' could be 'final'."),
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: d.name.span.start,
-                        end: d.name.span.end,
-                    },
+                    d.name.span,
                 ));
             }
         }

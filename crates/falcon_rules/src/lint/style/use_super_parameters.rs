@@ -11,7 +11,7 @@
 //! it to a `super.` parameter.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -118,7 +118,11 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
             && id.name == param.name.name
             && used_once(&param.name.name)
         {
-            flag(diags, ctx, &param.name.span);
+            diags.push(ctx.diagnostic(
+                "use-super-parameters",
+                "Use a super parameter instead of forwarding a parameter to super.".to_string(),
+                param.name.span,
+            ));
         }
     }
 
@@ -132,20 +136,11 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
                 && matches!(&n.value, Expr::Ident(id) if id.name == param.name.name)
         });
         if forwarded && used_once(&param.name.name) {
-            flag(diags, ctx, &param.name.span);
+            diags.push(ctx.diagnostic(
+                "use-super-parameters",
+                "Use a super parameter instead of forwarding a parameter to super.".to_string(),
+                param.name.span,
+            ));
         }
     }
-}
-
-fn flag(diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, span: &Span) {
-    diags.push(Diagnostic::new(
-        "use-super-parameters",
-        Severity::Warning,
-        "Use a super parameter instead of forwarding a parameter to super.".to_string(),
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
 }

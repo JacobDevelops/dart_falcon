@@ -1,7 +1,7 @@
 //! Avoid null assertions that merely coerce a nullable type parameter to itself.
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -20,34 +20,19 @@ impl Rule for NullCheckOnNullableTypeParameter {
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         visit_program(&mut collector, program, state);
         collector.diagnostics
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
-    fn report(&mut self, span: &Span) {
-        self.diagnostics.push(Diagnostic::new(
-            "null-check-on-nullable-type-parameter",
-            Severity::Warning,
-            "Avoid a null assertion on a nullable type parameter.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-}
-
-impl SemanticRuleVisitor for Collector {
+impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::NullAssert { operand, span } = node else {
             return;
@@ -58,7 +43,11 @@ impl SemanticRuleVisitor for Collector {
         } = &operand_type
             && matches!(state.expected(), Some(ResolvedType::TypeParameter { id: expected_id, nullable: false, .. }) if expected_id == id)
         {
-            self.report(span);
+            self.diagnostics.push(self.ctx.diagnostic(
+                "null-check-on-nullable-type-parameter",
+                "Avoid a null assertion on a nullable type parameter.",
+                *span,
+            ));
         }
     }
 
@@ -74,7 +63,11 @@ impl SemanticRuleVisitor for Collector {
                 Some(ResolvedType::TypeParameter { nullable: true, .. })
             )
         {
-            self.report(span);
+            self.diagnostics.push(self.ctx.diagnostic(
+                "null-check-on-nullable-type-parameter",
+                "Avoid a null assertion on a nullable type parameter.",
+                *span,
+            ));
         }
     }
 }

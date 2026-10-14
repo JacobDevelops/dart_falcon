@@ -10,7 +10,7 @@
 //! flagged.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AvoidDynamic;
@@ -574,15 +574,10 @@ fn visit_collection_element(
 fn check_dart_type(dart_type: &DartType, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match dart_type {
         DartType::Dynamic { span } => {
-            diagnostics.push(Diagnostic::new(
+            diagnostics.push(ctx.diagnostic(
                 "avoid-dynamic",
-                Severity::Warning,
                 "Avoid using the 'dynamic' type",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         DartType::Named(named_type) => {

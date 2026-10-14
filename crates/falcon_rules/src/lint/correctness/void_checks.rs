@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use falcon_analyze::{
     AnalyzeContext, ResolvedSignature, ResolvedType, Rule, TypeParameterId, TypeTruth,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -26,33 +26,19 @@ impl Rule for VoidChecks {
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         visit_program(&mut collector, program, state);
         collector.diagnostics
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
-    fn report(&mut self, expression: &Expr) {
-        let span = expression.span();
-        self.diagnostics.push(Diagnostic::new(
-            "void-checks",
-            Severity::Warning,
-            "This value is not valid for a generic type instantiated with void.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-
+impl Collector<'_> {
     fn check_value(
         &mut self,
         original: &ResolvedType,
@@ -74,7 +60,11 @@ impl Collector {
                     .acceptable_for_void_context(return_type, &actual)
                     == TypeTruth::No
                 {
-                    self.report(&expression);
+                    self.diagnostics.push(self.ctx.diagnostic(
+                        "void-checks",
+                        "This value is not valid for a generic type instantiated with void.",
+                        *expression.span(),
+                    ));
                 }
             }
             return;
@@ -85,7 +75,11 @@ impl Collector {
         }
         let actual = state.infer(value);
         if state.model.acceptable_for_void_context(expected, &actual) == TypeTruth::No {
-            self.report(value);
+            self.diagnostics.push(self.ctx.diagnostic(
+                "void-checks",
+                "This value is not valid for a generic type instantiated with void.",
+                *value.span(),
+            ));
         }
     }
 
@@ -241,7 +235,7 @@ impl Collector {
     }
 }
 
-impl SemanticRuleVisitor for Collector {
+impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if !matches!(node, Expr::FuncExpr { .. })
             && let Some(ResolvedType::Function { return_type, .. }) = state.expected()
@@ -255,7 +249,11 @@ impl SemanticRuleVisitor for Collector {
                 .acceptable_for_void_context(return_type, &actual_return)
                 == TypeTruth::No
         {
-            self.report(node);
+            self.diagnostics.push(self.ctx.diagnostic(
+                "void-checks",
+                "This value is not valid for a generic type instantiated with void.",
+                *node.span(),
+            ));
         }
         match node {
             Expr::Call {

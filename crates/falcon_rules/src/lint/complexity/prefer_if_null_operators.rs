@@ -7,7 +7,7 @@
 //! it, firing when the two are textually equal.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -21,7 +21,7 @@ impl Rule for PreferIfNullOperators {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             source: ctx.source,
         };
         collector.visit_program(program);
@@ -31,7 +31,7 @@ impl Rule for PreferIfNullOperators {
 
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'s AnalyzeContext<'s>,
     source: &'s str,
 }
 
@@ -78,15 +78,10 @@ impl Visitor for Collector<'_> {
             // `x != null ? x : y` keeps `x` in the then branch.
             let fallthrough = if is_eq { else_expr } else { then_expr };
             if self.text(operand) == self.text(fallthrough) {
-                self.diags.push(Diagnostic::new(
+                self.diags.push(self.ctx.diagnostic(
                     "prefer-if-null-operators",
-                    Severity::Warning,
                     "Prefer using the if-null operator '??'.",
-                    self.file.clone(),
-                    DiagSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
+                    *span,
                 ));
             }
         }

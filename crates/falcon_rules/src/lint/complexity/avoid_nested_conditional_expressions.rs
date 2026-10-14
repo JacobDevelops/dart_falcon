@@ -7,9 +7,9 @@
 //! deeper), matching dart_code_linter's default acceptable level of one.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct AvoidNestedConditionalExpressions;
 
@@ -38,10 +38,6 @@ struct Collector<'a> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::FuncExpr { .. } = node {
             // A closure body is read on its own; a ternary inside one is not
@@ -53,15 +49,10 @@ impl Visitor for Collector<'_> {
         }
         if let Expr::Conditional { span, .. } = node {
             if self.cond_ancestor {
-                self.diags.push(Diagnostic::new(
+                self.diags.push(self.ctx.diagnostic(
                     "avoid-nested-conditional-expressions",
-                    Severity::Warning,
                     "Avoid nested conditional expressions",
-                    self.ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: span.start,
-                        end: span.end,
-                    },
+                    *span,
                 ));
             }
             // Everything under this conditional now has a conditional ancestor.

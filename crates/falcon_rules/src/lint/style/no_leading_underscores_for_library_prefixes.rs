@@ -8,7 +8,7 @@
 //! intentional throwaway name rather than a misapplied privacy marker.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct NoLeadingUnderscoresForLibraryPrefixes;
@@ -24,15 +24,10 @@ impl Rule for NoLeadingUnderscoresForLibraryPrefixes {
             if let Some(prefix) = &import.as_name
                 && has_leading_underscore(&prefix.name)
             {
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "no-leading-underscores-for-library-prefixes",
-                    Severity::Warning,
                     MESSAGE,
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: prefix.span.start,
-                        end: prefix.span.end,
-                    },
+                    prefix.span,
                 ));
             }
         }

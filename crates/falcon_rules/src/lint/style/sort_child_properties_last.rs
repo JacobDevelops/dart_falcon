@@ -10,7 +10,7 @@
 //! PascalCase — implicit `Foo(...)` calls and explicit `new`/`const Foo(...)`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -24,38 +24,33 @@ impl Rule for SortChildPropertiesLast {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Some((name, args)) = widget_construction(node)
-            // Widget constructors are PascalCase; requiring that keeps this off
-            // ordinary function calls that happen to take a `child:` argument.
-            && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-            && !args.named.is_empty()
+        // Widget constructors are PascalCase; requiring that keeps this off
+        // ordinary function calls that happen to take a `child:` argument.
+        && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && !args.named.is_empty()
         {
             let last = args.named.len() - 1;
             for (i, named) in args.named.iter().enumerate() {
                 if matches!(named.name.name.as_str(), "child" | "children") && i != last {
-                    self.diags.push(Diagnostic::new(
+                    self.diags.push(self.ctx.diagnostic(
                         "sort-child-properties-last",
-                        Severity::Warning,
                         "The child/children argument should be last in a widget constructor call.",
-                        self.file.clone(),
-                        DiagSpan {
-                            start: named.span.start,
-                            end: named.span.end,
-                        },
+                        named.span,
                     ));
                 }
             }

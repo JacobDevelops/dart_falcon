@@ -17,7 +17,7 @@
 //! of these patterns is skipped entirely; invalid patterns are ignored.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use regex::Regex;
 
@@ -231,7 +231,14 @@ fn check_group(
     if is_doc {
         // dcl reports one issue on the whole doc-comment node.
         let start = group[0].start;
-        diags.push(diag(ctx, start, start + group[0].marker.len()));
+        diags.push(ctx.diagnostic(
+            "format-comment",
+            "Prefer formatting comments like sentences",
+            DiagSpan {
+                start,
+                end: start + group[0].marker.len(),
+            },
+        ));
     } else {
         // dcl reports one issue per non-ignored regular-comment token.
         for tok in group {
@@ -240,19 +247,16 @@ fn check_group(
             if is_ignore_comment(trimmed) || is_ignored_pattern(trimmed, cfg) {
                 continue;
             }
-            diags.push(diag(ctx, tok.start, tok.start + tok.marker.len()));
+            diags.push(ctx.diagnostic(
+                "format-comment",
+                "Prefer formatting comments like sentences",
+                DiagSpan {
+                    start: tok.start,
+                    end: tok.start + tok.marker.len(),
+                },
+            ));
         }
     }
-}
-
-fn diag(ctx: &AnalyzeContext, start: usize, end: usize) -> Diagnostic {
-    Diagnostic::new(
-        "format-comment",
-        Severity::Warning,
-        "Prefer formatting comments like sentences",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan { start, end },
-    )
 }
 
 /// A single-line comment is valid when it is empty, an `ignore:` directive, a

@@ -8,7 +8,7 @@
 //! named arguments; other shapes and non-literal receivers are ignored.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -22,34 +22,19 @@ impl Rule for PreferSpreadCollections {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
-    fn push(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "prefer-spread-collections",
-            Severity::Warning,
-            "Use the spread operator '...' instead of 'addAll'.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-}
-
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Cascade {
             object, sections, ..
@@ -65,7 +50,11 @@ impl Visitor for Collector {
                         && args.positional.len() == 1
                         && args.named.is_empty()
                     {
-                        self.push(&section.span);
+                        self.diags.push(self.ctx.diagnostic(
+                            "prefer-spread-collections",
+                            "Use the spread operator '...' instead of 'addAll'.",
+                            section.span,
+                        ));
                         break;
                     }
                 }

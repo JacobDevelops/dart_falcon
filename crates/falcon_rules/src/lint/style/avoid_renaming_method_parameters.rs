@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule, SemanticMemberKind, SignatureIndex};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AvoidRenamingMethodParameters;
@@ -101,18 +101,13 @@ fn check_members(
                 .enumerate()
             {
                 if param.name != *inherited_name && flagged.insert(index) {
-                    diags.push(Diagnostic::new(
+                    diags.push(ctx.diagnostic(
                         "avoid-renaming-method-parameters",
-                        Severity::Warning,
                         format!(
                             "Rename parameter '{}' to match the overridden declaration's '{}'.",
                             param.name, inherited_name
                         ),
-                        ctx.file_path.to_string_lossy().into_owned(),
-                        DiagSpan {
-                            start: param.span.start,
-                            end: param.span.end,
-                        },
+                        param.span,
                     ));
                 }
             }

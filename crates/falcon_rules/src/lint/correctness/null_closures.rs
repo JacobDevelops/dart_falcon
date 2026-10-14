@@ -1,7 +1,7 @@
 //! Reject literal `null` in the closure slots of curated SDK APIs.
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -20,19 +20,19 @@ impl Rule for NullClosures {
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         visit_program(&mut collector, program, state);
         collector.diagnostics
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
+impl Collector<'_> {
     fn is_sdk_instance(
         &self,
         receiver: &ResolvedType,
@@ -51,15 +51,10 @@ impl Collector {
             return;
         }
         let span = expression.span();
-        self.diagnostics.push(Diagnostic::new(
+        self.diagnostics.push(self.ctx.diagnostic(
             "null-closures",
-            Severity::Warning,
             "Pass a closure instead of null.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 
@@ -229,7 +224,7 @@ impl Collector {
     }
 }
 
-impl SemanticRuleVisitor for Collector {
+impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         match node {
             Expr::Call { callee, args, .. } => self.check_call(callee, args, state),

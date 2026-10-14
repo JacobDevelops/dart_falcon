@@ -9,7 +9,7 @@
 //! type errors. Rename the inner parameter to something distinct.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_class_member, walk_dart_type, walk_expr, walk_formal_param, walk_stmt,
@@ -46,15 +46,10 @@ impl Checker<'_, '_> {
     fn enter(&mut self, tps: &[TypeParam]) -> usize {
         for tp in tps {
             if self.scope.contains(&tp.name.name) {
-                self.diags.push(Diagnostic::new(
+                self.diags.push(self.ctx.diagnostic(
                     "avoid-shadowing-type-parameters",
-                    Severity::Warning,
                     MESSAGE,
-                    self.ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: tp.name.span.start,
-                        end: tp.name.span.end,
-                    },
+                    tp.name.span,
                 ));
             }
         }

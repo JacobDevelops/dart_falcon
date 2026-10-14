@@ -6,10 +6,10 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
     TypeEnvironment, TypeParameterScope, TypeTruth,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program, walk_stmt, walk_top_level_decl};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt, walk_top_level_decl};
 
 pub struct InvalidRuntimeCheckWithJsInteropTypes;
 
@@ -24,7 +24,7 @@ impl Rule for InvalidRuntimeCheckWithJsInteropTypes {
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             model: SemanticModel::new(ctx.file_path, identities, ctx.types),
             signatures,
             environment: TypeEnvironment::new(),
@@ -51,7 +51,7 @@ enum Interop {
 
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
     environment: TypeEnvironment,
@@ -359,28 +359,16 @@ impl Collector<'_> {
         );
         let target = self.model.resolve_type_in(target, &self.type_parameters);
         if self.invalid_test(&source, &target, is_check) {
-            self.report(
-                span,
+            self.diagnostics.push(self.ctx.diagnostic(
+                "invalid-runtime-check-with-js-interop-types",
                 if is_check {
                     "Runtime type checks involving JS interop types are platform-dependent."
                 } else {
                     "This cast between JS interop and Dart types is not portable."
                 },
-            );
+                *span,
+            ));
         }
-    }
-
-    fn report(&mut self, span: &Span, message: &str) {
-        self.diagnostics.push(Diagnostic::new(
-            "invalid-runtime-check-with-js-interop-types",
-            Severity::Warning,
-            message,
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
     }
 
     fn function(&mut self, params: Option<&FormalParamList>, body: Option<&FunctionBody>) {
@@ -404,10 +392,6 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         let Some(type_params) = declaration_type_params(node) else {
             walk_top_level_decl(self, node);
@@ -487,10 +471,11 @@ impl Visitor for Collector<'_> {
                             self.normalize(&ty).interop,
                             Interop::None | Interop::Unknown
                         ) {
-                            self.report(
-                                &catch.span,
+                            self.diagnostics.push(self.ctx.diagnostic(
+                                "invalid-runtime-check-with-js-interop-types",
                                 "JS interop types cannot be used as catch types.",
-                            );
+                                catch.span,
+                            ));
                         }
                     }
                     self.environment.push_scope();

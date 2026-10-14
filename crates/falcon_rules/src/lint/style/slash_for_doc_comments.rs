@@ -8,7 +8,7 @@
 //! not mistaken for a doc comment.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 pub struct SlashForDocComments;
@@ -21,11 +21,9 @@ impl Rule for SlashForDocComments {
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for start in doc_block_comment_starts(ctx.source) {
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "slash-for-doc-comments",
-                Severity::Warning,
                 "Use the end-of-line form ('///') for doc comments.",
-                ctx.file_path.to_string_lossy().into_owned(),
                 DiagSpan {
                     start,
                     end: start + 3,

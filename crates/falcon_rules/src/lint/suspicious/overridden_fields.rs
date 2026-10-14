@@ -1,7 +1,7 @@
 //! Flags instance fields that redeclare inherited concrete fields.
 
 use falcon_analyze::{AnalyzeContext, IdentityIndex, Rule, SemanticMemberKind, SignatureIndex};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct OverriddenFields;
@@ -103,15 +103,10 @@ fn check_members(
                     })
                 });
             if inherited_field {
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "overridden-fields",
-                    Severity::Warning,
                     "Don't override inherited fields.",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: declarator.name.span.start,
-                        end: declarator.name.span.end,
-                    },
+                    declarator.name.span,
                 ));
             }
         }

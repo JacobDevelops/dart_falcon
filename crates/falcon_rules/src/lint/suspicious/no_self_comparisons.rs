@@ -5,7 +5,7 @@
 //! same value, and equality/ordering may be overloaded.
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
@@ -22,7 +22,7 @@ impl Rule for NoSelfComparisons {
             return Vec::new();
         };
         let mut collector = Collector {
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             source: ctx.source,
             diags: Vec::new(),
         };
@@ -32,7 +32,7 @@ impl Rule for NoSelfComparisons {
 }
 
 struct Collector<'a> {
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     source: &'a str,
     diags: Vec<Diagnostic>,
 }
@@ -63,15 +63,10 @@ impl SemanticRuleVisitor for Collector<'_> {
         if left_text != right_text {
             return;
         }
-        self.diags.push(Diagnostic::new(
+        self.diags.push(self.ctx.diagnostic(
             "no-self-comparisons",
-            Severity::Warning,
             "Both operands of this comparison are identical.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 }

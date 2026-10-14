@@ -11,7 +11,7 @@
 //! and setters (`super.x = v`) are all checked; operator overrides are not.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct UnnecessaryOverrides;
@@ -51,15 +51,10 @@ fn check_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &Analyze
     if !only_override(annotations) || !unnecessary {
         return;
     }
-    diags.push(Diagnostic::new(
+    diags.push(ctx.diagnostic(
         "unnecessary-overrides",
-        Severity::Warning,
         "Unnecessary override — this member only forwards to `super` unchanged",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: name_span.start,
-            end: name_span.end,
-        },
+        *name_span,
     ));
 }
 

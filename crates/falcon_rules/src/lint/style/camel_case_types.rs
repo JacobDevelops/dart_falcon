@@ -7,7 +7,7 @@
 //! treated as a wildcard and never flagged.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct CamelCaseTypes;
@@ -53,15 +53,6 @@ fn is_upper_camel_case(name: &str) -> bool {
 
 fn check(name: &Identifier, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if !is_upper_camel_case(&name.name) {
-        diags.push(Diagnostic::new(
-            "camel-case-types",
-            Severity::Warning,
-            MESSAGE,
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: name.span.start,
-                end: name.span.end,
-            },
-        ));
+        diags.push(ctx.diagnostic("camel-case-types", MESSAGE, name.span));
     }
 }

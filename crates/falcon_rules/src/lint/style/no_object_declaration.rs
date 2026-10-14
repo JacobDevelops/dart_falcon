@@ -9,7 +9,7 @@
 //! are out of scope.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct NoObjectDeclaration;
@@ -30,19 +30,6 @@ impl Rule for NoObjectDeclaration {
 
 const MESSAGE: &str = "Avoid using the Object type. Use a specific type or dynamic instead.";
 
-fn flag(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    diags.push(Diagnostic::new(
-        "no-object-declaration",
-        Severity::Warning,
-        MESSAGE,
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
-}
-
 /// Returns true when the type is exactly `Object` (or `Object?`).
 fn is_object_type(ty: &DartType) -> bool {
     match ty {
@@ -59,7 +46,7 @@ fn check_type(ty: Option<&DartType>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
     if let Some(ty) = ty
         && is_object_type(ty)
     {
-        flag(ty.span(), diags, ctx);
+        diags.push(ctx.diagnostic("no-object-declaration", MESSAGE, *(ty.span())));
     }
 }
 

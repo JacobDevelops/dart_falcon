@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::style::prefer_const_constructors_in_immutables::potentially_constant;
@@ -132,15 +132,10 @@ fn check_class(
 
     for constructor in constructors {
         if candidates.contains(constructor_name(constructor)) {
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "prefer-declaring-const-constructor",
-                Severity::Warning,
                 "Constructor could be declared as const.",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: constructor.span.start,
-                    end: constructor.span.end,
-                },
+                constructor.span,
             ));
         }
     }

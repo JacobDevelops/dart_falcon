@@ -9,7 +9,7 @@
 //! `x == true` is the correct null-safe way to test a nullable boolean.
 
 use falcon_analyze::{AnalyzeContext, LocalTypes, Rule, StaticType};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_function_decl,
@@ -139,15 +139,10 @@ impl Collector<'_, '_> {
         if other.is_some_and(|operand| {
             is_known_bool(operand) || self.locals.of_expr(operand).is_non_nullable_bool()
         }) {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "no-boolean-literal-compare",
-                Severity::Warning,
                 "Avoid comparing boolean values to boolean literals",
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
     }

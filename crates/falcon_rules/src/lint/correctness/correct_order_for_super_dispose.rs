@@ -9,7 +9,7 @@
 //! the end.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct CorrectOrderForSuperDispose;
@@ -78,15 +78,10 @@ fn check_dispose_method(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &Analyz
             && idx != last_index
         {
             // super.dispose() is not the last statement
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "correct-order-for-super-dispose",
-                Severity::Warning,
                 "super.dispose() should be called last in the dispose method.",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: expr.span().start,
-                    end: expr.span().end,
-                },
+                *expr.span(),
             ));
         }
     }

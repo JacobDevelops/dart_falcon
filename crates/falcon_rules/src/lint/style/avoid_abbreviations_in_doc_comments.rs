@@ -8,7 +8,7 @@
 //! on a line is reported.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 pub struct AvoidAbbreviationsInDocComments;
@@ -38,11 +38,9 @@ fn scan_source(source: &str, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
             for &abbr in &abbreviations {
                 if let Some(index) = line.find(abbr) {
                     let start = byte_offset + index;
-                    diags.push(Diagnostic::new(
+                    diags.push(ctx.diagnostic(
                         "avoid-abbreviations-in-doc-comments",
-                        Severity::Warning,
                         format!("Avoid abbreviation '{}' in doc comments", abbr),
-                        ctx.file_path.to_string_lossy().into_owned(),
                         DiagSpan {
                             start,
                             end: start + abbr.len(),

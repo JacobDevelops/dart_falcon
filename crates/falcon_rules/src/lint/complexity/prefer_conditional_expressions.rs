@@ -9,7 +9,7 @@
 //! variable.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct PreferConditionalExpressions;
@@ -115,13 +115,7 @@ fn check_stmt(stmt: &Stmt, parent_is_if: bool, diags: &mut Vec<Diagnostic>, ctx:
                         (Some(a), Some(b)) if a == b
                     );
                     if both_return || both_assign {
-                        diags.push(Diagnostic::new(
-                            "prefer-conditional-expressions",
-                            Severity::Warning,
-                            "Prefer a conditional expression over an if/else with a single statement in each branch",
-                            ctx.file_path.to_string_lossy().into_owned(),
-                            DiagSpan { start: if_stmt.span.start, end: if_stmt.span.end },
-                        ));
+                        diags.push(ctx.diagnostic("prefer-conditional-expressions", "Prefer a conditional expression over an if/else with a single statement in each branch", if_stmt.span));
                     }
                 }
             }

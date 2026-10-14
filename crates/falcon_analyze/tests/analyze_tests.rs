@@ -306,8 +306,21 @@ fn test_end_to_end_parse_analyze_serialize() {
         "expected one diagnostic from AlwaysErrorRule"
     );
 
-    let json_value = diagnostics[0].format_json();
+    let json_value = serde_json::to_value(&diagnostics[0]).unwrap();
     assert_eq!(json_value["rule"], "always_error");
     assert_eq!(json_value["severity"], "Error");
     assert!(json_value["file_path"].as_str().is_some());
+}
+
+#[test]
+fn test_context_diagnostic_uses_file_and_warning_default() {
+    let config = FalconConfig::default();
+    let ctx = AnalyzeContext::new(Path::new("foo.dart"), "abc", &config);
+    let span = falcon_syntax::ast::Span { start: 1, end: 3 };
+    let diagnostic = ctx.diagnostic("rule", "message", span);
+    assert_eq!(diagnostic.rule, "rule");
+    assert_eq!(diagnostic.message, "message");
+    assert_eq!(diagnostic.file_path, "foo.dart");
+    assert_eq!(diagnostic.severity, Severity::Warning);
+    assert_eq!(diagnostic.span, Span { start: 1, end: 3 });
 }

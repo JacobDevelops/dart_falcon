@@ -8,7 +8,7 @@
 //! alone. Without full type resolution the check is conservative.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_expr, walk_function_decl, walk_getter_decl, walk_method_decl, walk_stmt,
@@ -79,7 +79,11 @@ fn check(
         && let Some(body) = body
         && all_returns_provably_non_null(body)
     {
-        flag_return_type(return_type, diags, ctx);
+        diags.push(ctx.diagnostic(
+            "unnecessary-nullable-return-type",
+            "Function return type is unnecessarily nullable",
+            *return_type.span(),
+        ));
     }
 }
 
@@ -141,18 +145,4 @@ fn is_provably_non_null(expr: &Expr) -> bool {
             | Expr::Record { .. }
             | Expr::New { .. }
     )
-}
-
-fn flag_return_type(ty: &DartType, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let span = ty.span();
-    diags.push(Diagnostic::new(
-        "unnecessary-nullable-return-type",
-        Severity::Warning,
-        "Function return type is unnecessarily nullable",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
 }

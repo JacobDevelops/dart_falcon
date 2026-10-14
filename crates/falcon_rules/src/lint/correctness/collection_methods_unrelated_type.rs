@@ -1,7 +1,7 @@
 //! Reject collection operations whose argument is proven unrelated to K, V, or E.
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, TypeTruth};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -20,34 +20,29 @@ impl Rule for CollectionMethodsUnrelatedType {
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         visit_program(&mut collector, program, state);
         collector.diagnostics
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
+impl Collector<'_> {
     fn check(&mut self, argument: &Expr, expected: &ResolvedType, state: &SemanticState<'_>) {
         let actual = state.infer(argument);
         if state.signatures.unrelated(&actual, expected, &state.model) != TypeTruth::Yes {
             return;
         }
         let span = argument.span();
-        self.diagnostics.push(Diagnostic::new(
+        self.diagnostics.push(self.ctx.diagnostic(
             "collection-methods-unrelated-type",
-            Severity::Warning,
             "The argument type is unrelated to this collection's element type.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 
@@ -121,7 +116,7 @@ impl Collector {
     }
 }
 
-impl SemanticRuleVisitor for Collector {
+impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         match node {
             Expr::Call { callee, args, .. } => {

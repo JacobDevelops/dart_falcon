@@ -29,7 +29,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule, TypeIndex};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_expr, walk_field_decl, walk_function_decl, walk_getter_decl, walk_method_decl,
@@ -60,7 +60,7 @@ impl Rule for PreferCollectionLiterals {
 
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             types: ctx.types,
             suppressed: &scan.suppressed,
         };
@@ -71,24 +71,9 @@ impl Rule for PreferCollectionLiterals {
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     types: Option<&'a TypeIndex>,
     suppressed: &'a HashSet<(usize, usize)>,
-}
-
-impl Collector<'_> {
-    fn push(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "prefer-collection-literals",
-            Severity::Warning,
-            "Use a collection literal instead of a constructor invocation.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
 }
 
 impl Visitor for Collector<'_> {
@@ -100,7 +85,11 @@ impl Visitor for Collector<'_> {
             let user_shadow = self.types.is_some_and(|t| t.type_kind(name).is_some());
             let context_required = self.suppressed.contains(&(span.start, span.end));
             if !user_shadow && !context_required {
-                self.push(span);
+                self.diags.push(self.ctx.diagnostic(
+                    "prefer-collection-literals",
+                    "Use a collection literal instead of a constructor invocation.",
+                    *span,
+                ));
             }
         }
         walk_expr(self, node);

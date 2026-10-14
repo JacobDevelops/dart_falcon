@@ -1,7 +1,7 @@
 //! Avoid using library-private types in public APIs.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -15,7 +15,7 @@ impl Rule for LibraryPrivateTypesInPublicApi {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         for declaration in &program.declarations {
             collector.top_level(declaration);
@@ -24,12 +24,12 @@ impl Rule for LibraryPrivateTypesInPublicApi {
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
+impl Collector<'_> {
     fn top_level(&mut self, declaration: &TopLevelDecl) {
         match declaration {
             TopLevelDecl::Class(node) if is_public(&node.name) => {
@@ -177,7 +177,11 @@ impl Collector {
         match type_ {
             DartType::Named(node) => {
                 if let Some(name) = node.segments.last().filter(|name| !is_public(name)) {
-                    self.flag(&name.span);
+                    self.diags.push(self.ctx.diagnostic(
+                        "library-private-types-in-public-api",
+                        "Avoid using a private type in a public API.",
+                        name.span,
+                    ));
                 }
                 self.types(&node.type_args);
             }
@@ -196,19 +200,6 @@ impl Collector {
             }
             DartType::Void { .. } | DartType::Dynamic { .. } => {}
         }
-    }
-
-    fn flag(&mut self, span: &Span) {
-        self.diags.push(Diagnostic::new(
-            "library-private-types-in-public-api",
-            Severity::Warning,
-            "Avoid using a private type in a public API.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
     }
 }
 

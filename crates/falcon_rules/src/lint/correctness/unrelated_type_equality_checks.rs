@@ -1,7 +1,7 @@
 //! Reject equality checks between types proven to be unrelated.
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, TypeTruth};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -20,34 +20,19 @@ impl Rule for UnrelatedTypeEqualityChecks {
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         visit_program(&mut collector, program, state);
         collector.diagnostics
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
-    fn report(&mut self, span: &Span) {
-        self.diagnostics.push(Diagnostic::new(
-            "unrelated-type-equality-checks",
-            Severity::Warning,
-            "Equality checks should compare related types.",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
-        ));
-    }
-}
-
-impl SemanticRuleVisitor for Collector {
+impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Expr::Binary {
             op: BinaryOp::EqEq | BinaryOp::NotEq,
@@ -65,7 +50,11 @@ impl SemanticRuleVisitor for Collector {
                 .unrelated(&left_type, &right_type, &state.model)
                 == TypeTruth::Yes
             {
-                self.report(span);
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "unrelated-type-equality-checks",
+                    "Equality checks should compare related types.",
+                    *span,
+                ));
             }
         }
     }
@@ -90,7 +79,11 @@ impl SemanticRuleVisitor for Collector {
                 .unrelated(matched, &value_type, &state.model)
                 == TypeTruth::Yes
             {
-                self.report(span);
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "unrelated-type-equality-checks",
+                    "Equality checks should compare related types.",
+                    *span,
+                ));
             }
         }
     }

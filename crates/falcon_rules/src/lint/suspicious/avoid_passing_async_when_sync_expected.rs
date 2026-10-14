@@ -6,7 +6,7 @@ use falcon_analyze::{
     AnalyzeContext, ResolvedSignature, ResolvedType, Rule, SemanticModel, SignatureIndex,
     TypeEnvironment, TypeParameterScope, TypeTruth,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, bound_names, walk_expr, walk_pattern, walk_stmt};
 
@@ -34,7 +34,7 @@ impl Rule for AvoidPassingAsyncWhenSyncExpected {
             names: vec![HashSet::new()],
             current_type: None,
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diagnostics
@@ -49,7 +49,7 @@ struct Collector<'a> {
     names: Vec<HashSet<String>>,
     current_type: Option<ResolvedType>,
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
 impl Collector<'_> {
@@ -246,15 +246,10 @@ impl Collector<'_> {
         if self.model.is_future_like(return_type) != TypeTruth::No {
             return;
         }
-        self.diagnostics.push(Diagnostic::new(
+        self.diagnostics.push(self.ctx.diagnostic(
             "avoid-passing-async-when-sync-expected",
-            Severity::Warning,
             "Avoid passing an async function where a synchronous callback is expected",
-            self.file.clone(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 

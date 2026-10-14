@@ -8,7 +8,7 @@
 //! is private (has a leading underscore).
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use std::collections::HashMap;
@@ -67,17 +67,14 @@ fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<
         };
         // Both accessors must wrap the same private backing field.
         if gf == sf && gf.starts_with('_') {
-            diags.push(Diagnostic::new(
-                "unnecessary-getters-setters",
-                Severity::Warning,
-                "Avoid wrapping a field in trivial getters and setters; use a public field."
-                    .to_string(),
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: getter.name.span.start,
-                    end: getter.name.span.end,
-                },
-            ));
+            diags.push(
+                ctx.diagnostic(
+                    "unnecessary-getters-setters",
+                    "Avoid wrapping a field in trivial getters and setters; use a public field."
+                        .to_string(),
+                    getter.name.span,
+                ),
+            );
         }
     }
 }

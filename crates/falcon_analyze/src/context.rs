@@ -1,4 +1,5 @@
 use falcon_config::FalconConfig;
+use falcon_diagnostics::{Diagnostic, Severity, Span};
 
 use crate::resolve::{IdentityIndex, LibraryUnit, ProjectIndex, SignatureIndex, TypeIndex};
 
@@ -44,6 +45,21 @@ impl<'a> AnalyzeContext<'a> {
             signatures: None,
             library: None,
         }
+    }
+
+    pub fn diagnostic(
+        &self,
+        rule: &'static str,
+        message: impl Into<String>,
+        span: impl Into<Span>,
+    ) -> Diagnostic {
+        Diagnostic::new(
+            rule,
+            Severity::Warning,
+            message,
+            self.file_path.to_string_lossy().into_owned(),
+            span,
+        )
     }
 
     /// Attach a project index, enabling resolver-dependent rules to consult it.

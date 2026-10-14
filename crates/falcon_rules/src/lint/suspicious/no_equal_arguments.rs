@@ -10,9 +10,9 @@
 //! intentional. The report lands on the last duplicate.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct NoEqualArguments;
 
@@ -93,15 +93,10 @@ fn report_duplicates(entries: &[(&str, &Span)], diags: &mut Vec<Diagnostic>, ctx
         // member only.
         if last != i && entries[..i].iter().all(|(other, _)| other != src) {
             let span = entries[last].1;
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "no-equal-arguments",
-                Severity::Warning,
                 "The argument has already been passed",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
     }
@@ -121,10 +116,6 @@ struct Collector<'a> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_expr(&mut self, node: &Expr) {
         match node {
             Expr::Call { args, .. } | Expr::New { args, .. } => {

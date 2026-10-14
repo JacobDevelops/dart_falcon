@@ -17,7 +17,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct PreferCorrectIdentifierLength;
@@ -237,14 +237,5 @@ fn make_diag(ctx: &AnalyzeContext, span: &Span, name: &str, cfg: &IdentCfg) -> D
             cfg.min_length
         )
     };
-    Diagnostic::new(
-        "prefer-correct-identifier-length",
-        Severity::Warning,
-        message,
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    )
+    ctx.diagnostic("prefer-correct-identifier-length", message, *span)
 }

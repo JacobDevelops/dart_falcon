@@ -9,7 +9,7 @@
 //! and explicit `new`/`const` constructions are left alone.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct UseOnceConstructorsOnceProvider;
@@ -256,7 +256,11 @@ fn check_once_provider_call(
         // Direct call: OnceProvider(...)
         Expr::Ident(id) => {
             if is_once_provider_name(&id.name) {
-                flag_expr(expr, diags, ctx);
+                diags.push(ctx.diagnostic(
+                    "use-once-constructors-once-provider",
+                    "OnceProvider and similar Riverpod providers should use .once() factory method",
+                    *expr.span(),
+                ));
             }
         }
         // Method call: OnceProvider.once(...) or OnceProvider<T>.once(...)
@@ -267,18 +271,4 @@ fn check_once_provider_call(
 
 fn is_once_provider_name(name: &str) -> bool {
     ONCE_PROVIDERS.contains(&name)
-}
-
-fn flag_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let span = expr.span();
-    diags.push(Diagnostic::new(
-        "use-once-constructors-once-provider",
-        Severity::Warning,
-        "OnceProvider and similar Riverpod providers should use .once() factory method",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    ));
 }

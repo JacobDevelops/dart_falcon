@@ -8,9 +8,9 @@
 //! not rewrite `!(a == b)` into `a != b`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct AvoidInvertedBooleanExpressions;
 
@@ -37,10 +37,6 @@ struct Collector<'a> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Unary {
             op: UnaryOp::Bang,
@@ -49,15 +45,10 @@ impl Visitor for Collector<'_> {
         } = node
             && is_bang_unary(operand)
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "avoid-inverted-boolean-expressions",
-                Severity::Warning,
                 "Avoid inverted boolean expressions. Simplify the double negation.",
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
             // Resume below the whole bang chain so inner bangs are not re-flagged.
             let mut current = operand.as_ref();

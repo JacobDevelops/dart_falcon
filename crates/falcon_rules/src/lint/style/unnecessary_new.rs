@@ -7,9 +7,9 @@
 //! `const Foo()` keeps its `const`, so neither is touched. Delete the `new`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct UnnecessaryNew;
 
@@ -21,23 +21,19 @@ impl Rule for UnnecessaryNew {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
+impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         // Only explicit `new X(...)` is parsed as `Expr::New { is_const: false }`;
         // an implicit `X(...)` is an `Expr::Call`, and `const X(...)` sets is_const.
@@ -47,15 +43,10 @@ impl Visitor for Collector {
             ..
         } = node
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "unnecessary-new",
-                Severity::Warning,
                 "Unnecessary `new` keyword; it is optional and can be removed.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         walk_expr(self, node);

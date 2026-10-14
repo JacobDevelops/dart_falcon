@@ -9,9 +9,9 @@
 //! treated as extending the name so the braces are kept.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_program};
+use falcon_syntax::visitor::Visitor;
 
 pub struct UnnecessaryBraceInStringInterps;
 
@@ -23,7 +23,7 @@ impl Rule for UnnecessaryBraceInStringInterps {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
@@ -50,16 +50,12 @@ fn is_simple_identifier(s: &str) -> bool {
     !b.is_empty() && is_ident_start(b[0]) && b.iter().all(|&c| is_ident_body(c))
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
+impl Visitor for Collector<'_> {
     fn visit_string_lit(&mut self, node: &StringLitNode) {
         let Some(lit) = StringLitNode::delimiter(&node.raw) else {
             return;
@@ -82,11 +78,9 @@ impl Visitor for Collector {
                         .is_some_and(|&next| extends_identifier(next));
                     if is_simple_identifier(inner) && !extends {
                         let start = node.span.start + lit.content_offset + i;
-                        self.diags.push(Diagnostic::new(
+                        self.diags.push(self.ctx.diagnostic(
                             "unnecessary-brace-in-string-interps",
-                            Severity::Warning,
                             "Unnecessary braces in string interpolation; use `$name` instead.",
-                            self.file.clone(),
                             DiagSpan {
                                 start,
                                 end: node.span.start + lit.content_offset + close + 1,

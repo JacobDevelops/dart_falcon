@@ -8,7 +8,7 @@
 //! required or meaningful.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_local_var, walk_top_level_decl};
 
@@ -22,19 +22,19 @@ impl Rule for AvoidInitToNull {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
+impl Collector<'_> {
     /// A declaration only defaults to null when it is neither `final`, `const`
     /// nor `late` and its type is nullable (or absent/`dynamic`). In that case
     /// the `= null` is redundant and can be dropped without changing behaviour.
@@ -50,15 +50,10 @@ impl Collector {
         }
         for d in declarators {
             if matches!(&d.initializer, Some(Expr::NullLit { .. })) {
-                self.diags.push(Diagnostic::new(
+                self.diags.push(self.ctx.diagnostic(
                     "avoid-init-to-null",
-                    Severity::Warning,
                     "Don't explicitly initialize variables to null.",
-                    self.file.clone(),
-                    DiagSpan {
-                        start: d.span.start,
-                        end: d.span.end,
-                    },
+                    d.span,
                 ));
             }
         }
@@ -72,7 +67,7 @@ fn defaults_to_null(var_type: &Option<DartType>) -> bool {
     }
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(v) = node {
             self.check(v.keyword, v.is_late, &v.var_type, &v.declarators);

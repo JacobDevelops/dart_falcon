@@ -7,7 +7,7 @@
 //! then-statement assigns to that same operand.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
@@ -21,7 +21,7 @@ impl Rule for PreferConditionalAssignment {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             source: ctx.source,
         };
         collector.visit_program(program);
@@ -31,7 +31,7 @@ impl Rule for PreferConditionalAssignment {
 
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'s AnalyzeContext<'s>,
     source: &'s str,
 }
 
@@ -84,15 +84,10 @@ impl Visitor for Collector<'_> {
             } = &es.expr
             && self.text(target) == self.text(checked)
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "prefer-conditional-assignment",
-                Severity::Warning,
                 "Prefer using a conditional assignment '??='.",
-                self.file.clone(),
-                DiagSpan {
-                    start: if_stmt.span.start,
-                    end: if_stmt.span.end,
-                },
+                if_stmt.span,
             ));
         }
         walk_stmt(self, node);

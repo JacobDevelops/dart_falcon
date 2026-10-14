@@ -9,7 +9,7 @@
 //! to name a deliberately unused binding.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_formal_param, walk_pattern, walk_setter_decl, walk_stmt,
@@ -25,7 +25,7 @@ impl Rule for NoLeadingUnderscoresForLocalIdentifiers {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
@@ -40,29 +40,24 @@ fn has_leading_underscore(name: &str) -> bool {
     name.starts_with('_') && !name.bytes().all(|b| b == b'_')
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Collector {
+impl Collector<'_> {
     fn check(&mut self, name: &Identifier) {
         if has_leading_underscore(&name.name) {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "no-leading-underscores-for-local-identifiers",
-                Severity::Warning,
                 MESSAGE,
-                self.file.clone(),
-                DiagSpan {
-                    start: name.span.start,
-                    end: name.span.end,
-                },
+                name.span,
             ));
         }
     }
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     /// Every formal parameter is a local binding: top-level and member
     /// functions, closures, operators, and function-typed parameter signatures.
     ///

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
@@ -25,7 +25,7 @@ impl Rule for AvoidPrint {
         }
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             scopes: vec![HashSet::new()],
         };
         collector.visit_program(program);
@@ -33,13 +33,13 @@ impl Rule for AvoidPrint {
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     scopes: Vec<HashSet<String>>,
 }
 
-impl Collector {
+impl Collector<'_> {
     fn push(&mut self) {
         self.scopes.push(HashSet::new());
     }
@@ -113,7 +113,7 @@ impl Collector {
     }
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_class_decl(&mut self, node: &ClassDecl) {
         self.push();
         if node.members.iter().any(
@@ -140,15 +140,10 @@ impl Visitor for Collector {
             && matches!(callee.as_ref(), Expr::Ident(identifier) if identifier.name == "print")
             && !self.bound("print")
         {
-            self.diagnostics.push(Diagnostic::new(
+            self.diagnostics.push(self.ctx.diagnostic(
                 "avoid-print",
-                Severity::Warning,
                 "Avoid using print in production code; use a logging framework instead.",
-                self.file.clone(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         if let Expr::FuncExpr { params, body, .. } = node {

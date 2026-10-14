@@ -10,7 +10,7 @@
 //! otherwise skip.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::Visitor;
 
@@ -24,19 +24,19 @@ impl Rule for ProvideDeprecationMessage {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-struct Collector {
+struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
 }
 
-impl Visitor for Collector {
+impl Visitor for Collector<'_> {
     fn visit_annotation(&mut self, node: &Annotation) {
         let Some(last) = node.name.last() else {
             return;
@@ -57,15 +57,10 @@ impl Visitor for Collector {
             _ => false,
         };
         if flagged {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "provide-deprecation-message",
-                Severity::Warning,
                 "Provide a deprecation message, via @Deprecated(\"message\").",
-                self.file.clone(),
-                DiagSpan {
-                    start: node.span.start,
-                    end: node.span.end,
-                },
+                node.span,
             ));
         }
     }

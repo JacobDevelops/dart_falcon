@@ -6,7 +6,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, Rule, SemanticModel, SignatureIndex, TypeIndex,
     evaluate_constant,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -54,15 +54,10 @@ impl Rule for PreferConstConstructorsInImmutables {
                 {
                     continue;
                 }
-                diags.push(Diagnostic::new(
+                diags.push(ctx.diagnostic(
                     "prefer-const-constructors-in-immutables",
-                    Severity::Warning,
                     "Declare a const constructor in an immutable class.",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: constructor.span.start,
-                        end: constructor.span.end,
-                    },
+                    constructor.span,
                 ));
             }
         }

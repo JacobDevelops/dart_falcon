@@ -8,9 +8,9 @@
 //! its siblings) instead of pulling fields out of the whole `MediaQueryData`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 pub struct PreferDedicatedMediaQueryMethods;
 
@@ -36,15 +36,10 @@ fn check_media_query_size_field(
     ctx: &AnalyzeContext,
 ) {
     if (field.name == "width" || field.name == "height") && is_media_query_size(object) {
-        diags.push(Diagnostic::new(
+        diags.push(ctx.diagnostic(
             "prefer-dedicated-media-query-methods",
-            Severity::Warning,
             "Use MediaQuery.sizeOf(context) instead of MediaQuery.of(context).size.",
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: span.start,
-                end: span.end,
-            },
+            *span,
         ));
     }
 }
@@ -73,10 +68,6 @@ struct Collector<'a> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Field {
             object,

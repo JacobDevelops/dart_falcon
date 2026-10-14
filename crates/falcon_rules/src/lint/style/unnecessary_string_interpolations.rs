@@ -23,9 +23,9 @@
 //! nullable regardless of the member's own return type.
 
 use falcon_analyze::{AnalyzeContext, LocalTypes, ProjectIndex, Rule, StaticType};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program, walk_stmt};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 pub struct UnnecessaryStringInterpolations;
 
@@ -37,7 +37,7 @@ impl Rule for UnnecessaryStringInterpolations {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             lt: LocalTypes::new(),
             project: ctx.project,
         };
@@ -89,7 +89,7 @@ fn is_whole_interpolation(content: &str) -> bool {
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     lt: LocalTypes,
     project: Option<&'a ProjectIndex>,
 }
@@ -151,10 +151,6 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
         if let Some(params) = node.params() {
@@ -314,15 +310,10 @@ impl Visitor for Collector<'_> {
         if !self.is_non_nullable_string(&node.interpolations[0].expr) {
             return;
         }
-        self.diags.push(Diagnostic::new(
+        self.diags.push(self.ctx.diagnostic(
             "unnecessary-string-interpolations",
-            Severity::Warning,
             "Unnecessary string interpolation; use the expression directly.",
-            self.file.clone(),
-            DiagSpan {
-                start: node.span.start,
-                end: node.span.end,
-            },
+            node.span,
         ));
     }
 }

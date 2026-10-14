@@ -1,7 +1,7 @@
 //! Flags an `as` cast to the operand's resolved static type.
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::Program;
 
 use crate::lint::semantic_type_operations::{TypeOperationKind, collect};
@@ -31,15 +31,10 @@ impl Rule for AvoidUnnecessaryTypeCasts {
                 {
                     return None;
                 }
-                Some(Diagnostic::new(
+                Some(ctx.diagnostic(
                     self.name(),
-                    Severity::Warning,
                     "Unnecessary type cast — variable is already known to be this type",
-                    ctx.file_path.to_string_lossy().into_owned(),
-                    DiagSpan {
-                        start: operation.span.start,
-                        end: operation.span.end,
-                    },
+                    operation.span,
                 ))
             })
             .collect()

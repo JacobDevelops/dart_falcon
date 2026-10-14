@@ -6,10 +6,10 @@ use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationFacts, DeclarationIdentity, ResolvedType, Rule,
     SemanticModel, SignatureIndex, TypeEnvironment, TypeParameterScope, evaluate_constant,
 };
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program, walk_stmt, walk_top_level_decl};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt, walk_top_level_decl};
 
 pub struct ExhaustiveCases;
 
@@ -24,7 +24,7 @@ impl Rule for ExhaustiveCases {
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
-            file: ctx.file_path.to_string_lossy().into_owned(),
+            ctx,
             model: SemanticModel::new(ctx.file_path, identities, ctx.types),
             signatures,
             environment: TypeEnvironment::new(),
@@ -37,7 +37,7 @@ impl Rule for ExhaustiveCases {
 
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
-    file: String,
+    ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
     environment: TypeEnvironment,
@@ -100,19 +100,14 @@ impl Collector<'_> {
                 .find(|constant| !constant.is_deprecated)
                 .copied()
                 .unwrap_or(aliases[0]);
-            self.diagnostics.push(Diagnostic::new(
+            self.diagnostics.push(self.ctx.diagnostic(
                 "exhaustive-cases",
-                Severity::Warning,
                 format!(
                     "Add a case for '{}.{}'.",
                     identity_name(&identity),
                     preferred.name
                 ),
-                self.file.clone(),
-                DiagSpan {
-                    start: node.subject.span().start,
-                    end: node.subject.span().end,
-                },
+                *node.subject.span(),
             ));
         }
     }
@@ -139,10 +134,6 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         let Some(type_params) = declaration_type_params(node) else {
             walk_top_level_decl(self, node);

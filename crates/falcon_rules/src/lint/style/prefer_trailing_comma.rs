@@ -5,7 +5,7 @@
 //! the closing `)`. This mirrors the Dart 3.x tall-style formatter.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_annotation, walk_constructor_decl, walk_enum_decl, walk_expr,
@@ -128,11 +128,9 @@ impl Collector<'_, '_> {
         let Some(close) = needs_trailing_comma(self.ctx.source, &args.span) else {
             return;
         };
-        self.diags.push(Diagnostic::new(
+        self.diags.push(self.ctx.diagnostic(
             "prefer-trailing-comma",
-            Severity::Warning,
             "Add a trailing comma to the argument list",
-            self.ctx.file_path.to_string_lossy().into_owned(),
             DiagSpan {
                 start: close,
                 end: close + 1,

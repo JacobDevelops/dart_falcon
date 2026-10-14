@@ -11,7 +11,7 @@
 //! `Function` type syntax.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{self, Visitor};
@@ -41,15 +41,10 @@ struct Collector<'a, 'c> {
 impl Visitor for Collector<'_, '_> {
     fn visit_formal_param(&mut self, node: &FormalParam) {
         if node.function_params.is_some() {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "use-function-type-syntax-for-parameters",
-                Severity::Warning,
                 "Use the generic function type syntax for parameters.".to_string(),
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: node.name.span.start,
-                    end: node.name.span.end,
-                },
+                node.name.span,
             ));
         }
         visitor::walk_formal_param(self, node);

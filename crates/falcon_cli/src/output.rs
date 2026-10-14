@@ -13,8 +13,7 @@ pub fn format_text(diagnostics: &[Diagnostic]) -> String {
 
 /// Format diagnostics as a JSON array string.
 pub fn format_json(diagnostics: &[Diagnostic]) -> String {
-    let values: Vec<_> = diagnostics.iter().map(|d| d.format_json()).collect();
-    serde_json::to_string_pretty(&values).unwrap_or_else(|_| "[]".to_string())
+    serde_json::to_string_pretty(diagnostics).expect("diagnostics are JSON serializable")
 }
 
 /// Format diagnostics in quiet mode: no output (exit code communicates result).

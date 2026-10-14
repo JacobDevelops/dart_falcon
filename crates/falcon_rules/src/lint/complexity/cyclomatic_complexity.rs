@@ -14,7 +14,7 @@
 //! exceeds this.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct CyclomaticComplexity;
@@ -61,15 +61,10 @@ fn check_function(
     count_body(body, &mut count);
     let complexity = count + 1;
     if complexity > threshold {
-        diags.push(Diagnostic::new(
+        diags.push(ctx.diagnostic(
             "cyclomatic-complexity",
-            Severity::Warning,
             format!("Function has a cyclomatic complexity of {complexity} (max {threshold})."),
-            ctx.file_path.to_string_lossy().into_owned(),
-            DiagSpan {
-                start: name_span.start,
-                end: name_span.end,
-            },
+            *name_span,
         ));
     }
 }

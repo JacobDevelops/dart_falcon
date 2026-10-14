@@ -22,7 +22,7 @@
 //! `dispose`, `build`, and `overridden-methods`.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::member_order::{category_rank, check_sequence, read_string_list};
@@ -185,13 +185,7 @@ fn check_default(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &Ana
         }
         if cat < max_seen {
             let span = member.span();
-            diags.push(Diagnostic::new(
-                "member-ordering",
-                Severity::Warning,
-                "Class members are out of order: expected static const → static fields → instance fields → constructors → static methods → instance methods",
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan { start: span.start, end: span.end },
-            ));
+            diags.push(ctx.diagnostic("member-ordering", "Class members are out of order: expected static const → static fields → instance fields → constructors → static methods → instance methods", *span));
         } else {
             max_seen = cat;
         }

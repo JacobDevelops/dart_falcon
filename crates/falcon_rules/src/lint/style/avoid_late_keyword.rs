@@ -8,7 +8,7 @@
 //! declarations inside any function body are all checked.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_local_var, walk_top_level_decl};
 
@@ -39,35 +39,22 @@ impl Visitor for Collector<'_, '_> {
         if let TopLevelDecl::Variable(var) = node
             && var.is_late
         {
-            self.diags.push(make_diag(self.ctx, &var.span));
+            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", var.span));
         }
         walk_top_level_decl(self, node);
     }
 
     fn visit_field_decl(&mut self, node: &FieldDecl) {
         if node.is_late {
-            self.diags.push(make_diag(self.ctx, &node.span));
+            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", node.span));
         }
         walk_field_decl(self, node);
     }
 
     fn visit_local_var(&mut self, local: &LocalVarDecl) {
         if local.is_late {
-            self.diags.push(make_diag(self.ctx, &local.span));
+            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", local.span));
         }
         walk_local_var(self, local);
     }
-}
-
-fn make_diag(ctx: &AnalyzeContext, span: &Span) -> Diagnostic {
-    Diagnostic::new(
-        "avoid-late-keyword",
-        Severity::Warning,
-        "Avoid using the late keyword — use nullable types or initialize immediately instead",
-        ctx.file_path.to_string_lossy().into_owned(),
-        DiagSpan {
-            start: span.start,
-            end: span.end,
-        },
-    )
 }

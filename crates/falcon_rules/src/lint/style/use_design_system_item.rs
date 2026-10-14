@@ -17,7 +17,7 @@
 //! design-system replacement to suggest in the message.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct UseDesignSystemItem;
@@ -313,16 +313,7 @@ fn emit_for_base(
                 )
             };
 
-            diags.push(Diagnostic::new(
-                "use-design-system-item",
-                Severity::Warning,
-                &message,
-                ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
-            ));
+            diags.push(ctx.diagnostic("use-design-system-item", &message, *span));
             break; // Only report once per construction
         }
     }

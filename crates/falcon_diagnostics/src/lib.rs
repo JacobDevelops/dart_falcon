@@ -1,29 +1,16 @@
 //! Diagnostic types, severity levels, and reporting.
 //!
 //! The `Diagnostic` type is the canonical output of every lint rule.
+//! JSON exposes rule, severity, message, file_path, span, line, and col.
+//! LSP diagnostics use the rule name as their code.
 
 use lsp_types::{Diagnostic as LspDiagnostic, DiagnosticSeverity, Position, Range};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fmt;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Suggestion {
-    pub message: String,
-    pub replacement: Option<String>,
-}
-
-/// A single source line displayed alongside a diagnostic for context.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContextLine {
-    pub line_number: u32,
-    pub content: String,
-    pub is_primary: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Diagnostic {
     pub rule: &'static str,
-    pub code: String,
     pub severity: Severity,
     pub message: String,
     pub file_path: String,
@@ -33,22 +20,28 @@ pub struct Diagnostic {
     pub line: u32,
     /// 1-based column of `span.start`. 0 means unresolved.
     pub col: u32,
-    pub suggestions: Vec<Suggestion>,
-    pub context_lines: Vec<ContextLine>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Severity {
     Error,
     Warning,
     Info,
-    Note,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
+}
+
+impl From<falcon_syntax::ast::Span> for Span {
+    fn from(span: falcon_syntax::ast::Span) -> Self {
+        Self {
+            start: span.start,
+            end: span.end,
+        }
+    }
 }
 
 /// Convert an LSP `Position` (0-based line + UTF-16 `character`) back to a byte
@@ -105,9 +98,8 @@ pub fn byte_to_lsp_position(source: &str, offset: usize) -> Position {
     Position { line, character }
 }
 
-/// 1-based `(line, column)` of `offset` within `source` — the convention
-/// `dart analyze` and editor jump-to-error use. Columns count Unicode scalar
-/// values (consistent with [`byte_to_lsp_position`]).
+/// 1-based `(line, column)` of `offset` within `source`.
+/// Columns count UTF-16 code units, consistent with [`byte_to_lsp_position`].
 pub fn byte_to_line_col(source: &str, offset: usize) -> (u32, u32) {
     let pos = byte_to_lsp_position(source, offset);
     (pos.line + 1, pos.character + 1)
@@ -119,20 +111,16 @@ impl Diagnostic {
         severity: Severity,
         message: impl Into<String>,
         file_path: impl Into<String>,
-        span: Span,
+        span: impl Into<Span>,
     ) -> Self {
-        let msg = message.into();
         Self {
             rule,
-            code: rule.to_string(),
             severity,
-            message: msg,
+            message: message.into(),
             file_path: file_path.into(),
-            span,
+            span: span.into(),
             line: 0,
             col: 0,
-            suggestions: Vec::new(),
-            context_lines: Vec::new(),
         }
     }
 
@@ -143,38 +131,11 @@ impl Diagnostic {
         self.col = col;
     }
 
-    pub fn with_message(mut self, message: impl Into<String>) -> Self {
-        self.message = message.into();
-        self
-    }
-
-    pub fn with_code(mut self, code: impl Into<String>) -> Self {
-        self.code = code.into();
-        self
-    }
-
-    pub fn with_suggestion(mut self, msg: impl Into<String>, replacement: Option<String>) -> Self {
-        self.suggestions.push(Suggestion {
-            message: msg.into(),
-            replacement,
-        });
-        self
-    }
-
-    pub fn with_context_lines(mut self, lines: Vec<ContextLine>) -> Self {
-        self.context_lines = lines;
-        self
-    }
-
     pub fn format_text(&self) -> String {
         format!(
             "{}:{}:{}: [{}] ({}) {}",
             self.file_path, self.line, self.col, self.severity, self.rule, self.message
         )
-    }
-
-    pub fn format_json(&self) -> serde_json::Value {
-        serde_json::to_value(self).unwrap()
     }
 
     /// Serialize to an LSP `Diagnostic`, computing line/column from `source`.
@@ -192,9 +153,9 @@ impl Diagnostic {
             severity: Some(match self.severity {
                 Severity::Error => DiagnosticSeverity::ERROR,
                 Severity::Warning => DiagnosticSeverity::WARNING,
-                Severity::Info | Severity::Note => DiagnosticSeverity::INFORMATION,
+                Severity::Info => DiagnosticSeverity::INFORMATION,
             }),
-            code: Some(lsp_types::NumberOrString::String(self.code.clone())),
+            code: Some(lsp_types::NumberOrString::String(self.rule.to_owned())),
             source: Some("falcon".to_string()),
             message: self.message.clone(),
             related_information: None,
@@ -211,23 +172,6 @@ impl fmt::Display for Severity {
             Severity::Error => write!(f, "error"),
             Severity::Warning => write!(f, "warning"),
             Severity::Info => write!(f, "info"),
-            Severity::Note => write!(f, "note"),
-        }
-    }
-}
-
-impl std::str::FromStr for Severity {
-    type Err = String;
-
-    /// Parse a severity name as written in `falcon.json` `severity_override`
-    /// entries. Accepts the same names `Display` produces, plus "warn".
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "error" => Ok(Severity::Error),
-            "warning" | "warn" => Ok(Severity::Warning),
-            "info" => Ok(Severity::Info),
-            "note" => Ok(Severity::Note),
-            other => Err(format!("unknown severity: {other}")),
         }
     }
 }

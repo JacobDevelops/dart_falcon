@@ -9,7 +9,7 @@
 //! indented code, and inline code spans are skipped.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 pub struct UnintendedHtmlInDocComment;
@@ -20,7 +20,6 @@ impl Rule for UnintendedHtmlInDocComment {
     }
 
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let file = ctx.file_path.to_string_lossy().into_owned();
         let mut diags = Vec::new();
 
         let mut byte_offset = 0;
@@ -38,7 +37,7 @@ impl Rule for UnintendedHtmlInDocComment {
                 if content.trim_start().starts_with("```") {
                     in_fence = !in_fence;
                 } else if !in_fence && !content.starts_with("    ") {
-                    scan_content(content, content_offset, &file, &mut diags);
+                    scan_content(content, content_offset, ctx, &mut diags);
                 }
             }
 
@@ -52,7 +51,7 @@ impl Rule for UnintendedHtmlInDocComment {
 /// known HTML tag, skipping regions inside inline code spans (backticks) and
 /// inside `[...]` spans (Dartdoc source links, which may carry type arguments
 /// such as `[List<int>]`).
-fn scan_content(content: &str, base: usize, file: &str, diags: &mut Vec<Diagnostic>) {
+fn scan_content(content: &str, base: usize, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
     let bytes = content.as_bytes();
     let mut in_code = false;
     let mut in_ref = false;
@@ -91,11 +90,9 @@ fn scan_content(content: &str, base: usize, file: &str, diags: &mut Vec<Diagnost
         let follows_tag = matches!(bytes.get(p), Some(b'>' | b',' | b'<' | b' ' | b'\t'));
         let name = content[name_start..p].to_ascii_lowercase();
         if follows_tag && !HTML_TAGS.contains(&name.as_str()) {
-            diags.push(Diagnostic::new(
+            diags.push(ctx.diagnostic(
                 "unintended-html-in-doc-comment",
-                Severity::Warning,
                 "Angle brackets will be interpreted as HTML.",
-                file.to_string(),
                 DiagSpan {
                     start: base + i,
                     end: base + p,

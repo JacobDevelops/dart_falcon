@@ -9,9 +9,9 @@
 //! and `?:` ternary expressions.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_program, walk_stmt};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 pub struct NoEqualThenElse;
 
@@ -149,10 +149,6 @@ struct Collector<'a> {
 }
 
 impl Visitor for Collector<'_> {
-    fn visit_program(&mut self, node: &Program) {
-        walk_program(self, node);
-    }
-
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Conditional {
             then_expr,
@@ -163,15 +159,10 @@ impl Visitor for Collector<'_> {
             && normalize(span_src(self.ctx.source, then_expr.span()))
                 == normalize(span_src(self.ctx.source, else_expr.span()))
         {
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "no-equal-then-else",
-                Severity::Warning,
                 "Both branches of ternary are identical — remove the condition",
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: span.start,
-                    end: span.end,
-                },
+                *span,
             ));
         }
         walk_expr(self, node);
@@ -184,15 +175,10 @@ impl Visitor for Collector<'_> {
                 == normalize(span_src(self.ctx.source, else_branch.span()))
         {
             let last = last_stmt_span(&i.then_branch);
-            self.diags.push(Diagnostic::new(
+            self.diags.push(self.ctx.diagnostic(
                 "no-equal-then-else",
-                Severity::Warning,
                 "Both branches of if/else are identical — remove the condition",
-                self.ctx.file_path.to_string_lossy().into_owned(),
-                DiagSpan {
-                    start: last.start,
-                    end: last.end,
-                },
+                *last,
             ));
         }
         walk_stmt(self, node);
