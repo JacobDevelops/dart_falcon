@@ -15,15 +15,14 @@
 //! Nullable or unknown values and null-aware accesses are left alone.
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use crate::lint::string_lit::{interpolated_literal, is_simple_identifier, matching_brace};
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct UnnecessaryStringInterpolations;
 impl Rule for UnnecessaryStringInterpolations {
-    fn name(&self) -> &'static str {
-        "unnecessary-string-interpolations"
-    }
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
@@ -45,14 +44,10 @@ impl SemanticRuleVisitor for Collector<'_> {
         let Expr::StringLit(node) = node else {
             return;
         };
-        let Some(lit) = StringLitNode::delimiter(&node.raw) else {
+        let Some(lit) = interpolated_literal(node) else {
             return;
         };
-        if !lit.terminated
-            || lit.is_raw
-            || !is_whole_interpolation(lit.content)
-            || node.interpolations.len() != 1
-        {
+        if !is_whole_interpolation(lit.content) || node.interpolations.len() != 1 {
             return;
         }
         let ty = state.infer(&node.interpolations[0].expr);
@@ -66,44 +61,15 @@ impl SemanticRuleVisitor for Collector<'_> {
     }
 }
 
-fn is_ident_start(c: u8) -> bool {
-    c.is_ascii_alphabetic() || c == b'_'
-}
-
-// `$` is excluded so that `'$a$b'` (two interpolations) is not mistaken for one identifier.
-fn is_ident_continue(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_'
-}
-
-/// True when `content` is exactly one interpolation and nothing else: `${...}` spanning the
-/// whole content, or `$identifier` spanning the whole content.
 fn is_whole_interpolation(content: &str) -> bool {
     let bytes = content.as_bytes();
     if bytes.len() < 2 || bytes[0] != b'$' {
         return false;
     }
     if bytes[1] == b'{' {
-        // `${...}` must close exactly at the final byte, with a non-empty expression.
-        let mut depth = 0usize;
-        let mut i = 1;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'\\' => i += 1,
-                b'{' => depth += 1,
-                b'}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return i == bytes.len() - 1 && i > 2;
-                    }
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        false
+        matching_brace(bytes, 1).is_some_and(|close| close == bytes.len() - 1 && close > 2)
     } else {
-        // `$identifier` covering the whole content.
-        is_ident_start(bytes[1]) && bytes[1..].iter().all(|&c| is_ident_continue(c))
+        is_simple_identifier(&content[1..])
     }
 }
 

@@ -12,13 +12,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct PreferConditionalExpressions;
 
 impl Rule for PreferConditionalExpressions {
-    fn name(&self) -> &'static str {
-        "prefer-conditional-expressions"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -28,22 +25,11 @@ impl Rule for PreferConditionalExpressions {
                         check_body(body, &mut diags, ctx);
                     }
                 }
-                TopLevelDecl::Class(class) => {
-                    for member in &class.members {
+                _ => {
+                    for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
                         check_member(member, &mut diags, ctx);
                     }
                 }
-                TopLevelDecl::Mixin(mixin) => {
-                    for member in &mixin.members {
-                        check_member(member, &mut diags, ctx);
-                    }
-                }
-                TopLevelDecl::MixinClass(mc) => {
-                    for member in &mc.members {
-                        check_member(member, &mut diags, ctx);
-                    }
-                }
-                _ => {}
             }
         }
         diags

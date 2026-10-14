@@ -11,13 +11,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct ExhaustiveCases;
 
 impl Rule for ExhaustiveCases {
-    fn name(&self) -> &'static str {
-        "exhaustive-cases"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();

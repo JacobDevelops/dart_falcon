@@ -8,50 +8,39 @@
 //! `SizedBox` with no `child:` argument of its own; other arguments such as
 //! `color` do not disqualify the match, only a nested `child` does. Replace it
 //! with `Spacer()`, moving any `flex:` across.
+//! Checks functions and members of classes, mixins, enums, extensions, and extension types.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct UseSpacerAsExpandedChild;
 
 impl Rule for UseSpacerAsExpandedChild {
-    fn name(&self) -> &'static str {
-        "use-spacer-as-expanded-child"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
+        for declaration in &program.declarations {
+            scan_top(declaration, &mut diags, ctx);
         }
         diags
     }
 }
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            if let Some(body) = &f.body {
+fn scan_top(declaration: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+    match declaration {
+        TopLevelDecl::Function(function) => {
+            if let Some(body) = &function.body {
                 scan_body(body, diags, ctx);
             }
         }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
+        _ => {
+            if let Some(members) = crate::lint::declarations::members_of(declaration) {
+                for member in members {
+                    scan_member(member, diags, ctx);
+                }
             }
         }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -90,9 +79,7 @@ fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
 
 fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match body {
-        FunctionBody::Block(b) => {
-            scan_stmts(&b.stmts, diags, ctx);
-        }
+        FunctionBody::Block(b) => scan_stmts(&b.stmts, diags, ctx),
         FunctionBody::Arrow(e, _) => scan_expr(e, diags, ctx),
         FunctionBody::Native(_, _) => {}
     }
@@ -123,9 +110,7 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
         Stmt::While(w) => scan_stmt(&w.body, diags, ctx),
         Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx),
         Stmt::For(f) => scan_stmt(&f.body, diags, ctx),
-        Stmt::TryCatch(tc) => {
-            scan_stmts(&tc.body.stmts, diags, ctx);
-        }
+        Stmt::TryCatch(tc) => scan_stmts(&tc.body.stmts, diags, ctx),
         Stmt::Expr(e) => scan_expr(&e.expr, diags, ctx),
         Stmt::Return(r) => {
             if let Some(expr) = &r.value {
@@ -139,26 +124,14 @@ fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
 }
 
 fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+    if is_unqualified_construction(expr)
+        && let Some((name, args, span)) = crate::lint::flutter::widget_construction(expr)
+    {
+        check_expanded(name, args, span, diags, ctx);
+    }
     match expr {
-        Expr::New {
-            dart_type,
-            args,
-            span,
-            ..
-        } => {
-            if let DartType::Named(nt) = dart_type
-                && nt.segments.len() == 1
-            {
-                check_expanded(&nt.segments[0].name, args, span, diags, ctx);
-            }
-            scan_args(args, diags, ctx);
-        }
-        Expr::Call {
-            callee, args, span, ..
-        } => {
-            if let Expr::Ident(id) = callee.as_ref() {
-                check_expanded(&id.name, args, span, diags, ctx);
-            }
+        Expr::New { args, .. } => scan_args(args, diags, ctx),
+        Expr::Call { callee, args, .. } => {
             scan_expr(callee, diags, ctx);
             scan_args(args, diags, ctx);
         }
@@ -233,13 +206,12 @@ fn check_expanded(
     }
 }
 
-/// A `Container` or `SizedBox` with no `child:` argument is an empty placeholder
-/// that is better expressed as `Spacer()`. Other arguments (e.g. `color`) do not
-/// change that — only the presence of a `child` does.
 fn is_empty_spacer_widget(expr: &Expr) -> bool {
-    let (name, args) = match widget_construction(expr) {
-        Some(v) => v,
-        None => return false,
+    if !is_unqualified_construction(expr) {
+        return false;
+    }
+    let Some((name, args, _)) = crate::lint::flutter::widget_construction(expr) else {
+        return false;
     };
     if name != "Container" && name != "SizedBox" {
         return false;
@@ -247,22 +219,7 @@ fn is_empty_spacer_widget(expr: &Expr) -> bool {
     !args.named.iter().any(|n| n.name.name == "child")
 }
 
-/// Resolve a widget construction expressed as either an implicit call
-/// (`Container(...)`) or an explicit `new`/`const` (`Container(...)`).
-fn widget_construction(expr: &Expr) -> Option<(&str, &ArgList)> {
-    match expr {
-        Expr::New {
-            dart_type: DartType::Named(nt),
-            args,
-            ..
-        } if nt.segments.len() == 1 => Some((nt.segments[0].name.as_str(), args)),
-        Expr::Call { callee, args, .. } => {
-            if let Expr::Ident(id) = callee.as_ref() {
-                Some((id.name.as_str(), args))
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
+fn is_unqualified_construction(expr: &Expr) -> bool {
+    !matches!(expr, Expr::New { dart_type: DartType::Named(named), .. }
+        if named.segments.len() != 1)
 }

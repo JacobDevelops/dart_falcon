@@ -4,13 +4,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct DanglingLibraryDocComments;
 
 impl Rule for DanglingLibraryDocComments {
-    fn name(&self) -> &'static str {
-        "dangling-library-doc-comments"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let comments = documentation_blocks(ctx.source);
         let starts = dangling_starts(program, ctx.source, &comments);
@@ -63,7 +60,7 @@ fn dangling_starts(program: &Program, source: &str, comments: &[DocBlock]) -> Ve
     let Some(comment) = comments.iter().rev().find(|comment| comment.start < offset) else {
         return Vec::new();
     };
-    let declaration_line = line_at(source, offset);
+    let declaration_line = line_of(source, offset);
     (declaration_line > comment.end_line + 1)
         .then_some(vec![comment.start])
         .unwrap_or_default()
@@ -147,13 +144,7 @@ fn documentation_blocks(source: &str) -> Vec<DocBlock> {
     blocks
 }
 
-fn line_at(source: &str, offset: usize) -> usize {
-    source[..offset.min(source.len())]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count()
-        + 1
-}
+use crate::lint::expressions::line_of;
 
 #[cfg(test)]
 mod tests {

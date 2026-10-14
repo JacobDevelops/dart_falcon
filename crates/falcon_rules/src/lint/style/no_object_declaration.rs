@@ -12,13 +12,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct NoObjectDeclaration;
 
 impl Rule for NoObjectDeclaration {
-    fn name(&self) -> &'static str {
-        "no-object-declaration"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -55,13 +52,8 @@ fn check_type(ty: Option<&DartType>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
 /// field type and the member return type respectively. Parameters, local
 /// variables, top-level members, and setters are out of scope.
 fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let members = match decl {
-        TopLevelDecl::Class(c) => &c.members,
-        TopLevelDecl::Mixin(m) => &m.members,
-        TopLevelDecl::MixinClass(mc) => &mc.members,
-        TopLevelDecl::Enum(e) => &e.members,
-        TopLevelDecl::Extension(ext) => &ext.members,
-        _ => return,
+    let Some(members) = crate::lint::declarations::members_of(decl) else {
+        return;
     };
     for m in members {
         scan_member(m, diags, ctx);

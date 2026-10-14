@@ -27,15 +27,12 @@ use falcon_syntax::ast::*;
 
 use crate::member_order::{category_rank, check_sequence, read_string_list};
 
+#[derive(Default)]
 pub struct MemberOrdering;
 
 const NAME: &str = "member-ordering";
 
 impl Rule for MemberOrdering {
-    fn name(&self) -> &'static str {
-        NAME
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let order = read_string_list(ctx, NAME, "order");
@@ -133,11 +130,7 @@ fn widget_rank(member: &ClassMember, seq: &[String]) -> Option<usize> {
     seq.iter().position(|t| t == token)
 }
 
-fn is_override(annotations: &[Annotation]) -> bool {
-    annotations
-        .iter()
-        .any(|a| a.name.last().is_some_and(|id| id.name == "override"))
-}
+use crate::member_order::is_override;
 
 fn order_message() -> &'static str {
     "Class member is out of the configured order"

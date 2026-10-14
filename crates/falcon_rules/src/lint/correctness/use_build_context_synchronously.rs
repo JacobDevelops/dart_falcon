@@ -9,13 +9,10 @@ use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_class_decl};
 
+#[derive(Default)]
 pub struct UseBuildContextSynchronously;
 
 impl Rule for UseBuildContextSynchronously {
-    fn name(&self) -> &'static str {
-        "use-build-context-synchronously"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         if is_test_file(ctx.file_path) {
             return Vec::new();
@@ -69,16 +66,8 @@ impl Collector<'_> {
         let Some(identity) = self.model.resolve_name(&class.name.name) else {
             return false;
         };
-        let ty = ResolvedType::Interface {
-            identity,
-            arguments: Vec::new(),
-            nullable: false,
-            extension_type: false,
-        };
-        let state = DeclarationIdentity::Package {
-            package: "flutter",
-            name: "State",
-        };
+        let ty = ResolvedType::interface_identity(identity);
+        let state = DeclarationIdentity::flutter("State");
         self.signatures.is_subtype_of(&ty, &state, self.model) == Truth::Yes
     }
 }

@@ -1,6 +1,6 @@
 //! Require `hashCode` and `==` to be overridden together.
 //!
-//! Flags a class or mixin that overrides the `==` operator without also defining
+//! Flags a class-like declaration that overrides `==` without also defining
 //! `hashCode`, or defines `hashCode` without overriding `==`. The
 //! two are bound by a contract: any two objects that compare equal must return
 //! the same hash code. Overriding only one breaks that invariant, so the type
@@ -11,21 +11,15 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct HashAndEquals;
 
 impl Rule for HashAndEquals {
-    fn name(&self) -> &'static str {
-        "hash-and-equals"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
-            let members = match decl {
-                TopLevelDecl::Class(class) => &class.members,
-                TopLevelDecl::Mixin(mixin) => &mixin.members,
-                TopLevelDecl::MixinClass(mixin) => &mixin.members,
-                _ => continue,
+            let Some(members) = crate::lint::declarations::members_of(decl) else {
+                continue;
             };
             check_members(members, ctx, &mut diags);
         }

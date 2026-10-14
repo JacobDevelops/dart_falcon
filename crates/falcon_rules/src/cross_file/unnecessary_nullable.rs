@@ -24,17 +24,14 @@ use falcon_analyze::{
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
 
+#[derive(Default)]
 pub struct UnnecessaryNullable;
 
 const NAME: &str = "unnecessary-nullable";
 
 impl CrossFileRule for UnnecessaryNullable {
-    fn name(&self) -> &'static str {
-        NAME
-    }
-
     fn analyze_project(&self, files: &[ProjectFile], config: &FalconConfig) -> Vec<Diagnostic> {
         // Count every function/method by name project-wide so we only reason
         // about names that resolve to exactly one declaration.
@@ -180,13 +177,11 @@ fn private_targets(program: &Program) -> Vec<Target<'_>> {
                     push_target(&mut out, &f.name.name, params, f.body.as_ref());
                 }
             }
-            TopLevelDecl::Class(c) => collect_method_targets(&mut out, &c.members),
-            TopLevelDecl::Mixin(m) => collect_method_targets(&mut out, &m.members),
-            TopLevelDecl::MixinClass(m) => collect_method_targets(&mut out, &m.members),
-            TopLevelDecl::Enum(e) => collect_method_targets(&mut out, &e.members),
-            TopLevelDecl::Extension(e) => collect_method_targets(&mut out, &e.members),
-            TopLevelDecl::ExtensionType(e) => collect_method_targets(&mut out, &e.members),
-            _ => {}
+            _ => {
+                if let Some(members) = crate::lint::declarations::members_of(decl) {
+                    collect_method_targets(&mut out, members);
+                }
+            }
         }
     }
     out
@@ -287,13 +282,11 @@ fn decl_names(program: &Program) -> Vec<String> {
             {
                 out.push(f.name.name.clone())
             }
-            TopLevelDecl::Class(c) => method_names(&mut out, &c.members),
-            TopLevelDecl::Mixin(m) => method_names(&mut out, &m.members),
-            TopLevelDecl::MixinClass(m) => method_names(&mut out, &m.members),
-            TopLevelDecl::Enum(e) => method_names(&mut out, &e.members),
-            TopLevelDecl::Extension(e) => method_names(&mut out, &e.members),
-            TopLevelDecl::ExtensionType(e) => method_names(&mut out, &e.members),
-            _ => {}
+            _ => {
+                if let Some(members) = crate::lint::declarations::members_of(decl) {
+                    method_names(&mut out, members);
+                }
+            }
         }
     }
     out
@@ -536,15 +529,7 @@ fn body_null_assignments(body: Option<&FunctionBody>) -> HashSet<String> {
         names: HashSet::new(),
     };
     if let Some(body) = body {
-        match body {
-            FunctionBody::Block(b) => {
-                for s in &b.stmts {
-                    finder.visit_stmt(s);
-                }
-            }
-            FunctionBody::Arrow(e, _) => finder.visit_expr(e),
-            FunctionBody::Native(_, _) => {}
-        }
+        walk_function_body(&mut finder, body);
     }
     finder.names
 }

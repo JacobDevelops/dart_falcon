@@ -36,6 +36,7 @@ use falcon_syntax::visitor::{
     walk_top_level_decl,
 };
 
+#[derive(Default)]
 pub struct PreferCollectionLiterals;
 
 /// Constructors whose default invocation is expressible as a literal.
@@ -46,10 +47,6 @@ const NAMES: [&str; 5] = ["List", "Map", "Set", "LinkedHashMap", "LinkedHashSet"
 const CONCRETE: [&str; 2] = ["LinkedHashMap", "LinkedHashSet"];
 
 impl Rule for PreferCollectionLiterals {
-    fn name(&self) -> &'static str {
-        "prefer-collection-literals"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         // Pre-pass: spans of constructors sitting in a concrete-typed slot, which a
         // collection literal would not preserve.

@@ -15,6 +15,7 @@ use serde_yaml::{Mapping, Value};
 
 use super::{canonical_or_lexical, enclosing_pubspec};
 
+#[derive(Default)]
 pub struct DependOnReferencedPackages;
 
 const NAME: &str = "depend-on-referenced-packages";
@@ -26,10 +27,6 @@ struct PackageManifest {
 }
 
 impl CrossFileRule for DependOnReferencedPackages {
-    fn name(&self) -> &'static str {
-        NAME
-    }
-
     fn analyze_project(&self, files: &[ProjectFile], _config: &FalconConfig) -> Vec<Diagnostic> {
         let mut manifests: HashMap<PathBuf, Option<PackageManifest>> = HashMap::new();
         let mut diagnostics = Vec::new();

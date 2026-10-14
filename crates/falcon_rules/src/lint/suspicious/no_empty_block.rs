@@ -15,13 +15,10 @@ use falcon_syntax::visitor::{
     walk_getter_decl, walk_method_decl, walk_setter_decl, walk_stmt,
 };
 
+#[derive(Default)]
 pub struct NoEmptyBlock;
 
 impl Rule for NoEmptyBlock {
-    fn name(&self) -> &'static str {
-        "no-empty-block"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

@@ -11,13 +11,10 @@ use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, for_each_expr};
 
+#[derive(Default)]
 pub struct UseKeyInWidgetConstructors;
 
 impl Rule for UseKeyInWidgetConstructors {
-    fn name(&self) -> &'static str {
-        "use-key-in-widget-constructors"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
@@ -49,13 +46,8 @@ impl Collector<'_> {
         let Some(identity) = self.model.resolve_name(&class.name.name) else {
             return;
         };
-        let class_type = ResolvedType::Interface {
-            identity: identity.clone(),
-            arguments: Vec::new(),
-            nullable: false,
-            extension_type: false,
-        };
-        let widget = flutter_identity("Widget");
+        let class_type = ResolvedType::interface_identity(identity.clone());
+        let widget = DeclarationIdentity::flutter("Widget");
         if identity == widget
             || self
                 .signatures
@@ -266,13 +258,6 @@ fn target_defines_key(
 
 fn is_flutter_key(ty: &ResolvedType) -> bool {
     matches!(ty, ResolvedType::Interface { identity, .. } if identity.is_package("flutter", "Key"))
-}
-
-fn flutter_identity(name: &'static str) -> DeclarationIdentity {
-    DeclarationIdentity::Package {
-        package: "flutter",
-        name,
-    }
 }
 
 #[cfg(test)]

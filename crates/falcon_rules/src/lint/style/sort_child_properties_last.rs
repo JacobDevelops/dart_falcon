@@ -14,13 +14,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct SortChildPropertiesLast;
 
 impl Rule for SortChildPropertiesLast {
-    fn name(&self) -> &'static str {
-        "sort-child-properties-last"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -38,7 +35,7 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
-        if let Some((name, args)) = widget_construction(node)
+        if let Some((name, args, _)) = crate::lint::flutter::widget_construction(node)
         // Widget constructors are PascalCase; requiring that keeps this off
         // ordinary function calls that happen to take a `child:` argument.
         && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
@@ -56,25 +53,5 @@ impl Visitor for Collector<'_> {
             }
         }
         walk_expr(self, node);
-    }
-}
-
-/// Resolve a widget construction expressed as either an implicit call
-/// (`Foo(...)`) or an explicit `new`/`const` (`Foo(...)`).
-fn widget_construction(expr: &Expr) -> Option<(&str, &ArgList)> {
-    match expr {
-        Expr::New {
-            dart_type: DartType::Named(nt),
-            args,
-            ..
-        } => nt.segments.last().map(|s| (s.name.as_str(), args)),
-        Expr::Call { callee, args, .. } => {
-            if let Expr::Ident(id) = callee.as_ref() {
-                Some((id.name.as_str(), args))
-            } else {
-                None
-            }
-        }
-        _ => None,
     }
 }

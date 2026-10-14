@@ -12,13 +12,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct EmptyStatements;
 
 impl Rule for EmptyStatements {
-    fn name(&self) -> &'static str {
-        "empty-statements"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for body in bodies(program) {
@@ -116,13 +113,11 @@ fn bodies(program: &Program) -> Vec<&FunctionBody> {
     for decl in &program.declarations {
         match decl {
             TopLevelDecl::Function(f) => out.extend(f.body.as_ref()),
-            TopLevelDecl::Class(c) => member_bodies(&c.members, &mut out),
-            TopLevelDecl::Mixin(m) => member_bodies(&m.members, &mut out),
-            TopLevelDecl::MixinClass(mc) => member_bodies(&mc.members, &mut out),
-            TopLevelDecl::Enum(e) => member_bodies(&e.members, &mut out),
-            TopLevelDecl::Extension(e) => member_bodies(&e.members, &mut out),
-            TopLevelDecl::ExtensionType(e) => member_bodies(&e.members, &mut out),
-            _ => {}
+            _ => {
+                if let Some(members) = crate::lint::declarations::members_of(decl) {
+                    member_bodies(members, &mut out);
+                }
+            }
         }
     }
     out

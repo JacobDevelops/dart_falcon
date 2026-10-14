@@ -13,13 +13,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AvoidDynamic;
 
 impl Rule for AvoidDynamic {
-    fn name(&self) -> &'static str {
-        "avoid-dynamic"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
@@ -37,45 +34,17 @@ fn visit_top_level_decl(
     ctx: &AnalyzeContext,
 ) {
     match decl {
-        TopLevelDecl::Class(class) => {
-            visit_class_decl(class, diagnostics, ctx);
-        }
         TopLevelDecl::Function(func) => {
             visit_function_decl(func, diagnostics, ctx);
         }
         TopLevelDecl::Variable(var) => {
             visit_top_level_var_decl(var, diagnostics, ctx);
         }
-        TopLevelDecl::Mixin(mixin) => {
-            for member in &mixin.members {
+        _ => {
+            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
                 visit_class_member(member, diagnostics, ctx);
             }
         }
-        TopLevelDecl::MixinClass(mixin_class) => {
-            for member in &mixin_class.members {
-                visit_class_member(member, diagnostics, ctx);
-            }
-        }
-        TopLevelDecl::Enum(enum_decl) => {
-            for member in &enum_decl.members {
-                visit_class_member(member, diagnostics, ctx);
-            }
-        }
-        TopLevelDecl::Extension(ext) => {
-            for member in &ext.members {
-                visit_class_member(member, diagnostics, ctx);
-            }
-        }
-        TopLevelDecl::ExtensionType(_) => {}
-        TopLevelDecl::TypeAlias(_) => {}
-        TopLevelDecl::ClassTypeAlias(_) => {}
-        TopLevelDecl::Error(_) => {}
-    }
-}
-
-fn visit_class_decl(class: &ClassDecl, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for member in &class.members {
-        visit_class_member(member, diagnostics, ctx);
     }
 }
 

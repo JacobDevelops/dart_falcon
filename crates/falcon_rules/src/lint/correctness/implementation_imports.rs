@@ -11,13 +11,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct ImplementationImports;
 
 impl Rule for ImplementationImports {
-    fn name(&self) -> &'static str {
-        "implementation-imports"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(own_package) = source_package(ctx.file_path) else {
             return Vec::new();

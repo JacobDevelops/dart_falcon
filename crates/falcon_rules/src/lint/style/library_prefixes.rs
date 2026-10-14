@@ -10,13 +10,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct LibraryPrefixes;
 
 impl Rule for LibraryPrefixes {
-    fn name(&self) -> &'static str {
-        "library-prefixes"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for import in &program.imports {

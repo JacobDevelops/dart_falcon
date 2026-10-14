@@ -2,21 +2,19 @@
 
 use std::collections::HashSet;
 
+use crate::lint::lexical_usage::NameScopes;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, SemanticModel,
     SignatureIndex, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, bound_names, walk_expr, walk_pattern, walk_stmt};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_pattern, walk_stmt};
 
+#[derive(Default)]
 pub struct ProperControllerDispose;
 
 impl Rule for ProperControllerDispose {
-    fn name(&self) -> &'static str {
-        "proper-controller-dispose"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
@@ -42,16 +40,8 @@ fn is_flutter_state(name: &str, signatures: &SignatureIndex, model: &SemanticMod
     let Some(identity) = model.resolve_name(name) else {
         return false;
     };
-    let ty = ResolvedType::Interface {
-        identity,
-        arguments: Vec::new(),
-        nullable: false,
-        extension_type: false,
-    };
-    let state = DeclarationIdentity::Package {
-        package: "flutter",
-        name: "State",
-    };
+    let ty = ResolvedType::interface_identity(identity);
+    let state = DeclarationIdentity::flutter("State");
     signatures.is_subtype_of(&ty, &state, model) == Truth::Yes
 }
 
@@ -107,8 +97,8 @@ fn check_class(
                     continue;
                 };
                 let mut scan = Scan::new(&fields, model, &mut owned, &mut disposed, false);
-                scan.declare(&setter.param.name);
-                scan.body(body);
+                scan.scopes.declare(&setter.param.name);
+                walk_function_body(&mut scan, body);
                 continue;
             }
             ClassMember::Operator(operator) => {
@@ -121,9 +111,9 @@ fn check_class(
         };
         let mut scan = Scan::new(&fields, model, &mut owned, &mut disposed, in_dispose);
         if let Some(params) = params {
-            scan.params(params);
+            scan.scopes.params(params);
         }
-        scan.body(body);
+        walk_function_body(&mut scan, body);
     }
 
     for member in members {
@@ -144,7 +134,7 @@ struct Scan<'a, 'model> {
     owned: &'a mut HashSet<String>,
     disposed: &'a mut HashSet<String>,
     in_dispose: bool,
-    scopes: Vec<HashSet<String>>,
+    scopes: NameScopes,
 }
 
 impl<'a, 'model> Scan<'a, 'model> {
@@ -161,52 +151,15 @@ impl<'a, 'model> Scan<'a, 'model> {
             owned,
             disposed,
             in_dispose,
-            scopes: vec![HashSet::new()],
-        }
-    }
-
-    fn push(&mut self) {
-        self.scopes.push(HashSet::new());
-    }
-
-    fn pop(&mut self) {
-        self.scopes.pop();
-    }
-
-    fn declare(&mut self, name: &str) {
-        self.scopes
-            .last_mut()
-            .expect("lexical scope")
-            .insert(name.to_string());
-    }
-
-    fn bound(&self, name: &str) -> bool {
-        self.scopes.iter().rev().any(|scope| scope.contains(name))
-    }
-
-    fn params(&mut self, params: &FormalParamList) {
-        for param in params.params.iter() {
-            self.declare(&param.name.name);
-        }
-    }
-
-    fn body(&mut self, body: &FunctionBody) {
-        match body {
-            FunctionBody::Block(block) => {
-                for statement in &block.stmts {
-                    self.visit_stmt(statement);
-                }
-            }
-            FunctionBody::Arrow(expression, _) => self.visit_expr(expression),
-            FunctionBody::Native(_, _) => {}
+            scopes: NameScopes::default(),
         }
     }
 
     fn nested_function(&mut self, params: &FormalParamList, body: &FunctionBody) {
-        self.push();
-        self.params(params);
-        self.body(body);
-        self.pop();
+        self.scopes.push();
+        self.scopes.params(params);
+        walk_function_body(self, body);
+        self.scopes.pop();
     }
 
     fn local(&mut self, declaration: &LocalVarDecl) {
@@ -214,15 +167,13 @@ impl<'a, 'model> Scan<'a, 'model> {
             if let Some(initializer) = &declarator.initializer {
                 self.visit_expr(initializer);
             }
-            self.declare(&declarator.name.name);
+            self.scopes.declare(&declarator.name.name);
         }
     }
 
     fn pattern(&mut self, pattern: &Pattern) {
         walk_pattern(self, pattern);
-        for name in bound_names(pattern) {
-            self.declare(&name.name);
-        }
+        self.scopes.pattern(pattern);
     }
 
     fn field_target<'b>(&self, expression: &'b Expr) -> Option<&'b str> {
@@ -234,7 +185,8 @@ impl<'a, 'model> Scan<'a, 'model> {
                 Some(&field.name)
             }
             Expr::Ident(identifier)
-                if self.fields.contains(&identifier.name) && !self.bound(&identifier.name) =>
+                if self.fields.contains(&identifier.name)
+                    && !self.scopes.bound(&identifier.name) =>
             {
                 Some(&identifier.name)
             }
@@ -247,7 +199,7 @@ impl<'a, 'model> Scan<'a, 'model> {
             ForInit::VarDecl(declaration) => self.local(declaration),
             ForInit::ForIn { name, iterable, .. } => {
                 self.visit_expr(iterable);
-                self.declare(&name.name);
+                self.scopes.declare(&name.name);
             }
             ForInit::PatternForIn {
                 pattern, iterable, ..
@@ -272,15 +224,15 @@ impl Visitor for Scan<'_, '_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
             Stmt::Block(block) => {
-                self.push();
+                self.scopes.push();
                 for statement in &block.stmts {
                     self.visit_stmt(statement);
                 }
-                self.pop();
+                self.scopes.pop();
             }
             Stmt::LocalVar(declaration) => self.visit_local_var(declaration),
             Stmt::LocalFunc(function) => {
-                self.declare(&function.name.name);
+                self.scopes.declare(&function.name.name);
                 self.nested_function(&function.params, &function.body);
             }
             Stmt::PatternDecl(declaration) => {
@@ -297,20 +249,20 @@ impl Visitor for Scan<'_, '_> {
                 }
                 IfCondition::Case(value, pattern, guard) => {
                     self.visit_expr(value);
-                    self.push();
+                    self.scopes.push();
                     self.pattern(pattern);
                     if let Some(guard) = guard {
                         self.visit_expr(guard);
                     }
                     self.visit_stmt(&statement.then_branch);
-                    self.pop();
+                    self.scopes.pop();
                     if let Some(branch) = &statement.else_branch {
                         self.visit_stmt(branch);
                     }
                 }
             },
             Stmt::For(statement) => {
-                self.push();
+                self.scopes.push();
                 if let Some(init) = &statement.init {
                     self.for_init(init);
                 }
@@ -321,24 +273,24 @@ impl Visitor for Scan<'_, '_> {
                     self.visit_expr(update);
                 }
                 self.visit_stmt(&statement.body);
-                self.pop();
+                self.scopes.pop();
             }
             Stmt::TryCatch(statement) => {
                 for statement in &statement.body.stmts {
                     self.visit_stmt(statement);
                 }
                 for catch in &statement.catches {
-                    self.push();
+                    self.scopes.push();
                     if let Some(name) = &catch.exception_var {
-                        self.declare(&name.name);
+                        self.scopes.declare(&name.name);
                     }
                     if let Some(name) = &catch.stack_trace_var {
-                        self.declare(&name.name);
+                        self.scopes.declare(&name.name);
                     }
                     for statement in &catch.body.stmts {
                         self.visit_stmt(statement);
                     }
-                    self.pop();
+                    self.scopes.pop();
                 }
                 if let Some(finally) = &statement.finally {
                     for statement in &finally.stmts {

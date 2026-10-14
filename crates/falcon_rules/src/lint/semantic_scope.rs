@@ -7,7 +7,9 @@ use falcon_analyze::{
 };
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_pattern, walk_top_level_decl};
+use falcon_syntax::visitor::{
+    Visitor, walk_expr, walk_function_body, walk_pattern, walk_top_level_decl,
+};
 
 pub(crate) trait SemanticRuleVisitor {
     fn visit_expr(&mut self, _node: &Expr, _state: &SemanticState<'_>) {}
@@ -347,11 +349,6 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
 
     fn visit_body(&mut self, body: &FunctionBody) {
         match body {
-            FunctionBody::Block(block) => {
-                for statement in &block.stmts {
-                    self.visit_stmt(statement);
-                }
-            }
             FunctionBody::Arrow(expression, _) => {
                 let expected = self
                     .state
@@ -361,7 +358,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                     .unwrap_or(ResolvedType::Unknown);
                 self.with_expected(expected, |walker| walker.visit_expr(expression));
             }
-            FunctionBody::Native(_, _) => {}
+            _ => walk_function_body(self, body),
         }
     }
 
@@ -1449,44 +1446,68 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
     }
 }
 
-pub(crate) fn returned_expressions(body: &FunctionBody) -> Vec<Expr> {
-    struct ReturnCollector {
-        expressions: Vec<Expr>,
-    }
-
-    impl Visitor for ReturnCollector {
-        fn visit_stmt(&mut self, node: &Stmt) {
-            match node {
-                Stmt::Return(ReturnStmt {
-                    value: Some(value), ..
-                }) => self.expressions.push(value.clone()),
-                Stmt::LocalFunc(_) => {}
-                _ => falcon_syntax::visitor::walk_stmt(self, node),
-            }
-        }
-
-        fn visit_expr(&mut self, node: &Expr) {
-            if !matches!(node, Expr::FuncExpr { .. }) {
-                walk_expr(self, node);
-            }
+pub(crate) fn returned_expressions(body: &FunctionBody) -> Vec<&Expr> {
+    fn collect<'a>(statements: &'a [Stmt], expressions: &mut Vec<&'a Expr>) {
+        for statement in statements {
+            collect_statement(statement, expressions);
         }
     }
 
-    let mut collector = ReturnCollector {
-        expressions: Vec::new(),
-    };
+    fn collect_statement<'a>(statement: &'a Stmt, expressions: &mut Vec<&'a Expr>) {
+        match statement {
+            Stmt::Return(ReturnStmt {
+                value: Some(value), ..
+            }) => expressions.push(value),
+            Stmt::Block(block) => collect(&block.stmts, expressions),
+            Stmt::If(node) => {
+                collect_statement(&node.then_branch, expressions);
+                if let Some(branch) = &node.else_branch {
+                    collect_statement(branch, expressions);
+                }
+            }
+            Stmt::For(node) => collect_statement(&node.body, expressions),
+            Stmt::While(node) => collect_statement(&node.body, expressions),
+            Stmt::DoWhile(node) => collect_statement(&node.body, expressions),
+            Stmt::Switch(node) => {
+                for case in &node.cases {
+                    collect(&case.body, expressions);
+                }
+            }
+            Stmt::TryCatch(node) => {
+                collect(&node.body.stmts, expressions);
+                for catch in &node.catches {
+                    collect(&catch.body.stmts, expressions);
+                }
+                if let Some(block) = &node.finally {
+                    collect(&block.stmts, expressions);
+                }
+            }
+            Stmt::Labeled(node) => collect_statement(&node.stmt, expressions),
+            // Expressions contain statements only inside excluded function expressions.
+            Stmt::LocalFunc(_)
+            | Stmt::Return(_)
+            | Stmt::Throw(_)
+            | Stmt::Rethrow(_)
+            | Stmt::Empty(_)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::LocalVar(_)
+            | Stmt::PatternDecl(_)
+            | Stmt::PatternAssign(_)
+            | Stmt::Assert(_)
+            | Stmt::Yield(_)
+            | Stmt::Expr(_)
+            | Stmt::Error(_) => {}
+        }
+    }
+
+    let mut expressions = Vec::new();
     match body {
-        FunctionBody::Block(block) => {
-            for statement in &block.stmts {
-                collector.visit_stmt(statement);
-            }
-        }
-        FunctionBody::Arrow(expression, _) => {
-            collector.expressions.push(expression.as_ref().clone())
-        }
+        FunctionBody::Block(block) => collect(&block.stmts, &mut expressions),
+        FunctionBody::Arrow(expression, _) => expressions.push(expression.as_ref()),
         FunctionBody::Native(_, _) => {}
     }
-    collector.expressions
+    expressions
 }
 
 fn collect_type_parameter_ids(
@@ -1542,13 +1563,61 @@ mod tests {
 
     #[test]
     fn finds_nested_returns_without_crossing_function_boundaries() {
-        let (program, errors) =
-            parse("void f() { if (true) { return 1; } for (;;) { return 2; } () { return 3; }; }");
+        let (program, errors) = parse(
+            "void f() {
+                if (true) { return 1; } else { return 2; }
+                for (;;) { return 3; }
+                while (true) { return 4; }
+                do { return 5; } while (true);
+                switch (1) { case 1: return 6; default: return 7; }
+                try { return 8; } catch (e) { return 9; } finally { return 10; }
+                label: { return 11; }
+                void local() { return 12; }
+                () { return 13; };
+                return () { return 14; };
+            }",
+        );
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!()
         };
         let returns = returned_expressions(function.body.as_ref().unwrap());
-        assert_eq!(returns.len(), 2);
+        assert_eq!(returns.len(), 12);
+        for (expression, expected) in returns
+            .iter()
+            .zip(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"])
+        {
+            assert!(matches!(expression, Expr::IntLit { value, .. } if value == expected));
+        }
+        assert!(matches!(returns[11], Expr::FuncExpr { .. }));
+    }
+
+    #[test]
+    fn returns_borrowed_block_and_arrow_expressions() {
+        let (program, errors) = parse("int block() { return 1; } int arrow() => 2;");
+        assert!(errors.is_empty(), "{errors:?}");
+        for declaration in &program.declarations {
+            let TopLevelDecl::Function(function) = declaration else {
+                panic!()
+            };
+            let body = function.body.as_ref().unwrap();
+            let expression = match body {
+                FunctionBody::Block(block) => {
+                    let Stmt::Return(ReturnStmt {
+                        value: Some(expression),
+                        ..
+                    }) = &block.stmts[0]
+                    else {
+                        panic!()
+                    };
+                    expression
+                }
+                FunctionBody::Arrow(expression, _) => expression.as_ref(),
+                FunctionBody::Native(_, _) => panic!(),
+            };
+            let returns = returned_expressions(body);
+            assert_eq!(returns.len(), 1);
+            assert!(std::ptr::eq(returns[0], expression));
+        }
     }
 }

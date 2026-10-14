@@ -10,6 +10,7 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AvoidNestedIf;
 
 /// pyramid_lint's default `max_nesting_level`: an `if` is flagged when its
@@ -17,10 +18,6 @@ pub struct AvoidNestedIf;
 const MAX_NESTING_LEVEL: usize = 2;
 
 impl Rule for AvoidNestedIf {
-    fn name(&self) -> &'static str {
-        "avoid-nested-if"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -33,12 +30,11 @@ impl Rule for AvoidNestedIf {
 fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match decl {
         TopLevelDecl::Function(f) => scan_opt_body(f.body.as_ref(), diags, ctx),
-        TopLevelDecl::Class(c) => c.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::Mixin(m) => m.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::MixinClass(mc) => mc.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::Enum(e) => e.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        TopLevelDecl::Extension(ext) => ext.members.iter().for_each(|m| scan_member(m, diags, ctx)),
-        _ => {}
+        _ => {
+            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
+                scan_member(member, diags, ctx);
+            }
+        }
     }
 }
 

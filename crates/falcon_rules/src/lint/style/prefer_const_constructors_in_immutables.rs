@@ -2,21 +2,17 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::lint::const_eval::{arguments_potentially_constant, potentially_constant_with_shadowed};
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, Rule, SemanticModel, SignatureIndex, Truth, TypeIndex,
-    evaluate_constant,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct PreferConstConstructorsInImmutables;
 
 impl Rule for PreferConstConstructorsInImmutables {
-    fn name(&self) -> &'static str {
-        "prefer-const-constructors-in-immutables"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
@@ -298,190 +294,6 @@ fn initializer_allows_const(
             args, allowed, shadowed, owner, fields, model, signatures,
         ),
         ConstructorInitializer::ThisCall { .. } => true,
-    }
-}
-
-fn arguments_potentially_constant(
-    args: &ArgList,
-    allowed: &HashSet<String>,
-    shadowed: &HashSet<String>,
-    owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> bool {
-    args.positional
-        .iter()
-        .chain(args.named.iter().map(|argument| &argument.value))
-        .all(|argument| {
-            potentially_constant_with_shadowed(
-                argument, allowed, shadowed, owner, fields, model, signatures,
-            )
-        })
-}
-
-pub(crate) fn potentially_constant(
-    expr: &Expr,
-    allowed: &HashSet<String>,
-    owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> bool {
-    potentially_constant_with_shadowed(expr, allowed, allowed, owner, fields, model, signatures)
-}
-
-fn potentially_constant_with_shadowed(
-    expr: &Expr,
-    allowed: &HashSet<String>,
-    shadowed: &HashSet<String>,
-    owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> bool {
-    let mut checker = PotentiallyConstant {
-        allowed,
-        shadowed,
-        owner,
-        fields,
-        model,
-        signatures,
-        valid: true,
-    };
-    checker.visit_expr(expr);
-    checker.valid
-}
-
-struct PotentiallyConstant<'a, 'model> {
-    allowed: &'a HashSet<String>,
-    shadowed: &'a HashSet<String>,
-    owner: &'a DeclarationIdentity,
-    fields: &'a HashMap<&'a str, &'a Expr>,
-    model: &'a SemanticModel<'model>,
-    signatures: &'a SignatureIndex,
-    valid: bool,
-}
-
-impl Visitor for PotentiallyConstant<'_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        if !self.valid {
-            return;
-        }
-        if !matches!(node, Expr::Call { .. } | Expr::New { .. })
-            && evaluate_constant(
-                node,
-                Some(self.owner),
-                self.fields,
-                self.model,
-                self.signatures,
-            )
-            .is_some()
-        {
-            return;
-        }
-        match node {
-            Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
-            | Expr::BoolLit { .. }
-            | Expr::NullLit { .. }
-            | Expr::SymbolLit { .. } => {}
-            Expr::Ident(identifier) => {
-                self.valid = self.allowed.contains(&identifier.name)
-                    || evaluate_constant(
-                        node,
-                        Some(self.owner),
-                        self.fields,
-                        self.model,
-                        self.signatures,
-                    )
-                    .is_some();
-            }
-            Expr::Call { callee, args, .. } => {
-                let shadowed = expression_segments(callee)
-                    .and_then(|segments| segments.into_iter().next())
-                    .is_some_and(|name| self.shadowed.contains(&name));
-                self.valid = !shadowed && const_constructor(callee, self.model, self.signatures);
-                if self.valid {
-                    self.visit_arguments(args);
-                }
-            }
-            Expr::New {
-                is_const: true,
-                args,
-                ..
-            } => self.visit_arguments(args),
-            Expr::StringLit(_)
-            | Expr::Unary { .. }
-            | Expr::Binary { .. }
-            | Expr::Conditional { .. }
-            | Expr::As { .. }
-            | Expr::Field { .. }
-            | Expr::NullAssert { .. }
-            | Expr::List { .. }
-            | Expr::Map { .. }
-            | Expr::Set { .. }
-            | Expr::Record { .. } => walk_expr(self, node),
-            _ => self.valid = false,
-        }
-    }
-}
-
-impl PotentiallyConstant<'_, '_> {
-    fn visit_arguments(&mut self, args: &ArgList) {
-        for argument in args
-            .positional
-            .iter()
-            .chain(args.named.iter().map(|argument| &argument.value))
-        {
-            self.visit_expr(argument);
-        }
-    }
-}
-
-fn const_constructor(
-    callee: &Expr,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> bool {
-    let Some(mut segments) = expression_segments(callee) else {
-        return false;
-    };
-    let (identity, constructor) = if let Some(identity) = model.resolve_dotted(&segments) {
-        (identity, "new".to_string())
-    } else {
-        let Some(constructor) = segments.pop() else {
-            return false;
-        };
-        let Some(identity) = model.resolve_dotted(&segments) else {
-            return false;
-        };
-        (identity, constructor)
-    };
-    signatures.declaration(&identity).is_some_and(|facts| {
-        facts
-            .constructors
-            .iter()
-            .any(|candidate| candidate.name == constructor && candidate.is_const)
-    })
-}
-
-fn expression_segments(expr: &Expr) -> Option<Vec<String>> {
-    let mut current = expr;
-    let mut segments = Vec::new();
-    loop {
-        match current {
-            Expr::Ident(identifier) => {
-                segments.push(identifier.name.clone());
-                segments.reverse();
-                return Some(segments);
-            }
-            Expr::Field { object, field, .. } => {
-                segments.push(field.name.clone());
-                current = object;
-            }
-            _ => return None,
-        }
     }
 }
 

@@ -29,13 +29,10 @@ use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{self, Visitor};
 use std::collections::HashSet;
 
+#[derive(Default)]
 pub struct PreferFinalFields;
 
 impl Rule for PreferFinalFields {
-    fn name(&self) -> &'static str {
-        "prefer-final-fields"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         // Suppress-only: if this file participates in a library whose writes we
         // cannot fully see, stay silent. That is an unresolved part in the known
@@ -62,22 +59,11 @@ impl Rule for PreferFinalFields {
 
         let mut diags = Vec::new();
         for decl in &program.declarations {
-            if let Some(members) = members_of(decl) {
+            if let Some(members) = crate::lint::declarations::members_of(decl) {
                 check_class(members, &written.names, ctx, &mut diags);
             }
         }
         diags
-    }
-}
-
-fn members_of(decl: &TopLevelDecl) -> Option<&[ClassMember]> {
-    match decl {
-        TopLevelDecl::Class(c) => Some(&c.members),
-        TopLevelDecl::Mixin(m) => Some(&m.members),
-        TopLevelDecl::MixinClass(mc) => Some(&mc.members),
-        TopLevelDecl::Enum(e) => Some(&e.members),
-        TopLevelDecl::ExtensionType(e) => Some(&e.members),
-        _ => None,
     }
 }
 

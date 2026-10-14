@@ -13,6 +13,7 @@
 //! constants (see `constant-identifier-names`) are covered by separate rules and
 //! are out of scope here.
 
+use crate::lint::naming::is_lower_camel_case;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -22,13 +23,10 @@ use falcon_syntax::visitor::{
     walk_top_level_decl,
 };
 
+#[derive(Default)]
 pub struct NonConstantIdentifierNames;
 
 impl Rule for NonConstantIdentifierNames {
-    fn name(&self) -> &'static str {
-        "non-constant-identifier-names"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -40,27 +38,6 @@ impl Rule for NonConstantIdentifierNames {
 }
 
 const MESSAGE: &str = "Name non-constant identifiers using lowerCamelCase.";
-
-/// lowerCamelCase per the analyzer's `isLowerCamelCase`: an all-underscore name
-/// (a wildcard) is allowed, leading underscores are ignored, then the remainder
-/// must start with a lowercase letter or `$` and contain no further underscores.
-/// A single uppercase letter is also accepted (mirrors the analyzer helper).
-fn is_lower_camel_case(name: &str) -> bool {
-    if !name.is_empty() && name.bytes().all(|b| b == b'_') {
-        return true;
-    }
-    if name.len() == 1 && name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
-        return true;
-    }
-    let rest = name.trim_start_matches('_');
-    let Some(first) = rest.chars().next() else {
-        return true;
-    };
-    if !(first.is_ascii_lowercase() || first == '$') {
-        return false;
-    }
-    rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '$')
-}
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
@@ -202,8 +179,6 @@ mod tests {
 
     #[test]
     fn descends_into_every_expression_kind() {
-        // Regression: the old hand-rolled walker only entered FuncExpr, Call,
-        // Binary, Await, Throw, Assign.value and Conditional branches.
         let cases = [
             "void f() { var l = [(int Bad_P) => 0]; }",
             "void f() { var s = {(int Bad_P) => 0}; }",

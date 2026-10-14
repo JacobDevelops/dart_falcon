@@ -17,13 +17,10 @@ use falcon_syntax::visitor::{
     walk_getter_decl, walk_method_decl, walk_setter_decl, walk_stmt,
 };
 
+#[derive(Default)]
 pub struct PreferAsyncAwait;
 
 impl Rule for PreferAsyncAwait {
-    fn name(&self) -> &'static str {
-        "prefer-async-await"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

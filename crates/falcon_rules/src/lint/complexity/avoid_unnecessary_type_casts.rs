@@ -6,13 +6,10 @@ use falcon_syntax::ast::Program;
 
 use crate::lint::semantic_type_operations::{TypeOperationKind, collect};
 
+#[derive(Default)]
 pub struct AvoidUnnecessaryTypeCasts;
 
 impl Rule for AvoidUnnecessaryTypeCasts {
-    fn name(&self) -> &'static str {
-        "avoid-unnecessary-type-casts"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(analysis) = collect(program, ctx) else {
             return Vec::new();
@@ -32,7 +29,7 @@ impl Rule for AvoidUnnecessaryTypeCasts {
                     return None;
                 }
                 Some(ctx.diagnostic(
-                    self.name(),
+                    "avoid-unnecessary-type-casts",
                     "Unnecessary type cast — variable is already known to be this type",
                     operation.span,
                 ))

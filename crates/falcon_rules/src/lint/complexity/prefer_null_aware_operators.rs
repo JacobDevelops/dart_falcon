@@ -11,13 +11,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct PreferNullAwareOperators;
 
 impl Rule for PreferNullAwareOperators {
-    fn name(&self) -> &'static str {
-        "prefer-null-aware-operators"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -29,30 +26,12 @@ impl Rule for PreferNullAwareOperators {
     }
 }
 
+use crate::lint::expressions::{null_check, text};
+
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
     ctx: &'s AnalyzeContext<'s>,
     source: &'s str,
-}
-
-/// Return the non-null operand of a `E == null` / `E != null` comparison, along
-/// with whether it was the equality (`==`) form.
-fn null_check(cond: &Expr) -> Option<(&Expr, bool)> {
-    let Expr::Binary {
-        op, left, right, ..
-    } = cond
-    else {
-        return None;
-    };
-    let is_eq = match op {
-        BinaryOp::EqEq => true,
-        BinaryOp::NotEq => false,
-        _ => return None,
-    };
-    match (left.as_ref(), right.as_ref()) {
-        (Expr::NullLit { .. }, other) | (other, Expr::NullLit { .. }) => Some((other, is_eq)),
-        _ => None,
-    }
 }
 
 /// The receiver of a direct member access, index, or method call — the part
@@ -65,15 +44,6 @@ fn access_receiver(expr: &Expr) -> Option<&Expr> {
             _ => None,
         },
         _ => None,
-    }
-}
-
-impl Collector<'_> {
-    fn text(&self, e: &Expr) -> String {
-        self.source[e.span().start..e.span().end]
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect()
     }
 }
 
@@ -96,7 +66,7 @@ impl Visitor for Collector<'_> {
             };
             if matches!(null_branch.as_ref(), Expr::NullLit { .. })
                 && let Some(receiver) = access_receiver(access_branch)
-                && self.text(receiver) == self.text(operand)
+                && text(receiver, self.source) == text(operand, self.source)
             {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-null-aware-operators",

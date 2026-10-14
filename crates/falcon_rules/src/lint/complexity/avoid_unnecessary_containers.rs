@@ -12,13 +12,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct AvoidUnnecessaryContainers;
 
 impl Rule for AvoidUnnecessaryContainers {
-    fn name(&self) -> &'static str {
-        "avoid-unnecessary-containers"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -36,7 +33,7 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
-        if let Some((name, args, span)) = widget_construction(node)
+        if let Some((name, args, span)) = crate::lint::flutter::widget_construction(node)
             && name == "Container"
             && args.positional.is_empty()
             && args.named.len() == 1
@@ -49,28 +46,5 @@ impl Visitor for Collector<'_> {
             ));
         }
         walk_expr(self, node);
-    }
-}
-
-/// Resolve a widget construction expressed as either an implicit call
-/// (`Container(...)`) or an explicit `new`/`const` (`Container(...)`).
-fn widget_construction(expr: &Expr) -> Option<(&str, &ArgList, &Span)> {
-    match expr {
-        Expr::New {
-            dart_type: DartType::Named(nt),
-            args,
-            span,
-            ..
-        } => nt.segments.last().map(|s| (s.name.as_str(), args, span)),
-        Expr::Call {
-            callee, args, span, ..
-        } => {
-            if let Expr::Ident(id) = callee.as_ref() {
-                Some((id.name.as_str(), args, span))
-            } else {
-                None
-            }
-        }
-        _ => None,
     }
 }

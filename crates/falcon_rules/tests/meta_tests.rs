@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use falcon_rules::meta::{RULE_METADATA, RuleKind, RuleSource, meta_for};
+use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
 fn committed_schema_matches_generator() {
@@ -28,17 +28,6 @@ fn metadata_names_are_unique() {
             "duplicate metadata entry: {}",
             meta.name
         );
-    }
-}
-
-#[test]
-fn metadata_names_match_rule_constructors() {
-    for meta in RULE_METADATA {
-        let name = match meta.kind {
-            RuleKind::File { make, .. } => make().name(),
-            RuleKind::CrossFile(make) => make().name(),
-        };
-        assert_eq!(name, meta.name);
     }
 }
 

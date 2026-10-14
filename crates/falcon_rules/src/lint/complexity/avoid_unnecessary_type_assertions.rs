@@ -6,6 +6,7 @@ use falcon_syntax::ast::Program;
 
 use crate::lint::semantic_type_operations::{TypeOperationKind, collect};
 
+#[derive(Default)]
 pub struct AvoidUnnecessaryTypeAssertions;
 
 fn same_type_or_raw_target(operand: &ResolvedType, target: &ResolvedType) -> bool {
@@ -22,10 +23,6 @@ fn same_type_or_raw_target(operand: &ResolvedType, target: &ResolvedType) -> boo
 }
 
 impl Rule for AvoidUnnecessaryTypeAssertions {
-    fn name(&self) -> &'static str {
-        "avoid-unnecessary-type-assertions"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(analysis) = collect(program, ctx) else {
             return Vec::new();
@@ -45,7 +42,7 @@ impl Rule for AvoidUnnecessaryTypeAssertions {
                     return None;
                 }
                 Some(ctx.diagnostic(
-                    self.name(),
+                    "avoid-unnecessary-type-assertions",
                     "Unnecessary type assertion — variable is already known to be this type",
                     operation.span,
                 ))

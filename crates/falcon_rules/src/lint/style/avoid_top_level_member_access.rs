@@ -17,13 +17,10 @@ use falcon_syntax::visitor::{
     walk_top_level_decl,
 };
 
+#[derive(Default)]
 pub struct AvoidTopLevelMemberAccess;
 
 impl Rule for AvoidTopLevelMemberAccess {
-    fn name(&self) -> &'static str {
-        "avoid-top-level-member-access"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let top_level_vars = program
             .declarations

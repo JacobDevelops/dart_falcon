@@ -2,10 +2,9 @@
 //!
 //! Rules are organized biome-style by group under `lint/<group>/<rule>.rs`
 //! (complexity, correctness, performance, style, suspicious). Each rule is a
-//! zero-sized struct implementing the `Rule` trait and registered via
-//! `RuleRegistry` in `falcon_analyze`. Upstream provenance is recorded per rule
-//! by the `source` field of its `RuleMeta` entry (see `meta.rs`). Cross-file
-//! rules live under `cross_file/`.
+//! zero-sized struct implementing `Rule`. The metadata table supplies constructors,
+//! execution identities, configuration defaults, and upstream provenance.
+//! Cross-file rules implement `CrossFileRule` and live under `cross_file/`.
 
 pub(crate) mod cross_file;
 pub mod lint;
@@ -37,13 +36,13 @@ pub fn rule_requires_resolution(name: &str) -> bool {
     })
 }
 
-pub fn requires_resolution(rules: &[Box<dyn Rule>]) -> bool {
-    rules
-        .iter()
-        .any(|rule| rule_requires_resolution(rule.name()))
+pub fn requires_resolution(rules: &[(&'static str, Box<dyn Rule>)]) -> bool {
+    rules.iter().any(|(name, _)| rule_requires_resolution(name))
 }
 
-fn resolve_rules(config: &FalconConfig) -> impl Iterator<Item = Box<dyn Rule>> + '_ {
+fn resolve_rules(
+    config: &FalconConfig,
+) -> impl Iterator<Item = (&'static str, Box<dyn Rule>)> + '_ {
     for warning in config_warnings(config) {
         eprintln!("{warning}");
     }
@@ -56,7 +55,7 @@ fn resolve_rules(config: &FalconConfig) -> impl Iterator<Item = Box<dyn Rule>> +
                 meta.domain_names(),
             ) =>
         {
-            Some(make())
+            Some((meta.name, make()))
         }
         _ => None,
     })
@@ -64,8 +63,8 @@ fn resolve_rules(config: &FalconConfig) -> impl Iterator<Item = Box<dyn Rule>> +
 
 pub fn build_registry(config: &FalconConfig) -> RuleRegistry {
     let mut registry = RuleRegistry::with_lookup(suppression_lookup);
-    for rule in resolve_rules(config) {
-        registry.register(rule);
+    for (name, rule) in resolve_rules(config) {
+        registry.register(name, rule);
     }
     registry
 }
@@ -240,21 +239,21 @@ fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut 
     }
 }
 
-pub fn all_rules() -> Vec<Box<dyn Rule>> {
+pub fn all_rules() -> Vec<(&'static str, Box<dyn Rule>)> {
     RULE_METADATA
         .iter()
         .filter_map(|meta| match meta.kind {
-            RuleKind::File { make, .. } => Some(make()),
+            RuleKind::File { make, .. } => Some((meta.name, make())),
             RuleKind::CrossFile(_) => None,
         })
         .collect()
 }
 
-pub fn all_cross_file_rules() -> Vec<Box<dyn CrossFileRule>> {
+pub fn all_cross_file_rules() -> Vec<(&'static str, Box<dyn CrossFileRule>)> {
     RULE_METADATA
         .iter()
         .filter_map(|meta| match meta.kind {
-            RuleKind::CrossFile(make) => Some(make()),
+            RuleKind::CrossFile(make) => Some((meta.name, make())),
             RuleKind::File { .. } => None,
         })
         .collect()

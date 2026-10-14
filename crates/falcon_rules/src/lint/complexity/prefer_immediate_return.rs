@@ -10,13 +10,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct PreferImmediateReturn;
 
 impl Rule for PreferImmediateReturn {
-    fn name(&self) -> &'static str {
-        "prefer-immediate-return"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -26,17 +23,11 @@ impl Rule for PreferImmediateReturn {
                         check_body(body, &mut diags, ctx);
                     }
                 }
-                TopLevelDecl::Class(class) => {
-                    for member in &class.members {
+                _ => {
+                    for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
                         check_member(member, &mut diags, ctx);
                     }
                 }
-                TopLevelDecl::Mixin(mixin) => {
-                    for member in &mixin.members {
-                        check_member(member, &mut diags, ctx);
-                    }
-                }
-                _ => {}
             }
         }
         diags
@@ -81,7 +72,6 @@ fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext
         }
     }
 
-    // Recurse into nested blocks
     for stmt in stmts {
         match stmt {
             Stmt::Block(block) => check_stmts(&block.stmts, diags, ctx),

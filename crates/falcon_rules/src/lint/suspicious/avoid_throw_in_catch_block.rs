@@ -13,13 +13,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
+#[derive(Default)]
 pub struct AvoidThrowInCatchBlock;
 
 impl Rule for AvoidThrowInCatchBlock {
-    fn name(&self) -> &'static str {
-        "avoid-throw-in-catch-block"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

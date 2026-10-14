@@ -14,13 +14,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::Visitor;
 
+#[derive(Default)]
 pub struct ProvideDeprecationMessage;
 
 impl Rule for ProvideDeprecationMessage {
-    fn name(&self) -> &'static str {
-        "provide-deprecation-message"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

@@ -11,13 +11,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct SlashForDocComments;
 
 impl Rule for SlashForDocComments {
-    fn name(&self) -> &'static str {
-        "slash-for-doc-comments"
-    }
-
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for start in doc_block_comment_starts(ctx.source) {

@@ -13,13 +13,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
+#[derive(Default)]
 pub struct CurlyBracesInFlowControlStructures;
 
 impl Rule for CurlyBracesInFlowControlStructures {
-    fn name(&self) -> &'static str {
-        "curly-braces-in-flow-control-structures"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

@@ -19,13 +19,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct BooleanPrefixes;
 
 impl Rule for BooleanPrefixes {
-    fn name(&self) -> &'static str {
-        "boolean-prefixes"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let prefixes = resolve_prefixes(ctx);
@@ -46,14 +43,11 @@ const MESSAGE: &str = "Boolean should be named with a valid prefix.";
 
 fn resolve_prefixes(ctx: &AnalyzeContext) -> Vec<String> {
     let mut prefixes: Vec<String> = DEFAULT_PREFIXES.iter().map(|s| s.to_string()).collect();
-    if let Some(list) = crate::meta::meta_for("boolean-prefixes")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "boolean-prefixes"))
-        .and_then(|o| o.get("valid_prefixes"))
-        .and_then(|v| v.as_array())
-    {
-        for p in list.iter().filter_map(|v| v.as_str()) {
-            prefixes.push(p.to_string());
-        }
+    if let Some(list) = crate::lint::options::strings(
+        crate::lint::options::for_rule(ctx, "boolean-prefixes"),
+        "valid_prefixes",
+    ) {
+        prefixes.extend(list.map(str::to_string));
     }
     prefixes
 }
@@ -62,11 +56,7 @@ fn is_bool_type(ty: Option<&DartType>) -> bool {
     matches!(ty, Some(DartType::Named(nt)) if nt.segments.len() == 1 && nt.segments[0].name == "bool")
 }
 
-fn is_override(annotations: &[Annotation]) -> bool {
-    annotations
-        .iter()
-        .any(|a| a.name.last().is_some_and(|id| id.name == "override"))
-}
+use crate::member_order::is_override;
 
 /// pyramid_lint strips a single leading underscore and then checks whether the
 /// name simply *starts with* a valid prefix (no camelCase boundary is required,
@@ -125,28 +115,12 @@ fn scan_top(
                 scan_body(body, diags, ctx, prefixes);
             }
         }
-        TopLevelDecl::Class(c) => c
-            .members
-            .iter()
-            .for_each(|m| scan_member(m, diags, ctx, prefixes)),
-        TopLevelDecl::Mixin(m) => m
-            .members
-            .iter()
-            .for_each(|m| scan_member(m, diags, ctx, prefixes)),
-        TopLevelDecl::MixinClass(mc) => mc
-            .members
-            .iter()
-            .for_each(|m| scan_member(m, diags, ctx, prefixes)),
-        TopLevelDecl::Enum(e) => e
-            .members
-            .iter()
-            .for_each(|m| scan_member(m, diags, ctx, prefixes)),
-        TopLevelDecl::Extension(ext) => ext
-            .members
-            .iter()
-            .for_each(|m| scan_member(m, diags, ctx, prefixes)),
         TopLevelDecl::Variable(v) => check_declarators(&v.declarators, diags, ctx, prefixes),
-        _ => {}
+        _ => {
+            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
+                scan_member(member, diags, ctx, prefixes);
+            }
+        }
     }
 }
 

@@ -15,13 +15,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AvoidReturningWidgets;
 
 impl Rule for AvoidReturningWidgets {
-    fn name(&self) -> &'static str {
-        "avoid-returning-widgets"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
@@ -34,22 +31,11 @@ impl Rule for AvoidReturningWidgets {
                         diags.push(ctx.diagnostic("avoid-returning-widgets", "Functions should not return Widget directly; extract to a separate widget class", f.span));
                     }
                 }
-                TopLevelDecl::Class(c) => {
-                    for member in &c.members {
+                _ => {
+                    for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
                         check_class_member(member, &mut diags, ctx);
                     }
                 }
-                TopLevelDecl::Mixin(m) => {
-                    for member in &m.members {
-                        check_class_member(member, &mut diags, ctx);
-                    }
-                }
-                TopLevelDecl::MixinClass(mc) => {
-                    for member in &mc.members {
-                        check_class_member(member, &mut diags, ctx);
-                    }
-                }
-                _ => {}
             }
         }
 

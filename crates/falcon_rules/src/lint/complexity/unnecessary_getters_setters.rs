@@ -13,32 +13,18 @@ use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use std::collections::HashMap;
 
+#[derive(Default)]
 pub struct UnnecessaryGettersSetters;
 
 impl Rule for UnnecessaryGettersSetters {
-    fn name(&self) -> &'static str {
-        "unnecessary-getters-setters"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
-            if let Some(members) = members_of(decl) {
+            if let Some(members) = crate::lint::declarations::members_of(decl) {
                 check_members(members, ctx, &mut diags);
             }
         }
         diags
-    }
-}
-
-fn members_of(decl: &TopLevelDecl) -> Option<&[ClassMember]> {
-    match decl {
-        TopLevelDecl::Class(c) => Some(&c.members),
-        TopLevelDecl::Mixin(m) => Some(&m.members),
-        TopLevelDecl::MixinClass(mc) => Some(&mc.members),
-        TopLevelDecl::Enum(e) => Some(&e.members),
-        TopLevelDecl::ExtensionType(e) => Some(&e.members),
-        _ => None,
     }
 }
 

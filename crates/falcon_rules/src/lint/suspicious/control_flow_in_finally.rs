@@ -15,13 +15,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
+#[derive(Default)]
 pub struct ControlFlowInFinally;
 
 impl Rule for ControlFlowInFinally {
-    fn name(&self) -> &'static str {
-        "control-flow-in-finally"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut finder = Finder {
             diags: Vec::new(),

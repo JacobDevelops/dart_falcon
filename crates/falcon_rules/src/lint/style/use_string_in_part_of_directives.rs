@@ -10,13 +10,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct UseStringInPartOfDirectives;
 
 impl Rule for UseStringInPartOfDirectives {
-    fn name(&self) -> &'static str {
-        "use-string-in-part-of-directives"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         if let Some(part_of) = &program.part_of_directive

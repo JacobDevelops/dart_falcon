@@ -12,13 +12,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct PreferInlinedAdds;
 
 impl Rule for PreferInlinedAdds {
-    fn name(&self) -> &'static str {
-        "prefer-inlined-adds"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

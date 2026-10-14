@@ -12,13 +12,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct UnnecessaryLate;
 
 impl Rule for UnnecessaryLate {
-    fn name(&self) -> &'static str {
-        "unnecessary-late"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
@@ -27,13 +24,11 @@ impl Rule for UnnecessaryLate {
                 TopLevelDecl::Variable(var) if var.is_late => {
                     flag_initialized(&var.declarators, ctx, &mut diags);
                 }
-                TopLevelDecl::Class(c) => static_late_fields(&c.members, ctx, &mut diags),
-                TopLevelDecl::Mixin(m) => static_late_fields(&m.members, ctx, &mut diags),
-                TopLevelDecl::MixinClass(mc) => static_late_fields(&mc.members, ctx, &mut diags),
-                TopLevelDecl::Enum(e) => static_late_fields(&e.members, ctx, &mut diags),
-                TopLevelDecl::Extension(e) => static_late_fields(&e.members, ctx, &mut diags),
-                TopLevelDecl::ExtensionType(e) => static_late_fields(&e.members, ctx, &mut diags),
-                _ => {}
+                _ => {
+                    if let Some(members) = crate::lint::declarations::members_of(decl) {
+                        static_late_fields(members, ctx, &mut diags);
+                    }
+                }
             }
         }
 

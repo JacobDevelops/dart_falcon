@@ -13,13 +13,10 @@ use falcon_syntax::visitor::{Visitor, walk_annotation, walk_dart_type};
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
+#[derive(Default)]
 pub struct UnnecessaryFlutterImports;
 
 impl Rule for UnnecessaryFlutterImports {
-    fn name(&self) -> &'static str {
-        "unnecessary-flutter-imports"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();

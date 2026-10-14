@@ -13,13 +13,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AvoidGlobalState;
 
 impl Rule for AvoidGlobalState {
-    fn name(&self) -> &'static str {
-        "avoid-global-state"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -31,10 +28,11 @@ impl Rule for AvoidGlobalState {
                         var.span,
                     ));
                 }
-                TopLevelDecl::Class(class) => check_static_fields(&class.members, &mut diags, ctx),
-                TopLevelDecl::Mixin(mixin) => check_static_fields(&mixin.members, &mut diags, ctx),
-                TopLevelDecl::MixinClass(mc) => check_static_fields(&mc.members, &mut diags, ctx),
-                _ => {}
+                _ => {
+                    if let Some(members) = crate::lint::declarations::members_of(decl) {
+                        check_static_fields(members, &mut diags, ctx);
+                    }
+                }
             }
         }
         diags

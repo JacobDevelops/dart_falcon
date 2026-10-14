@@ -7,19 +7,16 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct ProperSuperInitState;
 
 impl Rule for ProperSuperInitState {
-    fn name(&self) -> &'static str {
-        "proper-super-init-state"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let state = flutter_state();
+        let state = DeclarationIdentity::flutter("State");
         let mut diags = Vec::new();
         for declaration in &program.declarations {
             let TopLevelDecl::Class(class) = declaration else {
@@ -28,7 +25,9 @@ impl Rule for ProperSuperInitState {
             let Some(identity) = model.resolve_name(&class.name.name) else {
                 continue;
             };
-            if signatures.is_subtype_of(&interface(identity), &state, &model) != Truth::Yes {
+            if signatures.is_subtype_of(&ResolvedType::interface_identity(identity), &state, &model)
+                != Truth::Yes
+            {
                 continue;
             }
             for member in &class.members {
@@ -77,20 +76,4 @@ fn is_super_init_state_statement(statement: &Stmt) -> bool {
                     Expr::Field { object, field, .. }
                         if matches!(object.as_ref(), Expr::Super { .. })
                             && field.name == "initState"))
-}
-
-fn interface(identity: DeclarationIdentity) -> ResolvedType {
-    ResolvedType::Interface {
-        identity,
-        arguments: Vec::new(),
-        nullable: false,
-        extension_type: false,
-    }
-}
-
-fn flutter_state() -> DeclarationIdentity {
-    DeclarationIdentity::Package {
-        package: "flutter",
-        name: "State",
-    }
 }

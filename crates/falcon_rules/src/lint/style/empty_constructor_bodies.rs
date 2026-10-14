@@ -9,24 +9,15 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct EmptyConstructorBodies;
 
 impl Rule for EmptyConstructorBodies {
-    fn name(&self) -> &'static str {
-        "empty-constructor-bodies"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
-            let members = match decl {
-                TopLevelDecl::Class(c) => &c.members,
-                TopLevelDecl::Mixin(m) => &m.members,
-                TopLevelDecl::MixinClass(mc) => &mc.members,
-                TopLevelDecl::Enum(e) => &e.members,
-                TopLevelDecl::Extension(e) => &e.members,
-                TopLevelDecl::ExtensionType(e) => &e.members,
-                _ => continue,
+            let Some(members) = crate::lint::declarations::members_of(decl) else {
+                continue;
             };
             for member in members {
                 if let ClassMember::Constructor(c) = member {

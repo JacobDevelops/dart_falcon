@@ -15,13 +15,10 @@ use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{self, Visitor};
 
+#[derive(Default)]
 pub struct PreferFunctionDeclarationsOverVariables;
 
 impl Rule for PreferFunctionDeclarationsOverVariables {
-    fn name(&self) -> &'static str {
-        "prefer-function-declarations-over-variables"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             ctx,

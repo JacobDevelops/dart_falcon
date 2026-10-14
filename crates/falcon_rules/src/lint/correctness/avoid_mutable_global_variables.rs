@@ -11,13 +11,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AvoidMutableGlobalVariables;
 
 impl Rule for AvoidMutableGlobalVariables {
-    fn name(&self) -> &'static str {
-        "avoid-mutable-global-variables"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 

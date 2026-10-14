@@ -15,13 +15,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct MaxLinesForFunction;
 
 impl Rule for MaxLinesForFunction {
-    fn name(&self) -> &'static str {
-        "max-lines-for-function"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -31,19 +28,15 @@ impl Rule for MaxLinesForFunction {
     }
 }
 
-fn line_of(source: &str, offset: usize) -> usize {
-    let c = offset.min(source.len());
-    source[..c].bytes().filter(|&b| b == b'\n').count() + 1
-}
+use crate::lint::expressions::line_of;
 
 /// Read the `max_lines` option (default 100). Malformed/missing → default.
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("max-lines-for-function")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "max-lines-for-function"))
-        .and_then(|o| o.get("max_lines"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize)
-        .unwrap_or(100)
+    crate::lint::options::usize(
+        crate::lint::options::for_rule(ctx, "max-lines-for-function"),
+        "max_lines",
+    )
+    .unwrap_or(100)
 }
 
 fn check_function_lines(
@@ -78,32 +71,11 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         TopLevelDecl::Function(f) => {
             check_function_lines(&f.span, f.body.is_some(), diags, ctx);
         }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
+        _ => {
+            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
+                scan_member(member, diags, ctx);
             }
         }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Enum(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Extension(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        _ => {}
     }
 }
 

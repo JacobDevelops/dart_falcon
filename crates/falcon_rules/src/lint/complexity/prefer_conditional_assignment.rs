@@ -11,13 +11,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
+#[derive(Default)]
 pub struct PreferConditionalAssignment;
 
 impl Rule for PreferConditionalAssignment {
-    fn name(&self) -> &'static str {
-        "prefer-conditional-assignment"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -61,14 +58,7 @@ fn single_stmt(stmt: &Stmt) -> Option<&Stmt> {
     }
 }
 
-impl Collector<'_> {
-    fn text(&self, e: &Expr) -> String {
-        self.source[e.span().start..e.span().end]
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect()
-    }
-}
+use crate::lint::expressions::text;
 
 impl Visitor for Collector<'_> {
     fn visit_stmt(&mut self, node: &Stmt) {
@@ -82,7 +72,7 @@ impl Visitor for Collector<'_> {
                 op: AssignOp::Eq,
                 ..
             } = &es.expr
-            && self.text(target) == self.text(checked)
+            && text(target, self.source) == text(checked, self.source)
         {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-conditional-assignment",

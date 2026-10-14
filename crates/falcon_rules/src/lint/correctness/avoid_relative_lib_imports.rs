@@ -13,13 +13,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AvoidRelativeLibImports;
 
 impl Rule for AvoidRelativeLibImports {
-    fn name(&self) -> &'static str {
-        "avoid-relative-lib-imports"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for import in &program.imports {

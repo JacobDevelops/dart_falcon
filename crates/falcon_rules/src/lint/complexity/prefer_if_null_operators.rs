@@ -11,13 +11,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct PreferIfNullOperators;
 
 impl Rule for PreferIfNullOperators {
-    fn name(&self) -> &'static str {
-        "prefer-if-null-operators"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -29,39 +26,12 @@ impl Rule for PreferIfNullOperators {
     }
 }
 
+use crate::lint::expressions::{null_check, text};
+
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
     ctx: &'s AnalyzeContext<'s>,
     source: &'s str,
-}
-
-/// Return the non-null operand of a `E == null` / `E != null` comparison, along
-/// with whether it was the equality (`==`) form.
-fn null_check(cond: &Expr) -> Option<(&Expr, bool)> {
-    let Expr::Binary {
-        op, left, right, ..
-    } = cond
-    else {
-        return None;
-    };
-    let is_eq = match op {
-        BinaryOp::EqEq => true,
-        BinaryOp::NotEq => false,
-        _ => return None,
-    };
-    match (left.as_ref(), right.as_ref()) {
-        (Expr::NullLit { .. }, other) | (other, Expr::NullLit { .. }) => Some((other, is_eq)),
-        _ => None,
-    }
-}
-
-impl Collector<'_> {
-    fn text(&self, e: &Expr) -> String {
-        self.source[e.span().start..e.span().end]
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect()
-    }
 }
 
 impl Visitor for Collector<'_> {
@@ -77,7 +47,7 @@ impl Visitor for Collector<'_> {
             // `x == null ? y : x` keeps `x` in the else branch;
             // `x != null ? x : y` keeps `x` in the then branch.
             let fallthrough = if is_eq { else_expr } else { then_expr };
-            if self.text(operand) == self.text(fallthrough) {
+            if text(operand, self.source) == text(fallthrough, self.source) {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-if-null-operators",
                     "Prefer using the if-null operator '??'.",

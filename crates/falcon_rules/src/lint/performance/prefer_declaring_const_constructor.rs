@@ -8,15 +8,12 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::style::prefer_const_constructors_in_immutables::potentially_constant;
+use crate::lint::const_eval::{arguments_potentially_constant, potentially_constant};
 
+#[derive(Default)]
 pub struct PreferDeclaringConstConstructor;
 
 impl Rule for PreferDeclaringConstConstructor {
-    fn name(&self) -> &'static str {
-        "prefer-declaring-const-constructor"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
@@ -176,6 +173,7 @@ fn constructor_candidate(
                     || !arguments_potentially_constant(
                         args,
                         &parameters,
+                        &parameters,
                         owner,
                         fields,
                         model,
@@ -193,6 +191,7 @@ fn constructor_candidate(
                 if !const_names.contains(target)
                     || !arguments_potentially_constant(
                         args,
+                        &parameters,
                         &parameters,
                         owner,
                         fields,
@@ -270,28 +269,7 @@ fn constructor_const(
     signatures: &SignatureIndex,
 ) -> bool {
     (*identity == DeclarationIdentity::OBJECT && name == "new")
-        || signatures.declaration(identity).is_some_and(|facts| {
-            facts
-                .constructors
-                .iter()
-                .any(|constructor| constructor.name == name && constructor.is_const)
-        })
-}
-
-fn arguments_potentially_constant(
-    args: &ArgList,
-    parameters: &HashSet<String>,
-    owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> bool {
-    args.positional
-        .iter()
-        .chain(args.named.iter().map(|argument| &argument.value))
-        .all(|argument| {
-            potentially_constant(argument, parameters, owner, fields, model, signatures)
-        })
+        || signatures.is_const_constructor(identity, name)
 }
 
 fn constructor_name(constructor: &ConstructorDecl) -> &str {

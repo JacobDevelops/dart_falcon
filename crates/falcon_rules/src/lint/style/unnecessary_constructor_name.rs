@@ -11,13 +11,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_constructor_decl, walk_expr};
 
+#[derive(Default)]
 pub struct UnnecessaryConstructorName;
 
 impl Rule for UnnecessaryConstructorName {
-    fn name(&self) -> &'static str {
-        "unnecessary-constructor-name"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

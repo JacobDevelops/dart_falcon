@@ -175,7 +175,7 @@ class AppConfig {
 "#,
 ];
 
-fn run_all_rules_on_source(rules: &[Box<dyn Rule>], path: &Path, source: &str) {
+fn run_all_rules_on_source(rules: &[(&'static str, Box<dyn Rule>)], path: &Path, source: &str) {
     let (program, _) = parse(source);
     let config = FalconConfig::default();
     let ctx = AnalyzeContext {
@@ -187,7 +187,7 @@ fn run_all_rules_on_source(rules: &[Box<dyn Rule>], path: &Path, source: &str) {
         signatures: None,
         library: None,
     };
-    for rule in rules {
+    for (_, rule) in rules {
         let _ = rule.analyze(&program, &ctx);
     }
 }
@@ -250,9 +250,8 @@ fn bench_per_rule(c: &mut Criterion) {
     let (program, _) = parse(snippet);
     let config = FalconConfig::default();
 
-    for rule in &rules {
-        let rule_name = rule.name().to_string();
-        c.bench_with_input(BenchmarkId::new("rule", &rule_name), &rule_name, |b, _| {
+    for (rule_name, rule) in &rules {
+        c.bench_with_input(BenchmarkId::new("rule", rule_name), rule_name, |b, _| {
             b.iter(|| {
                 let ctx = AnalyzeContext {
                     file_path: &path,

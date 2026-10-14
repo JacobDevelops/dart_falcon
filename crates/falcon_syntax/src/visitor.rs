@@ -961,7 +961,8 @@ pub fn walk_formal_param<V: Visitor>(v: &mut V, node: &FormalParam) {
     }
 }
 
-fn walk_function_body<V: Visitor>(v: &mut V, node: &FunctionBody) {
+/// Visits body contents without introducing a lexical scope.
+pub fn walk_function_body<V: Visitor>(v: &mut V, node: &FunctionBody) {
     match node {
         FunctionBody::Block(b) => {
             for s in &b.stmts {

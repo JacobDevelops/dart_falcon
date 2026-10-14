@@ -12,13 +12,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
+#[derive(Default)]
 pub struct AvoidEmptyElse;
 
 impl Rule for AvoidEmptyElse {
-    fn name(&self) -> &'static str {
-        "avoid-empty-else"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

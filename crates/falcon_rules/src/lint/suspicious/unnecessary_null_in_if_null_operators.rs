@@ -11,13 +11,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct UnnecessaryNullInIfNullOperators;
 
 impl Rule for UnnecessaryNullInIfNullOperators {
-    fn name(&self) -> &'static str {
-        "unnecessary-null-in-if-null-operators"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

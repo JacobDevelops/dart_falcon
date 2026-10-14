@@ -81,13 +81,14 @@ fn parse_expectations(source: &str) -> Vec<Expectation> {
 
 /// Run a single rule over `source`; return (rule-id, line) per diagnostic.
 fn run_rule(
+    rule_name: &str,
     rule: &dyn Rule,
     file: &Path,
     source: &str,
     config: &FalconConfig,
 ) -> Vec<(String, usize)> {
     let (program, errors) = parse(source);
-    let resolver_dependent = rule_requires_resolution(rule.name());
+    let resolver_dependent = rule_requires_resolution(rule_name);
     let types = resolver_dependent.then(|| TypeIndex::from_program(&program));
     let identity_sources = [IdentitySource {
         path: file,
@@ -203,11 +204,11 @@ fn registered_rules_have_real_corpus_coverage() {
     let corpus = corpus_dir();
     let rules = all_rules();
     let cross_file_rules = all_cross_file_rules();
-    let cross_file: HashSet<&str> = cross_file_rules.iter().map(|rule| rule.name()).collect();
+    let cross_file: HashSet<&str> = cross_file_rules.iter().map(|(name, _)| *name).collect();
     let known_stubs: HashSet<&str> = KNOWN_STUB_RULES.iter().copied().collect();
     let registered: HashSet<&str> = rules
         .iter()
-        .map(|rule| rule.name())
+        .map(|(name, _)| *name)
         .chain(cross_file.iter().copied())
         .collect();
     let mut failures = Vec::new();
@@ -453,7 +454,10 @@ fn corpus_marker_detection_is_specific() {
 #[test]
 fn corpus_matches_expectations() {
     let rules = all_rules();
-    let by_name: HashMap<&str, &dyn Rule> = rules.iter().map(|r| (r.name(), r.as_ref())).collect();
+    let by_name: HashMap<&str, &dyn Rule> = rules
+        .iter()
+        .map(|(name, rule)| (*name, rule.as_ref()))
+        .collect();
 
     let corpus = corpus_dir();
     let mut rule_dirs: Vec<PathBuf> = fs::read_dir(&corpus)
@@ -468,8 +472,10 @@ fn corpus_matches_expectations() {
     let mut total_expectations = 0usize;
     let mut total_files = 0usize;
 
-    let cross_file_rule_names: std::collections::HashSet<&str> =
-        all_cross_file_rules().iter().map(|r| r.name()).collect();
+    let cross_file_rule_names: std::collections::HashSet<&str> = all_cross_file_rules()
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
 
     for dir in &rule_dirs {
         let rule_name = dir.file_name().unwrap().to_string_lossy().to_string();
@@ -500,7 +506,7 @@ fn corpus_matches_expectations() {
                 .collect();
             total_expectations += expectations.len();
 
-            let mut diag_lines: Vec<usize> = run_rule(*rule, &file, &source, &config)
+            let mut diag_lines: Vec<usize> = run_rule(&rule_name, *rule, &file, &source, &config)
                 .into_iter()
                 .filter(|(r, _)| *r == rule_name)
                 .map(|(_, line)| line)
@@ -724,12 +730,12 @@ fn cross_file_corpus_matches_expectations() {
     let mut failures: Vec<String> = Vec::new();
     let mut total_expectations = 0usize;
 
-    for rule in all_cross_file_rules() {
-        let dir = corpus.join(rule.name()).join("cross-file");
+    for (rule_name, rule) in all_cross_file_rules() {
+        let dir = corpus.join(rule_name).join("cross-file");
         assert!(
             dir.is_dir(),
             "cross-file rule `{}` is missing its corpus/<rule>/cross-file/ fixture",
-            rule.name()
+            rule_name
         );
 
         for project in cross_file_project_dirs(&dir) {
@@ -772,7 +778,7 @@ fn cross_file_corpus_matches_expectations() {
             let mut expectations: Vec<(String, usize)> = Vec::new();
             for (path, source) in &fixture_sources {
                 for exp in parse_expectations(source) {
-                    if exp.rule == rule.name() {
+                    if exp.rule == rule_name {
                         total_expectations += 1;
                         expectations.push((path.to_string_lossy().into_owned(), exp.line));
                     }
@@ -782,7 +788,7 @@ fn cross_file_corpus_matches_expectations() {
             let mut diag_keys: Vec<(String, usize)> = rule
                 .analyze_project(&files, &config)
                 .into_iter()
-                .filter(|d| d.rule == rule.name())
+                .filter(|d| d.rule == rule_name)
                 .map(|d| {
                     (
                         d.file_path.clone(),
@@ -804,18 +810,14 @@ fn cross_file_corpus_matches_expectations() {
                 } else {
                     failures.push(format!(
                         "MISS  {}:{} — `{}` expected but not emitted",
-                        exp.0,
-                        exp.1,
-                        rule.name()
+                        exp.0, exp.1, rule_name
                     ));
                 }
             }
             for key in diag_keys {
                 failures.push(format!(
                     "EXTRA {}:{} — `{}` fired without a matching annotation",
-                    key.0,
-                    key.1,
-                    rule.name()
+                    key.0, key.1, rule_name
                 ));
             }
         }
@@ -847,11 +849,10 @@ fn resolver_dependent_per_file_project_corpus() {
     let mut failures: Vec<String> = Vec::new();
     let mut total_expectations = 0usize;
 
-    for rule in rules
+    for (rule_name, rule) in rules
         .iter()
-        .filter(|rule| rule_requires_resolution(rule.name()))
+        .filter(|(name, _)| rule_requires_resolution(name))
     {
-        let rule_name = rule.name();
         let dir = corpus.join(rule_name).join("project");
         if !dir.is_dir() {
             continue;
@@ -906,13 +907,13 @@ fn resolver_dependent_per_file_project_corpus() {
             let mut diag_lines: Vec<usize> = rule
                 .analyze(programs[i], &ctx)
                 .into_iter()
-                .filter(|d| d.rule == rule_name)
+                .filter(|d| d.rule == *rule_name)
                 .map(|d| byte_offset_to_line(&sources[i], d.span.start))
                 .collect();
 
             let expectations: Vec<usize> = parse_expectations(&sources[i])
                 .into_iter()
-                .filter(|e| e.rule == rule_name)
+                .filter(|e| e.rule == *rule_name)
                 .map(|e| e.line)
                 .collect();
             total_expectations += expectations.len();

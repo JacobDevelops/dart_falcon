@@ -20,13 +20,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct UseDesignSystemItem;
 
 impl Rule for UseDesignSystemItem {
-    fn name(&self) -> &'static str {
-        "use-design-system-item"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         // Config-driven: with no configured items the rule is a no-op.
         let items = parse_config_items(ctx);
@@ -45,13 +42,7 @@ impl Rule for UseDesignSystemItem {
 /// Read the rule's `options["items"]` as `(class_name, use_instead)` pairs.
 /// Any missing or malformed config yields an empty list (the rule then does nothing).
 fn parse_config_items(ctx: &AnalyzeContext) -> Vec<(String, Option<String>)> {
-    // Look up options under the rule's own group so a misplaced config entry is
-    // ignored, staying consistent with severity resolution.
-    let Some(group) = crate::meta::meta_for("use-design-system-item").map(|m| m.group) else {
-        return Vec::new();
-    };
-    let Some(items_array) = ctx
-        .rule_options(group.as_str(), "use-design-system-item")
+    let Some(items_array) = crate::lint::options::for_rule(ctx, "use-design-system-item")
         .and_then(|opts| opts.get("items"))
         .and_then(|v| v.as_array())
     else {
@@ -83,32 +74,11 @@ fn scan_top(
                 scan_body(body, diags, ctx, items);
             }
         }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx, items);
+        _ => {
+            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
+                scan_member(member, diags, ctx, items);
             }
         }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx, items);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx, items);
-            }
-        }
-        TopLevelDecl::Enum(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx, items);
-            }
-        }
-        TopLevelDecl::Extension(ext) => {
-            for m in &ext.members {
-                scan_member(m, diags, ctx, items);
-            }
-        }
-        _ => {}
     }
 }
 

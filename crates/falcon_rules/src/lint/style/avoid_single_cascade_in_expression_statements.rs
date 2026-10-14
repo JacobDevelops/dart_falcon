@@ -10,13 +10,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
+#[derive(Default)]
 pub struct AvoidSingleCascadeInExpressionStatements;
 
 impl Rule for AvoidSingleCascadeInExpressionStatements {
-    fn name(&self) -> &'static str {
-        "avoid-single-cascade-in-expression-statements"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

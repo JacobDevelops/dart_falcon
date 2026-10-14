@@ -1,5 +1,6 @@
 //! Require package names to be valid `lower_case_with_underscores` identifiers.
 
+use crate::lint::naming::is_snake_case;
 use std::path::Path;
 
 use falcon_analyze::{CrossFileRule, ProjectFile};
@@ -9,15 +10,12 @@ use serde_yaml::Value;
 
 use super::{project_pubspecs, yaml_string_span};
 
+#[derive(Default)]
 pub struct PackageNames;
 
 const NAME: &str = "package-names";
 
 impl CrossFileRule for PackageNames {
-    fn name(&self) -> &'static str {
-        NAME
-    }
-
     fn analyze_project(&self, files: &[ProjectFile], _config: &FalconConfig) -> Vec<Diagnostic> {
         project_pubspecs(files)
             .into_iter()
@@ -48,12 +46,7 @@ fn check_pubspec(path: &Path) -> Option<Diagnostic> {
 
 fn is_valid_package_name(name: &str) -> bool {
     let identifier = name.trim_start_matches('_');
-    let mut bytes = identifier.bytes();
-    let Some(first) = bytes.next() else {
-        return false;
-    };
-    first.is_ascii_lowercase()
-        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    is_snake_case(identifier)
         && !identifier.ends_with('_')
         && !identifier.contains("__")
         && !is_reserved_word(name)

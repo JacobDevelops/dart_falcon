@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use falcon_syntax::ast::*;
 
-use crate::resolve::expression_segments;
+use crate::resolve::{expression_segments, resolve_call_constructor};
 use crate::{DeclarationIdentity, QualifiedName, ResolvedType, SemanticModel, SignatureIndex};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -171,9 +171,9 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 )
             }
             Expr::Call { callee, args, .. } => {
-                let (identity, constructor) = resolve_call_constructor(callee, &self.model)?;
+                let (identity, constructor) = resolve_call_constructor(callee, &self.model, true)?;
                 self.call(
-                    const_constructor_identity(identity, &constructor, self.signatures)?,
+                    const_constructor_identity(identity, constructor, self.signatures)?,
                     args,
                 )
             }
@@ -372,30 +372,14 @@ fn decode_string(node: &StringLitNode) -> Option<String> {
     Some(output)
 }
 
-fn resolve_call_constructor(
-    callee: &Expr,
-    model: &SemanticModel<'_>,
-) -> Option<(DeclarationIdentity, String)> {
-    let mut segments = expression_segments(callee, true)?;
-    if let Some(identity) = model.resolve_dotted(&segments) {
-        return Some((identity, "new".to_string()));
-    }
-    let constructor = segments.pop()?;
-    model
-        .resolve_name(QualifiedName::from_segments(&segments)?)
-        .map(|identity| (identity, constructor.to_string()))
-}
-
 fn const_constructor_identity(
     identity: DeclarationIdentity,
     constructor: &str,
     signatures: &SignatureIndex,
 ) -> Option<String> {
-    signatures
-        .declaration(&identity)?
-        .constructors
-        .iter()
-        .find(|facts| facts.name == constructor && facts.is_const)?;
+    if !signatures.is_const_constructor(&identity, constructor) {
+        return None;
+    }
     Some(format!("{identity:?}::{constructor}"))
 }
 

@@ -10,13 +10,10 @@ use falcon_syntax::ast::*;
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
+#[derive(Default)]
 pub struct NoSelfComparisons;
 
 impl Rule for NoSelfComparisons {
-    fn name(&self) -> &'static str {
-        "no-self-comparisons"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
@@ -118,14 +115,4 @@ fn scalar_type(ty: &ResolvedType) -> bool {
     )
 }
 
-/// `None` when the span is out of bounds or off a UTF-8 boundary, so a bad span
-/// cannot panic or make two different operands normalize alike.
-fn normalized(source: &str, span: &Span) -> Option<String> {
-    Some(
-        source
-            .get(span.start..span.end)?
-            .chars()
-            .filter(|character| !character.is_whitespace())
-            .collect(),
-    )
-}
+use crate::lint::expressions::normalized;

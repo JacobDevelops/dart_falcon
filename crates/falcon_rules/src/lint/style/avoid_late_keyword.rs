@@ -12,13 +12,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_local_var, walk_top_level_decl};
 
+#[derive(Default)]
 pub struct AvoidLateKeyword;
 
 impl Rule for AvoidLateKeyword {
-    fn name(&self) -> &'static str {
-        "avoid-late-keyword"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

@@ -11,13 +11,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct UnnecessaryLibraryName;
 
 impl Rule for UnnecessaryLibraryName {
-    fn name(&self) -> &'static str {
-        "unnecessary-library-name"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         if let Some(lib) = &program.library_directive

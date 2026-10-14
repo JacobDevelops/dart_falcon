@@ -11,13 +11,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AvoidReturnTypesOnSetters;
 
 impl Rule for AvoidReturnTypesOnSetters {
-    fn name(&self) -> &'static str {
-        "avoid-return-types-on-setters"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
@@ -34,13 +31,11 @@ impl Rule for AvoidReturnTypesOnSetters {
                         func.name.span,
                     ));
                 }
-                TopLevelDecl::Class(c) => check_members(&c.members, ctx, &mut diags),
-                TopLevelDecl::Mixin(m) => check_members(&m.members, ctx, &mut diags),
-                TopLevelDecl::MixinClass(mc) => check_members(&mc.members, ctx, &mut diags),
-                TopLevelDecl::Enum(e) => check_members(&e.members, ctx, &mut diags),
-                TopLevelDecl::Extension(e) => check_members(&e.members, ctx, &mut diags),
-                TopLevelDecl::ExtensionType(e) => check_members(&e.members, ctx, &mut diags),
-                _ => {}
+                _ => {
+                    if let Some(members) = crate::lint::declarations::members_of(decl) {
+                        check_members(members, ctx, &mut diags);
+                    }
+                }
             }
         }
 

@@ -23,6 +23,7 @@ use falcon_syntax::token::TokenKind;
 
 use super::{canonical_or_lexical, detect_package, is_under_lib, resolve_directive_uri};
 
+#[derive(Default)]
 pub struct UnusedCode;
 
 const NAME: &str = "unused-code";
@@ -40,10 +41,6 @@ struct Candidate {
 }
 
 impl CrossFileRule for UnusedCode {
-    fn name(&self) -> &'static str {
-        NAME
-    }
-
     fn analyze_project(&self, files: &[ProjectFile], _config: &FalconConfig) -> Vec<Diagnostic> {
         let pkg = detect_package(files);
 

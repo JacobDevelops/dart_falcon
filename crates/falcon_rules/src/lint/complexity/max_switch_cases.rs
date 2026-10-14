@@ -16,13 +16,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
+#[derive(Default)]
 pub struct MaxSwitchCases;
 
 impl Rule for MaxSwitchCases {
-    fn name(&self) -> &'static str {
-        "max-switch-cases"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -45,12 +42,11 @@ fn count_non_default_cases(switch_stmt: &SwitchStmt) -> usize {
 
 /// Read the `max_cases` option (default 10). Malformed/missing → default.
 fn max_cases_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("max-switch-cases")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "max-switch-cases"))
-        .and_then(|o| o.get("max_cases"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize)
-        .unwrap_or(10)
+    crate::lint::options::usize(
+        crate::lint::options::for_rule(ctx, "max-switch-cases"),
+        "max_cases",
+    )
+    .unwrap_or(10)
 }
 
 struct Collector<'a, 'ctx> {

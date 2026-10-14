@@ -10,13 +10,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct InvalidRuntimeCheckWithJsInteropTypes;
 
 impl Rule for InvalidRuntimeCheckWithJsInteropTypes {
-    fn name(&self) -> &'static str {
-        "invalid-runtime-check-with-js-interop-types"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();

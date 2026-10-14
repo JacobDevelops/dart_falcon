@@ -20,6 +20,7 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct PreferCorrectIdentifierLength;
 
 /// Resolved options for one analysis pass. dcl defaults: min 3, max 300, no
@@ -33,31 +34,14 @@ struct IdentCfg {
 }
 
 fn ident_cfg(ctx: &AnalyzeContext) -> IdentCfg {
-    let opts = crate::meta::meta_for("prefer-correct-identifier-length")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "prefer-correct-identifier-length"));
-
-    let min_length = opts
-        .and_then(|o| o.get("min_length"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize)
-        .unwrap_or(3);
-
-    let max_length = opts
-        .and_then(|o| o.get("max_length"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize)
-        .unwrap_or(300);
-
-    let exceptions: HashSet<String> = opts
-        .and_then(|o| o.get("exceptions"))
-        .and_then(|v| v.as_array())
-        .map(|list| {
-            list.iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| s.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
+    let opts = crate::lint::options::for_rule(ctx, "prefer-correct-identifier-length");
+    let min_length = crate::lint::options::usize(opts, "min_length").unwrap_or(3);
+    let max_length = crate::lint::options::usize(opts, "max_length").unwrap_or(300);
+    let exceptions = crate::lint::options::strings(opts, "exceptions")
+        .into_iter()
+        .flatten()
+        .map(str::to_string)
+        .collect();
 
     IdentCfg {
         min_length,
@@ -67,10 +51,6 @@ fn ident_cfg(ctx: &AnalyzeContext) -> IdentCfg {
 }
 
 impl Rule for PreferCorrectIdentifierLength {
-    fn name(&self) -> &'static str {
-        "prefer-correct-identifier-length"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let cfg = ident_cfg(ctx);
@@ -88,19 +68,16 @@ impl Rule for PreferCorrectIdentifierLength {
                         check_ident(&decl.name, &mut diags, ctx, &cfg);
                     }
                 }
-                TopLevelDecl::Class(class) => check_members(&class.members, &mut diags, ctx, &cfg),
-                TopLevelDecl::Mixin(mixin) => check_members(&mixin.members, &mut diags, ctx, &cfg),
-                TopLevelDecl::MixinClass(mc) => check_members(&mc.members, &mut diags, ctx, &cfg),
-                TopLevelDecl::Extension(ext) => check_members(&ext.members, &mut diags, ctx, &cfg),
                 TopLevelDecl::Enum(e) => {
                     // Enum constants are checked as declarations…
                     for variant in &e.variants {
                         check_ident(&variant.name, &mut diags, ctx, &cfg);
                     }
-                    // …and any getters/setters/fields the enum declares.
-                    check_members(&e.members, &mut diags, ctx, &cfg);
                 }
                 _ => {}
+            }
+            if let Some(members) = crate::lint::declarations::members_of(decl) {
+                check_members(members, &mut diags, ctx, &cfg);
             }
         }
         diags

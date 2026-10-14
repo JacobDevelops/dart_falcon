@@ -10,13 +10,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AvoidRedundantAsync;
 
 impl Rule for AvoidRedundantAsync {
-    fn name(&self) -> &'static str {
-        "avoid-redundant-async"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
@@ -27,8 +24,8 @@ impl Rule for AvoidRedundantAsync {
                         diags.push(diag);
                     }
                 }
-                TopLevelDecl::Class(class_decl) => {
-                    for member in &class_decl.members {
+                _ => {
+                    for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
                         if let ClassMember::Method(method_decl) = member
                             && let Some(diag) = check_method_async(method_decl, ctx)
                         {
@@ -36,7 +33,6 @@ impl Rule for AvoidRedundantAsync {
                         }
                     }
                 }
-                _ => {}
             }
         }
 

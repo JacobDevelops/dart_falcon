@@ -17,17 +17,14 @@ use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 use std::collections::HashMap;
 
+#[derive(Default)]
 pub struct UseSuperParameters;
 
 impl Rule for UseSuperParameters {
-    fn name(&self) -> &'static str {
-        "use-super-parameters"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
-            if let Some(members) = members_of(decl) {
+            if let Some(members) = crate::lint::declarations::members_of(decl) {
                 for member in members {
                     if let ClassMember::Constructor(ctor) = member {
                         check_ctor(ctor, ctx, &mut diags);
@@ -36,16 +33,6 @@ impl Rule for UseSuperParameters {
             }
         }
         diags
-    }
-}
-
-fn members_of(decl: &TopLevelDecl) -> Option<&[ClassMember]> {
-    match decl {
-        TopLevelDecl::Class(c) => Some(&c.members),
-        TopLevelDecl::MixinClass(mc) => Some(&mc.members),
-        TopLevelDecl::Enum(e) => Some(&e.members),
-        TopLevelDecl::ExtensionType(e) => Some(&e.members),
-        _ => None,
     }
 }
 

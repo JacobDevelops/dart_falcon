@@ -22,7 +22,7 @@ pub fn with_rules_stack<T: Send>(f: impl FnOnce() -> T + Send) -> T {
 }
 
 pub struct RuleRegistry {
-    rules: Vec<Box<dyn Rule>>,
+    rules: Vec<(&'static str, Box<dyn Rule>)>,
     lookup: RuleLookup,
 }
 
@@ -47,11 +47,12 @@ impl RuleRegistry {
         }
     }
 
-    pub fn register(&mut self, rule: Box<dyn Rule>) {
-        self.rules.push(rule);
+    /// Register the canonical name supplied by the caller's metadata table.
+    pub fn register(&mut self, name: &'static str, rule: Box<dyn Rule>) {
+        self.rules.push((name, rule));
     }
 
-    pub fn rules(&self) -> &[Box<dyn Rule>] {
+    pub fn rules(&self) -> &[(&'static str, Box<dyn Rule>)] {
         &self.rules
     }
 
@@ -71,10 +72,10 @@ impl RuleRegistry {
         let diagnostics: Vec<Diagnostic> = self
             .rules
             .iter()
-            .flat_map(|rule| {
-                let span = debug_span!("run_rule", rule = rule.name());
+            .flat_map(|(name, rule)| {
+                let span = debug_span!("run_rule", rule = name);
                 let _enter = span.enter();
-                debug!(rule = rule.name(), "running rule");
+                debug!(rule = name, "running rule");
                 rule.analyze(program, ctx)
             })
             .collect();

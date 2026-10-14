@@ -25,7 +25,7 @@ pub use resolve::{
     LibraryId, LibrarySource, MemberFacts, MemberKind, MemberResult, NameIdentity, PackageIdentity,
     ParameterOwner, QualifiedName, ResolvedSignature, ResolvedType, SemanticModel, SignatureIndex,
     Truth, TypeEnvironment, TypeIndex, TypeParameterId, TypeParameterScope, canonical_or_lexical,
-    group_libraries, import_path, library_unit,
+    expression_segments, group_libraries, import_path, library_unit, resolve_call_constructor,
 };
 pub use rule::Rule;
 pub use suppressions::{FileSuppressions, RuleLookup};

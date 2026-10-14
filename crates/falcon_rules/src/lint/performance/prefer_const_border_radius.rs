@@ -12,13 +12,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct PreferConstBorderRadius;
 
 impl Rule for PreferConstBorderRadius {
-    fn name(&self) -> &'static str {
-        "prefer-const-border-radius"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -101,7 +98,7 @@ fn all_border_radii_equal(args: &ArgList) -> bool {
     }
 }
 
-fn extract_radius_value(expr: &Expr) -> Option<String> {
+fn extract_radius_value(expr: &Expr) -> Option<&str> {
     if let Expr::Call { callee, args, .. } = expr
         && let Expr::Field { object, field, .. } = callee.as_ref()
         && let Expr::Ident(ident) = object.as_ref()
@@ -109,19 +106,12 @@ fn extract_radius_value(expr: &Expr) -> Option<String> {
         && field.name == "circular"
         && args.positional.len() == 1
     {
-        return expr_to_string(&args.positional[0]);
+        return scalar_text(&args.positional[0]);
     }
     None
 }
 
-fn expr_to_string(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::IntLit { value, .. } => Some(value.clone()),
-        Expr::DoubleLit { value, .. } => Some(value.clone()),
-        Expr::Ident(id) => Some(id.name.clone()),
-        _ => None,
-    }
-}
+use crate::lint::expressions::scalar_text;
 
 /// Detection runs through the exhaustive shared walker, so a violation cannot
 /// hide inside newer syntax the way a hand-rolled `_ => {}` walk allowed.

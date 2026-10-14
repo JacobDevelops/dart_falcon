@@ -14,13 +14,10 @@ use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{self, Visitor};
 
+#[derive(Default)]
 pub struct PreferTypingUninitializedVariables;
 
 impl Rule for PreferTypingUninitializedVariables {
-    fn name(&self) -> &'static str {
-        "prefer-typing-uninitialized-variables"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             ctx,

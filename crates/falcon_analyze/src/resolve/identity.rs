@@ -131,6 +131,13 @@ impl DeclarationIdentity {
         name: "Object",
     };
 
+    pub const fn flutter(name: &'static str) -> Self {
+        Self::Package {
+            package: "flutter",
+            name,
+        }
+    }
+
     pub fn name(&self) -> &str {
         match self {
             Self::Project { name, .. } => name,

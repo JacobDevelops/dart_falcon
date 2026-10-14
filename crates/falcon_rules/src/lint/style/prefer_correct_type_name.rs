@@ -13,13 +13,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct PreferCorrectTypeName;
 
 impl Rule for PreferCorrectTypeName {
-    fn name(&self) -> &'static str {
-        "prefer-correct-type-name"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {

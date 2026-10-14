@@ -142,19 +142,16 @@ fn pascal_case(snake: &str) -> String {
 }
 
 /// Render the Rule impl stub for a new rule.
-fn rule_stub(struct_name: &str, rule_id: &str) -> String {
+fn rule_stub(struct_name: &str) -> String {
     format!(
         r#"use falcon_analyze::{{AnalyzeContext, Rule}};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 
+#[derive(Default)]
 pub struct {struct_name};
 
 impl Rule for {struct_name} {{
-    fn name(&self) -> &'static str {{
-        "{rule_id}"
-    }}
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {{
         let _ = (program, ctx);
         // TODO: walk `program.declarations` and emit diagnostics per violation.
@@ -188,7 +185,7 @@ fn codegen(group: String, rule_id: String) {
     }
 
     let struct_name = pascal_case(&module);
-    fs::write(&rule_file, rule_stub(&struct_name, &rule_id)).expect("write rule stub");
+    fs::write(&rule_file, rule_stub(&struct_name)).expect("write rule stub");
 
     fs::create_dir_all(&corpus_dir).expect("create corpus dir");
     let bad = corpus_dir.join("bad.dart");
@@ -222,9 +219,9 @@ fn codegen(group: String, rule_id: String) {
         .find(|category| category.as_str() == group)
         .unwrap();
     println!(
-        "  2. add `{rule_id}` to RULE_METADATA (crates/falcon_rules/src/meta.rs) with \
-         group RuleGroup::{category:?}, domains, recommended, source, and \
-         RuleKind::File {{ make: || Box::new(lint::{group}::{module}::{struct_name}), needs_resolution }}"
+        "  2. add RuleMeta::file::<lint::{group}::{module}::{struct_name}>(\
+         \"{rule_id}\", RuleGroup::{category:?}, domains, recommended, source) to \
+         RULE_METADATA (crates/falcon_rules/src/meta.rs); use resolved for semantic rules"
     );
     println!("  3. add `{rule_id}` under linter.rules.{group} in the root falcon.json showcase");
     println!(

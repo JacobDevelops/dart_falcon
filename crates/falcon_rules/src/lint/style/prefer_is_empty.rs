@@ -30,11 +30,9 @@ use falcon_syntax::ast::*;
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
+#[derive(Default)]
 pub struct PreferIsEmpty;
 impl Rule for PreferIsEmpty {
-    fn name(&self) -> &'static str {
-        "prefer-is-empty"
-    }
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();

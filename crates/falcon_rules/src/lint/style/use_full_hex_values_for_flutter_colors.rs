@@ -1,18 +1,15 @@
 //! Require an eight-digit hexadecimal integer for the canonical Flutter Color
 //! default constructor.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, Rule, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct UseFullHexValuesForFlutterColors;
 
 impl Rule for UseFullHexValuesForFlutterColors {
-    fn name(&self) -> &'static str {
-        "use-full-hex-values-for-flutter-colors"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(identities) = ctx.identities else {
             return Vec::new();
@@ -55,7 +52,7 @@ impl Visitor for Collector<'_> {
 fn construction<'a>(
     expression: &'a Expr,
     model: &SemanticModel<'_>,
-) -> Option<(DeclarationIdentity, String, &'a ArgList)> {
+) -> Option<(DeclarationIdentity, &'a str, &'a ArgList)> {
     match expression {
         Expr::New {
             dart_type,
@@ -66,44 +63,21 @@ fn construction<'a>(
             let DartType::Named(named) = dart_type else {
                 return None;
             };
-            let segments = named
-                .segments
-                .iter()
-                .map(|segment| segment.name.clone())
-                .collect::<Vec<_>>();
             let constructor = constructor_name
                 .as_ref()
-                .map_or_else(|| "new".to_string(), |name| name.name.clone());
-            Some((model.resolve_dotted(&segments)?, constructor, args))
+                .map_or("new", |name| name.name.as_str());
+            Some((
+                model.resolve_name(QualifiedName::from_identifiers(&named.segments)?)?,
+                constructor,
+                args,
+            ))
         }
         Expr::Call { callee, args, .. } => {
-            let mut segments = expression_segments(callee)?;
-            if let Some(identity) = model.resolve_dotted(&segments) {
-                return Some((identity, "new".to_string(), args));
-            }
-            let constructor = segments.pop()?;
-            Some((model.resolve_dotted(&segments)?, constructor, args))
+            let (identity, constructor) =
+                falcon_analyze::resolve_call_constructor(callee, model, false)?;
+            Some((identity, constructor, args))
         }
         _ => None,
-    }
-}
-
-fn expression_segments(expression: &Expr) -> Option<Vec<String>> {
-    let mut current = expression;
-    let mut segments = Vec::new();
-    loop {
-        match current {
-            Expr::Ident(identifier) => {
-                segments.push(identifier.name.clone());
-                segments.reverse();
-                return Some(segments);
-            }
-            Expr::Field { object, field, .. } => {
-                segments.push(field.name.clone());
-                current = object;
-            }
-            _ => return None,
-        }
     }
 }
 

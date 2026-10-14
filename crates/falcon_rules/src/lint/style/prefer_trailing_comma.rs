@@ -11,13 +11,10 @@ use falcon_syntax::visitor::{
     Visitor, walk_annotation, walk_constructor_decl, walk_enum_decl, walk_expr,
 };
 
+#[derive(Default)]
 pub struct PreferTrailingComma;
 
 impl Rule for PreferTrailingComma {
-    fn name(&self) -> &'static str {
-        "prefer-trailing-comma"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -28,13 +25,7 @@ impl Rule for PreferTrailingComma {
     }
 }
 
-fn line_of(source: &str, offset: usize) -> usize {
-    let offset = offset.min(source.len());
-    source.as_bytes()[..offset]
-        .iter()
-        .filter(|&&b| b == b'\n')
-        .count()
-}
+use crate::lint::expressions::line_of;
 
 /// Returns the real closing `)` when a trailing comma is required.
 fn needs_trailing_comma(source: &str, args_span: &Span) -> Option<usize> {

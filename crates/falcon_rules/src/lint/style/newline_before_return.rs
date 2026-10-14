@@ -12,13 +12,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct NewlineBeforeReturn;
 
 impl Rule for NewlineBeforeReturn {
-    fn name(&self) -> &'static str {
-        "newline-before-return"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -71,22 +68,11 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
                 scan_body(body, diags, ctx);
             }
         }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
+        _ => {
+            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
+                scan_member(member, diags, ctx);
             }
         }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        _ => {}
     }
 }
 

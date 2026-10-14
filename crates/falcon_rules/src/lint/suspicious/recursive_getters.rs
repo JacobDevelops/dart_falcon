@@ -12,13 +12,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct RecursiveGetters;
 
 impl Rule for RecursiveGetters {
-    fn name(&self) -> &'static str {
-        "recursive-getters"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -28,13 +25,11 @@ impl Rule for RecursiveGetters {
                 {
                     check(&f.body, &f.name.name, &mut diags, ctx);
                 }
-                TopLevelDecl::Class(c) => members(&c.members, &mut diags, ctx),
-                TopLevelDecl::Mixin(m) => members(&m.members, &mut diags, ctx),
-                TopLevelDecl::MixinClass(mc) => members(&mc.members, &mut diags, ctx),
-                TopLevelDecl::Enum(e) => members(&e.members, &mut diags, ctx),
-                TopLevelDecl::Extension(e) => members(&e.members, &mut diags, ctx),
-                TopLevelDecl::ExtensionType(e) => members(&e.members, &mut diags, ctx),
-                _ => {}
+                _ => {
+                    if let Some(class_members) = crate::lint::declarations::members_of(decl) {
+                        members(class_members, &mut diags, ctx);
+                    }
+                }
             }
         }
         diags

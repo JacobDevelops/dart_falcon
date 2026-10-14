@@ -12,13 +12,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct UnintendedHtmlInDocComment;
 
 impl Rule for UnintendedHtmlInDocComment {
-    fn name(&self) -> &'static str {
-        "unintended-html-in-doc-comment"
-    }
-
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 

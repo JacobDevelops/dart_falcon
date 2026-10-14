@@ -17,13 +17,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct CyclomaticComplexity;
 
 impl Rule for CyclomaticComplexity {
-    fn name(&self) -> &'static str {
-        "cyclomatic-complexity"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -35,12 +32,11 @@ impl Rule for CyclomaticComplexity {
 
 /// Read the `max_complexity` option (default 20). Malformed/missing → default.
 fn max_complexity_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("cyclomatic-complexity")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "cyclomatic-complexity"))
-        .and_then(|o| o.get("max_complexity"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize)
-        .unwrap_or(20)
+    crate::lint::options::usize(
+        crate::lint::options::for_rule(ctx, "cyclomatic-complexity"),
+        "max_complexity",
+    )
+    .unwrap_or(20)
 }
 
 /// Compute cyclomatic complexity for one function-like body and emit a
@@ -76,37 +72,11 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
                 check_function(body, &f.name.span, diags, ctx);
             }
         }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
+        _ => {
+            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
+                scan_member(member, diags, ctx);
             }
         }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Extension(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::ExtensionType(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Enum(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        _ => {}
     }
 }
 

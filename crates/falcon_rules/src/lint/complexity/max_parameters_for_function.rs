@@ -19,13 +19,10 @@ use falcon_syntax::visitor::{
     walk_method_decl, walk_stmt,
 };
 
+#[derive(Default)]
 pub struct MaxParametersForFunction;
 
 impl Rule for MaxParametersForFunction {
-    fn name(&self) -> &'static str {
-        "max-parameters-for-function"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             threshold: max_parameters_option(ctx),
@@ -38,12 +35,11 @@ impl Rule for MaxParametersForFunction {
 }
 
 fn max_parameters_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("max-parameters-for-function")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "max-parameters-for-function"))
-        .and_then(|o| o.get("max_parameters"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize)
-        .unwrap_or(5)
+    crate::lint::options::usize(
+        crate::lint::options::for_rule(ctx, "max-parameters-for-function"),
+        "max_parameters",
+    )
+    .unwrap_or(5)
 }
 
 struct Collector<'a> {

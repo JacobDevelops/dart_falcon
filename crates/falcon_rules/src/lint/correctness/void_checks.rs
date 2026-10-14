@@ -13,13 +13,10 @@ use crate::lint::semantic_scope::{
     SemanticRuleVisitor, SemanticState, returned_expressions, visit_program,
 };
 
+#[derive(Default)]
 pub struct VoidChecks;
 
 impl Rule for VoidChecks {
-    fn name(&self) -> &'static str {
-        "void-checks"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
@@ -54,7 +51,7 @@ impl Collector<'_> {
             && state.model.void_context(return_type)
         {
             for expression in returned_expressions(body) {
-                let actual = state.infer(&expression);
+                let actual = state.infer(expression);
                 if state
                     .model
                     .acceptable_for_void_context(return_type, &actual)

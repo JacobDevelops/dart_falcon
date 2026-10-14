@@ -26,15 +26,12 @@ use super::{
     build_reference_graph, canonical_or_lexical, detect_package, has_lib_component, is_under_lib,
 };
 
+#[derive(Default)]
 pub struct UnusedFiles;
 
 const NAME: &str = "unused-files";
 
 impl CrossFileRule for UnusedFiles {
-    fn name(&self) -> &'static str {
-        NAME
-    }
-
     fn analyze_project(&self, files: &[ProjectFile], _config: &FalconConfig) -> Vec<Diagnostic> {
         let pkg = detect_package(files);
         let canons: Vec<PathBuf> = files

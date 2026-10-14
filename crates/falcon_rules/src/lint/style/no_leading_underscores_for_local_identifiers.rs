@@ -8,6 +8,7 @@
 //! solely of underscores (e.g. `_`, `__`) are exempt, being the idiomatic way
 //! to name a deliberately unused binding.
 
+use crate::lint::naming::has_leading_underscore;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -15,13 +16,10 @@ use falcon_syntax::visitor::{
     Visitor, walk_formal_param, walk_pattern, walk_setter_decl, walk_stmt,
 };
 
+#[derive(Default)]
 pub struct NoLeadingUnderscoresForLocalIdentifiers;
 
 impl Rule for NoLeadingUnderscoresForLocalIdentifiers {
-    fn name(&self) -> &'static str {
-        "no-leading-underscores-for-local-identifiers"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -33,12 +31,6 @@ impl Rule for NoLeadingUnderscoresForLocalIdentifiers {
 }
 
 const MESSAGE: &str = "Avoid leading underscores for local identifiers.";
-
-/// A disallowed leading underscore: starts with `_` but is not composed solely
-/// of underscores (an all-underscore name is a wildcard).
-fn has_leading_underscore(name: &str) -> bool {
-    name.starts_with('_') && !name.bytes().all(|b| b == b'_')
-}
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
@@ -139,8 +131,6 @@ mod tests {
 
     #[test]
     fn descends_into_every_expression_kind() {
-        // Regression: the old hand-rolled walker only entered FuncExpr, Call,
-        // Binary, Await, Throw, Assign.value and Conditional branches.
         let cases = [
             "void f() { var l = [(int _a) => 0]; }",
             "void f() { var s = {(int _a) => 0}; }",

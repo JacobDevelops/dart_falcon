@@ -26,6 +26,7 @@ use falcon_syntax::ast::*;
 /// `extends` chain in malformed source.
 const MAX_SUPER_DEPTH: usize = 8;
 
+#[derive(Default)]
 pub struct TypeInitFormals;
 
 /// The file-local view of a class needed to resolve a formal's target type.
@@ -37,10 +38,6 @@ struct ClassInfo<'a> {
 type ClassTable<'a> = HashMap<&'a str, ClassInfo<'a>>;
 
 impl Rule for TypeInitFormals {
-    fn name(&self) -> &'static str {
-        "type-init-formals"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut classes: ClassTable = HashMap::new();
         for decl in &program.declarations {

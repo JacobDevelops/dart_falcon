@@ -5,13 +5,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct LibraryPrivateTypesInPublicApi;
 
 impl Rule for LibraryPrivateTypesInPublicApi {
-    fn name(&self) -> &'static str {
-        "library-private-types-in-public-api"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

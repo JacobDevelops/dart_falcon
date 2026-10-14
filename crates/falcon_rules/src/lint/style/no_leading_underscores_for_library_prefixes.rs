@@ -7,17 +7,15 @@
 //! prefix composed solely of underscores (e.g. `_`) is exempt, since it is an
 //! intentional throwaway name rather than a misapplied privacy marker.
 
+use crate::lint::naming::has_leading_underscore;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct NoLeadingUnderscoresForLibraryPrefixes;
 
 impl Rule for NoLeadingUnderscoresForLibraryPrefixes {
-    fn name(&self) -> &'static str {
-        "no-leading-underscores-for-library-prefixes"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for import in &program.imports {
@@ -36,9 +34,3 @@ impl Rule for NoLeadingUnderscoresForLibraryPrefixes {
 }
 
 const MESSAGE: &str = "Avoid leading underscores for library prefixes.";
-
-/// A name has a disallowed leading underscore when it starts with `_` and is not
-/// composed solely of underscores (an all-underscore name is a wildcard).
-fn has_leading_underscore(name: &str) -> bool {
-    name.starts_with('_') && !name.bytes().all(|b| b == b'_')
-}

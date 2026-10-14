@@ -1,23 +1,19 @@
 //! Flags a redundant `this.` qualifier on member access.
 
-use std::collections::HashSet;
-
+use crate::lint::lexical_usage::NameScopes;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, bound_names, walk_expr, walk_pattern, walk_stmt};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_pattern, walk_stmt};
 
+#[derive(Default)]
 pub struct UnnecessaryThis;
 
 impl Rule for UnnecessaryThis {
-    fn name(&self) -> &'static str {
-        "unnecessary-this"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         for declaration in &program.declarations {
-            let Some(members) = members_of(declaration) else {
+            let Some(members) = crate::lint::declarations::members_of(declaration) else {
                 continue;
             };
             for member in members {
@@ -25,18 +21,6 @@ impl Rule for UnnecessaryThis {
             }
         }
         diagnostics
-    }
-}
-
-fn members_of(declaration: &TopLevelDecl) -> Option<&[ClassMember]> {
-    match declaration {
-        TopLevelDecl::Class(class) => Some(&class.members),
-        TopLevelDecl::Mixin(mixin) => Some(&mixin.members),
-        TopLevelDecl::MixinClass(class) => Some(&class.members),
-        TopLevelDecl::Enum(enumeration) => Some(&enumeration.members),
-        TopLevelDecl::Extension(extension) => Some(&extension.members),
-        TopLevelDecl::ExtensionType(extension) => Some(&extension.members),
-        _ => None,
     }
 }
 
@@ -48,9 +32,9 @@ fn check_member(member: &ClassMember, ctx: &AnalyzeContext, diagnostics: &mut Ve
         }
         ClassMember::Setter(setter) if !setter.is_static => {
             let mut collector = Collector::new(ctx, diagnostics);
-            collector.declare(&setter.param.name);
+            collector.scopes.declare(&setter.param.name);
             if let Some(body) = &setter.body {
-                collector.body(body);
+                walk_function_body(&mut collector, body);
             }
             return;
         }
@@ -73,15 +57,15 @@ fn check_body(
     };
     let mut collector = Collector::new(ctx, diagnostics);
     if let Some(params) = params {
-        collector.params(params);
+        collector.scopes.params(params);
     }
-    collector.body(body);
+    walk_function_body(&mut collector, body);
 }
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
     diagnostics: &'a mut Vec<Diagnostic>,
-    scopes: Vec<HashSet<String>>,
+    scopes: NameScopes,
 }
 
 impl<'a, 'ctx> Collector<'a, 'ctx> {
@@ -89,59 +73,20 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
         Self {
             ctx,
             diagnostics,
-            scopes: vec![HashSet::new()],
-        }
-    }
-
-    fn push(&mut self) {
-        self.scopes.push(HashSet::new());
-    }
-
-    fn pop(&mut self) {
-        self.scopes.pop();
-    }
-
-    fn declare(&mut self, name: &str) {
-        self.scopes
-            .last_mut()
-            .expect("lexical scope")
-            .insert(name.to_string());
-    }
-
-    fn bound(&self, name: &str) -> bool {
-        self.scopes.iter().rev().any(|scope| scope.contains(name))
-    }
-
-    fn params(&mut self, params: &FormalParamList) {
-        for param in params.params.iter() {
-            self.declare(&param.name.name);
+            scopes: NameScopes::default(),
         }
     }
 
     fn pattern(&mut self, pattern: &Pattern) {
         walk_pattern(self, pattern);
-        for name in bound_names(pattern) {
-            self.declare(&name.name);
-        }
-    }
-
-    fn body(&mut self, body: &FunctionBody) {
-        match body {
-            FunctionBody::Block(block) => {
-                for statement in &block.stmts {
-                    self.visit_stmt(statement);
-                }
-            }
-            FunctionBody::Arrow(expression, _) => self.visit_expr(expression),
-            FunctionBody::Native(_, _) => {}
-        }
+        self.scopes.pattern(pattern);
     }
 
     fn nested_function(&mut self, params: &FormalParamList, body: &FunctionBody) {
-        self.push();
-        self.params(params);
-        self.body(body);
-        self.pop();
+        self.scopes.push();
+        self.scopes.params(params);
+        walk_function_body(self, body);
+        self.scopes.pop();
     }
 
     fn local(&mut self, declaration: &LocalVarDecl) {
@@ -149,7 +94,7 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
             if let Some(initializer) = &declarator.initializer {
                 self.visit_expr(initializer);
             }
-            self.declare(&declarator.name.name);
+            self.scopes.declare(&declarator.name.name);
         }
     }
 
@@ -158,7 +103,7 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
             ForInit::VarDecl(declaration) => self.local(declaration),
             ForInit::ForIn { name, iterable, .. } => {
                 self.visit_expr(iterable);
-                self.declare(&name.name);
+                self.scopes.declare(&name.name);
             }
             ForInit::PatternForIn {
                 pattern, iterable, ..
@@ -183,15 +128,15 @@ impl Visitor for Collector<'_, '_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
             Stmt::Block(block) => {
-                self.push();
+                self.scopes.push();
                 for statement in &block.stmts {
                     self.visit_stmt(statement);
                 }
-                self.pop();
+                self.scopes.pop();
             }
             Stmt::LocalVar(declaration) => self.visit_local_var(declaration),
             Stmt::LocalFunc(function) => {
-                self.declare(&function.name.name);
+                self.scopes.declare(&function.name.name);
                 self.nested_function(&function.params, &function.body);
             }
             Stmt::PatternDecl(declaration) => {
@@ -201,33 +146,33 @@ impl Visitor for Collector<'_, '_> {
             Stmt::If(statement) => match &statement.condition {
                 IfCondition::Expr(condition) => {
                     self.visit_expr(condition);
-                    self.push();
+                    self.scopes.push();
                     self.visit_stmt(&statement.then_branch);
-                    self.pop();
+                    self.scopes.pop();
                     if let Some(branch) = &statement.else_branch {
-                        self.push();
+                        self.scopes.push();
                         self.visit_stmt(branch);
-                        self.pop();
+                        self.scopes.pop();
                     }
                 }
                 IfCondition::Case(value, pattern, guard) => {
                     self.visit_expr(value);
-                    self.push();
+                    self.scopes.push();
                     self.pattern(pattern);
                     if let Some(guard) = guard {
                         self.visit_expr(guard);
                     }
                     self.visit_stmt(&statement.then_branch);
-                    self.pop();
+                    self.scopes.pop();
                     if let Some(branch) = &statement.else_branch {
-                        self.push();
+                        self.scopes.push();
                         self.visit_stmt(branch);
-                        self.pop();
+                        self.scopes.pop();
                     }
                 }
             },
             Stmt::For(statement) => {
-                self.push();
+                self.scopes.push();
                 if let Some(init) = &statement.init {
                     self.for_init(init);
                 }
@@ -238,24 +183,24 @@ impl Visitor for Collector<'_, '_> {
                     self.visit_expr(update);
                 }
                 self.visit_stmt(&statement.body);
-                self.pop();
+                self.scopes.pop();
             }
             Stmt::While(statement) => {
                 self.visit_expr(&statement.condition);
-                self.push();
+                self.scopes.push();
                 self.visit_stmt(&statement.body);
-                self.pop();
+                self.scopes.pop();
             }
             Stmt::DoWhile(statement) => {
-                self.push();
+                self.scopes.push();
                 self.visit_stmt(&statement.body);
                 self.visit_expr(&statement.condition);
-                self.pop();
+                self.scopes.pop();
             }
             Stmt::Switch(statement) => {
                 self.visit_expr(&statement.subject);
                 for case in &statement.cases {
-                    self.push();
+                    self.scopes.push();
                     for kind in &case.cases {
                         if let SwitchCaseKind::Pattern(pattern, guard) = kind {
                             self.pattern(pattern);
@@ -267,34 +212,34 @@ impl Visitor for Collector<'_, '_> {
                     for statement in &case.body {
                         self.visit_stmt(statement);
                     }
-                    self.pop();
+                    self.scopes.pop();
                 }
             }
             Stmt::TryCatch(statement) => {
-                self.push();
+                self.scopes.push();
                 for statement in &statement.body.stmts {
                     self.visit_stmt(statement);
                 }
-                self.pop();
+                self.scopes.pop();
                 for catch in &statement.catches {
-                    self.push();
+                    self.scopes.push();
                     if let Some(name) = &catch.exception_var {
-                        self.declare(&name.name);
+                        self.scopes.declare(&name.name);
                     }
                     if let Some(name) = &catch.stack_trace_var {
-                        self.declare(&name.name);
+                        self.scopes.declare(&name.name);
                     }
                     for statement in &catch.body.stmts {
                         self.visit_stmt(statement);
                     }
-                    self.pop();
+                    self.scopes.pop();
                 }
                 if let Some(finally) = &statement.finally {
-                    self.push();
+                    self.scopes.push();
                     for statement in &finally.stmts {
                         self.visit_stmt(statement);
                     }
-                    self.pop();
+                    self.scopes.pop();
                 }
             }
             _ => walk_stmt(self, node),
@@ -304,7 +249,7 @@ impl Visitor for Collector<'_, '_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Field { object, field, .. } = node
             && matches!(object.as_ref(), Expr::This { .. })
-            && !self.bound(&field.name)
+            && !self.scopes.bound(&field.name)
         {
             let span = object.span();
             self.diagnostics.push(self.ctx.diagnostic(

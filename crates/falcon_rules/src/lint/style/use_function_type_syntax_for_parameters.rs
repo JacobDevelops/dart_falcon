@@ -16,13 +16,10 @@ use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{self, Visitor};
 
+#[derive(Default)]
 pub struct UseFunctionTypeSyntaxForParameters;
 
 impl Rule for UseFunctionTypeSyntaxForParameters {
-    fn name(&self) -> &'static str {
-        "use-function-type-syntax-for-parameters"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             ctx,

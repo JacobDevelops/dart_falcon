@@ -28,11 +28,9 @@ use falcon_syntax::ast::*;
 use super::prefer_is_empty::lacks_collection_member;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
+#[derive(Default)]
 pub struct PreferIterableWhereType;
 impl Rule for PreferIterableWhereType {
-    fn name(&self) -> &'static str {
-        "prefer-iterable-where-type"
-    }
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();

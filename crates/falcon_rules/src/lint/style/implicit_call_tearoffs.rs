@@ -7,12 +7,10 @@ use falcon_syntax::ast::Expr;
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
+#[derive(Default)]
 pub struct ImplicitCallTearoffs;
 
 impl Rule for ImplicitCallTearoffs {
-    fn name(&self) -> &'static str {
-        "implicit-call-tearoffs"
-    }
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();

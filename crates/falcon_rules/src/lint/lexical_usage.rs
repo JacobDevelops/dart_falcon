@@ -1,7 +1,48 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, bound_names, walk_expr, walk_pattern};
+use falcon_syntax::visitor::{Visitor, bound_names, walk_expr, walk_function_body, walk_pattern};
+
+pub(crate) struct NameScopes(Vec<HashSet<String>>);
+
+impl Default for NameScopes {
+    fn default() -> Self {
+        Self(vec![HashSet::new()])
+    }
+}
+
+impl NameScopes {
+    pub(crate) fn push(&mut self) {
+        self.0.push(HashSet::new());
+    }
+
+    pub(crate) fn pop(&mut self) {
+        self.0.pop();
+    }
+
+    pub(crate) fn declare(&mut self, name: &str) {
+        self.0
+            .last_mut()
+            .expect("lexical scope")
+            .insert(name.to_string());
+    }
+
+    pub(crate) fn bound(&self, name: &str) -> bool {
+        self.0.iter().rev().any(|scope| scope.contains(name))
+    }
+
+    pub(crate) fn params(&mut self, params: &FormalParamList) {
+        for param in &params.params {
+            self.declare(&param.name.name);
+        }
+    }
+
+    pub(crate) fn pattern(&mut self, pattern: &Pattern) {
+        for name in bound_names(pattern) {
+            self.declare(&name.name);
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 enum Binding {
@@ -11,7 +52,7 @@ enum Binding {
 
 pub(crate) fn used_parameters(params: &FormalParamList, body: &FunctionBody) -> HashSet<usize> {
     let mut collector = UsageCollector::new(params);
-    collector.visit_body(body);
+    walk_function_body(&mut collector, body);
     collector.used
 }
 
@@ -44,7 +85,7 @@ pub(crate) fn used_constructor_parameters(
         }
     }
     if let Some(body) = body {
-        collector.visit_body(body);
+        walk_function_body(&mut collector, body);
     }
     collector.used
 }
@@ -104,22 +145,10 @@ impl UsageCollector {
         }
     }
 
-    fn visit_body(&mut self, body: &FunctionBody) {
-        match body {
-            FunctionBody::Block(block) => {
-                for statement in &block.stmts {
-                    self.visit_stmt(statement);
-                }
-            }
-            FunctionBody::Arrow(expression, _) => self.visit_expr(expression),
-            FunctionBody::Native(_, _) => {}
-        }
-    }
-
     fn visit_nested_function(&mut self, params: &FormalParamList, body: &FunctionBody) {
         self.push_scope();
         self.bind_params(params);
-        self.visit_body(body);
+        walk_function_body(self, body);
         self.pop_scope();
     }
 

@@ -7,13 +7,10 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 
 use crate::lint::lexical_usage::used_parameters;
 
+#[derive(Default)]
 pub struct PreferUnderscoreForUnusedCallbackParameters;
 
 impl Rule for PreferUnderscoreForUnusedCallbackParameters {
-    fn name(&self) -> &'static str {
-        "prefer-underscore-for-unused-callback-parameters"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diagnostics: Vec::new(),

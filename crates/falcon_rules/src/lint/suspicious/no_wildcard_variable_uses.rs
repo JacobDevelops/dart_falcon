@@ -13,13 +13,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct NoWildcardVariableUses;
 
 impl Rule for NoWildcardVariableUses {
-    fn name(&self) -> &'static str {
-        "no-wildcard-variable-uses"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut visitor = WildcardUseVisitor {
             diags: Vec::new(),

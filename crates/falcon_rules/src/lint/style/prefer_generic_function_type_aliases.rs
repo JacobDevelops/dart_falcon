@@ -14,13 +14,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::Program;
 
+#[derive(Default)]
 pub struct PreferGenericFunctionTypeAliases;
 
 impl Rule for PreferGenericFunctionTypeAliases {
-    fn name(&self) -> &'static str {
-        "prefer-generic-function-type-aliases"
-    }
-
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let bytes = ctx.source.as_bytes();

@@ -15,23 +15,19 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct MaxLinesForFile;
 
 /// Read the `max_lines` option (default 200). Malformed/missing → default.
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("max-lines-for-file")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "max-lines-for-file"))
-        .and_then(|o| o.get("max_lines"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize)
-        .unwrap_or(200)
+    crate::lint::options::usize(
+        crate::lint::options::for_rule(ctx, "max-lines-for-file"),
+        "max_lines",
+    )
+    .unwrap_or(200)
 }
 
 impl Rule for MaxLinesForFile {
-    fn name(&self) -> &'static str {
-        "max-lines-for-file"
-    }
-
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 

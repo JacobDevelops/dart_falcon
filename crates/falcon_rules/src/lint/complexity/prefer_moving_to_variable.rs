@@ -17,13 +17,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct PreferMovingToVariable;
 
 impl Rule for PreferMovingToVariable {
-    fn name(&self) -> &'static str {
-        "prefer-moving-to-variable"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let threshold = allowed_duplicated_chains(ctx);
@@ -40,19 +37,15 @@ impl Rule for PreferMovingToVariable {
 /// Malformed/missing → default. A value below 2 is clamped to 2 (the first
 /// occurrence can never be a duplicate).
 fn allowed_duplicated_chains(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("prefer-moving-to-variable")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "prefer-moving-to-variable"))
-        .and_then(|o| o.get("allowed_duplicated_chains"))
-        .and_then(|v| v.as_u64())
-        .map(|v| (v as usize).max(2))
-        .unwrap_or(2)
+    crate::lint::options::usize(
+        crate::lint::options::for_rule(ctx, "prefer-moving-to-variable"),
+        "allowed_duplicated_chains",
+    )
+    .unwrap_or(2)
+    .max(2)
 }
 
-fn expr_src<'a>(expr: &Expr, source: &'a str) -> &'a str {
-    let span = expr.span();
-    let end = span.end.min(source.len());
-    &source[span.start..end]
-}
+use crate::lint::expressions::expr_src;
 
 fn check_stmts(
     stmts: &[Stmt],
@@ -110,22 +103,11 @@ fn scan_top(
                 scan_body(body, diags, ctx, threshold);
             }
         }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx, threshold);
+        _ => {
+            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
+                scan_member(member, diags, ctx, threshold);
             }
         }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx, threshold);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx, threshold);
-            }
-        }
-        _ => {}
     }
 }
 

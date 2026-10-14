@@ -16,15 +16,12 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
 
+#[derive(Default)]
 pub struct MaximumNestingLevel;
 
 impl Rule for MaximumNestingLevel {
-    fn name(&self) -> &'static str {
-        "maximum-nesting-level"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -36,12 +33,11 @@ impl Rule for MaximumNestingLevel {
 
 /// Read the `max_nesting` option (default 5). Malformed/missing → default.
 fn max_nesting_option(ctx: &AnalyzeContext) -> usize {
-    crate::meta::meta_for("maximum-nesting-level")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "maximum-nesting-level"))
-        .and_then(|o| o.get("max_nesting"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize)
-        .unwrap_or(5)
+    crate::lint::options::usize(
+        crate::lint::options::for_rule(ctx, "maximum-nesting-level"),
+        "max_nesting",
+    )
+    .unwrap_or(5)
 }
 
 /// Compute the deepest control-flow nesting level within one function body and
@@ -59,15 +55,7 @@ fn check_function(
     let mut max = 0;
     walk_body(body, 0, &mut max);
     let mut closures = ClosureNesting { max };
-    match body {
-        FunctionBody::Block(b) => {
-            for s in &b.stmts {
-                closures.visit_stmt(s);
-            }
-        }
-        FunctionBody::Arrow(e, _) => closures.visit_expr(e),
-        FunctionBody::Native(_, _) => {}
-    }
+    walk_function_body(&mut closures, body);
     max = closures.max;
     if max > threshold {
         diags.push(ctx.diagnostic(
@@ -85,37 +73,11 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
                 check_function(body, &f.name.span, diags, ctx);
             }
         }
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
+        _ => {
+            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
+                scan_member(member, diags, ctx);
             }
         }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Extension(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::ExtensionType(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Enum(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        _ => {}
     }
 }
 

@@ -6,17 +6,15 @@
 //! words, each starting with an uppercase letter or `$`. Unnamed extensions have
 //! no identifier to check and are skipped.
 
+use crate::lint::naming::is_upper_camel_case;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct CamelCaseExtensions;
 
 impl Rule for CamelCaseExtensions {
-    fn name(&self) -> &'static str {
-        "camel-case-extensions"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -32,17 +30,3 @@ impl Rule for CamelCaseExtensions {
 }
 
 const MESSAGE: &str = "Name extensions using UpperCamelCase.";
-
-/// UpperCamelCase per the analyzer's `isCamelCase`: leading underscores are
-/// ignored, then the remainder must be one or more words each starting with an
-/// uppercase letter or `$` (`([A-Z$][a-z0-9$]*)+`).
-fn is_upper_camel_case(name: &str) -> bool {
-    let rest = name.trim_start_matches('_');
-    let Some(first) = rest.chars().next() else {
-        return true;
-    };
-    if !(first.is_ascii_uppercase() || first == '$') {
-        return false;
-    }
-    rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '$')
-}

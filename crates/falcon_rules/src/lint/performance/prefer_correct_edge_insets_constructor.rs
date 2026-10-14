@@ -12,13 +12,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct PreferCorrectEdgeInsetsConstructor;
 
 impl Rule for PreferCorrectEdgeInsetsConstructor {
-    fn name(&self) -> &'static str {
-        "prefer-correct-edge-insets-constructor"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -106,7 +103,7 @@ fn should_use_better_constructor(args: &ArgList) -> bool {
     let mut bottom = None;
 
     for named in &args.named {
-        let value_str = expr_to_string(&named.value);
+        let value_str = scalar_text(&named.value);
         match named.name.name.as_str() {
             "left" => left = value_str,
             "right" => right = value_str,
@@ -116,8 +113,7 @@ fn should_use_better_constructor(args: &ArgList) -> bool {
         }
     }
 
-    if let (Some(l), Some(r), Some(t), Some(b)) =
-        (left.clone(), right.clone(), top.clone(), bottom.clone())
+    if let (Some(l), Some(r), Some(t), Some(b)) = (left, right, top, bottom)
         && l == r
         && r == t
         && t == b
@@ -127,7 +123,7 @@ fn should_use_better_constructor(args: &ArgList) -> bool {
 
     if left.is_none()
         && right.is_none()
-        && let (Some(t), Some(b)) = (top.clone(), bottom.clone())
+        && let (Some(t), Some(b)) = (top, bottom)
         && t == b
     {
         return true;
@@ -135,7 +131,7 @@ fn should_use_better_constructor(args: &ArgList) -> bool {
 
     if top.is_none()
         && bottom.is_none()
-        && let (Some(l), Some(r)) = (left.clone(), right.clone())
+        && let (Some(l), Some(r)) = (left, right)
         && l == r
     {
         return true;
@@ -144,14 +140,7 @@ fn should_use_better_constructor(args: &ArgList) -> bool {
     false
 }
 
-fn expr_to_string(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::IntLit { value, .. } => Some(value.clone()),
-        Expr::DoubleLit { value, .. } => Some(value.clone()),
-        Expr::Ident(id) => Some(id.name.clone()),
-        _ => None,
-    }
-}
+use crate::lint::expressions::scalar_text;
 
 /// Detection runs through the exhaustive shared walker, so a violation cannot
 /// hide inside newer syntax the way a hand-rolled `_ => {}` walk allowed.

@@ -1255,10 +1255,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
     }
 
     fn is_build_context(&self, ty: &ResolvedType) -> bool {
-        let target = DeclarationIdentity::Package {
-            package: "flutter",
-            name: "BuildContext",
-        };
+        let target = DeclarationIdentity::flutter("BuildContext");
         matches!(ty, ResolvedType::Interface { identity, .. } if identity == &target)
             || self.signatures.is_subtype_of(ty, &target, self.model) == Truth::Yes
     }

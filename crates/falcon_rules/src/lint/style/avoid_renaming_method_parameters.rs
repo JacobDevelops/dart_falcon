@@ -8,13 +8,10 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AvoidRenamingMethodParameters;
 
 impl Rule for AvoidRenamingMethodParameters {
-    fn name(&self) -> &'static str {
-        "avoid-renaming-method-parameters"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();

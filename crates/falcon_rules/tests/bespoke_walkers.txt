@@ -17,7 +17,6 @@ lint/complexity/prefer_moving_to_variable.rs::scan_stmt
 lint/correctness/proper_controller_dispose.rs::visit_stmt
 lint/correctness/use_once_constructors_once_provider.rs::scan_expr
 lint/correctness/use_once_constructors_once_provider.rs::scan_stmt
-lint/correctness/valid_regexps.rs::expression_segments
 lint/lexical_usage.rs::visit_expr
 lint/semantic_scope.rs::visit_expr
 lint/style/binary_expression_operand_order.rs::scan_expr

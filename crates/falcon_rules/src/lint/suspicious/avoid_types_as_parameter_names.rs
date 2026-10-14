@@ -5,13 +5,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_formal_param};
 
+#[derive(Default)]
 pub struct AvoidTypesAsParameterNames;
 
 impl Rule for AvoidTypesAsParameterNames {
-    fn name(&self) -> &'static str {
-        "avoid-types-as-parameter-names"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some((identities, file)) = ctx
             .identities

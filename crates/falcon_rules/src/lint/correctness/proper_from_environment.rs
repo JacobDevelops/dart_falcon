@@ -13,13 +13,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_top_level_decl};
 
+#[derive(Default)]
 pub struct ProperFromEnvironment;
 
 impl Rule for ProperFromEnvironment {
-    fn name(&self) -> &'static str {
-        "proper-from-environment"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

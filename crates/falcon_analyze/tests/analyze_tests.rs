@@ -8,9 +8,6 @@ use std::path::Path;
 
 struct NoOpRule;
 impl Rule for NoOpRule {
-    fn name(&self) -> &'static str {
-        "no_op"
-    }
     fn analyze(&self, _program: &Program, _ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         vec![]
     }
@@ -18,9 +15,6 @@ impl Rule for NoOpRule {
 
 struct AlwaysErrorRule;
 impl Rule for AlwaysErrorRule {
-    fn name(&self) -> &'static str {
-        "always_error"
-    }
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         vec![Diagnostic::new(
             "always_error",
@@ -34,9 +28,6 @@ impl Rule for AlwaysErrorRule {
 
 struct CountFunctionDeclsRule(u32);
 impl Rule for CountFunctionDeclsRule {
-    fn name(&self) -> &'static str {
-        "count_functions"
-    }
     fn analyze(&self, _program: &Program, _ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         (0..self.0)
             .map(|i| {
@@ -50,15 +41,6 @@ impl Rule for CountFunctionDeclsRule {
             })
             .collect()
     }
-}
-
-#[test]
-fn test_mock_rule_name() {
-    let rule = NoOpRule;
-    assert_eq!(rule.name(), "no_op");
-
-    let error_rule = AlwaysErrorRule;
-    assert_eq!(error_rule.name(), "always_error");
 }
 
 #[test]
@@ -83,7 +65,7 @@ fn test_mock_rule_analyze_empty() {
 #[test]
 fn test_registry_register_and_run_all_empty() {
     let mut registry = RuleRegistry::new();
-    registry.register(Box::new(NoOpRule));
+    registry.register("no_op", Box::new(NoOpRule));
 
     let (program, _) = falcon_dart_parser::parse("void main() {}");
     let config = FalconConfig::default();
@@ -104,7 +86,7 @@ fn test_registry_register_and_run_all_empty() {
 #[test]
 fn test_registry_run_all_emits_diagnostic() {
     let mut registry = RuleRegistry::new();
-    registry.register(Box::new(AlwaysErrorRule));
+    registry.register("always_error", Box::new(AlwaysErrorRule));
 
     let (program, _) = falcon_dart_parser::parse("void main() {}");
     let config = FalconConfig::default();
@@ -127,9 +109,9 @@ fn test_registry_run_all_emits_diagnostic() {
 #[test]
 fn test_registry_multiple_rules() {
     let mut registry = RuleRegistry::new();
-    registry.register(Box::new(NoOpRule));
-    registry.register(Box::new(AlwaysErrorRule));
-    registry.register(Box::new(CountFunctionDeclsRule(2)));
+    registry.register("no_op", Box::new(NoOpRule));
+    registry.register("always_error", Box::new(AlwaysErrorRule));
+    registry.register("count_functions", Box::new(CountFunctionDeclsRule(2)));
 
     let (program, _) = falcon_dart_parser::parse("void main() {}");
     let config = FalconConfig::default();
@@ -172,11 +154,13 @@ fn test_analyze_context_fields() {
 #[test]
 fn test_registry_rules_accessor() {
     let mut registry = RuleRegistry::new();
-    registry.register(Box::new(NoOpRule));
-    registry.register(Box::new(AlwaysErrorRule));
+    registry.register("no_op", Box::new(NoOpRule));
+    registry.register("always_error", Box::new(AlwaysErrorRule));
 
     let rules = registry.rules();
     assert_eq!(rules.len(), 2);
+    assert_eq!(rules[0].0, "no_op");
+    assert_eq!(rules[1].0, "always_error");
 }
 
 #[test]
@@ -196,7 +180,7 @@ fn test_analyze_parallel_single_file() {
     use falcon_analyze::analyze_parallel;
 
     let mut registry = RuleRegistry::new();
-    registry.register(Box::new(CountFunctionDeclsRule(1)));
+    registry.register("count_functions", Box::new(CountFunctionDeclsRule(1)));
 
     let config = FalconConfig::default();
     let files = vec![(
@@ -215,7 +199,7 @@ fn test_analyze_parallel_ten_files() {
     use std::path::PathBuf;
 
     let mut registry = RuleRegistry::new();
-    registry.register(Box::new(CountFunctionDeclsRule(1)));
+    registry.register("count_functions", Box::new(CountFunctionDeclsRule(1)));
 
     let config = FalconConfig::default();
     let files: Vec<(PathBuf, String)> = (0..10)
@@ -238,7 +222,7 @@ fn test_analyze_parallel_result_correctness_multi_file() {
     use std::path::PathBuf;
 
     let mut registry = RuleRegistry::new();
-    registry.register(Box::new(AlwaysErrorRule));
+    registry.register("always_error", Box::new(AlwaysErrorRule));
 
     let config = FalconConfig::default();
     let files: Vec<(PathBuf, String)> = (0..5)
@@ -280,7 +264,7 @@ fn test_end_to_end_parse_analyze_serialize() {
     );
 
     let mut registry = RuleRegistry::new();
-    registry.register(Box::new(AlwaysErrorRule));
+    registry.register("always_error", Box::new(AlwaysErrorRule));
 
     let config = FalconConfig::default();
     let ctx = AnalyzeContext {

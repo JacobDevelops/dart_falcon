@@ -9,18 +9,16 @@
 //! and triple-quoted strings are skipped to avoid the edge cases around escaping
 //! runs of quotes. Remove the redundant backslash.
 
+use crate::lint::string_lit::interpolated_literal;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::Visitor;
 
+#[derive(Default)]
 pub struct UnnecessaryStringEscapes;
 
 impl Rule for UnnecessaryStringEscapes {
-    fn name(&self) -> &'static str {
-        "unnecessary-string-escapes"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -48,10 +46,10 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     fn visit_string_lit(&mut self, node: &StringLitNode) {
-        let Some(lit) = StringLitNode::delimiter(&node.raw) else {
+        let Some(lit) = interpolated_literal(node) else {
             return;
         };
-        if !lit.terminated || lit.is_raw || lit.triple {
+        if lit.triple {
             return;
         }
         let bytes = lit.content.as_bytes();

@@ -12,11 +12,11 @@ pub use identity::{
 pub use library::{
     LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, library_unit,
 };
-pub(crate) use semantic::expression_segments;
 pub use semantic::{
     DeclarationFacts, MemberFacts, ParameterOwner, ResolvedSignature, ResolvedType, SemanticModel,
     SignatureIndex, TypeEnvironment, TypeParameterId, TypeParameterScope,
 };
+pub use semantic::{expression_segments, resolve_call_constructor};
 pub use type_index::{LibrarySource, MemberKind, MemberResult, TypeIndex, TypeKind};
 
 /// A three-valued proof: `No` means proven false, never "not proven true".

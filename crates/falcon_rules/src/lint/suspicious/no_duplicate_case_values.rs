@@ -10,13 +10,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_class_decl, walk_expr, walk_function_decl, walk_stmt};
 
+#[derive(Default)]
 pub struct NoDuplicateCaseValues;
 
 impl Rule for NoDuplicateCaseValues {
-    fn name(&self) -> &'static str {
-        "no-duplicate-case-values"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();

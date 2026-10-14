@@ -11,13 +11,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AvoidAbbreviationsInDocComments;
 
 impl Rule for AvoidAbbreviationsInDocComments {
-    fn name(&self) -> &'static str {
-        "avoid-abbreviations-in-doc-comments"
-    }
-
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         scan_source(ctx.source, &mut diags, ctx);

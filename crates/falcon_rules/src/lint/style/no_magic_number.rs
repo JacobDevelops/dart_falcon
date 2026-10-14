@@ -27,6 +27,7 @@ mod dcl {
     use falcon_syntax::ast::*;
     use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt, walk_top_level_decl};
 
+    #[derive(Default)]
     pub struct NoMagicNumber;
 
     const EPS: f64 = 1e-9;
@@ -36,8 +37,7 @@ mod dcl {
     }
 
     fn cfg(ctx: &AnalyzeContext) -> Cfg {
-        let allowed = crate::meta::meta_for("no-magic-number")
-            .and_then(|m| ctx.rule_options(m.group.as_str(), "no-magic-number"))
+        let allowed = crate::lint::options::for_rule(ctx, "no-magic-number")
             .and_then(|o| o.get("allowed"))
             .and_then(|v| v.as_array())
             .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<_>>())
@@ -46,10 +46,6 @@ mod dcl {
     }
 
     impl Rule for NoMagicNumber {
-        fn name(&self) -> &'static str {
-            "no-magic-number"
-        }
-
         fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
             let cfg = cfg(ctx);
             let mut collector = Collector {

@@ -11,6 +11,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
+#[derive(Default)]
 pub struct PreferExtractingCallbacks;
 
 struct Cfg {
@@ -19,38 +20,25 @@ struct Cfg {
 }
 
 fn cfg(ctx: &AnalyzeContext) -> Cfg {
-    let opts = crate::meta::meta_for("prefer-extracting-callbacks")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "prefer-extracting-callbacks"));
+    let opts = crate::lint::options::for_rule(ctx, "prefer-extracting-callbacks");
     Cfg {
-        allowed_line_count: opts
-            .and_then(|o| o.get("allowed_line_count"))
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize),
-        ignored: opts
-            .and_then(|o| o.get("ignored_named_arguments"))
-            .and_then(|v| v.as_array())
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(|value| value.as_str().map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default(),
+        allowed_line_count: crate::lint::options::usize(opts, "allowed_line_count"),
+        ignored: crate::lint::options::strings(opts, "ignored_named_arguments")
+            .into_iter()
+            .flatten()
+            .map(str::to_string)
+            .collect(),
     }
 }
 
 impl Rule for PreferExtractingCallbacks {
-    fn name(&self) -> &'static str {
-        "prefer-extracting-callbacks"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let widget = flutter_identity("Widget");
-        let state = flutter_identity("State");
+        let widget = DeclarationIdentity::flutter("Widget");
+        let state = DeclarationIdentity::flutter("State");
         let cfg = cfg(ctx);
         let mut diags = Vec::new();
         for declaration in &program.declarations {
@@ -60,7 +48,7 @@ impl Rule for PreferExtractingCallbacks {
             let Some(identity) = model.resolve_name(&class.name.name) else {
                 continue;
             };
-            let class_type = interface(identity);
+            let class_type = ResolvedType::interface_identity(identity);
             if signatures.is_subtype_of(&class_type, &widget, &model) != Truth::Yes
                 && signatures.is_subtype_of(&class_type, &state, &model) != Truth::Yes
             {
@@ -95,7 +83,7 @@ struct CallbackCollector<'a, 'b> {
 
 impl Visitor for CallbackCollector<'_, '_> {
     fn visit_expr(&mut self, node: &Expr) {
-        if let Some((constructed, args)) = construction(node, self.model)
+        if let Some((constructed, args)) = crate::lint::flutter::construction(node, self.model)
             && self
                 .signatures
                 .is_subtype_of(&constructed, self.widget, self.model)
@@ -150,7 +138,8 @@ impl CallbackCollector<'_, '_> {
         };
         // An untyped `(context, index) {}` is still a builder; only a resolved non-context type rules it out.
         first.param_type.as_ref().is_none_or(|ty| {
-            self.model.resolve_type(ty) == interface(flutter_identity("BuildContext"))
+            self.model.resolve_type(ty)
+                == ResolvedType::interface_identity(DeclarationIdentity::flutter("BuildContext"))
         })
     }
 }
@@ -210,64 +199,8 @@ fn expression_is_widget(
     signatures: &SignatureIndex,
     widget: &DeclarationIdentity,
 ) -> bool {
-    construction(expression, model)
+    crate::lint::flutter::construction(expression, model)
         .is_some_and(|(ty, _)| signatures.is_subtype_of(&ty, widget, model) == Truth::Yes)
-}
-
-fn construction<'a>(
-    expression: &'a Expr,
-    model: &SemanticModel<'_>,
-) -> Option<(ResolvedType, &'a ArgList)> {
-    match expression {
-        Expr::New {
-            dart_type, args, ..
-        } => Some((model.resolve_type(dart_type).with_nullable(false), args)),
-        Expr::Call { callee, args, .. } => {
-            let mut segments = expression_segments(callee)?;
-            if let Some(identity) = model.resolve_dotted(&segments) {
-                return Some((interface(identity), args));
-            }
-            segments.pop()?;
-            let identity = model.resolve_dotted(&segments)?;
-            Some((interface(identity), args))
-        }
-        _ => None,
-    }
-}
-
-fn expression_segments(expression: &Expr) -> Option<Vec<String>> {
-    let mut current = expression;
-    let mut segments = Vec::new();
-    loop {
-        match current {
-            Expr::Ident(identifier) => {
-                segments.push(identifier.name.clone());
-                segments.reverse();
-                return Some(segments);
-            }
-            Expr::Field { object, field, .. } => {
-                segments.push(field.name.clone());
-                current = object;
-            }
-            _ => return None,
-        }
-    }
-}
-
-fn interface(identity: DeclarationIdentity) -> ResolvedType {
-    ResolvedType::Interface {
-        identity,
-        arguments: Vec::new(),
-        nullable: false,
-        extension_type: false,
-    }
-}
-
-fn flutter_identity(name: &'static str) -> DeclarationIdentity {
-    DeclarationIdentity::Package {
-        package: "flutter",
-        name,
-    }
 }
 
 fn is_long_enough(span: &Span, source: &str, cfg: &Cfg) -> bool {

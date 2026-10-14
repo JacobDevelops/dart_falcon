@@ -12,13 +12,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct CorrectOrderForSuperDispose;
 
 impl Rule for CorrectOrderForSuperDispose {
-    fn name(&self) -> &'static str {
-        "correct-order-for-super-dispose"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
@@ -29,33 +26,8 @@ impl Rule for CorrectOrderForSuperDispose {
 }
 
 fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Class(c) => {
-            for m in &c.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Mixin(m) => {
-            for mem in &m.members {
-                scan_member(mem, diags, ctx);
-            }
-        }
-        TopLevelDecl::MixinClass(mc) => {
-            for m in &mc.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Enum(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        TopLevelDecl::Extension(e) => {
-            for m in &e.members {
-                scan_member(m, diags, ctx);
-            }
-        }
-        _ => {}
+    for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
+        scan_member(member, diags, ctx);
     }
 }
 

@@ -15,13 +15,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 
+#[derive(Default)]
 pub struct UnnecessaryNullableForFinalVariableDeclarations;
 
 impl Rule for UnnecessaryNullableForFinalVariableDeclarations {
-    fn name(&self) -> &'static str {
-        "unnecessary-nullable-for-final-variable-declarations"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -37,23 +34,7 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-/// Only literals and constructor invocations are treated as provably non-null;
-/// anything whose value depends on another binding is left alone.
-fn is_provably_non_null(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
-            | Expr::StringLit(_)
-            | Expr::BoolLit { .. }
-            | Expr::List { .. }
-            | Expr::Map { .. }
-            | Expr::Set { .. }
-            | Expr::Record { .. }
-            | Expr::New { .. }
-            | Expr::FuncExpr { .. }
-    )
-}
+use crate::lint::expressions::is_provably_non_null;
 
 impl Collector<'_> {
     fn check(
@@ -71,10 +52,11 @@ impl Collector<'_> {
         }
         // The type is shared by every declarator, so it is only unnecessarily
         // nullable when *all* of them are provably non-null.
-        if !declarators
-            .iter()
-            .all(|d| d.initializer.as_ref().is_some_and(is_provably_non_null))
-        {
+        if !declarators.iter().all(|d| {
+            d.initializer.as_ref().is_some_and(|expr| {
+                is_provably_non_null(expr) || matches!(expr, Expr::FuncExpr { .. })
+            })
+        }) {
             return;
         }
         for d in declarators {

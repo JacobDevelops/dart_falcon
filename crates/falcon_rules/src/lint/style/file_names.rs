@@ -1,16 +1,14 @@
 //! Enforces `lowercase_with_underscores` for source file names.
 
+use crate::lint::naming::is_snake_case;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::Program;
 
+#[derive(Default)]
 pub struct FileNames;
 
 impl Rule for FileNames {
-    fn name(&self) -> &'static str {
-        "file-names"
-    }
-
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(file_name) = ctx.file_path.file_name().and_then(|name| name.to_str()) else {
             return Vec::new();
@@ -18,7 +16,7 @@ impl Rule for FileNames {
         let Some(stem) = file_name.strip_suffix(".dart") else {
             return Vec::new();
         };
-        if stem.split('.').all(valid_name) {
+        if stem.split('.').all(is_snake_case) {
             return Vec::new();
         }
         vec![ctx.diagnostic(
@@ -27,10 +25,4 @@ impl Rule for FileNames {
             DiagSpan { start: 0, end: 0 },
         )]
     }
-}
-
-fn valid_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    matches!(chars.next(), Some('a'..='z'))
-        && chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
 }

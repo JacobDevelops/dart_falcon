@@ -17,13 +17,10 @@ use falcon_syntax::visitor::{
     walk_method_decl, walk_setter_decl, walk_stmt,
 };
 
+#[derive(Default)]
 pub struct AvoidReturningNullForVoid;
 
 impl Rule for AvoidReturningNullForVoid {
-    fn name(&self) -> &'static str {
-        "avoid-returning-null-for-void"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

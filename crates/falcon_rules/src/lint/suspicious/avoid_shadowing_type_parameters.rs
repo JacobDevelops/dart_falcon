@@ -16,13 +16,10 @@ use falcon_syntax::visitor::{
     walk_top_level_decl,
 };
 
+#[derive(Default)]
 pub struct AvoidShadowingTypeParameters;
 
 impl Rule for AvoidShadowingTypeParameters {
-    fn name(&self) -> &'static str {
-        "avoid-shadowing-type-parameters"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut checker = Checker {
             diags: Vec::new(),

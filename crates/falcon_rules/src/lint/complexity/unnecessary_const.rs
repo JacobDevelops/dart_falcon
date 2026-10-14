@@ -16,13 +16,10 @@ use falcon_syntax::visitor::{
     Visitor, walk_expr, walk_field_decl, walk_local_var, walk_top_level_decl,
 };
 
+#[derive(Default)]
 pub struct UnnecessaryConst;
 
 impl Rule for UnnecessaryConst {
-    fn name(&self) -> &'static str {
-        "unnecessary-const"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),

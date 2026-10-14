@@ -66,6 +66,15 @@ pub enum ResolvedType {
 }
 
 impl ResolvedType {
+    pub fn interface_identity(identity: DeclarationIdentity) -> Self {
+        Self::Interface {
+            identity,
+            arguments: Vec::new(),
+            nullable: false,
+            extension_type: false,
+        }
+    }
+
     pub fn nullable(&self) -> bool {
         match self {
             Self::Null => true,
@@ -1550,19 +1559,9 @@ impl SignatureIndex {
             },
         });
 
-        let widget = DeclarationIdentity::Package {
-            package: "flutter",
-            name: "Widget",
-        };
-        let key = ResolvedType::Interface {
-            identity: DeclarationIdentity::Package {
-                package: "flutter",
-                name: "Key",
-            },
-            arguments: Vec::new(),
-            nullable: true,
-            extension_type: false,
-        };
+        let widget = DeclarationIdentity::flutter("Widget");
+        let key = ResolvedType::interface_identity(DeclarationIdentity::flutter("Key"))
+            .with_nullable(true);
         for name in [
             "StatelessWidget",
             "StatefulWidget",
@@ -1576,16 +1575,8 @@ impl SignatureIndex {
             "GestureDetector",
             "MaterialApp",
         ] {
-            let identity = DeclarationIdentity::Package {
-                package: "flutter",
-                name,
-            };
-            let supertype = ResolvedType::Interface {
-                identity: widget.clone(),
-                arguments: Vec::new(),
-                nullable: false,
-                extension_type: false,
-            };
+            let identity = DeclarationIdentity::flutter(name);
+            let supertype = ResolvedType::interface_identity(widget.clone());
             self.supertypes
                 .insert(identity.clone(), (Vec::new(), vec![supertype.clone()]));
             self.member_supertypes
@@ -1830,6 +1821,16 @@ impl SignatureIndex {
         name: &str,
     ) -> Option<&ResolvedSignature> {
         self.constructors.get(identity)?.get(name)
+    }
+
+    /// Whether the declaration explicitly records the named constructor as const.
+    pub fn is_const_constructor(&self, identity: &DeclarationIdentity, name: &str) -> bool {
+        self.declaration(identity).is_some_and(|facts| {
+            facts
+                .constructors
+                .iter()
+                .any(|constructor| constructor.name == name && constructor.is_const)
+        })
     }
 
     pub fn resolved_constructor(
@@ -2269,17 +2270,13 @@ fn constructed_identity(
             _ => None,
         },
         Expr::Call { callee, .. } => {
-            let mut segments = expression_segments(callee, false)?;
-            model.resolve_dotted(&segments).or_else(|| {
-                segments.pop();
-                model.resolve_dotted(&segments)
-            })
+            resolve_call_constructor(callee, model, false).map(|(identity, _)| identity)
         }
         _ => None,
     }
 }
 
-pub(crate) fn expression_segments(
+pub fn expression_segments(
     expression: &Expr,
     allow_generic_instantiation: bool,
 ) -> Option<Vec<&str>> {
@@ -2302,6 +2299,23 @@ pub(crate) fn expression_segments(
             _ => return None,
         }
     }
+}
+
+/// Resolve a constructor call's callee, borrowing its constructor name.
+///
+/// Constant evaluation permits generic-instantiation wrappers; lexical lint
+/// policies can keep rejecting those wrappers by passing `false`.
+pub fn resolve_call_constructor<'a>(
+    callee: &'a Expr,
+    model: &SemanticModel<'_>,
+    allow_generic_instantiation: bool,
+) -> Option<(DeclarationIdentity, &'a str)> {
+    let mut segments = expression_segments(callee, allow_generic_instantiation)?;
+    if let Some(identity) = model.resolve_dotted(&segments) {
+        return Some((identity, "new"));
+    }
+    let constructor = segments.pop()?;
+    Some((model.resolve_dotted(&segments)?, constructor))
 }
 
 fn annotation_targets_library(
@@ -2351,21 +2365,10 @@ fn infer_const_initializer_type(
 ) -> ResolvedType {
     match initializer {
         Expr::New { dart_type, .. } => model.resolve_type_in(dart_type, scope).with_nullable(false),
-        Expr::Call { callee, .. } => {
-            let Some(mut segments) = expression_segments(callee, false) else {
-                return ResolvedType::Unknown;
-            };
-            let identity = model.resolve_dotted(&segments).or_else(|| {
-                segments.pop();
-                model.resolve_dotted(&segments)
-            });
-            identity.map_or(ResolvedType::Unknown, |identity| ResolvedType::Interface {
-                identity,
-                arguments: Vec::new(),
-                nullable: false,
-                extension_type: false,
-            })
-        }
+        Expr::Call { callee, .. } => resolve_call_constructor(callee, model, false)
+            .map_or(ResolvedType::Unknown, |(identity, _)| {
+                ResolvedType::interface_identity(identity)
+            }),
         Expr::Conditional {
             then_expr,
             else_expr,

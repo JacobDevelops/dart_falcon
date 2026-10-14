@@ -11,7 +11,7 @@ use std::path::Path;
 
 fn run(source: &str) -> Vec<String> {
     let mut registry = RuleRegistry::with_lookup(suppression_lookup);
-    registry.register(Box::new(AvoidDynamic));
+    registry.register("avoid-dynamic", Box::new(AvoidDynamic));
     let (program, _) = parse(source);
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config);

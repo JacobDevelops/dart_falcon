@@ -22,26 +22,20 @@ use falcon_syntax::ast::*;
 
 use crate::member_order::{category_rank, check_sequence, read_string_list};
 
+#[derive(Default)]
 pub struct ClassMembersOrdering;
 
 const NAME: &str = "class-members-ordering";
 
 impl Rule for ClassMembersOrdering {
-    fn name(&self) -> &'static str {
-        NAME
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         // A configured `order` option (a list of DCL category tokens) drives the
         // check; otherwise the built-in default order is used.
         let order = read_string_list(ctx, NAME, "order");
         for decl in &program.declarations {
-            let members = match decl {
-                TopLevelDecl::Class(c) => &c.members,
-                TopLevelDecl::Mixin(m) => &m.members,
-                TopLevelDecl::MixinClass(mc) => &mc.members,
-                _ => continue,
+            let Some(members) = crate::lint::declarations::members_of(decl) else {
+                continue;
             };
             match &order {
                 Some(seq) => check_sequence(

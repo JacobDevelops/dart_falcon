@@ -11,20 +11,17 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct NoLogicInCreateState;
 
 impl Rule for NoLogicInCreateState {
-    fn name(&self) -> &'static str {
-        "no-logic-in-create-state"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        let stateful_widget = flutter_identity("StatefulWidget");
-        let state = flutter_identity("State");
+        let stateful_widget = DeclarationIdentity::flutter("StatefulWidget");
+        let state = DeclarationIdentity::flutter("State");
         let mut diags = Vec::new();
         for declaration in &program.declarations {
             let TopLevelDecl::Class(class) = declaration else {
@@ -33,8 +30,11 @@ impl Rule for NoLogicInCreateState {
             let Some(identity) = model.resolve_name(&class.name.name) else {
                 continue;
             };
-            if signatures.is_subtype_of(&interface(identity), &stateful_widget, &model)
-                != Truth::Yes
+            if signatures.is_subtype_of(
+                &ResolvedType::interface_identity(identity),
+                &stateful_widget,
+                &model,
+            ) != Truth::Yes
             {
                 continue;
             }
@@ -96,7 +96,7 @@ fn body_result(
         },
         FunctionBody::Native(..) => return BodyResult::Unknown,
     };
-    let Some((constructed, args)) = construction(expression, model) else {
+    let Some((constructed, args)) = crate::lint::flutter::construction(expression, model) else {
         return if looks_like_unresolved_construction(expression) {
             BodyResult::Unknown
         } else {
@@ -111,62 +111,7 @@ fn body_result(
     }
 }
 
-fn construction<'a>(
-    expression: &'a Expr,
-    model: &SemanticModel<'_>,
-) -> Option<(ResolvedType, &'a ArgList)> {
-    match expression {
-        Expr::New {
-            dart_type, args, ..
-        } => Some((model.resolve_type(dart_type).with_nullable(false), args)),
-        Expr::Call { callee, args, .. } => {
-            let mut segments = expression_segments(callee)?;
-            let identity = model.resolve_dotted(&segments).or_else(|| {
-                segments.pop();
-                model.resolve_dotted(&segments)
-            })?;
-            Some((interface(identity), args))
-        }
-        _ => None,
-    }
-}
-
 fn looks_like_unresolved_construction(expression: &Expr) -> bool {
     matches!(expression, Expr::Call { callee, .. }
-        if expression_segments(callee).is_some())
-}
-
-fn expression_segments(expression: &Expr) -> Option<Vec<String>> {
-    let mut current = expression;
-    let mut segments = Vec::new();
-    loop {
-        match current {
-            Expr::Ident(identifier) => {
-                segments.push(identifier.name.clone());
-                segments.reverse();
-                return Some(segments);
-            }
-            Expr::Field { object, field, .. } => {
-                segments.push(field.name.clone());
-                current = object;
-            }
-            _ => return None,
-        }
-    }
-}
-
-fn interface(identity: DeclarationIdentity) -> ResolvedType {
-    ResolvedType::Interface {
-        identity,
-        arguments: Vec::new(),
-        nullable: false,
-        extension_type: false,
-    }
-}
-
-fn flutter_identity(name: &'static str) -> DeclarationIdentity {
-    DeclarationIdentity::Package {
-        package: "flutter",
-        name,
-    }
+        if falcon_analyze::expression_segments(callee, false).is_some())
 }

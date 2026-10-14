@@ -13,13 +13,10 @@ mod dcl {
 
     use crate::lint::lexical_usage::{used_constructor_parameters, used_parameters};
 
+    #[derive(Default)]
     pub struct AvoidUnusedParameters;
 
     impl Rule for AvoidUnusedParameters {
-        fn name(&self) -> &'static str {
-            "avoid-unused-parameters"
-        }
-
         fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
             let mut collector = Collector {
                 ctx,

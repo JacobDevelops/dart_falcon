@@ -8,18 +8,18 @@
 //! strings and escaped `\$` sequences are skipped, and a `$` right after the `}` is
 //! treated as extending the name so the braces are kept.
 
+use crate::lint::string_lit::{
+    interpolated_literal, is_ident_body, is_simple_identifier, matching_brace,
+};
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::Visitor;
 
+#[derive(Default)]
 pub struct UnnecessaryBraceInStringInterps;
 
 impl Rule for UnnecessaryBraceInStringInterps {
-    fn name(&self) -> &'static str {
-        "unnecessary-brace-in-string-interps"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -30,24 +30,10 @@ impl Rule for UnnecessaryBraceInStringInterps {
     }
 }
 
-fn is_ident_start(c: u8) -> bool {
-    c.is_ascii_alphabetic() || c == b'_'
-}
-
-fn is_ident_body(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_'
-}
-
 /// A `$` after the `}` starts another interpolation rather than extending the identifier,
 /// but keeping the braces there is harmless — so we treat it as "extends" and stay silent.
 fn extends_identifier(c: u8) -> bool {
     is_ident_body(c) || c == b'$'
-}
-
-/// A single Dart identifier without `$`, so removing the braces is unambiguous.
-fn is_simple_identifier(s: &str) -> bool {
-    let b = s.as_bytes();
-    !b.is_empty() && is_ident_start(b[0]) && b.iter().all(|&c| is_ident_body(c))
 }
 
 struct Collector<'a> {
@@ -57,12 +43,9 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     fn visit_string_lit(&mut self, node: &StringLitNode) {
-        let Some(lit) = StringLitNode::delimiter(&node.raw) else {
+        let Some(lit) = interpolated_literal(node) else {
             return;
         };
-        if !lit.terminated || lit.is_raw {
-            return;
-        }
         let bytes = lit.content.as_bytes();
         let mut i = 0;
         while i < bytes.len() {
@@ -93,25 +76,4 @@ impl Visitor for Collector<'_> {
             }
         }
     }
-}
-
-/// Given the index of an opening `{`, returns the index of its matching `}`.
-fn matching_brace(bytes: &[u8], open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut i = open;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => i += 1,
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
 }

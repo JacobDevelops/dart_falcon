@@ -15,7 +15,6 @@ pub struct ProjectFile {
 }
 
 pub trait CrossFileRule: Send + Sync {
-    fn name(&self) -> &'static str;
     fn analyze_project(&self, files: &[ProjectFile], config: &FalconConfig) -> Vec<Diagnostic>;
 }
 

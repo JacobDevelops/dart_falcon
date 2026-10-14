@@ -7,15 +7,12 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+#[derive(Default)]
 pub struct AnnotateOverrides;
 
 type Candidate<'a> = (&'a str, &'a Span, &'a [Annotation], MemberKind);
 
 impl Rule for AnnotateOverrides {
-    fn name(&self) -> &'static str {
-        "annotate-overrides"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();

@@ -14,13 +14,10 @@ use falcon_syntax::visitor::{
     Visitor, walk_expr, walk_function_decl, walk_getter_decl, walk_method_decl, walk_stmt,
 };
 
+#[derive(Default)]
 pub struct UnnecessaryNullableReturnType;
 
 impl Rule for UnnecessaryNullableReturnType {
-    fn name(&self) -> &'static str {
-        "unnecessary-nullable-return-type"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
@@ -132,17 +129,4 @@ impl Visitor for ReturnScan {
     }
 }
 
-fn is_provably_non_null(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
-            | Expr::BoolLit { .. }
-            | Expr::StringLit(_)
-            | Expr::List { .. }
-            | Expr::Map { .. }
-            | Expr::Set { .. }
-            | Expr::Record { .. }
-            | Expr::New { .. }
-    )
-}
+use crate::lint::expressions::is_provably_non_null;

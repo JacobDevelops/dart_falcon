@@ -92,9 +92,10 @@ notes, is in
    This writes the rule module and empty `bad.dart` / `good.dart` fixtures, then
    prints the exact follow-up steps.
 
-2. **Implement** the rule. Rules implement the `Rule` trait from `falcon_analyze`
-   and walk the AST from `falcon_syntax` (`falcon_syntax::ast::*`). Use the
-   `Visitor` trait / `visit_*` helpers in `falcon_syntax::visitor` to traverse.
+2. **Implement** the rule. Rule structs derive `Default` and implement the `Rule`
+   trait from `falcon_analyze` (or `CrossFileRule` for project-wide analysis).
+   Use the `Visitor` trait / `visit_*` helpers in `falcon_syntax::visitor` to
+   traverse the AST from `falcon_syntax` (`falcon_syntax::ast::*`).
 
    > **Construction gotcha:** `Expr::New` is emitted **only** for `new X(...)` and
    > `const X(...)`. A plain `X()` or a named constructor like `X.from()` parses as
@@ -105,20 +106,23 @@ notes, is in
    (or `src/cross_file.rs` for a cross-file rule).
 
 4. **Register the rule** with one `RuleMeta` entry in
-   `crates/falcon_rules/src/meta.rs`. Choose a typed `RuleGroup` and `Domain`
-   slice, set `recommended`, and supply its constructor through `RuleKind::File`
-   (including `needs_resolution`) or `RuleKind::CrossFile`. Set `source` to
+   `crates/falcon_rules/src/meta.rs`, using `RuleMeta::file::<T>` for syntax-only
+   rules, `RuleMeta::resolved::<T>` for file rules requiring resolution, or
+   `RuleMeta::cross_file::<T>` for project-wide rules. Pass the canonical name,
+   typed `RuleGroup`, `Domain` slice, `recommended` flag, and source. Sources are
    `RuleSource::DartCodeLinter("...")`, `RuleSource::PyramidLint("...")`,
    `RuleSource::Lints("...")`, or `RuleSource::Falcon` for original rules.
-   Registries and schemas derive from this table; there is no separate
-   registration list.
+   Constructors use `T::default()`. Execution identities, registries, and schemas
+   derive from this table; there is no separate registration list or rule name
+   method.
 
 5. **Add a showcase entry**: list the rule in the root `falcon.json` under its
    group (`linter.rules.<group>` for file rules, `"cross-file".rules.<group>` for
    cross-file rules).
 
    Compilation checks module declarations and constructors. `meta_tests.rs`
-   checks constructor names, metadata uniqueness, and source ids;
+   checks metadata name uniqueness, source ids, and the committed schema;
+   corpus tests check diagnostic identities against fixture expectations.
    `root_config_tests.rs` requires the root `falcon.json` to list every rule
    exactly once.
 

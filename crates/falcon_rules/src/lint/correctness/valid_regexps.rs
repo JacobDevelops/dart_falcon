@@ -5,13 +5,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct ValidRegexps;
 
 impl Rule for ValidRegexps {
-    fn name(&self) -> &'static str {
-        "valid-regexps"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(identities) = ctx.identities else {
             return Vec::new();
@@ -48,7 +45,7 @@ impl Collector<'_> {
     }
 
     fn sdk_regexp_name(&self, expression: &Expr) -> bool {
-        let segments = expression_segments(expression);
+        let segments = falcon_analyze::expression_segments(expression, false);
         matches!(segments.as_deref().and_then(|segments| self.model.resolve_dotted(segments)), Some(DeclarationIdentity::Sdk { library, name }) if library == "dart:core" && name == "RegExp")
     }
 }
@@ -65,18 +62,6 @@ impl Visitor for Collector<'_> {
             _ => {}
         }
         walk_expr(self, node);
-    }
-}
-
-fn expression_segments(expression: &Expr) -> Option<Vec<String>> {
-    match expression {
-        Expr::Ident(identifier) => Some(vec![identifier.name.clone()]),
-        Expr::Field { object, field, .. } => {
-            let mut segments = expression_segments(object)?;
-            segments.push(field.name.clone());
-            Some(segments)
-        }
-        _ => None,
     }
 }
 

@@ -7,11 +7,9 @@ use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use std::collections::HashSet;
 
+#[derive(Default)]
 pub struct TypeLiteralInConstantPattern;
 impl Rule for TypeLiteralInConstantPattern {
-    fn name(&self) -> &'static str {
-        "type-literal-in-constant-pattern"
-    }
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
@@ -20,15 +18,7 @@ impl Rule for TypeLiteralInConstantPattern {
             .declarations
             .iter()
             .filter_map(|declaration| {
-                let members = match declaration {
-                    TopLevelDecl::Class(declaration) => &declaration.members,
-                    TopLevelDecl::Mixin(declaration) => &declaration.members,
-                    TopLevelDecl::MixinClass(declaration) => &declaration.members,
-                    TopLevelDecl::Enum(declaration) => &declaration.members,
-                    TopLevelDecl::Extension(declaration) => &declaration.members,
-                    TopLevelDecl::ExtensionType(declaration) => &declaration.members,
-                    _ => return None,
-                };
+                let members = crate::lint::declarations::members_of(declaration)?;
                 Some((*declaration.span(), member_names(members)))
             })
             .collect();

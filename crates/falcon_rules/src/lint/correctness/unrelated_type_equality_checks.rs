@@ -7,13 +7,10 @@ use falcon_syntax::ast::*;
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
+#[derive(Default)]
 pub struct UnrelatedTypeEqualityChecks;
 
 impl Rule for UnrelatedTypeEqualityChecks {
-    fn name(&self) -> &'static str {
-        "unrelated-type-equality-checks"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();

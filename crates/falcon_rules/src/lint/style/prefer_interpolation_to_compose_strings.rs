@@ -9,13 +9,10 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
+#[derive(Default)]
 pub struct PreferInterpolationToComposeStrings;
 
 impl Rule for PreferInterpolationToComposeStrings {
-    fn name(&self) -> &'static str {
-        "prefer-interpolation-to-compose-strings"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();

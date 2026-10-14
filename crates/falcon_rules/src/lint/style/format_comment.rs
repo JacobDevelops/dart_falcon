@@ -21,6 +21,7 @@ use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use regex::Regex;
 
+#[derive(Default)]
 pub struct FormatComment;
 
 /// Resolved options for one analysis pass.
@@ -32,8 +33,7 @@ struct CommentCfg {
 }
 
 fn comment_cfg(ctx: &AnalyzeContext) -> CommentCfg {
-    let opts = crate::meta::meta_for("format-comment")
-        .and_then(|m| ctx.rule_options(m.group.as_str(), "format-comment"));
+    let opts = crate::lint::options::for_rule(ctx, "format-comment");
 
     let only_doc_comments = opts
         .and_then(|o| o.get("only_doc_comments"))
@@ -42,16 +42,11 @@ fn comment_cfg(ctx: &AnalyzeContext) -> CommentCfg {
 
     // Compile each pattern leniently: an invalid regex is ignored rather than
     // panicking on user config.
-    let ignored_patterns = opts
-        .and_then(|o| o.get("ignored_patterns"))
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .filter_map(|s| Regex::new(s).ok())
-                .collect()
-        })
-        .unwrap_or_default();
+    let ignored_patterns = crate::lint::options::strings(opts, "ignored_patterns")
+        .into_iter()
+        .flatten()
+        .filter_map(|pattern| Regex::new(pattern).ok())
+        .collect();
 
     CommentCfg {
         only_doc_comments,
@@ -60,10 +55,6 @@ fn comment_cfg(ctx: &AnalyzeContext) -> CommentCfg {
 }
 
 impl Rule for FormatComment {
-    fn name(&self) -> &'static str {
-        "format-comment"
-    }
-
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let cfg = comment_cfg(ctx);

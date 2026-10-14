@@ -6,13 +6,10 @@ use falcon_syntax::ast::Program;
 
 use crate::lint::semantic_type_operations::{TypeOperationKind, collect};
 
+#[derive(Default)]
 pub struct AvoidUnrelatedTypeAssertions;
 
 impl Rule for AvoidUnrelatedTypeAssertions {
-    fn name(&self) -> &'static str {
-        "avoid-unrelated-type-assertions"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let Some(analysis) = collect(program, ctx) else {
             return Vec::new();
@@ -31,7 +28,7 @@ impl Rule for AvoidUnrelatedTypeAssertions {
                     return None;
                 }
                 Some(ctx.diagnostic(
-                    self.name(),
+                    "avoid-unrelated-type-assertions",
                     "Type assertion can never be true — types are unrelated",
                     operation.span,
                 ))

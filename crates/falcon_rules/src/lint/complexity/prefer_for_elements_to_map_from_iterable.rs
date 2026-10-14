@@ -13,13 +13,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
+#[derive(Default)]
 pub struct PreferForElementsToMapFromIterable;
 
 impl Rule for PreferForElementsToMapFromIterable {
-    fn name(&self) -> &'static str {
-        "prefer-for-elements-to-map-from-iterable"
-    }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             diags: Vec::new(),
