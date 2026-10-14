@@ -1,0 +1,1893 @@
+//! Report public declarations that no entry point of an executable library
+//! reaches.
+//!
+//! A library — its defining unit plus every `part` file — is executable when it
+//! declares a top-level function named `main`, or a top-level function
+//! annotated `@pragma('vm:entry-point')` whose `pragma` provably resolves to
+//! `dart:core`. Starting from those entry points (and from top-level functions
+//! annotated with a widget-preview `@Preview`), the rule follows references:
+//! identifiers, invocations, constructor names and tear-offs, annotations,
+//! user-defined operators, object-pattern fields, doc comment references,
+//! supertypes named in a class's `extends`/`with`/`implements` clause or an
+//! extension type's `implements` clause, implicit super-constructor calls,
+//! typedef and extension-type names, type literals, type arguments, and the
+//! types of `external` members. A plain type annotation is not a reference, and
+//! constructor invocations inside constant patterns do not count. Instance
+//! `toJson` methods are reachable with their container, because `dart:convert`
+//! calls them dynamically.
+//!
+//! The candidates are the library's top-level declarations and the public
+//! constructors (except enum constructors), fields, methods, getters, setters,
+//! and operators of public classes, enums, mixins, extensions, and extension
+//! types. A member that overrides a supertype member is not a candidate, nor
+//! are the test-harness methods `test_*`, `solo_test_*`, `setUp`, `tearDown`,
+//! `setUpClass`, and `tearDownClass`. Unreached public candidates are reported
+//! unless annotated `@visibleForTesting` or a widget preview; a member other
+//! than a field is not reported again when its enclosing declaration already
+//! is (the analyzer reports unreachable fields of an unreachable class too).
+//! Libraries that declare a top-level name twice are not analyzed.
+//!
+//! Facts falcon cannot prove are resolved toward reachability, so uncertainty
+//! causes misses rather than false positives: a member whose container has a
+//! supertype declared outside the library may override it and is never a
+//! candidate; a member access on a receiver of unknown type reaches every
+//! same-named member, and its class too when the class is named anywhere
+//! outside its own declaration (a class that is never named cannot be the
+//! static type of a receiver); an identifier counts unless it lexically
+//! resolves to a local. A library with a part that does not resolve to an
+//! analyzed file is not analyzed.
+//!
+//! Adopted from the official `unreachable_from_main` lint.
+
+use std::collections::{HashMap, HashSet};
+
+use falcon_analyze::{AnalyzeContext, QualifiedName, Rule};
+use falcon_diagnostics::Diagnostic;
+use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr, walk_pattern,
+    walk_stmt, walk_top_level_decl,
+};
+
+use crate::lint::lexical_usage::{for_in_declares_variable, locally_bound_identifiers};
+use crate::lint::string_lit::{is_ident_body, is_simple_identifier};
+
+const RULE: &str = "unreachable-from-main";
+
+/// Members every class inherits from `Object`; declaring one is an override.
+const OBJECT_MEMBERS: &[&str] = &["==", "hashCode", "toString", "noSuchMethod", "runtimeType"];
+
+/// Bound on typedef-alias chains followed while resolving a named type.
+const MAX_ALIAS_DEPTH: usize = 8;
+
+#[derive(Default)]
+pub struct UnreachableFromMain;
+
+impl Rule for UnreachableFromMain {
+    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let Some(units) = library_units(program, ctx) else {
+            return Vec::new();
+        };
+        let tables = Tables::build(&units, ctx);
+        if !tables.executable || tables.conflicting {
+            return Vec::new();
+        }
+
+        let mut deps: Vec<Vec<DeclId>> = vec![Vec::new(); tables.decls.len()];
+        for (index, unit) in units.iter().enumerate() {
+            let bound = locally_bound_identifiers(unit.program);
+            let mut walker = RefWalker::new(&tables, index, unit.source, &bound, &mut deps);
+            for declaration in &unit.program.declarations {
+                walker.visit_top_level_decl(declaration);
+            }
+            walker.doc_references();
+        }
+
+        let mut reached = vec![false; tables.decls.len()];
+        let mut pending = tables.roots.clone();
+        for &root in &pending {
+            reached[root] = true;
+        }
+        while let Some(declaration) = pending.pop() {
+            for &dependency in &deps[declaration] {
+                if !reached[dependency] {
+                    reached[dependency] = true;
+                    pending.push(dependency);
+                }
+            }
+        }
+
+        let mut diagnostics: Vec<Diagnostic> = tables
+            .decls
+            .iter()
+            .enumerate()
+            .filter(|(id, decl)| {
+                decl.unit == 0
+                    && decl.reportable
+                    && !reached[*id]
+                    && (decl.field
+                        || decl
+                            .container
+                            .is_none_or(|container| reached[tables.containers[container].decl]))
+            })
+            .map(|(_, decl)| {
+                ctx.diagnostic(
+                    RULE,
+                    format!(
+                        "Unreachable member '{}' in an executable library.",
+                        decl.label
+                    ),
+                    decl.name_span,
+                )
+            })
+            .collect();
+        diagnostics.sort_by_key(|diagnostic| diagnostic.span.start);
+        diagnostics
+    }
+}
+
+/// One compilation unit of the analyzed library. Unit 0 is the file under
+/// analysis; the rest are its library siblings.
+struct Unit<'a> {
+    program: &'a Program,
+    /// The in-memory text `program` was parsed from, so its spans index it.
+    source: &'a str,
+}
+
+/// The analyzed file plus every sibling unit of its library, each with the
+/// source text it was parsed from. `None` when the library is incomplete.
+fn library_units<'a>(program: &'a Program, ctx: &'a AnalyzeContext<'a>) -> Option<Vec<Unit<'a>>> {
+    let current = Unit {
+        program,
+        source: ctx.source,
+    };
+    if ctx
+        .library
+        .is_some_and(|library| library.has_unresolved_parts())
+    {
+        return None;
+    }
+    let Some(library) = ctx.library.filter(|library| !library.siblings().is_empty()) else {
+        let standalone = program.part_of_directive.is_none() && program.part_directives.is_empty();
+        return standalone.then(|| vec![current]);
+    };
+    let siblings = library
+        .siblings()
+        .iter()
+        .zip(library.sibling_sources())
+        .map(|(&program, &source)| Unit { program, source });
+    Some(std::iter::once(current).chain(siblings).collect())
+}
+
+fn top_level_name(declaration: &TopLevelDecl) -> Option<&Identifier> {
+    match declaration {
+        TopLevelDecl::Class(x) => Some(&x.name),
+        TopLevelDecl::ClassTypeAlias(x) => Some(&x.name),
+        TopLevelDecl::Mixin(x) => Some(&x.name),
+        TopLevelDecl::MixinClass(x) => Some(&x.name),
+        TopLevelDecl::Enum(x) => Some(&x.name),
+        TopLevelDecl::Extension(x) => x.name.as_ref(),
+        TopLevelDecl::ExtensionType(x) => Some(&x.name),
+        TopLevelDecl::Function(x) => Some(&x.name),
+        TopLevelDecl::Variable(x) => x.declarators.first().map(|declarator| &declarator.name),
+        TopLevelDecl::TypeAlias(x) => Some(&x.name),
+        TopLevelDecl::Error(_) => None,
+    }
+}
+
+type DeclId = usize;
+type ContainerId = usize;
+
+/// A declaration that reachability is computed for.
+struct Decl {
+    /// The name used in the diagnostic message.
+    label: String,
+    unit: usize,
+    name_span: Span,
+    /// The enclosing class-like declaration of a member.
+    container: Option<ContainerId>,
+    /// The class-like scope references in this declaration's doc comment
+    /// resolve in: the container of a member, or the container itself.
+    scope: Option<ContainerId>,
+    /// A public candidate that is not exempt from reporting.
+    reportable: bool,
+    /// Start of the leading doc comment, or of the declaration without one.
+    doc_start: usize,
+    end: usize,
+    /// A field: the analyzer reports an unreachable field even when its
+    /// enclosing declaration is reported too.
+    field: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ContainerKind {
+    /// A class or mixin class declaration (with a body).
+    Class,
+    /// A mixin-application class `class C = S with M;`.
+    ClassTypeAlias,
+    Mixin,
+    Enum,
+    Extension,
+    ExtensionType,
+}
+
+/// A class-like top-level declaration.
+struct Container<'a> {
+    decl: DeclId,
+    kind: ContainerKind,
+    superclass: Option<&'a DartType>,
+    /// Types whose members this declaration inherits or must implement.
+    supertypes: Vec<&'a DartType>,
+    /// Every member name in the declaration's lexical scope.
+    declared: HashSet<String>,
+    /// Instance member names, for override detection.
+    instance: HashSet<String>,
+    constructors: HashSet<String>,
+    /// Candidate non-constructor members by name.
+    members: HashMap<String, Vec<DeclId>>,
+    /// Candidate constructors by name (`new` for the unnamed one).
+    candidate_constructors: HashMap<String, DeclId>,
+    members_source: &'a [ClassMember],
+    public: bool,
+    unit: usize,
+}
+
+impl<'a> Container<'a> {
+    fn new(
+        decl: DeclId,
+        kind: ContainerKind,
+        members_source: &'a [ClassMember],
+        public: bool,
+        unit: usize,
+    ) -> Self {
+        Self {
+            decl,
+            kind,
+            superclass: None,
+            supertypes: Vec::new(),
+            declared: HashSet::new(),
+            instance: HashSet::new(),
+            constructors: HashSet::new(),
+            members: HashMap::new(),
+            candidate_constructors: HashMap::new(),
+            members_source,
+            public,
+            unit,
+        }
+    }
+}
+
+struct Tables<'a> {
+    decls: Vec<Decl>,
+    containers: Vec<Container<'a>>,
+    /// Top-level declarations by name.
+    top: HashMap<&'a str, Vec<DeclId>>,
+    container_named: HashMap<&'a str, ContainerId>,
+    alias_named: HashMap<&'a str, &'a DartType>,
+    /// Top-level variable initializers, for annotations through a constant.
+    initializers: HashMap<&'a str, &'a Expr>,
+    /// Candidate non-constructor members of every container, by name.
+    members_named: HashMap<String, Vec<DeclId>>,
+    /// Declaration ids by `(unit, span start)` of their declaring node.
+    at: HashMap<(usize, usize), DeclId>,
+    container_at: HashMap<(usize, usize), ContainerId>,
+    roots: Vec<DeclId>,
+    executable: bool,
+    /// Names declared by more than one top-level declaration (other than a
+    /// getter and setter pair); such invalid code is not analyzed.
+    defined: HashSet<&'a str>,
+    conflicting: bool,
+    /// Per container: whether its name occurs anywhere in the library outside
+    /// its own declaration, as an identifier, type, comment, or string.
+    named_elsewhere: Vec<bool>,
+}
+
+impl<'a> Tables<'a> {
+    fn build(units: &'a [Unit<'a>], ctx: &AnalyzeContext) -> Self {
+        let mut tables = Tables {
+            decls: Vec::new(),
+            containers: Vec::new(),
+            top: HashMap::new(),
+            container_named: HashMap::new(),
+            alias_named: HashMap::new(),
+            initializers: HashMap::new(),
+            members_named: HashMap::new(),
+            at: HashMap::new(),
+            container_at: HashMap::new(),
+            roots: Vec::new(),
+            executable: false,
+            defined: HashSet::new(),
+            conflicting: false,
+            named_elsewhere: Vec::new(),
+        };
+        for (unit, source) in units.iter().enumerate() {
+            for declaration in &source.program.declarations {
+                tables.add_top_level(unit, source.source, declaration);
+            }
+        }
+        for container in 0..tables.containers.len() {
+            tables.add_members(container, units[tables.containers[container].unit].source);
+        }
+        tables.find_entry_points(units, ctx);
+        tables.find_named_elsewhere(units);
+        tables
+    }
+
+    fn add_decl(&mut self, unit: usize, key: usize, decl: Decl) -> DeclId {
+        let id = self.decls.len();
+        self.decls.push(Decl { unit, ..decl });
+        self.at.insert((unit, key), id);
+        id
+    }
+
+    fn add_top_level(&mut self, unit: usize, source: &str, declaration: &'a TopLevelDecl) {
+        let annotations: &[Annotation] = match declaration {
+            TopLevelDecl::Class(x) => &x.annotations,
+            TopLevelDecl::ClassTypeAlias(x) => &x.annotations,
+            TopLevelDecl::Mixin(x) => &x.annotations,
+            TopLevelDecl::MixinClass(x) => &x.annotations,
+            TopLevelDecl::Enum(x) => &x.annotations,
+            TopLevelDecl::Extension(x) => &x.annotations,
+            TopLevelDecl::ExtensionType(x) => &x.annotations,
+            TopLevelDecl::Function(x) => &x.annotations,
+            TopLevelDecl::Variable(x) => &x.annotations,
+            TopLevelDecl::TypeAlias(x) => &x.annotations,
+            TopLevelDecl::Error(_) => return,
+        };
+        let span = *declaration.span();
+        let doc_start = doc_start(source, annotated_start(annotations, span.start));
+        let exempt = annotations.iter().any(is_visible_for_testing);
+
+        if let TopLevelDecl::Variable(variable) = declaration {
+            for declarator in &variable.declarators {
+                let id = self.add_decl(
+                    unit,
+                    declarator.span.start,
+                    Decl {
+                        label: declarator.name.name.clone(),
+                        unit,
+                        name_span: declarator.name.span,
+                        container: None,
+                        scope: None,
+                        reportable: is_public(&declarator.name.name) && !exempt,
+                        doc_start,
+                        end: declarator.span.end,
+                        field: false,
+                    },
+                );
+                self.top.entry(&declarator.name.name).or_default().push(id);
+                self.conflicting |= !self.defined.insert(&declarator.name.name);
+                if let Some(initializer) = &declarator.initializer {
+                    self.initializers.insert(&declarator.name.name, initializer);
+                }
+            }
+            return;
+        }
+
+        let Some(name) = top_level_name(declaration) else {
+            // An unnamed extension: never referenced by name, never reported,
+            // but its members are reached through implicit invocations.
+            if let TopLevelDecl::Extension(extension) = declaration {
+                let id = self.add_decl(
+                    unit,
+                    span.start,
+                    Decl {
+                        label: String::new(),
+                        unit,
+                        name_span: span,
+                        container: None,
+                        scope: None,
+                        reportable: false,
+                        doc_start,
+                        end: span.end,
+                        field: false,
+                    },
+                );
+                self.add_container(
+                    span.start,
+                    Container::new(
+                        id,
+                        ContainerKind::Extension,
+                        &extension.members,
+                        false,
+                        unit,
+                    ),
+                );
+            }
+            return;
+        };
+        let id = self.add_decl(
+            unit,
+            span.start,
+            Decl {
+                label: name.name.clone(),
+                unit,
+                name_span: name.span,
+                container: None,
+                scope: None,
+                reportable: is_public(&name.name) && !exempt,
+                doc_start,
+                end: span.end,
+                field: false,
+            },
+        );
+        self.top.entry(&name.name).or_default().push(id);
+        let accessor = matches!(declaration, TopLevelDecl::Function(function)
+            if !matches!(function.kind, FunctionKind::Function(_)));
+        if !accessor {
+            self.conflicting |= !self.defined.insert(&name.name);
+        }
+
+        let public = is_public(&name.name);
+        let (kind, superclass, supertypes, members): (_, _, Vec<&DartType>, &[ClassMember]) =
+            match declaration {
+                TopLevelDecl::Class(x) => (
+                    ContainerKind::Class,
+                    x.extends.as_ref(),
+                    x.extends
+                        .iter()
+                        .chain(&x.with_clause)
+                        .chain(&x.implements)
+                        .collect(),
+                    &x.members,
+                ),
+                TopLevelDecl::MixinClass(x) => (
+                    ContainerKind::Class,
+                    x.extends.as_ref(),
+                    x.extends
+                        .iter()
+                        .chain(&x.with_clause)
+                        .chain(&x.implements)
+                        .collect(),
+                    &x.members,
+                ),
+                TopLevelDecl::ClassTypeAlias(x) => (
+                    ContainerKind::ClassTypeAlias,
+                    Some(&x.superclass),
+                    std::iter::once(&x.superclass)
+                        .chain(&x.with_clause)
+                        .chain(&x.implements)
+                        .collect(),
+                    &[],
+                ),
+                TopLevelDecl::Mixin(x) => (
+                    ContainerKind::Mixin,
+                    None,
+                    x.on_clause.iter().chain(&x.implements).collect(),
+                    &x.members,
+                ),
+                TopLevelDecl::Enum(x) => (
+                    ContainerKind::Enum,
+                    None,
+                    x.with_clause.iter().chain(&x.implements).collect(),
+                    &x.members,
+                ),
+                TopLevelDecl::Extension(x) => {
+                    (ContainerKind::Extension, None, Vec::new(), &x.members)
+                }
+                TopLevelDecl::ExtensionType(x) => (
+                    ContainerKind::ExtensionType,
+                    None,
+                    x.implements.iter().collect(),
+                    &x.members,
+                ),
+                TopLevelDecl::TypeAlias(x) => {
+                    self.alias_named.insert(&name.name, &x.aliased);
+                    return;
+                }
+                TopLevelDecl::Function(_) | TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => {
+                    return;
+                }
+            };
+        let container = self.add_container(
+            span.start,
+            Container {
+                superclass,
+                supertypes,
+                ..Container::new(id, kind, members, public, unit)
+            },
+        );
+        self.container_named.entry(&name.name).or_insert(container);
+        self.decls[id].scope = Some(container);
+        let lexical = &mut self.containers[container];
+        match declaration {
+            TopLevelDecl::Enum(x) => {
+                lexical
+                    .declared
+                    .extend(x.variants.iter().map(|variant| variant.name.name.clone()));
+            }
+            TopLevelDecl::ExtensionType(x) => {
+                let field = &x.representation.field_name.name;
+                lexical.declared.insert(field.clone());
+                lexical.instance.insert(field.clone());
+                lexical.constructors.insert(
+                    x.representation
+                        .constructor_name
+                        .as_ref()
+                        .map_or_else(|| "new".to_string(), |name| name.name.clone()),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    /// Register a container, indexing the names its members declare.
+    fn add_container(&mut self, key: usize, mut container: Container<'a>) -> ContainerId {
+        for member in container.members_source {
+            let (is_static, single, fields): (bool, Option<String>, &[VarDeclarator]) = match member
+            {
+                ClassMember::Constructor(constructor) => {
+                    container.constructors.insert(constructor_key(constructor));
+                    continue;
+                }
+                ClassMember::Field(x) => (x.is_static, None, &x.declarators),
+                ClassMember::Method(x) => (x.is_static, Some(x.name.name.clone()), &[]),
+                ClassMember::Getter(x) => (x.is_static, Some(x.name.name.clone()), &[]),
+                ClassMember::Setter(x) => (x.is_static, Some(x.name.name.clone()), &[]),
+                ClassMember::Operator(x) => (false, Some(operator_key(x)), &[]),
+                ClassMember::Error(_) => continue,
+            };
+            for name in single
+                .into_iter()
+                .chain(fields.iter().map(|declarator| declarator.name.name.clone()))
+            {
+                if !is_static {
+                    container.instance.insert(name.clone());
+                }
+                container.declared.insert(name);
+            }
+        }
+        let id = self.containers.len();
+        self.container_at.insert((container.unit, key), id);
+        self.containers.push(container);
+        id
+    }
+
+    /// Register the candidate members of a public container. Runs after every
+    /// container is known, so override detection sees the whole library.
+    fn add_members(&mut self, container: ContainerId, source: &str) {
+        let Container {
+            public,
+            unit,
+            kind,
+            members_source,
+            decl,
+            ..
+        } = self.containers[container];
+        if !public {
+            return;
+        }
+        let owner = self.decls[decl].label.clone();
+        for member in members_source {
+            let span = *member.span();
+            let (annotations, is_static): (&[Annotation], bool) = match member {
+                ClassMember::Field(x) => (&x.annotations, x.is_static),
+                ClassMember::Constructor(x) => (&x.annotations, true),
+                ClassMember::Method(x) => (&x.annotations, x.is_static),
+                ClassMember::Getter(x) => (&x.annotations, x.is_static),
+                ClassMember::Setter(x) => (&x.annotations, x.is_static),
+                ClassMember::Operator(x) => (&x.annotations, false),
+                ClassMember::Error(_) => continue,
+            };
+            let doc_start = doc_start(source, annotated_start(annotations, span.start));
+            let visible_for_testing = annotations.iter().any(is_visible_for_testing);
+            let preview = annotations.iter().any(|a| self.is_preview(a));
+            let mut entries: Vec<(usize, String, String, Span, Span)> = Vec::new();
+            match member {
+                ClassMember::Constructor(constructor) => {
+                    let key = constructor_key(constructor);
+                    if kind == ContainerKind::Enum || !is_public(&key) {
+                        continue;
+                    }
+                    let name_span = constructor
+                        .constructor_name
+                        .as_ref()
+                        .map_or(constructor.name.span, |name| name.span);
+                    let label = format!("{owner}.{key}");
+                    entries.push((span.start, key, label, name_span, span));
+                }
+                ClassMember::Field(field) => {
+                    for declarator in &field.declarators {
+                        let name = &declarator.name.name;
+                        if is_public(name) && (is_static || !self.may_override(container, name)) {
+                            entries.push((
+                                declarator.span.start,
+                                name.clone(),
+                                name.clone(),
+                                declarator.name.span,
+                                Span::new(span.start, declarator.span.end),
+                            ));
+                        }
+                    }
+                }
+                ClassMember::Operator(operator) => {
+                    let key = operator_key(operator);
+                    if !self.may_override(container, &key) {
+                        let name_span = find_operator_span(source, span, &operator.op);
+                        entries.push((span.start, key, operator.op.clone(), name_span, span));
+                    }
+                }
+                ClassMember::Method(MethodDecl { name, .. })
+                | ClassMember::Getter(GetterDecl { name, .. })
+                | ClassMember::Setter(SetterDecl { name, .. }) => {
+                    let key = &name.name;
+                    if is_public(key)
+                        && !is_test_method(key)
+                        && (is_static || !self.may_override(container, key))
+                    {
+                        entries.push((span.start, key.clone(), key.clone(), name.span, span));
+                    }
+                }
+                ClassMember::Error(_) => {}
+            }
+            // Widget previews apply to constructors and static methods.
+            let preview_exempt = preview
+                && match member {
+                    ClassMember::Constructor(_) => true,
+                    ClassMember::Method(method) => method.is_static,
+                    _ => false,
+                };
+            let is_constructor = matches!(member, ClassMember::Constructor(_));
+            for (at, key, label, name_span, range) in entries {
+                let id = self.add_decl(
+                    unit,
+                    at,
+                    Decl {
+                        label,
+                        unit,
+                        name_span,
+                        container: Some(container),
+                        scope: Some(container),
+                        reportable: !visible_for_testing && !preview_exempt,
+                        doc_start: doc_start.min(range.start),
+                        end: range.end,
+                        field: matches!(member, ClassMember::Field(_)),
+                    },
+                );
+                if is_constructor {
+                    self.containers[container]
+                        .candidate_constructors
+                        .insert(key, id);
+                } else {
+                    self.containers[container]
+                        .members
+                        .entry(key.clone())
+                        .or_default()
+                        .push(id);
+                    self.members_named.entry(key).or_default().push(id);
+                }
+            }
+        }
+    }
+
+    /// Whether an instance member named `name` of `container` may override a
+    /// supertype member. Unknown supertypes answer yes.
+    fn may_override(&self, container: ContainerId, name: &str) -> bool {
+        if OBJECT_MEMBERS.contains(&name) {
+            return true;
+        }
+        let declaration = &self.containers[container];
+        match declaration.kind {
+            ContainerKind::Extension | ContainerKind::ExtensionType => return false,
+            ContainerKind::Enum if name == "index" => return true,
+            _ => {}
+        }
+        let mut visited = HashSet::from([container]);
+        let mut pending: Vec<&DartType> = declaration.supertypes.clone();
+        while let Some(supertype) = pending.pop() {
+            if is_object(supertype) && !self.top.contains_key("Object") {
+                continue;
+            }
+            let Some(parent) = self.library_container(supertype) else {
+                return true;
+            };
+            if !visited.insert(parent) {
+                continue;
+            }
+            let parent = &self.containers[parent];
+            if parent.instance.contains(name) {
+                return true;
+            }
+            pending.extend(parent.supertypes.iter().copied());
+        }
+        false
+    }
+
+    /// The library container a written type denotes, following typedefs.
+    fn library_container(&self, ty: &DartType) -> Option<ContainerId> {
+        let mut ty = ty;
+        for _ in 0..MAX_ALIAS_DEPTH {
+            let DartType::Named(named) = ty else {
+                return None;
+            };
+            let [segment] = named.segments.as_slice() else {
+                return None;
+            };
+            if let Some(&container) = self.container_named.get(segment.name.as_str()) {
+                return Some(container);
+            }
+            ty = self.alias_named.get(segment.name.as_str())?;
+        }
+        None
+    }
+
+    /// The library container a top-level name denotes, following typedefs.
+    fn container_for(&self, name: &str) -> Option<ContainerId> {
+        if let Some(&container) = self.container_named.get(name) {
+            return Some(container);
+        }
+        self.library_container(self.alias_named.get(name)?)
+    }
+
+    fn find_named_elsewhere(&mut self, units: &[Unit<'_>]) {
+        let mut by_name: HashMap<&str, Vec<ContainerId>> = HashMap::new();
+        for (id, container) in self.containers.iter().enumerate() {
+            let label = self.decls[container.decl].label.as_str();
+            if !label.is_empty() {
+                by_name.entry(label).or_default().push(id);
+            }
+        }
+        let mut named = vec![false; self.containers.len()];
+        for (unit, source) in units.iter().enumerate() {
+            let bytes = source.source.as_bytes();
+            let mut index = 0;
+            while index < bytes.len() {
+                if !is_ident_body(bytes[index]) {
+                    index += 1;
+                    continue;
+                }
+                let start = index;
+                while index < bytes.len() && is_ident_body(bytes[index]) {
+                    index += 1;
+                }
+                let Some(containers) = source.source.get(start..index).and_then(|w| by_name.get(w))
+                else {
+                    continue;
+                };
+                for &container in containers {
+                    let decl = &self.decls[self.containers[container].decl];
+                    if decl.unit != unit || start < decl.doc_start || start >= decl.end {
+                        named[container] = true;
+                    }
+                }
+            }
+        }
+        self.named_elsewhere = named;
+    }
+
+    fn find_entry_points(&mut self, units: &'a [Unit<'a>], ctx: &AnalyzeContext) {
+        let library = ctx.identities.and_then(|identities| {
+            Some((
+                identities,
+                identities.library(identities.file(ctx.file_path)?),
+            ))
+        });
+        for (unit, source) in units.iter().enumerate() {
+            for declaration in &source.program.declarations {
+                let TopLevelDecl::Function(function) = declaration else {
+                    continue;
+                };
+                let Some(&id) = self.at.get(&(unit, function.span.start)) else {
+                    continue;
+                };
+                let is_main = function.name.name == "main";
+                let pragmas: Vec<QualifiedName<'_>> = function
+                    .annotations
+                    .iter()
+                    .filter_map(|annotation| self.entry_point_pragma(annotation))
+                    .collect();
+                let preview = function.annotations.iter().any(|a| self.is_preview(a));
+                if preview {
+                    self.decls[id].reportable = false;
+                }
+                if !is_main && pragmas.is_empty() && !preview {
+                    continue;
+                }
+                self.roots.push(id);
+                let proven_pragma = library.is_some_and(|(identities, library)| {
+                    pragmas.iter().any(|&name| {
+                        identities
+                            .resolve_sdk_member(library, name)
+                            .is_some_and(|identity| identity.is_sdk("dart:core", "pragma"))
+                    })
+                });
+                self.executable |= is_main || proven_pragma;
+            }
+        }
+    }
+
+    /// The written `pragma` name of an `@pragma('vm:entry-point')` annotation,
+    /// directly or through a top-level constant.
+    fn entry_point_pragma(&self, annotation: &'a Annotation) -> Option<QualifiedName<'a>> {
+        let (callee, args) = match annotation.name.as_slice() {
+            [single] if annotation.args.is_none() => {
+                invocation(self.initializers.get(single.name.as_str())?)?
+            }
+            segments => (
+                QualifiedName::from_identifiers(segments)?,
+                annotation.args.as_ref()?,
+            ),
+        };
+        let is_entry_point = callee.name == "pragma"
+            && matches!(args.positional.first(), Some(Expr::StringLit(literal))
+                if literal.interpolations.is_empty() && literal.value == "vm:entry-point");
+        is_entry_point.then_some(callee)
+    }
+
+    /// Whether an annotation is a widget-preview `@Preview(...)`, directly or
+    /// through a top-level constant. A library-declared `Preview` is not the
+    /// Flutter one.
+    fn is_preview(&self, annotation: &Annotation) -> bool {
+        if self.top.contains_key("Preview") {
+            return false;
+        }
+        let callee = match annotation.name.as_slice() {
+            [single] if annotation.args.is_none() => self
+                .initializers
+                .get(single.name.as_str())
+                .and_then(|initializer| invocation(initializer))
+                .map(|(callee, _)| callee),
+            segments => QualifiedName::from_identifiers(segments),
+        };
+        callee.is_some_and(|callee| callee.name == "Preview")
+    }
+}
+
+/// The invoked (possibly prefixed) name and arguments of `name(...)`,
+/// `prefix.name(...)`, or `const name(...)`.
+fn invocation(expr: &Expr) -> Option<(QualifiedName<'_>, &ArgList)> {
+    match expr {
+        Expr::Call { callee, args, .. } => {
+            let name = match callee.as_ref() {
+                Expr::Ident(name) => QualifiedName::from(&name.name),
+                Expr::Field { object, field, .. } => match object.as_ref() {
+                    Expr::Ident(prefix) => QualifiedName::prefixed(&prefix.name, &field.name),
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            Some((name, args))
+        }
+        Expr::New {
+            dart_type: DartType::Named(named),
+            constructor_name: None,
+            args,
+            ..
+        } => Some((QualifiedName::from_identifiers(&named.segments)?, args)),
+        _ => None,
+    }
+}
+
+fn is_visible_for_testing(annotation: &Annotation) -> bool {
+    annotation
+        .name
+        .last()
+        .is_some_and(|name| name.name == "visibleForTesting")
+}
+
+fn is_public(name: &str) -> bool {
+    !name.starts_with('_')
+}
+
+fn is_test_method(name: &str) -> bool {
+    name.starts_with("test_")
+        || name.starts_with("solo_test_")
+        || matches!(name, "setUp" | "tearDown" | "setUpClass" | "tearDownClass")
+}
+
+fn is_object(ty: &DartType) -> bool {
+    matches!(ty, DartType::Named(named) if matches!(named.segments.as_slice(), [only] if only.name == "Object"))
+}
+
+fn constructor_key(constructor: &ConstructorDecl) -> String {
+    constructor
+        .constructor_name
+        .as_ref()
+        .map_or_else(|| "new".to_string(), |name| name.name.clone())
+}
+
+/// The lookup key of a user-defined operator; unary minus is `unary-`.
+fn operator_key(operator: &OperatorDecl) -> String {
+    if operator.op == "-" && operator.params.params.is_empty() {
+        "unary-".to_string()
+    } else {
+        operator.op.clone()
+    }
+}
+
+/// The span of the operator token in an operator declaration.
+fn find_operator_span(source: &str, span: Span, op: &str) -> Span {
+    let text = source.get(span.start..span.end).unwrap_or_default();
+    text.find("operator")
+        .and_then(|keyword| {
+            let after = keyword + "operator".len();
+            let offset = text[after..].find(op.chars().next()?)? + after;
+            Some(Span::new(
+                span.start + offset,
+                span.start + offset + op.len(),
+            ))
+        })
+        .unwrap_or(span)
+}
+
+fn annotated_start(annotations: &[Annotation], start: usize) -> usize {
+    annotations
+        .iter()
+        .map(|annotation| annotation.span.start)
+        .fold(start, usize::min)
+}
+
+/// Start of the doc comment block immediately preceding `start`, or `start`.
+/// The empty block comment `/**/` is not a doc comment.
+fn doc_start(source: &str, start: usize) -> usize {
+    let mut start = start.min(source.len());
+    loop {
+        let Some(before) = source.get(..start).map(str::trim_end) else {
+            return start;
+        };
+        let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
+        if before[line_start..].trim_start().starts_with("///") {
+            start = line_start;
+            continue;
+        }
+        if let Some(body_end) = before.strip_suffix("*/").map(str::len)
+            && let Some(open) = before.rfind("/**")
+            && before
+                .get(open + 3..body_end)
+                .is_some_and(|body| !body.contains("*/"))
+        {
+            start = open;
+            continue;
+        }
+        return start;
+    }
+}
+
+/// A `[name]`, `[Type.member]`, or `[new Type]` reference in a doc comment.
+struct DocReference<'s> {
+    at: usize,
+    is_new: bool,
+    segments: Vec<&'s str>,
+}
+
+/// Every reference in the `///` and `/** */` doc comments of `source`.
+fn doc_comment_references(source: &str) -> Vec<DocReference<'_>> {
+    let mut references = Vec::new();
+    let mut in_block = false;
+    let mut offset = 0;
+    for line in source.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let is_doc = if in_block {
+            if trimmed.contains("*/") {
+                in_block = false;
+            }
+            true
+        } else if trimmed.starts_with("///") {
+            true
+        } else if trimmed.starts_with("/**") && !trimmed.starts_with("/**/") {
+            in_block = !trimmed.contains("*/");
+            true
+        } else {
+            false
+        };
+        if is_doc {
+            let mut cursor = 0;
+            while let Some(open) = line[cursor..].find('[') {
+                let open = cursor + open;
+                let Some(close) = line[open..].find(']') else {
+                    break;
+                };
+                let close = open + close;
+                let inner = line[open + 1..close].trim();
+                let (is_new, path) = match inner.strip_prefix("new ") {
+                    Some(rest) => (true, rest.trim()),
+                    None => (false, inner),
+                };
+                let segments: Vec<&str> = path.split('.').collect();
+                if segments.iter().all(|segment| is_simple_identifier(segment)) {
+                    references.push(DocReference {
+                        at: offset + open,
+                        is_new,
+                        segments,
+                    });
+                }
+                cursor = close + 1;
+            }
+        }
+        offset += line.len();
+    }
+    references
+}
+
+/// Resolution of an unqualified name in expression context.
+enum Lexical {
+    /// A member declared by the enclosing class-like declaration.
+    Member(ContainerId),
+    TopLevel,
+    /// Imported, inherited, or otherwise unknown.
+    Unknown,
+}
+
+/// Records, for each declaration being walked, the declarations it references.
+struct RefWalker<'t, 'a> {
+    tables: &'t Tables<'a>,
+    unit: usize,
+    source: &'t str,
+    /// Identifier expressions resolving to locals.
+    bound: &'t HashSet<usize>,
+    deps: &'t mut Vec<Vec<DeclId>>,
+    /// Declarations whose subtree is being walked; references count for all.
+    stack: Vec<DeclId>,
+    container: Option<ContainerId>,
+    type_argument_depth: usize,
+    external_depth: usize,
+    constant_pattern_depth: usize,
+}
+
+impl<'t, 'a> RefWalker<'t, 'a> {
+    fn new(
+        tables: &'t Tables<'a>,
+        unit: usize,
+        source: &'t str,
+        bound: &'t HashSet<usize>,
+        deps: &'t mut Vec<Vec<DeclId>>,
+    ) -> Self {
+        Self {
+            tables,
+            unit,
+            source,
+            bound,
+            deps,
+            stack: Vec::new(),
+            container: None,
+            type_argument_depth: 0,
+            external_depth: 0,
+            constant_pattern_depth: 0,
+        }
+    }
+
+    fn id_at(&self, start: usize) -> Option<DeclId> {
+        self.tables.at.get(&(self.unit, start)).copied()
+    }
+
+    fn mark(&mut self, target: DeclId) {
+        for &source in &self.stack {
+            self.deps[source].push(target);
+        }
+    }
+
+    fn mark_top(&mut self, name: &str) {
+        let tables = self.tables;
+        for &id in tables.top.get(name).into_iter().flatten() {
+            self.mark(id);
+        }
+    }
+
+    fn mark_container(&mut self, container: ContainerId) {
+        self.mark(self.tables.containers[container].decl);
+    }
+
+    fn mark_members(&mut self, container: ContainerId, name: &str) {
+        let tables = self.tables;
+        for &id in tables.containers[container]
+            .members
+            .get(name)
+            .into_iter()
+            .flatten()
+        {
+            self.mark(id);
+        }
+        self.mark_container(container);
+    }
+
+    fn mark_constructor(&mut self, container: ContainerId, name: &str) {
+        if let Some(&id) = self.tables.containers[container]
+            .candidate_constructors
+            .get(name)
+        {
+            self.mark(id);
+        }
+        self.mark_container(container);
+    }
+
+    /// `Container.name`: a static member or a constructor.
+    fn mark_static(&mut self, container: ContainerId, name: &str) {
+        self.mark_members(container, name);
+        self.mark_constructor(container, name);
+    }
+
+    /// A member access on a receiver of unknown type. The member's container
+    /// is reached too when the receiver may have its type: always for an
+    /// extension, otherwise only when the container's name occurs outside its
+    /// own declaration (no expression can have a type that is never named).
+    fn mark_any_member(&mut self, name: &str) {
+        let tables = self.tables;
+        for &id in tables.members_named.get(name).into_iter().flatten() {
+            self.mark(id);
+            if let Some(container) = tables.decls[id].container
+                && (tables.containers[container].kind == ContainerKind::Extension
+                    || tables.named_elsewhere[container])
+            {
+                self.mark_container(container);
+            }
+        }
+    }
+
+    /// A member access on an instance of `container`: the member it declares
+    /// or inherits from library supertypes, else any same-named member.
+    fn mark_member_of(&mut self, container: ContainerId, name: &str) {
+        if !self.mark_in_hierarchy(container, name) {
+            self.mark_any_member(name);
+        }
+    }
+
+    /// Mark the members named `name` that `container` declares or inherits
+    /// from library supertypes; whether any declaration was found.
+    fn mark_in_hierarchy(&mut self, container: ContainerId, name: &str) -> bool {
+        let tables = self.tables;
+        let mut visited = HashSet::new();
+        let mut pending = vec![container];
+        let mut found = false;
+        while let Some(current) = pending.pop() {
+            if !visited.insert(current) {
+                continue;
+            }
+            let declaration = &tables.containers[current];
+            if declaration.declared.contains(name) {
+                self.mark_members(current, name);
+                found = true;
+                continue;
+            }
+            pending.extend(
+                declaration
+                    .supertypes
+                    .iter()
+                    .filter_map(|supertype| tables.library_container(supertype)),
+            );
+        }
+        found
+    }
+
+    fn lexical(&self, name: &str) -> Lexical {
+        if let Some(container) = self.container
+            && self.tables.containers[container].declared.contains(name)
+        {
+            return Lexical::Member(container);
+        }
+        if self.tables.top.contains_key(name) {
+            Lexical::TopLevel
+        } else {
+            Lexical::Unknown
+        }
+    }
+
+    /// An unqualified identifier that is not a local.
+    fn reference(&mut self, name: &str) {
+        match self.lexical(name) {
+            Lexical::Member(container) => self.mark_members(container, name),
+            Lexical::TopLevel => {
+                self.mark_top(name);
+                // An inherited member of the same name may be what the
+                // identifier denotes; counting it too only adds reachability.
+                if let Some(container) = self.container {
+                    self.mark_in_hierarchy(container, name);
+                }
+            }
+            Lexical::Unknown if self.container.is_some() => self.mark_any_member(name),
+            Lexical::Unknown => {}
+        }
+    }
+
+    /// The library container an unqualified, non-local identifier names.
+    fn named_container(&self, identifier: &Identifier) -> Option<ContainerId> {
+        if self.bound.contains(&identifier.span.start) {
+            return None;
+        }
+        match self.lexical(&identifier.name) {
+            Lexical::TopLevel => self.tables.container_for(&identifier.name),
+            Lexical::Member(_) | Lexical::Unknown => None,
+        }
+    }
+
+    /// A constructor invocation or tear-off of `Type[.name]`.
+    fn constructor_reference(&mut self, type_name: &str, constructor: &str) {
+        if self.constant_pattern_depth > 0 {
+            return;
+        }
+        let Some(container) = self.tables.container_for(type_name) else {
+            return;
+        };
+        self.mark_top(type_name);
+        self.mark_constructor(container, constructor);
+    }
+
+    /// The constructor a written `Type`, `Type.name`, or `prefix.Type` names.
+    fn constructor_target<'n>(
+        &self,
+        segments: &'n [Identifier],
+        constructor: Option<&'n Identifier>,
+    ) -> Option<(&'n str, &'n str)> {
+        let named = |name: Option<&'n Identifier>| name.map_or("new", |name| name.name.as_str());
+        match segments {
+            [type_name] => Some((&type_name.name, named(constructor))),
+            [type_name, name]
+                if constructor.is_none()
+                    && self.tables.container_for(&type_name.name).is_some() =>
+            {
+                Some((&type_name.name, &name.name))
+            }
+            _ => None,
+        }
+    }
+
+    /// The class-like declaration an expression is an instance of, when it is
+    /// syntactically evident.
+    fn receiver_container(&self, receiver: &Expr) -> Option<ContainerId> {
+        match receiver {
+            Expr::This { .. } => self.container.filter(|&container| {
+                self.tables.containers[container].kind != ContainerKind::Extension
+            }),
+            Expr::Call { callee, .. } => match callee.as_ref() {
+                Expr::Ident(type_name) => self.named_container(type_name),
+                Expr::Field { object, field, .. } => match object.as_ref() {
+                    Expr::Ident(type_name) => {
+                        self.named_container(type_name).filter(|&container| {
+                            self.tables.containers[container]
+                                .constructors
+                                .contains(&field.name)
+                        })
+                    }
+                    _ => None,
+                },
+                _ => None,
+            },
+            Expr::New {
+                dart_type: DartType::Named(named),
+                constructor_name,
+                ..
+            } => self
+                .constructor_target(&named.segments, constructor_name.as_ref())
+                .and_then(|(type_name, _)| self.tables.container_for(type_name)),
+            _ => None,
+        }
+    }
+
+    /// `receiver.name` where the receiver is not a type name.
+    fn instance_member(&mut self, receiver: &Expr, name: &str) {
+        match self.receiver_container(receiver) {
+            Some(container) => self.mark_member_of(container, name),
+            None => self.mark_any_member(name),
+        }
+    }
+
+    /// `object.name`: a static member or constructor when `object` names a
+    /// library type, an instance member otherwise.
+    fn member_access(&mut self, object: &Expr, name: &str) {
+        if let Expr::Ident(type_name) = object
+            && let Some(container) = self.named_container(type_name)
+        {
+            self.mark_static(container, name);
+            return;
+        }
+        self.instance_member(object, name);
+    }
+
+    fn superclass_constructor(&mut self, container: ContainerId, name: &str) {
+        let tables = self.tables;
+        if let Some(superclass) = tables.containers[container]
+            .superclass
+            .and_then(|superclass| tables.library_container(superclass))
+        {
+            self.mark_constructor(superclass, name);
+        }
+    }
+
+    fn visit_type_arguments(&mut self, arguments: &[DartType]) {
+        self.type_argument_depth += 1;
+        for argument in arguments {
+            self.visit_dart_type(argument);
+        }
+        self.type_argument_depth -= 1;
+    }
+
+    fn visit_external_type(&mut self, ty: Option<&DartType>, is_external: bool) {
+        if let Some(ty) = ty
+            && is_external
+        {
+            self.external_depth += 1;
+            self.visit_dart_type(ty);
+            self.external_depth -= 1;
+        }
+    }
+
+    /// Walk variable declarators: annotations and the declared type belong to
+    /// every declarator, each initializer only to its own.
+    fn visit_declarators(
+        &mut self,
+        annotations: &[Annotation],
+        ty: Option<&DartType>,
+        is_external: bool,
+        declarators: &[VarDeclarator],
+    ) {
+        let ids: Vec<DeclId> = declarators
+            .iter()
+            .filter_map(|declarator| self.id_at(declarator.span.start))
+            .collect();
+        let depth = self.stack.len();
+        self.stack.extend(ids);
+        for annotation in annotations {
+            self.visit_annotation(annotation);
+        }
+        if let Some(ty) = ty {
+            self.visit_dart_type(ty);
+        }
+        self.visit_external_type(ty, is_external);
+        self.stack.truncate(depth);
+        for declarator in declarators {
+            let id = self.id_at(declarator.span.start);
+            self.stack.extend(id);
+            if let Some(initializer) = &declarator.initializer {
+                self.visit_expr(initializer);
+            }
+            self.stack.truncate(depth);
+        }
+    }
+
+    /// Container-level references: named supertypes, the implicit super
+    /// constructor call, reflective-test instantiation, and `toJson`.
+    fn container_references(&mut self, declaration: &TopLevelDecl, container: ContainerId) {
+        let (supertypes, members, annotations): (Vec<&DartType>, &[ClassMember], &[Annotation]) =
+            match declaration {
+                TopLevelDecl::Class(x) => (
+                    x.extends
+                        .iter()
+                        .chain(&x.with_clause)
+                        .chain(&x.implements)
+                        .collect(),
+                    &x.members,
+                    &x.annotations,
+                ),
+                TopLevelDecl::MixinClass(x) => (
+                    x.extends
+                        .iter()
+                        .chain(&x.with_clause)
+                        .chain(&x.implements)
+                        .collect(),
+                    &x.members,
+                    &x.annotations,
+                ),
+                TopLevelDecl::ExtensionType(x) => (x.implements.iter().collect(), &x.members, &[]),
+                TopLevelDecl::Mixin(x) => (Vec::new(), &x.members, &[]),
+                TopLevelDecl::Enum(x) => (Vec::new(), &x.members, &[]),
+                TopLevelDecl::Extension(x) => (Vec::new(), &x.members, &[]),
+                TopLevelDecl::ClassTypeAlias(_)
+                | TopLevelDecl::Function(_)
+                | TopLevelDecl::Variable(_)
+                | TopLevelDecl::TypeAlias(_)
+                | TopLevelDecl::Error(_) => (Vec::new(), &[], &[]),
+            };
+        for supertype in supertypes {
+            if let DartType::Named(named) = supertype
+                && let [name] = named.segments.as_slice()
+            {
+                self.mark_top(&name.name);
+            }
+        }
+        let kind = self.tables.containers[container].kind;
+        if kind == ContainerKind::Class {
+            if !members
+                .iter()
+                .any(|member| matches!(member, ClassMember::Constructor(_)))
+            {
+                self.superclass_constructor(container, "new");
+            }
+            if annotations.iter().any(|annotation| {
+                annotation
+                    .name
+                    .last()
+                    .is_some_and(|name| name.name == "reflectiveTest")
+            }) {
+                self.mark_constructor(container, "new");
+            }
+        }
+        for member in members {
+            if let ClassMember::Method(method) = member
+                && method.name.name == "toJson"
+                && !method.is_static
+                && let Some(id) = self.id_at(member.span().start)
+            {
+                self.mark(id);
+            }
+        }
+    }
+
+    fn constructor_references(&mut self, constructor: &ConstructorDecl) {
+        let Some(container) = self.container else {
+            return;
+        };
+        let mut has_super_call = false;
+        for initializer in &constructor.initializers {
+            match initializer {
+                ConstructorInitializer::SuperCall { call_name, .. } => {
+                    has_super_call = true;
+                    let name = call_name.as_ref().map_or("new", |name| name.name.as_str());
+                    self.superclass_constructor(container, name);
+                }
+                ConstructorInitializer::ThisCall { call_name, .. } => {
+                    let name = call_name.as_ref().map_or("new", |name| name.name.as_str());
+                    self.mark_constructor(container, name);
+                }
+                ConstructorInitializer::FieldInit { field, .. } => {
+                    self.mark_members(container, &field.name);
+                }
+                ConstructorInitializer::Assert { .. } => {}
+            }
+        }
+        if !has_super_call && self.tables.containers[container].kind == ContainerKind::Class {
+            self.superclass_constructor(container, "new");
+        }
+        if let Some(redirect) = &constructor.redirect
+            && let DartType::Named(named) = &redirect.type_
+            && let Some((type_name, name)) =
+                self.constructor_target(&named.segments, redirect.constructor_name.as_ref())
+        {
+            self.constructor_reference(type_name, name);
+        }
+    }
+
+    /// Attribute every doc comment reference of this unit to the declarations
+    /// whose doc comment or body contains it.
+    fn doc_references(&mut self) {
+        let tables = self.tables;
+        let unit_decls: Vec<DeclId> = (0..tables.decls.len())
+            .filter(|&id| tables.decls[id].unit == self.unit)
+            .collect();
+        for reference in doc_comment_references(self.source) {
+            self.stack.extend(unit_decls.iter().copied().filter(|&id| {
+                let decl = &tables.decls[id];
+                decl.doc_start <= reference.at && reference.at < decl.end
+            }));
+            let owners = &self.stack;
+            let Some(&innermost) = owners.iter().max_by_key(|&&id| tables.decls[id].doc_start)
+            else {
+                continue;
+            };
+            self.container = tables.decls[innermost].scope;
+            match reference.segments.as_slice() {
+                [name] if reference.is_new => self.constructor_reference(name, "new"),
+                [name] => self.reference(name),
+                [type_name, member] => {
+                    self.reference(type_name);
+                    match tables.container_for(type_name) {
+                        Some(container) if matches!(self.lexical(type_name), Lexical::TopLevel) => {
+                            self.mark_static(container, member)
+                        }
+                        _ => self.mark_any_member(member),
+                    }
+                }
+                [.., member] => self.mark_any_member(member),
+                [] => {}
+            }
+            self.stack.clear();
+        }
+        self.container = None;
+    }
+}
+
+/// The overloadable operator a binary expression invokes.
+fn binary_operator(op: BinaryOp) -> Option<&'static str> {
+    Some(match op {
+        BinaryOp::Add => "+",
+        BinaryOp::Sub => "-",
+        BinaryOp::Mul => "*",
+        BinaryOp::Div => "/",
+        BinaryOp::Mod => "%",
+        BinaryOp::IntDiv => "~/",
+        BinaryOp::Lt => "<",
+        BinaryOp::Gt => ">",
+        BinaryOp::LtEq => "<=",
+        BinaryOp::GtEq => ">=",
+        BinaryOp::BitAnd => "&",
+        BinaryOp::BitOr => "|",
+        BinaryOp::BitXor => "^",
+        BinaryOp::Shl => "<<",
+        BinaryOp::Shr => ">>",
+        BinaryOp::UShr => ">>>",
+        BinaryOp::EqEq
+        | BinaryOp::NotEq
+        | BinaryOp::And
+        | BinaryOp::Or
+        | BinaryOp::NullCoalesce => {
+            return None;
+        }
+    })
+}
+
+/// The overloadable operator a compound assignment invokes.
+fn assignment_operator(op: AssignOp) -> Option<&'static str> {
+    Some(match op {
+        AssignOp::PlusEq => "+",
+        AssignOp::MinusEq => "-",
+        AssignOp::MulEq => "*",
+        AssignOp::DivEq => "/",
+        AssignOp::ModEq => "%",
+        AssignOp::IntDivEq => "~/",
+        AssignOp::AndEq => "&",
+        AssignOp::OrEq => "|",
+        AssignOp::XorEq => "^",
+        AssignOp::ShlEq => "<<",
+        AssignOp::ShrEq => ">>",
+        AssignOp::UShrEq => ">>>",
+        AssignOp::Eq | AssignOp::NullCoalesceEq => return None,
+    })
+}
+
+fn relational_operator(op: RelationalPatternOp) -> Option<&'static str> {
+    match op {
+        RelationalPatternOp::Lt => Some("<"),
+        RelationalPatternOp::Gt => Some(">"),
+        RelationalPatternOp::LtEq => Some("<="),
+        RelationalPatternOp::GtEq => Some(">="),
+        RelationalPatternOp::Eq | RelationalPatternOp::NotEq => None,
+    }
+}
+
+impl Visitor for RefWalker<'_, '_> {
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        if let TopLevelDecl::Variable(variable) = node {
+            self.visit_declarators(
+                &variable.annotations,
+                variable.var_type.as_ref(),
+                variable.is_external,
+                &variable.declarators,
+            );
+            return;
+        }
+        let start = node.span().start;
+        let id = self.id_at(start);
+        let container = self.tables.container_at.get(&(self.unit, start)).copied();
+        self.stack.extend(id);
+        self.container = container;
+        if let Some(container) = container {
+            self.container_references(node, container);
+        }
+        walk_top_level_decl(self, node);
+        self.container = None;
+        self.stack.clear();
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) {
+        let depth = self.stack.len();
+        match node {
+            ClassMember::Field(field) => {
+                self.visit_declarators(
+                    &field.annotations,
+                    field.field_type.as_ref(),
+                    field.is_external,
+                    &field.declarators,
+                );
+                return;
+            }
+            ClassMember::Constructor(constructor) => {
+                self.stack.extend(self.id_at(constructor.span.start));
+                self.constructor_references(constructor);
+            }
+            ClassMember::Method(method) => {
+                self.stack.extend(self.id_at(method.span.start));
+                self.visit_external_type(method.return_type.as_ref(), method.is_external);
+            }
+            ClassMember::Getter(getter) => {
+                self.stack.extend(self.id_at(getter.span.start));
+                self.visit_external_type(getter.return_type.as_ref(), getter.is_external);
+            }
+            ClassMember::Operator(operator) => {
+                self.stack.extend(self.id_at(operator.span.start));
+                self.visit_external_type(operator.return_type.as_ref(), operator.is_external);
+            }
+            ClassMember::Setter(setter) => self.stack.extend(self.id_at(setter.span.start)),
+            ClassMember::Error(_) => {}
+        }
+        walk_class_member(self, node);
+        self.stack.truncate(depth);
+    }
+
+    fn visit_annotation(&mut self, node: &Annotation) {
+        let invoked = node.args.is_some();
+        match node.name.as_slice() {
+            [name] if invoked => {
+                let constructor = node
+                    .constructor_name
+                    .as_ref()
+                    .map_or("new", |name| name.name.as_str());
+                if self.tables.container_for(&name.name).is_some() {
+                    self.constructor_reference(&name.name, constructor);
+                } else {
+                    self.mark_top(&name.name);
+                }
+            }
+            [name] => self.mark_top(&name.name),
+            [type_name, member] => {
+                if let Some(container) = self.tables.container_for(&type_name.name) {
+                    self.mark_top(&type_name.name);
+                    self.mark_static(container, &member.name);
+                }
+            }
+            _ => {}
+        }
+        self.type_argument_depth += 1;
+        walk_annotation(self, node);
+        self.type_argument_depth -= 1;
+    }
+
+    fn visit_dart_type(&mut self, node: &DartType) {
+        let DartType::Named(named) = node else {
+            walk_dart_type(self, node);
+            return;
+        };
+        if let [segment] = named.segments.as_slice() {
+            let name = segment.name.as_str();
+            let counts = self.type_argument_depth > 0
+                || self.external_depth > 0
+                || self.tables.alias_named.contains_key(name)
+                || self
+                    .tables
+                    .container_named
+                    .get(name)
+                    .is_some_and(|&container| {
+                        self.tables.containers[container].kind == ContainerKind::ExtensionType
+                    });
+            if counts {
+                self.mark_top(name);
+            }
+        }
+        self.visit_type_arguments(&named.type_args);
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::For(statement) = node
+            && let Some(ForInit::ForIn {
+                keyword,
+                var_type,
+                name,
+                ..
+            }) = &statement.header.init
+            && !for_in_declares_variable(*keyword, var_type.as_ref(), name, self.source)
+        {
+            self.reference(&name.name);
+        }
+        walk_stmt(self, node);
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        match node {
+            Expr::Ident(identifier) if !self.bound.contains(&identifier.span.start) => {
+                self.reference(&identifier.name);
+            }
+            Expr::Field { object, field, .. } => self.member_access(object, &field.name),
+            Expr::Call {
+                callee, type_args, ..
+            } => {
+                self.visit_type_arguments(type_args);
+                if let Expr::Ident(type_name) = callee.as_ref()
+                    && self.named_container(type_name).is_some()
+                {
+                    self.constructor_reference(&type_name.name, "new");
+                }
+            }
+            Expr::New {
+                dart_type: DartType::Named(named),
+                constructor_name,
+                ..
+            } => {
+                if let Some((type_name, name)) =
+                    self.constructor_target(&named.segments, constructor_name.as_ref())
+                {
+                    self.constructor_reference(type_name, name);
+                }
+            }
+            Expr::DotShorthand { name, .. } => {
+                self.mark_any_member(&name.name);
+                let tables = self.tables;
+                for (container, declaration) in tables.containers.iter().enumerate() {
+                    if declaration.constructors.contains(&name.name) {
+                        self.mark_constructor(container, &name.name);
+                    }
+                }
+            }
+            Expr::Binary { op, .. } => {
+                if let Some(operator) = binary_operator(*op) {
+                    self.mark_any_member(operator);
+                }
+            }
+            Expr::Unary { op, .. } => {
+                let operator = match op {
+                    UnaryOp::Minus => Some("unary-"),
+                    UnaryOp::Tilde => Some("~"),
+                    UnaryOp::PlusPlus => Some("+"),
+                    UnaryOp::MinusMinus => Some("-"),
+                    UnaryOp::Bang => None,
+                };
+                if let Some(operator) = operator {
+                    self.mark_any_member(operator);
+                }
+            }
+            Expr::PostfixIncDec { op, .. } => self.mark_any_member(match op {
+                PostfixIncDec::Increment => "+",
+                PostfixIncDec::Decrement => "-",
+            }),
+            Expr::Assign { target, op, .. } => {
+                if let Some(operator) = assignment_operator(*op) {
+                    self.mark_any_member(operator);
+                }
+                if matches!(target.as_ref(), Expr::Index { .. }) {
+                    self.mark_any_member("[]=");
+                }
+            }
+            Expr::Index { .. } => self.mark_any_member("[]"),
+            Expr::Cascade {
+                object, sections, ..
+            } => {
+                for operation in sections.iter().flat_map(|section| &section.ops) {
+                    match operation {
+                        CascadeOp::Field { name, .. } => self.instance_member(object, &name.name),
+                        CascadeOp::Call(name, type_args, _) => {
+                            self.visit_type_arguments(type_args);
+                            self.instance_member(object, &name.name);
+                        }
+                        CascadeOp::Index { .. } => self.mark_any_member("[]"),
+                        CascadeOp::Assign(target, op, _) => {
+                            // `..name = v` and `..[index] = v` share this shape.
+                            if let Expr::Ident(name) = target.as_ref() {
+                                self.instance_member(object, &name.name);
+                            }
+                            self.mark_any_member("[]=");
+                            if let Some(operator) = assignment_operator(*op) {
+                                self.mark_any_member(operator);
+                                self.mark_any_member("[]");
+                            }
+                        }
+                    }
+                }
+            }
+            Expr::List { type_arg, .. } | Expr::Set { type_arg, .. } => {
+                self.visit_type_arguments(type_arg.as_slice());
+            }
+            Expr::Map { type_args, .. } | Expr::GenericInstantiation { type_args, .. } => {
+                self.visit_type_arguments(type_args);
+            }
+            _ => {}
+        }
+        walk_expr(self, node);
+    }
+
+    fn visit_pattern(&mut self, node: &Pattern) {
+        match node {
+            Pattern::Object(object) => {
+                let tables = self.tables;
+                let container = match &object.type_ {
+                    named @ DartType::Named(_) => tables.library_container(named),
+                    _ => None,
+                };
+                for field in &object.fields {
+                    match container {
+                        Some(container) => self.mark_member_of(container, &field.name.name),
+                        None => self.mark_any_member(&field.name.name),
+                    }
+                }
+            }
+            Pattern::Const(constant) => {
+                if let ConstPatternValue::Name(segments) = &constant.value {
+                    match segments.as_slice() {
+                        [name] => self.reference(&name.name),
+                        [type_name, member] => {
+                            self.reference(&type_name.name);
+                            match self.named_container(type_name) {
+                                Some(container) => self.mark_static(container, &member.name),
+                                None => self.mark_any_member(&member.name),
+                            }
+                        }
+                        [.., member] => self.mark_any_member(&member.name),
+                        [] => {}
+                    }
+                }
+                self.constant_pattern_depth += 1;
+                walk_pattern(self, node);
+                self.constant_pattern_depth -= 1;
+                return;
+            }
+            Pattern::Relational { op, .. } => {
+                if let Some(operator) = relational_operator(*op) {
+                    self.mark_any_member(operator);
+                }
+            }
+            Pattern::List(list) => self.visit_type_arguments(list.type_arg.as_slice()),
+            Pattern::Map(map) => self.visit_type_arguments(&map.type_args),
+            _ => {}
+        }
+        walk_pattern(self, node);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use falcon_analyze::{AnalyzeContext, Rule};
+    use falcon_config::FalconConfig;
+
+    use super::{UnreachableFromMain, doc_comment_references, doc_start};
+
+    fn lint(source: &str) -> Vec<String> {
+        let (program, _) = falcon_dart_parser::parse(source);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(std::path::Path::new("main.dart"), source, &config);
+        UnreachableFromMain
+            .analyze(&program, &ctx)
+            .into_iter()
+            .map(|diagnostic| source[diagnostic.span.start..diagnostic.span.end].to_string())
+            .collect()
+    }
+
+    #[test]
+    fn doc_comment_references_parse_names_members_and_constructors() {
+        let source = "/// See [A], [B.c], [new D] and [text](url).\n/** [E] */\nvoid f() {}\n";
+        let references: Vec<(bool, Vec<&str>)> = doc_comment_references(source)
+            .into_iter()
+            .map(|reference| (reference.is_new, reference.segments))
+            .collect();
+        assert_eq!(
+            references,
+            [
+                (false, vec!["A"]),
+                (false, vec!["B", "c"]),
+                (true, vec!["D"]),
+                (false, vec!["text"]),
+                (false, vec!["E"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn doc_start_covers_line_and_block_doc_comments() {
+        let source = "int a = 0;\n/// One.\n/// Two.\nvoid f() {}\n/** Block. */\nvoid g() {}\n";
+        assert_eq!(
+            doc_start(source, source.find("void f").unwrap()),
+            source.find("/// One").unwrap()
+        );
+        assert_eq!(
+            doc_start(source, source.find("void g").unwrap()),
+            source.find("/**").unwrap()
+        );
+        assert_eq!(doc_start(source, source.find("int a").unwrap()), 0);
+    }
+
+    #[test]
+    fn empty_block_comment_is_not_a_doc_comment() {
+        let source = "/**/\nvoid main() {}\n";
+        assert_eq!(doc_start(source, source.find("void").unwrap()), 5);
+        assert!(lint(source).is_empty());
+        assert_eq!(lint("/**/\nvoid main() {}\nclass C {}\n"), ["C"]);
+    }
+
+    #[test]
+    fn members_of_unknown_supertypes_are_never_candidates() {
+        let source = "void main() { W(); }\nclass W extends External { void build() {} }\n";
+        assert!(lint(source).is_empty());
+    }
+
+    #[test]
+    fn local_and_member_shadowing_do_not_reach_top_level() {
+        let source = "void main() { var f = 1; print(f); C().m(); }\n\
+                      class C { int f() => 0; void m() => f(); }\n\
+                      int f = 0;\n";
+        assert_eq!(lint(source), ["f"]);
+    }
+
+    #[test]
+    fn library_without_entry_point_is_not_analyzed() {
+        assert!(lint("class C {}\nvoid helper() {}\n").is_empty());
+    }
+
+    #[test]
+    fn part_without_library_context_is_not_analyzed() {
+        assert!(lint("part of 'lib.dart';\nvoid main() {}\nclass C {}\n").is_empty());
+    }
+}

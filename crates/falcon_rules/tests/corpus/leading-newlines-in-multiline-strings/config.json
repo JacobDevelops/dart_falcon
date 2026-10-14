@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "leading-newlines-in-multiline-strings": "warn"
+      }
+    }
+  }
+}

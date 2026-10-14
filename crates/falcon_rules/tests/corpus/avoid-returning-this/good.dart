@@ -1,0 +1,54 @@
+class Builder {
+  final List<int> _items = [];
+
+  // Use cascades instead of returning `this`.
+  void add(int x) => _items.add(x);
+
+  // Returns a new instance, not `this`.
+  Builder copy() => Builder().._items.addAll(_items);
+
+  // Some paths return something else.
+  Builder pick(Builder other, bool first) {
+    if (first) return this;
+    return other;
+  }
+
+  // Return type is not the enclosing type.
+  Object identity() => this;
+
+  // Operators are not methods.
+  Builder operator +(int x) => this;
+}
+
+// Overriding an inherited member is required by the interface.
+abstract class Chain {
+  Chain next();
+}
+
+class Link implements Chain {
+  @override
+  Chain next() => this;
+}
+
+class Node extends Link {
+  @override
+  Link next() => this;
+}
+
+// Unresolvable inheritance stays silent.
+class Remote extends SomeUnknownBase {
+  Remote ping() => this;
+}
+
+// Extensions are not checked.
+extension on String {
+  String same() => this;
+}
+
+// Static methods cannot return `this`; nested closures do not count.
+class Holder {
+  Holder run() {
+    final f = () => this;
+    return Holder();
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "eol-at-end-of-file": "warn"
+      }
+    }
+  }
+}

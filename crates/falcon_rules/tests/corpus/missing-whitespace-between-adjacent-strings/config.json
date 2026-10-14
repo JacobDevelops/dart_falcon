@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "missing-whitespace-between-adjacent-strings": "warn"
+      }
+    }
+  }
+}

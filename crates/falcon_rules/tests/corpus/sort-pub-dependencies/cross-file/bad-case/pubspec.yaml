@@ -1,0 +1,5 @@
+name: case_sensitive
+dependencies:
+  apple: any
+  Zebra: any # /* expect: sort-pub-dependencies */
+  "quoted": any

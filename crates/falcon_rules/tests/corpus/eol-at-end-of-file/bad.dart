@@ -1,0 +1,1 @@
+void main() {} /* expect: eol-at-end-of-file */

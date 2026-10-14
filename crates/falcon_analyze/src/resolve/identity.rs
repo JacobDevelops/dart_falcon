@@ -162,6 +162,10 @@ enum ImportTarget {
     Package(String),
     Unknown,
 }
+type SourceAnnotations = HashMap<
+    LibraryId,
+    HashMap<String, HashMap<String, (FileId, Vec<falcon_syntax::ast::Annotation>)>>,
+>;
 
 /// Project-wide library/name identity index.
 #[derive(Debug, Clone, Default)]
@@ -169,6 +173,9 @@ pub struct IdentityIndex {
     libraries: Vec<Library>,
     file_library: Vec<LibraryId>,
     by_path: HashMap<PathBuf, FileId>,
+    /// `by_path` inverted, indexed by [`FileId`].
+    paths: Vec<Option<PathBuf>>,
+    source_annotations: SourceAnnotations,
 }
 
 impl IdentityIndex {
@@ -240,11 +247,26 @@ impl IdentityIndex {
                 });
             }
         }
+        let mut source_annotations = HashMap::new();
+        for (index, file) in files.iter().enumerate() {
+            collect_source_annotations(
+                file.program,
+                file_library[index],
+                FileId(index),
+                &mut source_annotations,
+            );
+        }
+        let mut paths = vec![None; files.len()];
+        for (path, file) in &by_path {
+            paths[file.0] = Some(path.clone());
+        }
 
         Self {
             libraries,
             file_library,
             by_path,
+            paths,
+            source_annotations,
         }
     }
 
@@ -256,6 +278,30 @@ impl IdentityIndex {
     pub fn library(&self, file: FileId) -> LibraryId {
         self.file_library[file.0]
     }
+    /// Possible deprecation metadata (`@deprecated`/`@Deprecated(...)`; other
+    /// annotations are not indexed) for a proven project declaration.
+    /// `selector` is empty for a declaration/readable top-level accessor,
+    /// `variable` for a top-level
+    /// variable, a member name for a readable member, `field:name` for a field,
+    /// `set:name` for a setter (`set:` at top level), `new:name` for a constructor,
+    /// `op:arity:name` for an operator, or `param:member:name` for a formal parameter
+    /// (a top-level function's member is empty).
+    /// Static member selectors have an additional `static:` prefix.
+    pub fn source_annotations(
+        &self,
+        identity: &DeclarationIdentity,
+        selector: &str,
+    ) -> Option<(&Path, &[falcon_syntax::ast::Annotation])> {
+        let DeclarationIdentity::Project { library, name } = identity else {
+            return None;
+        };
+        let (file, annotations) = self
+            .source_annotations
+            .get(library)?
+            .get(name)?
+            .get(selector)?;
+        Some((self.source_path(*file)?, annotations))
+    }
 
     pub(crate) fn declaration_file(&self, library: LibraryId, name: &str) -> Option<FileId> {
         self.get(library)
@@ -266,9 +312,7 @@ impl IdentityIndex {
     }
 
     pub(crate) fn source_path(&self, file: FileId) -> Option<&Path> {
-        self.by_path
-            .iter()
-            .find_map(|(path, &id)| (id == file).then_some(path.as_path()))
+        self.paths.get(file.0)?.as_deref()
     }
 
     fn get(&self, library: LibraryId) -> &Library {
@@ -287,6 +331,75 @@ impl IdentityIndex {
         match name.prefix {
             None => self.resolve_unprefixed(library, name.name),
             Some(prefix) => self.resolve_prefixed(library, prefix, name.name),
+        }
+    }
+
+    /// Whether every top-level name visible in `library` is indexed: the
+    /// library is complete and imports only `dart:core` (without combinators)
+    /// or complete project libraries whose exports are themselves fully
+    /// indexed. Names [`Self::resolve`] classifies as unknown are then absent,
+    /// apart from `dart:core` members, which are not all indexed.
+    pub fn names_fully_indexed(&self, library: LibraryId) -> bool {
+        self.complete(library).is_some_and(|unit| {
+            unit.imports.iter().all(|import| match &import.target {
+                ImportTarget::Sdk(uri) => uri == "dart:core" && import.combinators.is_empty(),
+                ImportTarget::Library(target) => {
+                    self.exports_fully_indexed(*target, &mut HashSet::new())
+                }
+                ImportTarget::Package(_) | ImportTarget::Unknown => false,
+            })
+        })
+    }
+
+    fn exports_fully_indexed(&self, library: LibraryId, visited: &mut HashSet<LibraryId>) -> bool {
+        if !visited.insert(library) {
+            return true;
+        }
+        let unit = self.get(library);
+        !unit.incomplete
+            && unit.exports.iter().all(|export| match &export.target {
+                ImportTarget::Library(target) => self.exports_fully_indexed(*target, visited),
+                ImportTarget::Sdk(_) | ImportTarget::Package(_) | ImportTarget::Unknown => false,
+            })
+    }
+
+    /// Whether `name` is declared in `library` or supplied by one of its
+    /// imports, counting ambiguous and conflicting declarations as present.
+    pub fn name_visible(
+        &self,
+        library: LibraryId,
+        QualifiedName { prefix, name }: QualifiedName<'_>,
+    ) -> bool {
+        let unit = self.get(library);
+        (prefix.is_none() && unit.declarations.contains_key(name))
+            || self
+                .visible_imports(unit, prefix, name)
+                .any(|import| self.target_declares(&import.target, name, &mut HashSet::new()))
+    }
+
+    fn target_declares(
+        &self,
+        target: &ImportTarget,
+        name: &str,
+        visited: &mut HashSet<LibraryId>,
+    ) -> bool {
+        match target {
+            ImportTarget::Library(library) => {
+                if name.starts_with('_') || !visited.insert(*library) {
+                    return false;
+                }
+                let unit = self.get(*library);
+                unit.declarations.contains_key(name)
+                    || unit.exports.iter().any(|export| {
+                        allows(&export.combinators, name)
+                            && self.target_declares(&export.target, name, visited)
+                    })
+            }
+            ImportTarget::Sdk(uri) => sdk_type(uri, name)
+                .or_else(|| sdk_member(uri, name))
+                .is_some(),
+            ImportTarget::Package(package) => package_member(package, name).is_some(),
+            ImportTarget::Unknown => false,
         }
     }
 
@@ -451,7 +564,8 @@ impl IdentityIndex {
             }
             candidates.extend(self.target_declaration(&import.target, name));
         }
-        if unit.implicit_core {
+        // Explicitly imported declarations shadow implicitly imported `dart:core`.
+        if unit.implicit_core && candidates.is_empty() {
             candidates.extend(sdk_type("dart:core", name));
         }
         unique_declaration(candidates)
@@ -500,7 +614,7 @@ impl IdentityIndex {
         for import in self.visible_imports(unit, None, name) {
             combine(&mut result, self.target_identity(&import.target, name));
         }
-        if unit.implicit_core && sdk_type("dart:core", name).is_some() {
+        if unit.implicit_core && result.is_none() && sdk_type("dart:core", name).is_some() {
             combine(&mut result, NameIdentity::Type);
         }
         result.unwrap_or(NameIdentity::Unknown)
@@ -609,6 +723,244 @@ impl IdentityIndex {
             NameIdentity::Unknown
         }
     }
+}
+
+fn collect_source_annotations(
+    program: &Program,
+    library: LibraryId,
+    file: FileId,
+    index: &mut SourceAnnotations,
+) {
+    use falcon_syntax::ast::*;
+    for declaration in &program.declarations {
+        let (names, annotations, members, params) = match declaration {
+            TopLevelDecl::Class(n) => (
+                vec![&n.name.name],
+                &n.annotations,
+                n.members.as_slice(),
+                None,
+            ),
+            TopLevelDecl::Mixin(n) => (
+                vec![&n.name.name],
+                &n.annotations,
+                n.members.as_slice(),
+                None,
+            ),
+            TopLevelDecl::MixinClass(n) => (
+                vec![&n.name.name],
+                &n.annotations,
+                n.members.as_slice(),
+                None,
+            ),
+            TopLevelDecl::Enum(n) => (
+                vec![&n.name.name],
+                &n.annotations,
+                n.members.as_slice(),
+                None,
+            ),
+            TopLevelDecl::ExtensionType(n) => (
+                vec![&n.name.name],
+                &n.annotations,
+                n.members.as_slice(),
+                None,
+            ),
+            TopLevelDecl::ClassTypeAlias(n) => (vec![&n.name.name], &n.annotations, &[][..], None),
+            TopLevelDecl::TypeAlias(n) => (vec![&n.name.name], &n.annotations, &[][..], None),
+            TopLevelDecl::Function(n) => (vec![&n.name.name], &n.annotations, &[][..], n.params()),
+            TopLevelDecl::Variable(n) => (
+                n.declarators.iter().map(|d| &d.name.name).collect(),
+                &n.annotations,
+                &[][..],
+                None,
+            ),
+            TopLevelDecl::Extension(_) | TopLevelDecl::Error(_) => continue,
+        };
+        for name in names {
+            let mut entries = HashMap::new();
+            if let Some(annotations) = deprecation_annotations(annotations) {
+                let selector = match declaration {
+                    TopLevelDecl::Variable(_) => "variable",
+                    TopLevelDecl::Function(n) if matches!(n.kind, FunctionKind::Setter(_)) => {
+                        "set:"
+                    }
+                    _ => "",
+                };
+                entries.insert(selector.to_owned(), (file, annotations));
+            }
+            if let TopLevelDecl::Enum(enumeration) = declaration {
+                for variant in &enumeration.variants {
+                    if let Some(annotations) = deprecation_annotations(&variant.annotations) {
+                        entries.insert(
+                            format!("static:field:{}", variant.name.name),
+                            (file, annotations),
+                        );
+                    }
+                }
+            }
+            if let Some(params) = params {
+                for param in &params.params {
+                    if let Some(annotations) = parameter_deprecation(param) {
+                        entries.insert(format!("param::{}", param.name.name), (file, annotations));
+                    }
+                }
+            }
+            for member in members {
+                let has_metadata = match member {
+                    ClassMember::Field(n) => might_deprecate(&n.annotations),
+                    ClassMember::Getter(n) => might_deprecate(&n.annotations),
+                    ClassMember::Setter(n) => might_deprecate(&n.annotations),
+                    ClassMember::Method(n) => {
+                        might_deprecate(&n.annotations)
+                            || n.params.params.iter().any(parameter_might_deprecate)
+                    }
+                    ClassMember::Constructor(n) => {
+                        might_deprecate(&n.annotations)
+                            || n.params.params.iter().any(parameter_might_deprecate)
+                    }
+                    ClassMember::Operator(n) => might_deprecate(&n.annotations),
+                    ClassMember::Error(_) => false,
+                };
+                if !has_metadata {
+                    continue;
+                }
+                let (selectors, annotations, params) = match member {
+                    ClassMember::Field(n) => (
+                        n.declarators
+                            .iter()
+                            .map(|d| {
+                                format!(
+                                    "{}field:{}",
+                                    if n.is_static { "static:" } else { "" },
+                                    d.name.name
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                        &n.annotations,
+                        None,
+                    ),
+                    ClassMember::Method(n) => (
+                        vec![format!(
+                            "{}{}",
+                            if n.is_static { "static:" } else { "" },
+                            n.name.name
+                        )],
+                        &n.annotations,
+                        Some(&n.params),
+                    ),
+                    ClassMember::Getter(n) => (
+                        vec![format!(
+                            "{}{}",
+                            if n.is_static { "static:" } else { "" },
+                            n.name.name
+                        )],
+                        &n.annotations,
+                        None,
+                    ),
+                    ClassMember::Setter(n) => (
+                        vec![format!(
+                            "{}set:{}",
+                            if n.is_static { "static:" } else { "" },
+                            n.name.name
+                        )],
+                        &n.annotations,
+                        None,
+                    ),
+                    ClassMember::Constructor(n) => (
+                        vec![format!(
+                            "new:{}",
+                            n.constructor_name
+                                .as_ref()
+                                .map_or("new", |n| n.name.as_str())
+                        )],
+                        &n.annotations,
+                        Some(&n.params),
+                    ),
+                    ClassMember::Operator(n) => (
+                        vec![format!("op:{}:{}", n.params.params.len(), n.op)],
+                        &n.annotations,
+                        None,
+                    ),
+                    ClassMember::Error(_) => continue,
+                };
+                for selector in selectors {
+                    if let Some(annotations) = deprecation_annotations(annotations) {
+                        entries.insert(selector.clone(), (file, annotations));
+                    }
+                    if let Some(params) = params {
+                        for param in &params.params {
+                            if let Some(annotations) = parameter_deprecation(param) {
+                                entries.insert(
+                                    format!("param:{selector}:{}", param.name.name),
+                                    (file, annotations),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            if !entries.is_empty() {
+                index
+                    .entry(library)
+                    .or_default()
+                    .entry(name.clone())
+                    .or_default()
+                    .extend(entries);
+            }
+        }
+    }
+}
+
+/// Whether `annotation` is spelled like `dart:core`'s `@deprecated` or
+/// `@Deprecated(...)`. Only these can resolve to the SDK deprecation metadata
+/// (a project typedef or constant resolves to a project identity), so the
+/// index skips every other annotation instead of cloning it.
+fn may_be_deprecation(annotation: &falcon_syntax::ast::Annotation) -> bool {
+    annotation.constructor_name.is_none()
+        && match annotation.name.last().map(|name| name.name.as_str()) {
+            Some("deprecated") => annotation.args.is_none(),
+            Some("Deprecated") => annotation.args.is_some(),
+            _ => false,
+        }
+}
+
+fn might_deprecate(annotations: &[falcon_syntax::ast::Annotation]) -> bool {
+    annotations.iter().any(may_be_deprecation)
+}
+
+/// Deprecation does not apply to required named parameters (the official
+/// `deprecated_member_use` verifier skips them), so they are never indexed.
+fn parameter_might_deprecate(param: &falcon_syntax::ast::FormalParam) -> bool {
+    !is_required_named(param) && might_deprecate(&param.annotations)
+}
+
+fn parameter_deprecation(
+    param: &falcon_syntax::ast::FormalParam,
+) -> Option<Vec<falcon_syntax::ast::Annotation>> {
+    if is_required_named(param) {
+        return None;
+    }
+    deprecation_annotations(&param.annotations)
+}
+
+fn is_required_named(param: &falcon_syntax::ast::FormalParam) -> bool {
+    matches!(
+        param.kind,
+        falcon_syntax::ast::ParamKind::Named { required: true }
+    )
+}
+
+/// The possible deprecation annotations in `annotations`; `None` when there
+/// are none.
+fn deprecation_annotations(
+    annotations: &[falcon_syntax::ast::Annotation],
+) -> Option<Vec<falcon_syntax::ast::Annotation>> {
+    might_deprecate(annotations).then(|| {
+        annotations
+            .iter()
+            .filter(|annotation| may_be_deprecation(annotation))
+            .cloned()
+            .collect()
+    })
 }
 
 fn declaration_identities(declaration: &TopLevelDecl) -> Vec<(&str, NameIdentity)> {
@@ -749,6 +1101,25 @@ const SDK_TYPES: Allowlist = &[
             "WeakReference",
             "Finalizer",
             "dynamic",
+            "Exception",
+            "FormatException",
+            "IntegerDivisionByZeroException",
+            "Error",
+            "AssertionError",
+            "TypeError",
+            "ArgumentError",
+            "RangeError",
+            "IndexError",
+            "StateError",
+            "UnsupportedError",
+            "UnimplementedError",
+            "ConcurrentModificationError",
+            "OutOfMemoryError",
+            "StackOverflowError",
+            "NoSuchMethodError",
+            "Sink",
+            "Deprecated",
+            "StringSink",
         ],
     ),
     (
@@ -759,6 +1130,29 @@ const SDK_TYPES: Allowlist = &[
             "Timer",
             "Completer",
             "StreamController",
+            "Stream",
+            "StreamSubscription",
+            "StreamSink",
+            "StreamConsumer",
+            "EventSink",
+            "TimeoutException",
+            "AsyncError",
+        ],
+    ),
+    (
+        "dart:io",
+        &[
+            "FileSystemEntity",
+            "File",
+            "Directory",
+            "Link",
+            "IOSink",
+            "Socket",
+            "IOException",
+            "OSError",
+            "FileSystemException",
+            "HttpException",
+            "SocketException",
         ],
     ),
     ("dart:ui", &["Color"]),
@@ -807,12 +1201,31 @@ const SDK_TYPES: Allowlist = &[
             "JSBigUint64Array",
         ],
     ),
+    (
+        "dart:html",
+        &[
+            "Element",
+            "HtmlElement",
+            "DocumentFragment",
+            "AnchorElement",
+            "EmbedElement",
+            "IFrameElement",
+            "ScriptElement",
+            "DivElement",
+            "SpanElement",
+            "ParagraphElement",
+            "BodyElement",
+            "TemplateElement",
+            "Window",
+        ],
+    ),
 ];
 
 const SDK_MEMBERS: Allowlist = &[
-    ("dart:core", &["print", "pragma"]),
+    ("dart:core", &["print", "pragma", "deprecated"]),
     ("dart:async", &["scheduleMicrotask"]),
     ("dart:js_interop", &["JS", "staticInterop"]),
+    ("dart:html", &["window"]),
 ];
 
 const PACKAGE_TYPES: Allowlist = &[
@@ -841,6 +1254,11 @@ const PACKAGE_TYPES: Allowlist = &[
             "ElevatedButton",
             "GestureDetector",
             "MaterialApp",
+            "SizedBox",
+            "Colors",
+            "Diagnosticable",
+            "DiagnosticableTree",
+            "DiagnosticableTreeMixin",
         ],
     ),
 ];
@@ -862,7 +1280,9 @@ const PACKAGE_MEMBERS: Allowlist = &[
             "kIsWasm",
         ],
     ),
-    ("test", &["TestOn", "Timeout", "Tags", "OnPlatform"]),
+    ("test", &["TestOn", "Timeout", "Tags", "OnPlatform", "fail"]),
+    ("test_api", &["fail"]),
+    ("flutter_test", &["fail"]),
 ];
 
 fn allowed(list: Allowlist, library: &str, name: &str) -> Option<(&'static str, &'static str)> {
@@ -872,6 +1292,11 @@ fn allowed(list: Allowlist, library: &str, name: &str) -> Option<(&'static str, 
 }
 
 fn sdk_type(library: &str, name: &str) -> Option<DeclarationIdentity> {
+    // `dart:core` re-exports `Future` and `Stream` from `dart:async`.
+    let library = match (library, name) {
+        ("dart:core", "Future" | "Stream") => "dart:async",
+        _ => library,
+    };
     allowed(SDK_TYPES, library, name)
         .map(|(library, name)| DeclarationIdentity::Sdk { library, name })
 }

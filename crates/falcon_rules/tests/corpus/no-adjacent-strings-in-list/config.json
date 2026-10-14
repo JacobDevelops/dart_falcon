@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "no-adjacent-strings-in-list": "warn"
+      }
+    }
+  }
+}

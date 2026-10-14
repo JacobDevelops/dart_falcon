@@ -51,6 +51,11 @@ membership is authoritative from `package:lints` (`core.yaml`,
 `recommended.yaml`) and `package:flutter_lints` (`flutter.yaml`); `recommended`
 includes `core`, `flutter` includes `recommended`.
 
+**Status: shipped.** All 145 rules in this section are registered in
+`RULE_METADATA` under their kebab-case ids with `RuleSource::Lints` provenance.
+The 25 preset rules follow their preset; the 120 non-preset rules are opt-in
+(`recommended: false`).
+
 Preset rules are **must-have** for 1.0. Non-preset (opt-in / Effective-Dart)
 rules are **nice-to-have**. For non-preset rows, `falcon_group`, `domain`, and
 `analysis` are heuristic; the 25 preset rows are hand-classified.
@@ -223,10 +228,6 @@ workstream.
 
 Non-preset analysis-type breakdown (heuristic): needs-full-type-resolution 63,
 syntax-only 37, needs-local-type-inference 12, needs-cross-file/project 8.
-Experimental rows above (`implicit_reopen`, `invalid_case_patterns`,
-`no_default_cases`, `unnecessary_null_checks`,
-`use_late_for_private_fields_and_variables`) are deferred within the
-nice-to-have bucket until upstream stabilizes them.
 
 ---
 

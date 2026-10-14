@@ -897,8 +897,9 @@ fn resolver_dependent_per_file_project_corpus() {
         let identities = IdentityIndex::from_project_files(&identity_sources, &[]);
         let signatures = SignatureIndex::from_project_files(&path_prog, &identities, &type_index);
 
+        let source_refs: Vec<&str> = sources.iter().map(String::as_str).collect();
         for (i, path) in paths.iter().enumerate() {
-            let unit = library_unit(&grouping, &programs, i);
+            let unit = library_unit(&grouping, &programs, &source_refs, i);
             let ctx = AnalyzeContext::new(path, &sources[i], &config)
                 .with_types(&type_index)
                 .with_identities(&identities)

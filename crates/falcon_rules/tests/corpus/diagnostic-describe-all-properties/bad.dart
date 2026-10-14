@@ -1,0 +1,50 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+
+class Tile extends StatelessWidget {
+  const Tile({
+    super.key,
+    required this.title,
+    required this.count,
+    required this.tags,
+    required this.child,
+  });
+
+  final String title; /* expect: diagnostic-describe-all-properties */
+  final int count;
+  final List<String> tags; /* expect: diagnostic-describe-all-properties */
+  final Widget child;
+
+  bool get enabled => count > 0; /* expect: diagnostic-describe-all-properties */
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+    super.debugFillProperties(properties);
+    properties.add(IntProperty('count', count));
+  }
+
+  @override
+  Widget build(BuildContext context) => child;
+}
+
+class Counter extends StatefulWidget {
+  const Counter({super.key});
+
+  @override
+  State<Counter> createState() => _CounterState();
+}
+
+class _CounterState extends State<Counter> {
+  int clicks = 0; /* expect: diagnostic-describe-all-properties */
+  DateTime? lastClick; /* expect: diagnostic-describe-all-properties */
+
+  @override
+  Widget build(BuildContext context) => const Placeholder();
+}
+
+class Model with Diagnosticable {
+  Model(this.value);
+
+  final double value; /* expect: diagnostic-describe-all-properties */
+  final Duration timeout = Duration.zero; /* expect: diagnostic-describe-all-properties */
+}

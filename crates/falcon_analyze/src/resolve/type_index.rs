@@ -325,6 +325,36 @@ impl TypeIndex {
         }
     }
 
+    /// Whether the class or a class on its superclass chain (`extends` only,
+    /// not mixins or interfaces) is annotated `@immutable`. `No` only when the
+    /// whole chain is resolved project code without the annotation.
+    pub fn superclass_chain_is_immutable(&self, type_name: &str) -> Truth {
+        if self.incomplete {
+            return Truth::Unknown;
+        }
+        let mut visited = HashSet::new();
+        let mut current = type_name;
+        while visited.insert(current) {
+            match self.resolve(current) {
+                Some(Resolved::User(entry)) => {
+                    if entry.is_immutable {
+                        return Truth::Yes;
+                    }
+                    if entry.has_unresolved_parts {
+                        return Truth::Unknown;
+                    }
+                    match entry.superclass.as_deref() {
+                        Some(superclass) => current = superclass,
+                        None => return Truth::No,
+                    }
+                }
+                Some(Resolved::Core(_)) => return Truth::No,
+                None | Some(Resolved::Ambiguous) => return Truth::Unknown,
+            }
+        }
+        Truth::Unknown
+    }
+
     // ── Internals ───────────────────────────────────────────────────────────────
 
     /// Resolve a name against user declarations first, then the core table.

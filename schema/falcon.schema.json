@@ -22,6 +22,9 @@
                 "depend-on-referenced-packages": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "sort-pub-dependencies": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-nullable": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -43,6 +46,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `style` group.",
               "properties": {
+                "package-api-docs": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "package-names": {
                   "$ref": "#/definitions/ruleConfig"
                 }
@@ -81,6 +87,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `complexity` group.",
               "properties": {
+                "avoid-classes-with-only-static-members": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-function-literals-in-foreach-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -105,7 +114,13 @@
                 "avoid-unnecessary-type-casts": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "cascade-invocations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "cyclomatic-complexity": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "join-return-with-assignment": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "max-lines-for-file": {
@@ -126,16 +141,25 @@
                 "no-boolean-literal-compare": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "one-member-abstracts": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-conditional-assignment": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-conditional-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-expression-function-bodies": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-extracting-callbacks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-for-elements-to-map-from-iterable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-if-elements-to-conditional-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-if-null-operators": {
@@ -162,6 +186,9 @@
                 "unnecessary-getters-setters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unnecessary-lambdas": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-overrides": {
                   "$ref": "#/definitions/ruleConfig"
                 }
@@ -172,6 +199,12 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
+                "always-use-package-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-dynamic-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-global-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -184,6 +217,9 @@
                 "avoid-returning-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-type-to-string": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unused-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -193,10 +229,28 @@
                 "await-only-futures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "cancel-subscriptions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "close-sinks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "collection-methods-unrelated-type": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "comment-references": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "correct-order-for-super-dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "deprecated-member-use-from-same-package": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "diagnostic-describe-all-properties": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "discarded-futures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
@@ -208,19 +262,40 @@
                 "implementation-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "implicit-reopen": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "invalid-case-patterns": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "invalid-runtime-check-with-js-interop-types": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "library-private-types-in-public-api": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "literal-only-boolean-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-adjacent-strings-in-list": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "no-logic-in-create-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-self-assignments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "null-check-on-nullable-type-parameter": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "null-closures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-relative-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-void-to-null": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "proper-controller-dispose": {
@@ -235,6 +310,12 @@
                 "proper-super-init-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "test-types-in-equals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "throw-in-finally": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "type-literal-in-constant-pattern": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -244,7 +325,13 @@
                 "unnecessary-nullable-return-type": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unnecessary-statements": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unrelated-type-equality-checks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unsafe-html": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-build-context-synchronously": {
@@ -269,6 +356,12 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
+                "avoid-slow-async-io": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "noop-primitive-operations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-const-border-radius": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -281,10 +374,19 @@
                 "prefer-declaring-const-constructor": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-foreach": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "sized-box-for-whitespace": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-to-list-in-spreads": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-is-even-rather-than-modulo": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-string-buffers": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -299,22 +401,82 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `style` group.",
               "properties": {
+                "always-declare-return-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "always-put-control-body-on-new-line": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "always-put-required-named-parameters-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "always-specify-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "annotate-overrides": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-abbreviations-in-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-annotating-with-dynamic": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-bool-literals-in-conditional-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-catches-without-on-clauses": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-catching-errors": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-double-and-int-checks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-equals-and-hash-code-on-mutable-classes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-escaping-inner-quotes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-field-initializers-in-const-classes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-final-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-implementing-value-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-init-to-null": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-js-rounded-ints": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-late-keyword": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-multiple-declarations-per-line": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-non-null-assertion": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-null-checks-in-equality-operators": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-positional-boolean-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-positional-fields-in-records": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-private-typedef-functions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-redundant-argument-values": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-redundant-pattern-field-names": {
@@ -326,6 +488,12 @@
                 "avoid-return-types-on-setters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-returning-this": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-setters-without-getters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-single-cascade-in-expression-statements": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -333,6 +501,15 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-top-level-member-access": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-types-on-closure-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unused-constructor-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-void-async": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "binary-expression-operand-order": {
@@ -347,7 +524,16 @@
                 "camel-case-types": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "cast-nullable-to-non-nullable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "class-members-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "combinators-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "conditional-uri-does-not-exist": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "constant-identifier-names": {
@@ -359,13 +545,28 @@
                 "dangling-library-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "deprecated-consistency": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "directives-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "do-not-use-environment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "double-literal-format": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "empty-constructor-bodies": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "eol-at-end-of-file": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "file-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "flutter-style-todos": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "format-comment": {
@@ -374,16 +575,34 @@
                 "implicit-call-tearoffs": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "leading-newlines-in-multiline-strings": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "library-annotations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "library-names": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "library-prefixes": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "lines-longer-than-80-chars": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "matching-super-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "member-ordering": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "missing-whitespace-between-adjacent-strings": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "newline-before-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-default-cases": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-leading-underscores-for-library-prefixes": {
@@ -392,16 +611,40 @@
                 "no-leading-underscores-for-local-identifiers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "no-literal-bool-comparisons": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "no-magic-number": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-object-declaration": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "no-runtime-type-to-string": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "non-constant-identifier-names": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "omit-local-variable-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "only-throw-errors": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "package-prefixed-library-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "parameter-assignments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-adjacent-string-concatenation": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-asserts-in-initializer-lists": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-asserts-with-message": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-async-await": {
@@ -413,7 +656,19 @@
                 "prefer-collection-literals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-const-constructors": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-const-constructors-in-immutables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-const-declarations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-const-literals-to-create-immutables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-constructors-over-static-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-correct-identifier-length": {
@@ -425,7 +680,19 @@
                 "prefer-dedicated-media-query-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-double-quotes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-final-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-final-in-for-each": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-final-locals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-final-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-first": {
@@ -441,6 +708,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-inlined-adds": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-int-literals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-interpolation-to-compose-strings": {
@@ -464,6 +734,15 @@
                 "prefer-last": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-mixin": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-null-aware-method-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-single-quotes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-spread-collections": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -479,25 +758,61 @@
                 "provide-deprecation-message": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "public-member-api-docs": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "require-trailing-commas": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "sized-box-shrink-expand": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "slash-for-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "sort-child-properties-last": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "sort-constructors-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "sort-unnamed-constructors-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "tighten-type-of-initializing-formals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "type-annotate-public-apis": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "type-init-formals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unawaited-futures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unintended-html-in-doc-comment": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unnecessary-await-in-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-brace-in-string-interps": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-breaks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-constructor-name": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unnecessary-final": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-late": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-library-directive": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-library-name": {
@@ -506,7 +821,19 @@
                 "unnecessary-new": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unnecessary-null-aware-operator-on-extension-on-nullable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-null-checks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-nullable-for-final-variable-declarations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-parenthesis": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-raw-strings": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-string-escapes": {
@@ -518,13 +845,40 @@
                 "unnecessary-this": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unreachable-from-main": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-colored-box": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-decorated-box": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "use-design-system-item": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-enums": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-full-hex-values-for-flutter-colors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-function-type-syntax-for-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-if-null-to-convert-nulls-to-bools": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-late-for-private-fields-and-variables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-named-constants": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-raw-strings": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-setters-to-change-properties": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-spacer-as-expanded-child": {
@@ -534,6 +888,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-super-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-test-throws-matchers": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-to-and-as-if-applicable": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -685,6 +1045,9 @@
                 "depend-on-referenced-packages": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "sort-pub-dependencies": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-nullable": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -706,6 +1069,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `style` group.",
               "properties": {
+                "package-api-docs": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "package-names": {
                   "$ref": "#/definitions/ruleConfig"
                 }
@@ -774,6 +1140,9 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `complexity` group.",
               "properties": {
+                "avoid-classes-with-only-static-members": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-function-literals-in-foreach-calls": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -798,7 +1167,13 @@
                 "avoid-unnecessary-type-casts": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "cascade-invocations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "cyclomatic-complexity": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "join-return-with-assignment": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "max-lines-for-file": {
@@ -819,16 +1194,25 @@
                 "no-boolean-literal-compare": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "one-member-abstracts": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-conditional-assignment": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-conditional-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-expression-function-bodies": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-extracting-callbacks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-for-elements-to-map-from-iterable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-if-elements-to-conditional-expressions": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-if-null-operators": {
@@ -855,6 +1239,9 @@
                 "unnecessary-getters-setters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unnecessary-lambdas": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-overrides": {
                   "$ref": "#/definitions/ruleConfig"
                 }
@@ -865,6 +1252,12 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
               "properties": {
+                "always-use-package-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-dynamic-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-global-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -877,6 +1270,9 @@
                 "avoid-returning-widgets": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-type-to-string": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-unused-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -886,10 +1282,28 @@
                 "await-only-futures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "cancel-subscriptions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "close-sinks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "collection-methods-unrelated-type": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "comment-references": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "correct-order-for-super-dispose": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "deprecated-member-use-from-same-package": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "diagnostic-describe-all-properties": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "discarded-futures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "exhaustive-cases": {
@@ -901,19 +1315,40 @@
                 "implementation-imports": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "implicit-reopen": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "invalid-case-patterns": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "invalid-runtime-check-with-js-interop-types": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "library-private-types-in-public-api": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "literal-only-boolean-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-adjacent-strings-in-list": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "no-logic-in-create-state": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-self-assignments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "null-check-on-nullable-type-parameter": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "null-closures": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-relative-imports": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-void-to-null": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "proper-controller-dispose": {
@@ -928,6 +1363,12 @@
                 "proper-super-init-state": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "test-types-in-equals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "throw-in-finally": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "type-literal-in-constant-pattern": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -937,7 +1378,13 @@
                 "unnecessary-nullable-return-type": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unnecessary-statements": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unrelated-type-equality-checks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unsafe-html": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-build-context-synchronously": {
@@ -962,6 +1409,12 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `performance` group.",
               "properties": {
+                "avoid-slow-async-io": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "noop-primitive-operations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-const-border-radius": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -974,10 +1427,19 @@
                 "prefer-declaring-const-constructor": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-foreach": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "sized-box-for-whitespace": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-to-list-in-spreads": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-is-even-rather-than-modulo": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-string-buffers": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },
@@ -992,22 +1454,82 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `style` group.",
               "properties": {
+                "always-declare-return-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "always-put-control-body-on-new-line": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "always-put-required-named-parameters-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "always-specify-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "annotate-overrides": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-abbreviations-in-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-annotating-with-dynamic": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-bool-literals-in-conditional-expressions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-catches-without-on-clauses": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-catching-errors": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-double-and-int-checks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-equals-and-hash-code-on-mutable-classes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-escaping-inner-quotes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-field-initializers-in-const-classes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-final-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-implementing-value-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-init-to-null": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-js-rounded-ints": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-late-keyword": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-multiple-declarations-per-line": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-non-null-assertion": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-null-checks-in-equality-operators": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-positional-boolean-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-positional-fields-in-records": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-private-typedef-functions": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-redundant-argument-values": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-redundant-pattern-field-names": {
@@ -1019,6 +1541,12 @@
                 "avoid-return-types-on-setters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "avoid-returning-this": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-setters-without-getters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "avoid-single-cascade-in-expression-statements": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1026,6 +1554,15 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "avoid-top-level-member-access": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-types-on-closure-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-unused-constructor-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "avoid-void-async": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "binary-expression-operand-order": {
@@ -1040,7 +1577,16 @@
                 "camel-case-types": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "cast-nullable-to-non-nullable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "class-members-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "combinators-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "conditional-uri-does-not-exist": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "constant-identifier-names": {
@@ -1052,13 +1598,28 @@
                 "dangling-library-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "deprecated-consistency": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "directives-ordering": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "do-not-use-environment": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "double-literal-format": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "empty-constructor-bodies": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "eol-at-end-of-file": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "file-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "flutter-style-todos": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "format-comment": {
@@ -1067,16 +1628,34 @@
                 "implicit-call-tearoffs": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "leading-newlines-in-multiline-strings": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "library-annotations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "library-names": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "library-prefixes": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "lines-longer-than-80-chars": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "matching-super-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "member-ordering": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "missing-whitespace-between-adjacent-strings": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "newline-before-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "no-default-cases": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-leading-underscores-for-library-prefixes": {
@@ -1085,16 +1664,40 @@
                 "no-leading-underscores-for-local-identifiers": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "no-literal-bool-comparisons": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "no-magic-number": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "no-object-declaration": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "no-runtime-type-to-string": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "non-constant-identifier-names": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "omit-local-variable-types": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "only-throw-errors": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "package-prefixed-library-names": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "parameter-assignments": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-adjacent-string-concatenation": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-asserts-in-initializer-lists": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-asserts-with-message": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-async-await": {
@@ -1106,7 +1709,19 @@
                 "prefer-collection-literals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-const-constructors": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-const-constructors-in-immutables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-const-declarations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-const-literals-to-create-immutables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-constructors-over-static-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-correct-identifier-length": {
@@ -1118,7 +1733,19 @@
                 "prefer-dedicated-media-query-methods": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-double-quotes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-final-fields": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-final-in-for-each": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-final-locals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-final-parameters": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-first": {
@@ -1134,6 +1761,9 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-inlined-adds": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-int-literals": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "prefer-interpolation-to-compose-strings": {
@@ -1157,6 +1787,15 @@
                 "prefer-last": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "prefer-mixin": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-null-aware-method-calls": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "prefer-single-quotes": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "prefer-spread-collections": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1172,25 +1811,61 @@
                 "provide-deprecation-message": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "public-member-api-docs": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "require-trailing-commas": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "sized-box-shrink-expand": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "slash-for-doc-comments": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "sort-child-properties-last": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "sort-constructors-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "sort-unnamed-constructors-first": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "tighten-type-of-initializing-formals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "type-annotate-public-apis": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "type-init-formals": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unawaited-futures": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unintended-html-in-doc-comment": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unnecessary-await-in-return": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-brace-in-string-interps": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-breaks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-constructor-name": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unnecessary-final": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-late": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-library-directive": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-library-name": {
@@ -1199,7 +1874,19 @@
                 "unnecessary-new": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unnecessary-null-aware-operator-on-extension-on-nullable": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-null-checks": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "unnecessary-nullable-for-final-variable-declarations": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-parenthesis": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "unnecessary-raw-strings": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unnecessary-string-escapes": {
@@ -1211,13 +1898,40 @@
                 "unnecessary-this": {
                   "$ref": "#/definitions/ruleConfig"
                 },
+                "unreachable-from-main": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-colored-box": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-decorated-box": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
                 "use-design-system-item": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-enums": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-full-hex-values-for-flutter-colors": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-function-type-syntax-for-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-if-null-to-convert-nulls-to-bools": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-late-for-private-fields-and-variables": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-named-constants": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-raw-strings": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-setters-to-change-properties": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-spacer-as-expanded-child": {
@@ -1227,6 +1941,12 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-super-parameters": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-test-throws-matchers": {
+                  "$ref": "#/definitions/ruleConfig"
+                },
+                "use-to-and-as-if-applicable": {
                   "$ref": "#/definitions/ruleConfig"
                 }
               },

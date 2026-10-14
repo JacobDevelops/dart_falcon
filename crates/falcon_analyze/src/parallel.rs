@@ -134,8 +134,9 @@ fn analyze_indexed(
     let identities = IdentityIndex::from_project_files(&identity_sources, packages);
     let signatures = SignatureIndex::from_project_files(&project_files, &identities, &type_index);
     let programs: Vec<&Program> = parsed.iter().map(|p| &p.program).collect();
+    let sources: Vec<&str> = parsed.iter().map(|p| p.source.as_str()).collect();
     let library_units: Vec<LibraryUnit> = (0..parsed.len())
-        .map(|i| library_unit(&grouping, &programs, i))
+        .map(|i| library_unit(&grouping, &programs, &sources, i))
         .collect();
 
     let run_one = |(i, p): (usize, &Parsed)| {

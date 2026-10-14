@@ -1,0 +1,33 @@
+class Rectangle {
+  final int width;
+  final int height;
+  Rectangle(this.width, this.height);
+  Rectangle.square(int size)
+      : width = size,
+        height = size;
+}
+
+class ColoredRectangle extends Rectangle {
+  final String color;
+  ColoredRectangle(
+    this.color,
+    super.height, /* expect: matching-super-parameters */
+    super.width, /* expect: matching-super-parameters */
+  );
+}
+
+class Square extends Rectangle {
+  Square(super.side) : super.square(); /* expect: matching-super-parameters */
+}
+
+class Base {
+  Base(int a, [int? b]);
+}
+
+class Child extends Base {
+  Child(super.x); /* expect: matching-super-parameters */
+}
+
+class OptionalChild extends Base {
+  OptionalChild(super.a, [super.c]); /* expect: matching-super-parameters */
+}

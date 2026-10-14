@@ -1,0 +1,82 @@
+//! Flags abstract classes whose only member is a single abstract method.
+//!
+//! Such a class is just a function type with extra ceremony; a top-level
+//! function or a function-typed parameter does the same job. Classes that
+//! extend, mix in, or implement another type, or that declare any field,
+//! getter, or setter, are left alone because they carry more than one member.
+//!
+//! ```dart
+//! abstract class Predicate { bool test(Object o); } // flagged
+//! typedef Predicate = bool Function(Object o);      // ok
+//! ```
+//!
+//! Adopted from the official `one_member_abstracts` lint.
+
+use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_diagnostics::Diagnostic;
+use falcon_syntax::Program;
+use falcon_syntax::ast::*;
+
+#[derive(Default)]
+pub struct OneMemberAbstracts;
+
+impl Rule for OneMemberAbstracts {
+    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        program
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                TopLevelDecl::Class(class)
+                    if class.modifiers.is_abstract
+                        && class.extends.is_none()
+                        && class.with_clause.is_empty()
+                        && class.implements.is_empty() =>
+                {
+                    Some((&class.name, class.members.as_slice()))
+                }
+                TopLevelDecl::MixinClass(class)
+                    if class.is_abstract
+                        && class.extends.is_none()
+                        && class.with_clause.is_empty()
+                        && class.implements.is_empty() =>
+                {
+                    Some((&class.name, class.members.as_slice()))
+                }
+                _ => None,
+            })
+            .filter_map(|(name, members)| {
+                let method = single_abstract_method(members)?;
+                Some(ctx.diagnostic(
+                    "one-member-abstracts",
+                    format!(
+                        "Unnecessary use of an abstract class; make '{method}' a top-level function and remove the class."
+                    ),
+                    name.span,
+                ))
+            })
+            .collect()
+    }
+}
+
+/// The name of the class's only method when it is abstract and the class has
+/// no fields or accessors; operators count as methods, constructors do not.
+fn single_abstract_method(members: &[ClassMember]) -> Option<&str> {
+    let mut method = None;
+    for member in members {
+        let (name, abstract_body) = match member {
+            ClassMember::Constructor(_) => continue,
+            ClassMember::Method(m) => (m.name.name.as_str(), m.body.is_none() && !m.is_external),
+            ClassMember::Operator(o) => (o.op.as_str(), o.body.is_none() && !o.is_external),
+            ClassMember::Field(_)
+            | ClassMember::Getter(_)
+            | ClassMember::Setter(_)
+            | ClassMember::Error(_) => return None,
+        };
+        if method.is_some() {
+            return None;
+        }
+        method = Some((name, abstract_body));
+    }
+    let (name, abstract_body) = method?;
+    abstract_body.then_some(name)
+}

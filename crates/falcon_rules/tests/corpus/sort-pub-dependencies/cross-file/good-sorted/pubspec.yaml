@@ -1,0 +1,11 @@
+name: sample
+dependencies:
+  a: any
+  b: {path: ../b}
+  c: any
+dev_dependencies:
+  a: any
+  b: any
+dependency_overrides:
+  a: any
+  z: any

@@ -101,7 +101,7 @@ impl SemanticRuleVisitor for Collector<'_> {
     }
 }
 
-fn is_enum_like(facts: &DeclarationFacts, identity: &DeclarationIdentity) -> bool {
+pub(crate) fn is_enum_like(facts: &DeclarationFacts, identity: &DeclarationIdentity) -> bool {
     !facts.is_abstract
         && !facts.has_subclass_in_library
         && !facts.constructors.is_empty()

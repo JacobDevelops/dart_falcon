@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "unnecessary-raw-strings": "warn"
+      }
+    }
+  }
+}

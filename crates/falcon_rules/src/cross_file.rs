@@ -7,14 +7,18 @@
 //! package/pubspec discovery, directive-URI resolution, and path normalization.
 
 pub mod depend_on_referenced_packages;
+pub mod package_api_docs;
 pub mod package_names;
 pub mod secure_pubspec_urls;
+pub mod sort_pub_dependencies;
 pub mod unnecessary_nullable;
 pub mod unused_code;
 pub mod unused_files;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
+use std::time::SystemTime;
 
 use falcon_analyze::{PackageIdentity, ProjectFile, canonical_or_lexical};
 use falcon_diagnostics::Span as DiagSpan;
@@ -340,6 +344,85 @@ pub fn has_lib_component(path: &Path) -> bool {
     path.components().any(|c| c.as_os_str() == "lib")
 }
 
+struct CachedPackage {
+    modified: SystemTime,
+    length: u64,
+    #[cfg(unix)]
+    changed: (i64, i64),
+    name: String,
+}
+
+static PACKAGE_CACHE: LazyLock<Mutex<HashMap<PathBuf, CachedPackage>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The package enclosing `path` (nearest `pubspec.yaml`), or `None` outside any
+/// package. Mirrors the analyzer's `RuleContext.package`.
+/// Parsed identities are shared between rules; manifest timestamp or length
+/// changes invalidate the bounded process-wide cache.
+pub fn enclosing_package(path: &Path) -> Option<PackageIdentity> {
+    let manifest = enclosing_pubspec(path)?;
+    let pubspec = canonical_or_lexical(&manifest);
+    let Ok(metadata) = std::fs::metadata(&pubspec) else {
+        return Some(crate::package_identity(&manifest));
+    };
+    let Ok(modified) = metadata.modified() else {
+        return Some(crate::package_identity(&manifest));
+    };
+    let length = metadata.len();
+    #[cfg(unix)]
+    let changed = {
+        use std::os::unix::fs::MetadataExt;
+        (metadata.ctime(), metadata.ctime_nsec())
+    };
+    let cached_name = {
+        let cache = PACKAGE_CACHE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.get(&pubspec).and_then(|entry| {
+            let valid = entry.modified == modified && entry.length == length;
+            #[cfg(unix)]
+            let valid = valid && entry.changed == changed;
+            valid.then(|| entry.name.clone())
+        })
+    };
+    if let Some(name) = cached_name {
+        return Some(PackageIdentity {
+            name,
+            // Resolve lib/ afresh: its symlink can change independently of pubspec.
+            lib_root: canonical_or_lexical(&manifest.parent()?.join("lib")),
+        });
+    }
+    let package = crate::package_identity(&manifest);
+    let mut cache = PACKAGE_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Bound retained paths across long-running LSP sessions and test projects.
+    if cache.len() >= 256 {
+        cache.clear();
+    }
+    cache.insert(
+        pubspec,
+        CachedPackage {
+            modified,
+            length,
+            #[cfg(unix)]
+            changed,
+            name: package.name.clone(),
+        },
+    );
+    Some(package)
+}
+
+/// The enclosing package when `path` lies in that package's `lib/` directory.
+/// Mirrors the analyzer's `RuleContext.isInLibDir`: `None` for files outside
+/// any package or outside `lib/`.
+pub fn lib_dir_package(path: &Path) -> Option<PackageIdentity> {
+    let package = enclosing_package(path)?;
+    canonical_or_lexical(path)
+        .starts_with(&package.lib_root)
+        .then_some(package)
+}
+
 /// Directed reference graph over the file set: `adj[i]` lists the indices of the
 /// files that `files[i]` references via its imports/exports/parts (all URI kinds,
 /// including conditional). `canons` is the caller's canonical path per file (same
@@ -383,10 +466,137 @@ pub fn build_reference_graph(
     adj
 }
 
+/// Test support for per-file rules whose behaviour depends on the enclosing
+/// package: runs a rule over every Dart file of `corpus/<rule>/project/` at its
+/// real path (so `pubspec.yaml` discovery works) and checks the
+/// `/* expect: <rule> */` annotations line by line. The in-process corpus runner
+/// only exercises top-level fixtures for non-resolving rules.
+#[cfg(test)]
+pub(crate) fn assert_project_fixture(rule_name: &str, rule: &dyn falcon_analyze::Rule) {
+    fn dart_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                dart_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "dart") {
+                out.push(path);
+            }
+        }
+    }
+
+    let project = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/corpus")
+        .join(rule_name)
+        .join("project");
+    let mut files = Vec::new();
+    dart_files(&project, &mut files);
+    let config = falcon_config::FalconConfig::default();
+    let marker = format!("/* expect: {rule_name} */");
+    let mut expected_total = 0;
+    let mut failures = Vec::new();
+    for path in files {
+        let source = std::fs::read_to_string(&path).unwrap();
+        let (program, _) = falcon_dart_parser::parser::parse(&source);
+        let ctx = falcon_analyze::AnalyzeContext::new(&path, &source, &config);
+        let line_of = |offset: usize| source[..offset].matches('\n').count() + 1;
+        let mut actual: Vec<usize> = rule
+            .analyze(&program, &ctx)
+            .iter()
+            .filter(|diagnostic| diagnostic.rule == rule_name)
+            .map(|diagnostic| line_of(diagnostic.span.start))
+            .collect();
+        actual.sort_unstable();
+        let expected: Vec<usize> = source
+            .lines()
+            .enumerate()
+            .flat_map(|(index, line)| std::iter::repeat_n(index + 1, line.matches(&marker).count()))
+            .collect();
+        expected_total += expected.len();
+        if actual != expected {
+            failures.push(format!(
+                "{}: expected lines {expected:?}, got {actual:?}",
+                path.display()
+            ));
+        }
+    }
+    assert!(
+        expected_total > 0,
+        "{rule_name} project fixture has no expectations"
+    );
+    assert!(
+        failures.is_empty(),
+        "{rule_name} project fixture mismatch:\n{}",
+        failures.join("\n")
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use falcon_dart_parser::parser::parse;
+
+    #[test]
+    fn enclosing_package_cache_tracks_manifest_changes() {
+        let root = std::env::temp_dir().join(format!(
+            "falcon-cached-package-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        let manifest = root.join("pubspec.yaml");
+        let source = root.join("lib/example.dart");
+        std::fs::write(&manifest, "name: first\n").unwrap();
+        assert_eq!(enclosing_package(&source).unwrap().name, "first");
+        assert_eq!(lib_dir_package(&source).unwrap().name, "first");
+        // A different length makes invalidation deterministic even on a coarse clock.
+        std::fs::write(&manifest, "name: second_package\n").unwrap();
+        assert_eq!(enclosing_package(&source).unwrap().name, "second_package");
+        assert!(lib_dir_package(&root.join("test/example.dart")).is_none());
+        std::fs::remove_file(&manifest).unwrap();
+        assert!(enclosing_package(&source).is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn enclosing_package_cache_preserves_symlink_roots() {
+        let root = std::env::temp_dir().join(format!(
+            "falcon-cached-symlinks-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let package = root.join("package");
+        let first = root.join("first");
+        let second = root.join("second");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::create_dir(&first).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        std::fs::write(root.join("shared.yaml"), "name: shared\n").unwrap();
+        std::os::unix::fs::symlink(root.join("shared.yaml"), package.join("pubspec.yaml")).unwrap();
+        std::os::unix::fs::symlink(&first, package.join("lib")).unwrap();
+        let source = package.join("example.dart");
+        assert_eq!(
+            enclosing_package(&source).unwrap().lib_root,
+            canonical_or_lexical(&first)
+        );
+        std::fs::remove_file(package.join("lib")).unwrap();
+        std::os::unix::fs::symlink(&second, package.join("lib")).unwrap();
+        assert_eq!(
+            enclosing_package(&source).unwrap().lib_root,
+            canonical_or_lexical(&second)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[cfg(unix)]
     #[test]

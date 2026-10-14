@@ -1,0 +1,14 @@
+name: sample
+dependencies:
+  z: any
+  y: any # /* expect: sort-pub-dependencies */
+  x: any
+  w: any
+dev_dependencies:
+  a: any
+  c: any
+  b: any # /* expect: sort-pub-dependencies */
+  a_second: any
+dependency_overrides:
+  path: ^1.9.0
+  meta: ^1.15.0 # /* expect: sort-pub-dependencies */

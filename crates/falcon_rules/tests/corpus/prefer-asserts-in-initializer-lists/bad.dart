@@ -1,0 +1,27 @@
+int limit = 10;
+
+class Range {
+  final int start;
+  final int end;
+  Range(this.start, this.end) {
+    assert(start <= end); /* expect: prefer-asserts-in-initializer-lists */
+    assert(end < limit); /* expect: prefer-asserts-in-initializer-lists */
+    print(start);
+  }
+  Range.of(int a, int b) : start = a, end = b {
+    assert(a <= b, 'ordered'); /* expect: prefer-asserts-in-initializer-lists */
+  }
+  Range.single(int v) : start = v, end = v {
+    assert(isValid(v)); /* expect: prefer-asserts-in-initializer-lists */
+  }
+  Range.list(List<int> items) : start = items.first, end = items.last {
+    assert(items.every((e) => e >= 0)); /* expect: prefer-asserts-in-initializer-lists */
+  }
+  static bool isValid(int v) => v >= 0;
+}
+
+class Sub extends Range {
+  Sub(int a) : super(a, a) {
+    assert(a > 0); /* expect: prefer-asserts-in-initializer-lists */
+  }
+}

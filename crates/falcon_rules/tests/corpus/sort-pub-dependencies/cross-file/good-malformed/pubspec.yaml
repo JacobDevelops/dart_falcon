@@ -1,0 +1,3 @@
+name: malformed
+dependencies: [z, a]
+dev_dependencies: {b: any

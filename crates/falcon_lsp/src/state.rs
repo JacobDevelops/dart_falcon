@@ -289,6 +289,7 @@ impl LspState {
         };
         let mut ctx = AnalyzeContext::new(&doc.path, &doc.text, &self.config);
         let programs;
+        let sources;
         let library;
         if let Some((snapshot, file_index)) = semantic {
             programs = snapshot
@@ -296,7 +297,12 @@ impl LspState {
                 .iter()
                 .map(|file| &file.program)
                 .collect::<Vec<_>>();
-            library = library_unit(&snapshot.grouping, &programs, file_index);
+            sources = snapshot
+                .files
+                .iter()
+                .map(|file| file.source.as_str())
+                .collect::<Vec<_>>();
+            library = library_unit(&snapshot.grouping, &programs, &sources, file_index);
             ctx = ctx
                 .with_types(&snapshot.indexes.types)
                 .with_identities(&snapshot.indexes.identities)

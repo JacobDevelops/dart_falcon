@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "avoid-escaping-inner-quotes": "warn"
+      }
+    }
+  }
+}

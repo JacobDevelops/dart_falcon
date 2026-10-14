@@ -205,7 +205,8 @@ mod tests {
             .map(|((p, _), prog)| (PathBuf::from(p), *prog))
             .collect();
         let grouping = group_libraries(&path_prog);
-        let unit = library_unit(&grouping, &programs, target);
+        let sources: Vec<&str> = files.iter().map(|(_, source)| *source).collect();
+        let unit = library_unit(&grouping, &programs, &sources, target);
         let config = FalconConfig::default();
         let path = PathBuf::from(files[target].0);
         let ctx = AnalyzeContext::new(&path, files[target].1, &config).with_library(&unit);

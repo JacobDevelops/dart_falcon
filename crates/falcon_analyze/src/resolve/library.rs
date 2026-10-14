@@ -17,10 +17,12 @@ use std::path::{Component, Path, PathBuf};
 
 use falcon_syntax::ast::Program;
 
-/// A file's library context: the sibling programs that complete its library and
-/// whether that library has an unresolved part.
+/// A file's library context: the sibling programs that complete its library,
+/// the source text each was parsed from, and whether that library has an
+/// unresolved part.
 pub struct LibraryUnit<'a> {
     siblings: Vec<&'a Program>,
+    sibling_sources: Vec<&'a str>,
     has_unresolved_parts: bool,
 }
 
@@ -29,6 +31,12 @@ impl<'a> LibraryUnit<'a> {
     /// for a part file). Empty for a standalone single-file library.
     pub fn siblings(&self) -> &[&'a Program] {
         &self.siblings
+    }
+
+    /// The in-memory source text of each [`Self::siblings`] program, index for
+    /// index — the exact text its spans refer to.
+    pub fn sibling_sources(&self) -> &[&'a str] {
+        &self.sibling_sources
     }
 
     /// Whether the library has a `part`/`part of` link that could not be resolved
@@ -142,15 +150,18 @@ pub fn group_libraries(files: &[(PathBuf, &Program)]) -> LibraryGrouping {
     }
 }
 
-/// Build the [`LibraryUnit`] for file `i` from a grouping and the parsed programs.
+/// Build the [`LibraryUnit`] for file `i` from a grouping, the parsed programs,
+/// and the source text each program was parsed from (same indices).
 pub fn library_unit<'a>(
     grouping: &LibraryGrouping,
     programs: &[&'a Program],
+    sources: &[&'a str],
     i: usize,
 ) -> LibraryUnit<'a> {
-    let siblings = grouping.siblings(i).iter().map(|&j| programs[j]).collect();
+    let siblings = grouping.siblings(i);
     LibraryUnit {
-        siblings,
+        siblings: siblings.iter().map(|&j| programs[j]).collect(),
+        sibling_sources: siblings.iter().map(|&j| sources[j]).collect(),
         has_unresolved_parts: grouping.is_unresolved(i),
     }
 }
@@ -380,8 +391,13 @@ mod tests {
         ];
         let g = group_libraries(&files);
         let programs = vec![&owner, &part];
-        let unit = library_unit(&g, &programs, 0);
+        let sources = [
+            "part 'part.dart'; class Owner {}",
+            "part of 'owner.dart'; class Extra {}",
+        ];
+        let unit = library_unit(&g, &programs, &sources, 0);
         assert_eq!(unit.siblings().len(), 1);
+        assert_eq!(unit.sibling_sources(), [sources[1]]);
         assert!(!unit.has_unresolved_parts());
     }
 }

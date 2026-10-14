@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "flutter-style-todos": "warn"
+      }
+    }
+  }
+}

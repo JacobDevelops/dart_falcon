@@ -1,0 +1,9 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "lines-longer-than-80-chars": "warn"
+      }
+    }
+  }
+}

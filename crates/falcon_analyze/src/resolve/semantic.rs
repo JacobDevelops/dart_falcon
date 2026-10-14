@@ -780,6 +780,8 @@ struct ExtensionFacts {
     name: Option<String>,
     on_type: ResolvedType,
     members: HashSet<String>,
+    /// Instance methods, getters, setters (as `name=`), and operators.
+    instance_members: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -954,6 +956,23 @@ impl SignatureIndex {
                             .iter()
                             .filter_map(|member| match member {
                                 ClassMember::Method(method) => Some(method.name.name.clone()),
+                                _ => None,
+                            })
+                            .collect(),
+                        instance_members: extension
+                            .members
+                            .iter()
+                            .filter_map(|member| match member {
+                                ClassMember::Method(method) if !method.is_static => {
+                                    Some(method.name.name.clone())
+                                }
+                                ClassMember::Getter(getter) if !getter.is_static => {
+                                    Some(getter.name.name.clone())
+                                }
+                                ClassMember::Setter(setter) if !setter.is_static => {
+                                    Some(format!("{}=", setter.name.name))
+                                }
+                                ClassMember::Operator(operator) => Some(operator.op.clone()),
                                 _ => None,
                             })
                             .collect(),
@@ -1586,6 +1605,7 @@ impl SignatureIndex {
             "ElevatedButton",
             "GestureDetector",
             "MaterialApp",
+            "SizedBox",
         ] {
             let identity = DeclarationIdentity::flutter(name);
             let supertype = ResolvedType::interface_identity(widget.clone());
@@ -1614,6 +1634,111 @@ impl SignatureIndex {
                 return_type: ResolvedType::Unknown,
             },
         );
+        self.add_sdk_hierarchy();
+    }
+
+    /// Seeds [`SDK_HIERARCHY`] plus the stream/file members whose results
+    /// resource-tracking rules need to type (`Stream.listen`,
+    /// `StreamController.stream`, `File.openWrite`).
+    fn add_sdk_hierarchy(&mut self) {
+        let arity = |library: &str, name: &str| {
+            SDK_HIERARCHY
+                .iter()
+                .find(|entry| entry.0 == library && entry.1 == name)
+                .map_or(0, |entry| entry.2)
+        };
+        let sdk = |library: &'static str, name: &'static str, arguments: Vec<ResolvedType>| {
+            ResolvedType::Interface {
+                identity: DeclarationIdentity::Sdk { library, name },
+                arguments,
+                nullable: false,
+                extension_type: false,
+            }
+        };
+        for &(library, name, own_arity, supertypes) in SDK_HIERARCHY {
+            let parameters: Vec<_> = (0..own_arity)
+                .map(|ordinal| sdk_parameter(name, ordinal))
+                .collect();
+            let resolved = supertypes
+                .iter()
+                .map(|&(super_library, super_name)| {
+                    let arguments =
+                        if own_arity > 0 && arity(super_library, super_name) == own_arity {
+                            parameters
+                                .iter()
+                                .map(|id| ResolvedType::TypeParameter {
+                                    id: id.clone(),
+                                    bound: Box::new(ResolvedType::Dynamic),
+                                    nullable: false,
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+                    sdk(super_library, super_name, arguments)
+                })
+                .collect();
+            self.supertypes
+                .entry(DeclarationIdentity::Sdk { library, name })
+                .or_insert((parameters, resolved));
+        }
+        let element = |owner: &'static str| ResolvedType::TypeParameter {
+            id: sdk_parameter(owner, 0),
+            bound: Box::new(ResolvedType::Dynamic),
+            nullable: false,
+        };
+        let listen = self
+            .member_entries
+            .entry(DeclarationIdentity::Sdk {
+                library: "dart:async",
+                name: "Stream",
+            })
+            .or_default()
+            .entry("listen".to_string())
+            .or_default();
+        listen.is_instance_method = true;
+        listen.signature = Some(ResolvedSignature {
+            owner_parameters: vec![sdk_parameter("Stream", 0)],
+            call_parameters: Vec::new(),
+            positional: vec![ResolvedType::Function {
+                return_type: Box::new(ResolvedType::Void),
+                positional: vec![element("Stream")],
+                named: Vec::new(),
+                nullable: true,
+            }],
+            named: HashMap::new(),
+            return_type: sdk("dart:async", "StreamSubscription", vec![element("Stream")]),
+        });
+        self.member_entries
+            .entry(DeclarationIdentity::Sdk {
+                library: "dart:async",
+                name: "StreamController",
+            })
+            .or_default()
+            .entry("stream".to_string())
+            .or_default()
+            .read = Some(sdk(
+            "dart:async",
+            "Stream",
+            vec![element("StreamController")],
+        ));
+        let open_write = self
+            .member_entries
+            .entry(DeclarationIdentity::Sdk {
+                library: "dart:io",
+                name: "File",
+            })
+            .or_default()
+            .entry("openWrite".to_string())
+            .or_default();
+        open_write.is_instance_method = true;
+        open_write.signature = Some(ResolvedSignature {
+            owner_parameters: Vec::new(),
+            call_parameters: Vec::new(),
+            positional: Vec::new(),
+            named: HashMap::new(),
+            return_type: sdk("dart:io", "IOSink", Vec::new()),
+        });
     }
 
     fn add_type(
@@ -1799,6 +1924,17 @@ impl SignatureIndex {
         self.declarations.get(identity)
     }
 
+    /// The number of type parameters a project-declared class, mixin, enum,
+    /// or extension type declares; `None` for SDK, package, and unindexed types.
+    pub fn project_type_parameter_count(&self, identity: &DeclarationIdentity) -> Option<usize> {
+        if !matches!(identity, DeclarationIdentity::Project { .. }) {
+            return None;
+        }
+        self.supertypes
+            .get(identity)
+            .map(|(parameters, _)| parameters.len())
+    }
+
     pub fn constant_initializer(&self, identity: &DeclarationIdentity) -> Option<&Expr> {
         self.constants.get(identity)
     }
@@ -1945,7 +2081,41 @@ impl SignatureIndex {
         if !visited.insert(identity.clone()) {
             return Some(());
         }
-        if !name.starts_with('_') || same_library(owner, identity) {
+        let is_object = matches!(
+            identity,
+            DeclarationIdentity::Sdk {
+                library: "dart:core",
+                name: "Object"
+            }
+        );
+        if let DeclarationIdentity::Sdk {
+            library,
+            name: type_name,
+        } = identity
+            && !is_object
+        {
+            // Only `Object` has recorded member facts; the curated supertype
+            // edges say nothing about what other SDK types declare, so
+            // reaching one is unknown unless its members are listed in
+            // [`SDK_INTERFACE_MEMBERS`].
+            let (.., members) = SDK_INTERFACE_MEMBERS
+                .iter()
+                .find(|entry| entry.0 == *library && entry.1 == *type_name)?;
+            facts.extend(members.iter().filter(|member| member.0 == name).map(
+                |&(_, kind, parameters)| {
+                    MemberFacts {
+                        declaring_type: identity.clone(),
+                        kind,
+                        is_static: false,
+                        is_abstract: true,
+                        positional_parameter_names: parameters
+                            .iter()
+                            .map(|&parameter| parameter.to_owned())
+                            .collect(),
+                    }
+                },
+            ));
+        } else if !name.starts_with('_') || same_library(owner, identity) {
             facts.extend(
                 self.member_entry(identity, name)
                     .into_iter()
@@ -1958,13 +2128,7 @@ impl SignatureIndex {
             for supertype in supertypes {
                 self.collect_inherited_member_facts(owner, supertype, name, visited, facts)?;
             }
-        } else if !matches!(
-            identity,
-            DeclarationIdentity::Sdk {
-                library: "dart:core",
-                name: "Object"
-            }
-        ) {
+        } else if !is_object {
             return None;
         }
         Some(())
@@ -2091,6 +2255,60 @@ impl SignatureIndex {
         })
     }
 
+    /// Three-valued "`ty` implements SDK declaration `library.name`".
+    ///
+    /// `Yes` when any declared supertype path reaches the target. `No` only when
+    /// every reachable edge resolved to a declaration whose own supertype list is
+    /// recorded (project declarations and the curated [`SDK_HIERARCHY`]);
+    /// anything else — unresolved supertypes, unlisted SDK or package types,
+    /// extension types, non-interface types — is `Unknown`.
+    pub fn implements_sdk(&self, ty: &ResolvedType, library: &str, name: &str) -> Truth {
+        match ty {
+            ResolvedType::TypeParameter { bound, .. } => self.implements_sdk(bound, library, name),
+            ResolvedType::Interface {
+                identity,
+                extension_type: false,
+                ..
+            } => self.identity_implements_sdk(identity, library, name, &mut HashSet::new()),
+            _ => Truth::Unknown,
+        }
+    }
+
+    fn identity_implements_sdk(
+        &self,
+        identity: &DeclarationIdentity,
+        library: &str,
+        name: &str,
+        visited: &mut HashSet<DeclarationIdentity>,
+    ) -> Truth {
+        if identity.is_sdk(library, name) {
+            return Truth::Yes;
+        }
+        if *identity == DeclarationIdentity::OBJECT || !visited.insert(identity.clone()) {
+            return Truth::No;
+        }
+        let Some((_, supertypes)) = self.supertypes.get(identity) else {
+            return Truth::Unknown;
+        };
+        let mut result = Truth::No;
+        for supertype in supertypes {
+            let found = match supertype {
+                ResolvedType::Interface {
+                    identity,
+                    extension_type: false,
+                    ..
+                } => self.identity_implements_sdk(identity, library, name, visited),
+                _ => Truth::Unknown,
+            };
+            match found {
+                Truth::Yes => return Truth::Yes,
+                Truth::Unknown => result = Truth::Unknown,
+                Truth::No => {}
+            }
+        }
+        result
+    }
+
     pub fn has_applicable_extension_member(
         &self,
         receiver: &ResolvedType,
@@ -2109,6 +2327,88 @@ impl SignatureIndex {
                     target => self.unrelated(receiver, target, model) != Truth::Yes,
                 }
         })
+    }
+
+    /// Facts for the members named `name` that `identity` itself declares.
+    pub fn declared_member_facts(
+        &self,
+        identity: &DeclarationIdentity,
+        name: &str,
+    ) -> &[MemberFacts] {
+        self.member_entry(identity, name)
+            .map_or(&[], |entry| entry.facts.as_slice())
+    }
+
+    /// On-types of the visible extensions declaring the instance member `name`
+    /// (setters as `name=`, operators by symbol) that apply to the non-nullable
+    /// form of `receiver`; `None` when some candidate's applicability is unknown.
+    pub fn applicable_extension_on_types(
+        &self,
+        receiver: &ResolvedType,
+        name: &str,
+        model: &SemanticModel<'_>,
+    ) -> Option<Vec<&ResolvedType>> {
+        let receiver = receiver.with_nullable(false);
+        let mut on_types = Vec::new();
+        for extension in &self.extensions {
+            if !extension.instance_members.contains(name)
+                || !model.extension_visible(extension.declaring_library, extension.name.as_deref())
+            {
+                continue;
+            }
+            match self.extension_applies(&receiver, &extension.on_type, model) {
+                Truth::Yes => on_types.push(&extension.on_type),
+                Truth::No => {}
+                Truth::Unknown => return None,
+            }
+        }
+        Some(on_types)
+    }
+
+    fn extension_applies(
+        &self,
+        receiver: &ResolvedType,
+        on_type: &ResolvedType,
+        model: &SemanticModel<'_>,
+    ) -> Truth {
+        match on_type {
+            ResolvedType::Dynamic => Truth::Yes,
+            ResolvedType::Interface { identity, .. }
+                if *identity == DeclarationIdentity::OBJECT =>
+            {
+                Truth::Yes
+            }
+            ResolvedType::Interface { identity, .. } => {
+                if self.is_subtype_of(receiver, identity, model) == Truth::Yes {
+                    Truth::Yes
+                } else if self.unrelated(receiver, &on_type.with_nullable(false), model)
+                    == Truth::Yes
+                {
+                    Truth::No
+                } else {
+                    Truth::Unknown
+                }
+            }
+            ResolvedType::TypeParameter { bound, .. } => {
+                self.extension_applies(receiver, bound, model)
+            }
+            _ => Truth::Unknown,
+        }
+    }
+
+    /// The on-type of the visible extension named `name`.
+    pub fn visible_extension_on_type(
+        &self,
+        name: &str,
+        model: &SemanticModel<'_>,
+    ) -> Option<&ResolvedType> {
+        self.extensions
+            .iter()
+            .find(|extension| {
+                extension.name.as_deref() == Some(name)
+                    && model.extension_visible(extension.declaring_library, Some(name))
+            })
+            .map(|extension| &extension.on_type)
     }
 
     fn resolved_instance_owner(
@@ -2897,6 +3197,207 @@ impl TypeEnvironment {
         }
     }
 }
+
+/// `(library, name, members)`; each member is `(name, kind, positional
+/// parameter names)`.
+type SdkInterfaceMembersEntry = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, MemberKind, &'static [&'static str])],
+);
+
+/// Complete instance-member lists of SDK interfaces (beyond `Object`) whose
+/// members [`SignatureIndex::inherited_member_facts`] may report; every listed
+/// member is abstract. Any other SDK supertype makes inherited facts unknown.
+const SDK_INTERFACE_MEMBERS: &[SdkInterfaceMembersEntry] = &[(
+    "dart:core",
+    "Type",
+    &[
+        ("hashCode", MemberKind::Getter, &[]),
+        ("==", MemberKind::Operator, &["other"]),
+        ("toString", MemberKind::Method, &[]),
+    ],
+)];
+
+/// `(library, name, arity, supertypes)`; each supertype is `(library, name)`.
+type SdkHierarchyEntry = (
+    &'static str,
+    &'static str,
+    usize,
+    &'static [(&'static str, &'static str)],
+);
+
+/// Curated SDK supertype graph: `(library, name, arity, supertypes)`.
+///
+/// Each entry lists every public supertype of its declaration other than
+/// `Object`, so [`SignatureIndex::implements_sdk`] may prove a negative through
+/// it. Generic supertypes with the same arity receive the declaration's own
+/// type parameters; others are recorded raw.
+const SDK_HIERARCHY: &[SdkHierarchyEntry] = &[
+    ("dart:core", "Function", 0, &[]),
+    ("dart:core", "Record", 0, &[]),
+    ("dart:core", "Type", 0, &[]),
+    ("dart:core", "Symbol", 0, &[]),
+    ("dart:core", "bool", 0, &[]),
+    ("dart:core", "Comparable", 1, &[]),
+    ("dart:core", "Pattern", 0, &[]),
+    ("dart:core", "num", 0, &[("dart:core", "Comparable")]),
+    ("dart:core", "int", 0, &[("dart:core", "num")]),
+    ("dart:core", "double", 0, &[("dart:core", "num")]),
+    (
+        "dart:core",
+        "String",
+        0,
+        &[("dart:core", "Comparable"), ("dart:core", "Pattern")],
+    ),
+    ("dart:core", "RegExp", 0, &[("dart:core", "Pattern")]),
+    ("dart:core", "BigInt", 0, &[("dart:core", "Comparable")]),
+    ("dart:core", "Duration", 0, &[("dart:core", "Comparable")]),
+    ("dart:core", "DateTime", 0, &[("dart:core", "Comparable")]),
+    ("dart:core", "Uri", 0, &[]),
+    ("dart:core", "StackTrace", 0, &[]),
+    ("dart:core", "Enum", 0, &[]),
+    ("dart:core", "Iterable", 1, &[]),
+    ("dart:core", "Iterator", 1, &[]),
+    ("dart:core", "Map", 2, &[]),
+    ("dart:core", "MapEntry", 2, &[]),
+    ("dart:core", "Exception", 0, &[]),
+    (
+        "dart:core",
+        "FormatException",
+        0,
+        &[("dart:core", "Exception")],
+    ),
+    (
+        "dart:core",
+        "IntegerDivisionByZeroException",
+        0,
+        &[
+            ("dart:core", "Exception"),
+            ("dart:core", "UnsupportedError"),
+        ],
+    ),
+    ("dart:core", "Error", 0, &[]),
+    ("dart:core", "AssertionError", 0, &[("dart:core", "Error")]),
+    ("dart:core", "TypeError", 0, &[("dart:core", "Error")]),
+    ("dart:core", "ArgumentError", 0, &[("dart:core", "Error")]),
+    (
+        "dart:core",
+        "RangeError",
+        0,
+        &[("dart:core", "ArgumentError")],
+    ),
+    (
+        "dart:core",
+        "IndexError",
+        0,
+        &[("dart:core", "ArgumentError"), ("dart:core", "RangeError")],
+    ),
+    ("dart:core", "StateError", 0, &[("dart:core", "Error")]),
+    (
+        "dart:core",
+        "UnsupportedError",
+        0,
+        &[("dart:core", "Error")],
+    ),
+    (
+        "dart:core",
+        "UnimplementedError",
+        0,
+        &[("dart:core", "UnsupportedError")],
+    ),
+    (
+        "dart:core",
+        "ConcurrentModificationError",
+        0,
+        &[("dart:core", "Error")],
+    ),
+    (
+        "dart:core",
+        "OutOfMemoryError",
+        0,
+        &[("dart:core", "Error")],
+    ),
+    (
+        "dart:core",
+        "StackOverflowError",
+        0,
+        &[("dart:core", "Error")],
+    ),
+    (
+        "dart:core",
+        "NoSuchMethodError",
+        0,
+        &[("dart:core", "Error")],
+    ),
+    ("dart:core", "Sink", 1, &[]),
+    ("dart:core", "StringSink", 0, &[]),
+    ("dart:async", "Future", 1, &[]),
+    ("dart:async", "Completer", 1, &[]),
+    ("dart:async", "Timer", 0, &[]),
+    ("dart:async", "Stream", 1, &[]),
+    ("dart:async", "StreamSubscription", 1, &[]),
+    ("dart:async", "EventSink", 1, &[("dart:core", "Sink")]),
+    ("dart:async", "StreamConsumer", 1, &[]),
+    (
+        "dart:async",
+        "StreamSink",
+        1,
+        &[
+            ("dart:async", "EventSink"),
+            ("dart:async", "StreamConsumer"),
+        ],
+    ),
+    (
+        "dart:async",
+        "StreamController",
+        1,
+        &[("dart:async", "StreamSink")],
+    ),
+    (
+        "dart:async",
+        "TimeoutException",
+        0,
+        &[("dart:core", "Exception")],
+    ),
+    ("dart:async", "AsyncError", 0, &[("dart:core", "Error")]),
+    ("dart:io", "FileSystemEntity", 0, &[]),
+    ("dart:io", "File", 0, &[("dart:io", "FileSystemEntity")]),
+    (
+        "dart:io",
+        "Directory",
+        0,
+        &[("dart:io", "FileSystemEntity")],
+    ),
+    ("dart:io", "Link", 0, &[("dart:io", "FileSystemEntity")]),
+    (
+        "dart:io",
+        "IOSink",
+        0,
+        &[("dart:async", "StreamSink"), ("dart:core", "StringSink")],
+    ),
+    (
+        "dart:io",
+        "Socket",
+        0,
+        &[("dart:async", "Stream"), ("dart:io", "IOSink")],
+    ),
+    ("dart:io", "IOException", 0, &[("dart:core", "Exception")]),
+    ("dart:io", "OSError", 0, &[("dart:core", "Exception")]),
+    (
+        "dart:io",
+        "FileSystemException",
+        0,
+        &[("dart:io", "IOException")],
+    ),
+    ("dart:io", "HttpException", 0, &[("dart:io", "IOException")]),
+    (
+        "dart:io",
+        "SocketException",
+        0,
+        &[("dart:io", "IOException")],
+    ),
+];
 
 fn sdk_parameter(owner: &'static str, ordinal: usize) -> TypeParameterId {
     TypeParameterId {
