@@ -1,9 +1,7 @@
 name: Release
 
 # Tag a version (vX.Y.Z) → build the four platform binaries → publish a GitHub
-# Release with the tarballs → commit the SRI-hash manifest (nix/binaries.json)
-# back to main so the flake can fetch prebuilt binaries. workflow_dispatch takes
-# an existing tag for manual re-runs.
+# Release with the tarballs. workflow_dispatch takes an existing tag for manual re-runs.
 on:
   push:
     tags: ["v*"]
@@ -35,7 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${INPUT_TAG:-$GITHUB_REF_NAME}"; VERSION="${VERSION#v}"
-          nix_system() {
+          archive_platform() {
             case "$1" in
               x86_64-unknown-linux-musl) echo x86_64-linux ;;
               aarch64-unknown-linux-musl) echo aarch64-linux ;;
@@ -46,7 +44,7 @@ jobs:
             cargo zigbuild --release --locked -p dart_falcon --target "$target"
             rm -rf stage && mkdir -p stage
             install -m755 "target/$target/release/falcon" stage/falcon
-            tar -C stage -czf "dist/falcon-${VERSION}-$(nix_system "$target").tar.gz" falcon
+            tar -C stage -czf "dist/falcon-${VERSION}-$(archive_platform "$target").tar.gz" falcon
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -68,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${INPUT_TAG:-$GITHUB_REF_NAME}"; VERSION="${VERSION#v}"
-          nix_system() {
+          archive_platform() {
             case "$1" in
               aarch64-apple-darwin) echo aarch64-darwin ;;
               x86_64-apple-darwin) echo x86_64-darwin ;;
@@ -80,7 +78,7 @@ jobs:
             cargo build --release --locked -p dart_falcon --target "$target"
             rm -rf stage && mkdir -p stage
             install -m755 "target/$target/release/falcon" stage/falcon
-            tar -C stage -czf "dist/falcon-${VERSION}-$(nix_system "$target").tar.gz" falcon
+            tar -C stage -czf "dist/falcon-${VERSION}-$(archive_platform "$target").tar.gz" falcon
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -119,67 +117,3 @@ jobs:
           generate_release_notes: true
           files: dist/*.tar.gz
           fail_on_unmatched_files: true
-
-  manifest:
-    name: Commit binary manifest
-    needs: release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      # Full checkout of main: the manifest lands on the branch, not the tag.
-      # The push uses a deploy key (MANIFEST_DEPLOY_KEY): deploy keys are a
-      # bypass actor on the main ruleset, which GITHUB_TOKEN cannot satisfy
-      # (org-owned repo; the Actions app can't be added as a bypass actor).
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          ssh-key: ${{ secrets.MANIFEST_DEPLOY_KEY }}
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: tarballs-*
-          merge-multiple: true
-          path: dist
-      - name: Write manifest and commit to main
-        env:
-          INPUT_TAG: ${{ github.event.inputs.tag }}
-        run: |
-          set -euo pipefail
-          VERSION="${INPUT_TAG:-$GITHUB_REF_NAME}"; VERSION="${VERSION#v}"
-          # SRI hash: "sha256-" + base64 of the raw sha256 digest.
-          sri() { printf 'sha256-%s' "$(openssl dgst -sha256 -binary "$1" | base64)"; }
-          # Keys pre-sorted; jq preserves order and emits a trailing newline.
-          jq -n \
-            --arg version "$VERSION" \
-            --arg aarch64_darwin "$(sri "dist/falcon-${VERSION}-aarch64-darwin.tar.gz")" \
-            --arg aarch64_linux "$(sri "dist/falcon-${VERSION}-aarch64-linux.tar.gz")" \
-            --arg x86_64_darwin "$(sri "dist/falcon-${VERSION}-x86_64-darwin.tar.gz")" \
-            --arg x86_64_linux "$(sri "dist/falcon-${VERSION}-x86_64-linux.tar.gz")" \
-            '{
-              version: $version,
-              systems: {
-                "aarch64-darwin": $aarch64_darwin,
-                "aarch64-linux": $aarch64_linux,
-                "x86_64-darwin": $x86_64_darwin,
-                "x86_64-linux": $x86_64_linux
-              }
-            }' > nix/binaries.json
-          git add nix/binaries.json
-          if git diff --cached --quiet; then
-            echo "manifest unchanged; nothing to commit"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: binary manifest for v${VERSION} [skip ci]"
-          # main may have moved since checkout — rebase and retry the push.
-          for attempt in 1 2 3 4 5; do
-            if git push origin HEAD:main; then
-              exit 0
-            fi
-            echo "push failed (attempt $attempt); rebasing onto main"
-            git pull --rebase origin main
-          done
-          echo "failed to push manifest after retries" >&2
-          exit 1

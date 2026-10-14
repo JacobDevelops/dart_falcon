@@ -1,0 +1,7 @@
+[tools]
+bun = "1.4.3"
+"cargo:cargo-nextest" = "0.9.148"
+"cargo:cargo-watch" = "8.5.3"
+
+[env]
+_.path = ["{{ env.CARGO_HOME | default(value=env.HOME ~ '/.cargo') }}/bin"]

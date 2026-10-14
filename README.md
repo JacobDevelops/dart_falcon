@@ -46,8 +46,14 @@ sudo mv falcon /usr/local/bin/
 cargo install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
 ```
 
-**Nix** users can consume the flake (`github:JacobDevelops/dart_falcon`) or
-`nix run github:JacobDevelops/dart_falcon -- check .`.
+**mise**: add this to your project's `mise.toml`, then run `mise install`:
+
+```toml
+[tools]
+"github:JacobDevelops/dart_falcon" = { version = "0.3.0", matching = "falcon-" }
+```
+
+Run `mise exec -- falcon check .`, or use `falcon` directly with mise activated.
 
 See [docs/installation.md](./docs/installation.md) for all channels, supported
 platforms, and how releases are cut.

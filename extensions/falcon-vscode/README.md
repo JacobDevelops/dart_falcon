@@ -6,8 +6,7 @@ Launches `falcon lsp` over stdio and shows falcon diagnostics inline for
 
 ## Requirements
 
-- The `falcon` binary on your `PATH` (`cargo build --release` →
-  `target/release/falcon`, or `nix build`), or set `falcon.binaryPath`.
+- The `falcon` binary on your `PATH` (see [installation](../../docs/installation.md)), or set `falcon.binaryPath`.
 
 ## Install (Phase 1 — local)
 

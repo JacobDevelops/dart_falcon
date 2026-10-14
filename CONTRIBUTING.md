@@ -17,16 +17,14 @@ reviewers can calibrate. Don't open a PR you can't explain.
 
 ## Dev environment
 
-Two options:
+Install [mise](https://mise.jdx.dev/getting-started.html) and [rustup](https://rustup.rs), then run from the repo root:
 
-- **devenv + direnv (full environment).** The repo ships a `devenv.nix` /
-  `devenv.yaml`. With [direnv](https://direnv.net) installed, `direnv allow` drops
-  you into a shell with the pinned Rust toolchain (byte-identical to the flake's,
-  so it resolves from the binary cache), `cargo-nextest`, `cargo-watch`, and the
-  Nix tooling. Or run `devenv shell` directly.
-- **Plain Rust.** A stable Rust toolchain via [rustup](https://rustup.rs) plus
-  Cargo is enough for everything except the Nix packaging work. Clone and
-  `cargo build`.
+```sh
+mise install
+cargo build
+```
+
+`mise.toml` pins Bun, `cargo-nextest`, and `cargo-watch`. Activate mise in your shell to put them on `PATH`, or prefix commands with `mise exec --`. Rust stays under rustup: `rust-toolchain.toml` selects stable Rust, `rust-src`, `rust-analyzer`, Clippy, rustfmt, and the `wasm32-wasip2` target. Cargo installs the declared toolchain on first use.
 
 The repo is a colocated jj + git repo. **jj (Jujutsu) users are welcome**, but
 plain git works fine — use whichever you prefer.
@@ -151,13 +149,9 @@ mandatory; a malformed directive is itself reported.
 
 falcon versions its workspace crates together. To cut a release:
 
-1. Bump `version` under `[workspace.package]` in `Cargo.toml` (all crates and the
-   flake derive from it — nothing else needs editing).
+1. Bump `version` under `[workspace.package]` in `Cargo.toml` (all workspace crates derive from it).
 2. Commit, then tag: `git tag vX.Y.Z && git push --tags`.
 
-The tag triggers `.github/workflows/release.yml`, which builds the four platform
-binaries, publishes a GitHub Release with auto-generated notes (failing if the tag
-and `Cargo.toml` version disagree), and commits the SRI-hash manifest
-(`nix/binaries.json`) back to `main` so the flake can fetch prebuilt binaries.
+The tag triggers `.github/workflows/release.yml`, which builds the four platform binaries and publishes a GitHub Release with auto-generated notes (failing if the tag and `Cargo.toml` version disagree).
 
 Thanks for contributing!

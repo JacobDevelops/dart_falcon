@@ -5,9 +5,7 @@ scratch_hits/
 # Zed dev-extension build output
 extensions/falcon-zed/extension.wasm
 extensions/falcon-zed/grammars/
-# Nix
-result
-result-*
+# Local environment state
 .direnv/
 .devenv/
 node_modules

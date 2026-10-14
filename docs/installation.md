@@ -46,28 +46,23 @@ cargo build --release
 
 The package is named `dart_falcon`; the installed binary is `falcon`.
 
-## Nix
+## mise
 
-The repository is also a Nix flake whose default package is the prebuilt static
-binary (a fixed-output fetch of the release tarball — no compilation):
+Add the GitHub release backend to your project's `mise.toml`:
 
-```nix
-{
-  inputs.falcon.url = "github:JacobDevelops/dart_falcon";
-}
+```toml
+[tools]
+"github:JacobDevelops/dart_falcon" = { version = "0.3.0", matching = "falcon-" }
 ```
 
-Reference `falcon.packages.${system}.default` in a devShell or package list, or
-run it directly:
+Install the pinned release and run it:
 
 ```sh
-nix run github:JacobDevelops/dart_falcon -- check .
+mise install
+mise exec -- falcon check .
 ```
 
-`packages.<system>.falcon` is the build-from-source escape hatch (crane + the
-pinned toolchain). When no release has been published yet, `default` falls back
-to the source build. The flake reads `nix/binaries.json`, which CI updates with
-each release's tarball hashes.
+With [mise activated](https://mise.jdx.dev/getting-started.html), `falcon` is available directly on your `PATH`. The GitHub backend downloads the release archive for your platform; it doesn't compile Rust.
 
 ## Editor extensions
 
@@ -87,8 +82,6 @@ channel above first.
    (static musl for Linux via `cargo-zigbuild`, native builds for macOS).
 3. The binaries are packaged as `falcon-X.Y.Z-<system>.tar.gz` and attached to a
    GitHub Release.
-4. CI computes each tarball's SRI hash and commits `nix/binaries.json` back to
-   `main` for the flake's prebuilt packages.
 
 ## Next steps
 

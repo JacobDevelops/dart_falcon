@@ -25,12 +25,14 @@ falcon version
 cargo install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
 ```
 
-**Nix** — run it directly or add the flake (`github:JacobDevelops/dart_falcon`)
-to a devShell:
+**mise**: add this to your project's `mise.toml`, then run `mise install`:
 
-```sh
-nix run github:JacobDevelops/dart_falcon -- check .
+```toml
+[tools]
+"github:JacobDevelops/dart_falcon" = { version = "0.3.0", matching = "falcon-" }
 ```
+
+Run `mise exec -- falcon check .`, or use `falcon` directly with mise activated.
 
 ## Configuration
 

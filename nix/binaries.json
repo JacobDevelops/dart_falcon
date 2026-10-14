@@ -1,9 +1,0 @@
-{
-  "version": "0.3.0",
-  "systems": {
-    "aarch64-darwin": "sha256-9aKNMSefBg4Tq8AONCXTwCGh9EZdhvT3Ias9AaeQRbk=",
-    "aarch64-linux": "sha256-aZbw/YLTyfB2YukDuF/86uE3E00Ux4d7la4VkTY/380=",
-    "x86_64-darwin": "sha256-S2hqAN2w91b0jfBvvRpxWOcRQ7ZAhrkWbi3LUCYZ9+4=",
-    "x86_64-linux": "sha256-LztcPnlJjjq/Pysi7QDOA3HYccJ7wleVWTG2QPQrqS8="
-  }
-}

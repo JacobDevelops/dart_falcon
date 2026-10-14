@@ -23,7 +23,7 @@ fn corpus_root() -> Option<PathBuf> {
 
 /// Directories that are not project-owned Dart source — skip them entirely.
 const SKIP_DIRS: &[&str] = &[
-    ".direnv", // nix/direnv cached inputs
+    ".direnv",
     ".dart_tool",
     ".pub-cache",
     "build",
@@ -32,7 +32,7 @@ const SKIP_DIRS: &[&str] = &[
 ];
 
 fn is_skip_dir(name: &str) -> bool {
-    SKIP_DIRS.contains(&name) || name.starts_with("result") // nix result, result-1, result-11, …
+    SKIP_DIRS.contains(&name)
 }
 
 fn collect_dart_files(root: &Path) -> Vec<PathBuf> {

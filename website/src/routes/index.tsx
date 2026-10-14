@@ -21,11 +21,12 @@ cargo install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
 
 falcon check lib/`
 
-const INSTALL_NIX = `# run it directly, or add the flake to a devShell
-nix run github:JacobDevelops/dart_falcon -- check lib/
+const INSTALL_MISE = `# mise.toml
+[tools]
+"github:JacobDevelops/dart_falcon" = { version = "0.3.0", matching = "falcon-" }
 
-# or install into your profile
-nix profile install github:JacobDevelops/dart_falcon`
+# then run: mise install
+# lint with: mise exec -- falcon check lib/`
 
 function Home() {
   return (
@@ -215,10 +216,10 @@ function QuickStart() {
                 ),
               },
               {
-                id: 'nix',
-                label: 'Nix',
+                id: 'mise',
+                label: 'mise',
                 content: (
-                  <CodeBlock code={INSTALL_NIX} lang="bash" filename="terminal" />
+                  <CodeBlock code={INSTALL_MISE} lang="toml" filename="mise.toml" />
                 ),
               },
             ]}

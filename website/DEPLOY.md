@@ -10,12 +10,7 @@ official `@cloudflare/vite-plugin`. Wrangler is the deploy CLI.
 
 ## Prerequisites
 
-- Run inside the devenv shell so `bun` and `wrangler` are on PATH:
-  ```sh
-  devenv shell
-  ```
-  (Both are declared in `devenv.nix`.) Outside devenv, any Bun + `bunx wrangler`
-  also works.
+Install [mise](https://mise.jdx.dev/getting-started.html) and activate it in your shell, then run `mise install` from the repo root for the pinned Bun version. Install the website dependencies with `bun install --frozen-lockfile` from `website/`; Wrangler is a local package dependency.
 
 ## Build & verify locally (no account needed)
 
@@ -37,7 +32,7 @@ agent.**
 
 1. **Authenticate wrangler** (opens a browser for OAuth, or use an API token):
    ```sh
-   wrangler login
+   bunx wrangler login
    ```
    Or set `CLOUDFLARE_API_TOKEN` (token with the *Workers Scripts: Edit* +
    *Account: Read* permissions) and `CLOUDFLARE_ACCOUNT_ID` in the environment
@@ -55,7 +50,7 @@ agent.**
    at `falcon-docs.<subdomain>.workers.dev`.)
 
 4. **Secrets, if/when added.** Runtime secrets go through
-   `wrangler secret put <NAME>` (never committed). Local dev values go in
+   `bunx wrangler secret put <NAME>` (never committed). Local dev values go in
    `website/.dev.vars` (gitignored). There are none today — the site is static
    SSR with no backend bindings.
 

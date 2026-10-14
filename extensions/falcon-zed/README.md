@@ -6,8 +6,7 @@ flagged range shows the rule id and message.
 
 ## Requirements
 
-- The `falcon` binary on your `PATH` (`cargo build --release` →
-  `target/release/falcon`, or `nix build`).
+- The `falcon` binary on your `PATH` (see [installation](../../docs/installation.md)).
 - The **Dart** Zed extension (provides the Dart language this server
   attaches to).
 
