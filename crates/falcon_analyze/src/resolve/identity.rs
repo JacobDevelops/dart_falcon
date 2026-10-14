@@ -6,11 +6,12 @@
 //! [`NameIdentity::Unknown`].
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use falcon_syntax::ast::{ImportCombinator, Program, TopLevelDecl};
 
 use super::group_libraries;
+use super::library::canonical_or_lexical;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameIdentity {
@@ -37,6 +38,8 @@ struct Library {
     imports: Vec<Import>,
     exports: Vec<Export>,
     incomplete: bool,
+    file: PathBuf,
+    implicit_core: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +103,8 @@ impl IdentityIndex {
                     imports: Vec::new(),
                     exports: Vec::new(),
                     incomplete: grouping.is_unresolved(i),
+                    file: files[i].path.to_path_buf(),
+                    implicit_core: true,
                 });
                 index
             });
@@ -109,7 +114,7 @@ impl IdentityIndex {
         let mut by_path = HashMap::new();
         for (i, file) in files.iter().enumerate() {
             let library = file_library[i];
-            by_path.insert(normalize(file.path), library);
+            by_path.insert(canonical_or_lexical(file.path), library);
             libraries[library].incomplete |= file.has_parse_errors;
             for declaration in &file.program.declarations {
                 for (name, identity) in declaration_identities(declaration) {
@@ -121,6 +126,9 @@ impl IdentityIndex {
         for (i, file) in files.iter().enumerate() {
             let library = file_library[i];
             for import in &file.program.imports {
+                if import.uri.value == "dart:core" {
+                    libraries[library].implicit_core = false;
+                }
                 libraries[library].imports.push(Import {
                     target: resolve_uri(file.path, &import.uri.value, &by_path, packages),
                     prefix: import.as_name.as_ref().map(|id| id.name.clone()),
@@ -142,7 +150,7 @@ impl IdentityIndex {
     /// visible from `file`. Longer dotted names denote member access, not a type
     /// literal identity.
     pub fn resolve(&self, file: &Path, segments: &[String]) -> NameIdentity {
-        let Some(&library) = self.by_path.get(&normalize(file)) else {
+        let Some(&library) = self.by_path.get(&canonical_or_lexical(file)) else {
             return NameIdentity::Unknown;
         };
         if self.libraries[library].incomplete {
@@ -156,7 +164,17 @@ impl IdentityIndex {
     }
 
     pub(super) fn library_identity(&self, file: &Path) -> Option<usize> {
-        self.by_path.get(&normalize(file)).copied()
+        self.by_path.get(&canonical_or_lexical(file)).copied()
+    }
+
+    pub(crate) fn declaration_file(&self, identity: &DeclarationIdentity) -> Option<&Path> {
+        match identity {
+            DeclarationIdentity::Project { library, .. } => self
+                .libraries
+                .get(*library)
+                .map(|library| library.file.as_path()),
+            DeclarationIdentity::Sdk { .. } | DeclarationIdentity::Package { .. } => None,
+        }
     }
 
     pub fn extension_visible(
@@ -165,10 +183,10 @@ impl IdentityIndex {
         declaring_file: &Path,
         extension_name: Option<&str>,
     ) -> bool {
-        let Some(&from) = self.by_path.get(&normalize(file)) else {
+        let Some(&from) = self.by_path.get(&canonical_or_lexical(file)) else {
             return false;
         };
-        let Some(&target) = self.by_path.get(&normalize(declaring_file)) else {
+        let Some(&target) = self.by_path.get(&canonical_or_lexical(declaring_file)) else {
             return false;
         };
         if from == target {
@@ -208,7 +226,7 @@ impl IdentityIndex {
         file: &Path,
         segments: &[String],
     ) -> Option<DeclarationIdentity> {
-        let &library = self.by_path.get(&normalize(file))?;
+        let &library = self.by_path.get(&canonical_or_lexical(file))?;
         if self.libraries[library].incomplete {
             return None;
         }
@@ -225,7 +243,7 @@ impl IdentityIndex {
         file: &Path,
         segments: &[String],
     ) -> Option<DeclarationIdentity> {
-        let &library = self.by_path.get(&normalize(file))?;
+        let &library = self.by_path.get(&canonical_or_lexical(file))?;
         if self.libraries[library].incomplete {
             return None;
         }
@@ -252,9 +270,12 @@ impl IdentityIndex {
                 import.prefix.as_deref() == prefix && allows(&import.combinators, name)
             })
             .filter_map(|import| match &import.target {
-                ImportTarget::Library(target) => {
-                    self.exported_value(*target, name, &mut HashSet::new())
-                }
+                ImportTarget::Library(target) => self.exported_declaration(
+                    *target,
+                    name,
+                    NameIdentity::Value,
+                    &mut HashSet::new(),
+                ),
                 _ => None,
             })
             .collect();
@@ -272,7 +293,7 @@ impl IdentityIndex {
         file: &Path,
         segments: &[String],
     ) -> Option<DeclarationIdentity> {
-        let &library = self.by_path.get(&normalize(file))?;
+        let &library = self.by_path.get(&canonical_or_lexical(file))?;
         if self.libraries[library].incomplete {
             return None;
         }
@@ -318,7 +339,7 @@ impl IdentityIndex {
         file: &Path,
         segments: &[String],
     ) -> Option<DeclarationIdentity> {
-        let &library = self.by_path.get(&normalize(file))?;
+        let &library = self.by_path.get(&canonical_or_lexical(file))?;
         if self.libraries[library].incomplete {
             return None;
         }
@@ -346,11 +367,10 @@ impl IdentityIndex {
                 _ => None,
             })
             .collect();
-        let has_explicit_core = imports.iter().any(|import| {
-            import.prefix.is_none()
-                && matches!(&import.target, ImportTarget::Sdk(uri) if uri == "dart:core")
-        });
-        if prefix.is_none() && !has_explicit_core && is_sdk_member("dart:core", name) {
+        if prefix.is_none()
+            && self.libraries[library].implicit_core
+            && is_sdk_member("dart:core", name)
+        {
             candidates.push(DeclarationIdentity::Sdk {
                 library: "dart:core".to_string(),
                 name: name.to_string(),
@@ -383,11 +403,7 @@ impl IdentityIndex {
                 candidates.push(candidate);
             }
         }
-        if !self.libraries[library].imports.iter().any(|import| {
-            import.prefix.is_none()
-                && matches!(&import.target, ImportTarget::Sdk(uri) if uri == "dart:core")
-        }) && is_sdk_type("dart:core", name)
-        {
+        if self.libraries[library].implicit_core && is_sdk_type("dart:core", name) {
             candidates.push(DeclarationIdentity::Sdk {
                 library: "dart:core".to_string(),
                 name: name.to_string(),
@@ -423,7 +439,7 @@ impl IdentityIndex {
     fn target_declaration(&self, target: &ImportTarget, name: &str) -> Option<DeclarationIdentity> {
         match target {
             ImportTarget::Library(library) => {
-                self.exported_declaration(*library, name, &mut HashSet::new())
+                self.exported_declaration(*library, name, NameIdentity::Type, &mut HashSet::new())
             }
             ImportTarget::Sdk(uri) if is_sdk_type(uri, name) => Some(DeclarationIdentity::Sdk {
                 library: uri.clone(),
@@ -447,11 +463,7 @@ impl IdentityIndex {
         let imports = self.libraries[library]
             .imports
             .iter()
-            .filter(|import| import.prefix.is_none() && allows(&import.combinators, name))
-            .collect::<Vec<_>>();
-        let has_explicit_core = imports
-            .iter()
-            .any(|import| matches!(&import.target, ImportTarget::Sdk(uri) if uri == "dart:core"));
+            .filter(|import| import.prefix.is_none() && allows(&import.combinators, name));
         if self.resolve_unprefixed_declaration(library, name).is_some() {
             return NameIdentity::Type;
         }
@@ -460,7 +472,7 @@ impl IdentityIndex {
         for import in imports {
             combine(&mut result, self.target_identity(&import.target, name));
         }
-        if !has_explicit_core && is_core_type(name) {
+        if self.libraries[library].implicit_core && is_core_type(name) {
             combine(&mut result, NameIdentity::Type);
         }
         result.unwrap_or(NameIdentity::Unknown)
@@ -495,47 +507,18 @@ impl IdentityIndex {
         }
     }
 
-    fn exported_value(
-        &self,
-        library: usize,
-        name: &str,
-        visiting: &mut HashSet<usize>,
-    ) -> Option<DeclarationIdentity> {
-        if name.starts_with('_') || self.libraries[library].incomplete || !visiting.insert(library)
-        {
-            return None;
-        }
-        if self.libraries[library].declarations.get(name) == Some(&NameIdentity::Value) {
-            visiting.remove(&library);
-            return Some(DeclarationIdentity::Project {
-                library,
-                name: name.to_string(),
-            });
-        }
-        let candidates = self.libraries[library]
-            .exports
-            .iter()
-            .filter(|export| allows(&export.combinators, name))
-            .filter_map(|export| match &export.target {
-                ImportTarget::Library(target) => self.exported_value(*target, name, visiting),
-                _ => None,
-            })
-            .collect();
-        visiting.remove(&library);
-        unique_declaration(candidates)
-    }
-
     fn exported_declaration(
         &self,
         library: usize,
         name: &str,
+        namespace: NameIdentity,
         visiting: &mut HashSet<usize>,
     ) -> Option<DeclarationIdentity> {
         if name.starts_with('_') || self.libraries[library].incomplete || !visiting.insert(library)
         {
             return None;
         }
-        if self.libraries[library].declarations.get(name) == Some(&NameIdentity::Type) {
+        if self.libraries[library].declarations.get(name) == Some(&namespace) {
             visiting.remove(&library);
             return Some(DeclarationIdentity::Project {
                 library,
@@ -547,14 +530,20 @@ impl IdentityIndex {
             .iter()
             .filter(|export| allows(&export.combinators, name))
             .filter_map(|export| match &export.target {
-                ImportTarget::Library(target) => self.exported_declaration(*target, name, visiting),
-                ImportTarget::Sdk(uri) if is_sdk_type(uri, name) => {
+                ImportTarget::Library(target) => {
+                    self.exported_declaration(*target, name, namespace, visiting)
+                }
+                ImportTarget::Sdk(uri)
+                    if namespace == NameIdentity::Type && is_sdk_type(uri, name) =>
+                {
                     Some(DeclarationIdentity::Sdk {
                         library: uri.clone(),
                         name: name.to_string(),
                     })
                 }
-                ImportTarget::Package(package) if is_known_package_type(package, name) => {
+                ImportTarget::Package(package)
+                    if namespace == NameIdentity::Type && is_known_package_type(package, name) =>
+                {
                     Some(DeclarationIdentity::Package {
                         package: package.clone(),
                         name: name.to_string(),
@@ -682,8 +671,8 @@ fn resolve_uri(
         if matches.next().is_some() {
             return ImportTarget::Unknown;
         }
-        let lib_root = normalize(&matched.lib_root);
-        let target = normalize(&lib_root.join(subpath));
+        let lib_root = canonical_or_lexical(&matched.lib_root);
+        let target = canonical_or_lexical(&lib_root.join(subpath));
         if !target.starts_with(&lib_root) {
             return ImportTarget::Unknown;
         }
@@ -695,30 +684,10 @@ fn resolve_uri(
     }
     let parent = from.parent().unwrap_or_else(|| Path::new(""));
     by_path
-        .get(&normalize(&parent.join(uri)))
+        .get(&canonical_or_lexical(&parent.join(uri)))
         .copied()
         .map(ImportTarget::Library)
         .unwrap_or(ImportTarget::Unknown)
-}
-
-fn normalize(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| {
-        let mut out = PathBuf::new();
-        for component in path.components() {
-            match component {
-                Component::ParentDir => {
-                    if matches!(out.components().next_back(), Some(Component::Normal(_))) {
-                        out.pop();
-                    } else if !matches!(out.components().next_back(), Some(Component::RootDir)) {
-                        out.push(component.as_os_str());
-                    }
-                }
-                Component::CurDir => {}
-                other => out.push(other.as_os_str()),
-            }
-        }
-        out
-    })
 }
 
 fn is_sdk_member(library: &str, name: &str) -> bool {
@@ -918,9 +887,53 @@ mod tests {
     }
 
     #[test]
+    fn explicit_core_imports_replace_the_implicit_namespace() {
+        for source in [
+            "import 'dart:core' hide Duration, print;",
+            "import 'dart:core' show int;",
+            "import 'dart:core' as core;",
+        ] {
+            let path = PathBuf::from("/project/lib/core.dart");
+            let (program, errors) = parse(source);
+            assert!(errors.is_empty(), "{errors:?}");
+            let index = IdentityIndex::from_project_files(
+                &[IdentitySource {
+                    path: &path,
+                    program: &program,
+                    has_parse_errors: false,
+                }],
+                &[],
+            );
+            assert_eq!(
+                index.resolve(&path, &["Duration".into()]),
+                NameIdentity::Unknown
+            );
+            assert_eq!(index.resolve_declaration(&path, &["Duration".into()]), None);
+            assert_eq!(index.resolve_sdk_member(&path, &["print".into()]), None);
+            if source.contains("as core") {
+                assert_eq!(
+                    index.resolve(&path, &["core".into(), "Duration".into()]),
+                    NameIdentity::Type
+                );
+                assert!(
+                    index
+                        .resolve_declaration(&path, &["core".into(), "Duration".into()],)
+                        .is_some()
+                );
+            } else {
+                assert_eq!(index.resolve(&path, &["int".into()]), NameIdentity::Type);
+                assert!(index.resolve_declaration(&path, &["int".into()]).is_some());
+            }
+        }
+    }
+
+    #[test]
     fn reexports_preserve_original_declaration_identity() {
         let inputs = [
-            (PathBuf::from("/project/lib/origin.dart"), "class Box<T> {}"),
+            (
+                PathBuf::from("/project/lib/origin.dart"),
+                "class Box<T> {} const answer = 42;",
+            ),
             (
                 PathBuf::from("/project/lib/barrel.dart"),
                 "export 'origin.dart';",
@@ -950,6 +963,18 @@ mod tests {
         let imported =
             index.resolve_declaration(Path::new("/project/lib/main.dart"), &["Box".to_string()]);
         assert_eq!(imported, origin);
+        let origin_value = index.resolve_value_declaration(
+            Path::new("/project/lib/origin.dart"),
+            &["answer".to_string()],
+        );
+        assert!(origin_value.is_some());
+        assert_eq!(
+            index.resolve_value_declaration(
+                Path::new("/project/lib/main.dart"),
+                &["answer".to_string()],
+            ),
+            origin_value
+        );
     }
 
     #[test]

@@ -10,9 +10,7 @@
 //! directives and a part's `part of` (URI or dotted-name) directive. A link that
 //! resolves to a file in the set merges the two; a link that resolves to nothing
 //! flags the file's group `has_unresolved_parts`. Files with no directives are
-//! each their own single-file library. This mirrors the tolerant path handling
-//! in `falcon_rules::project`, re-implemented here to keep `falcon_analyze` free
-//! of an upward dependency.
+//! each their own single-file library.
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -178,7 +176,7 @@ fn resolve_relative(dir: &Path, uri: &str) -> Option<PathBuf> {
 
 /// Canonical path when it exists (so two spellings compare equal), else a
 /// lexical normalization that resolves `.`/`..` without touching the FS.
-fn canonical_or_lexical(path: &Path) -> PathBuf {
+pub fn canonical_or_lexical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| lexical_normalize(path))
 }
 
@@ -316,6 +314,17 @@ mod tests {
             lexical_normalize(Path::new("src/../../outside.dart")),
             PathBuf::from("../outside.dart")
         );
+    }
+
+    #[test]
+    fn lexical_normalization_preserves_parent_chains_and_clamps_roots() {
+        for (path, expected) in [
+            ("../../src/../file.dart", "../../file.dart"),
+            ("/../../src/../file.dart", "/file.dart"),
+            ("src/./nested/../file.dart", "src/file.dart"),
+        ] {
+            assert_eq!(lexical_normalize(Path::new(path)), PathBuf::from(expected));
+        }
     }
 
     #[test]

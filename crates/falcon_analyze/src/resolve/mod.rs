@@ -1,23 +1,4 @@
-//! Minimal type-resolution layer.
-//!
-//! Falcon has no full semantic model (no symbol tables, scopes, or type
-//! inference). This module is the *ponytail* minimum that lets three otherwise
-//! off-by-default rules run reliably — it is deliberately **not** a Dart type
-//! checker:
-//!
-//! * [`LocalTypes`] — a file-local, per-function-body scope tracker that answers
-//!   "what is the static type of this expression?" for the handful of cases a
-//!   rule can trust without a resolver (declared types + trivial initializer
-//!   inference).
-//! * [`ProjectIndex`] — a cross-file declaration index mapping a declaration
-//!   name to its declared return type, plus a curated builtin table for Dart
-//!   core-library members whose return types matter to `avoid-ignoring-return-values`.
-//!
-//! Guiding invariant: **never report a type fact that could be wrong.** Every
-//! inference returns [`StaticType::Unknown`] the moment certainty is lost. This
-//! trades precision for soundness on purpose — a rule consuming this layer may
-//! miss violations, but it must not fire a false positive because of a bad
-//! type fact.
+//! Declaration identities, canonical semantic facts, and conservative type indexes.
 
 mod identity;
 mod library;
@@ -30,19 +11,18 @@ mod type_index;
 pub use identity::{
     DeclarationIdentity, IdentityIndex, IdentitySource, NameIdentity, PackageIdentity,
 };
-pub use library::{LibraryGrouping, LibraryUnit, group_libraries, library_unit};
+pub use library::{
+    LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, library_unit,
+};
 pub use local_types::LocalTypes;
 pub use project_index::{ProgramSource, ProjectIndex};
 pub use receiver::ReceiverTypes;
+pub(crate) use semantic::expression_segments;
 pub use semantic::{
-    ConstructorFacts, DeclarationFacts, MemberFacts, ParameterFacts, ResolvedSignature,
-    ResolvedType, SemanticMemberKind, SemanticModel, SignatureIndex, StaticConstFacts,
-    TypeEnvironment, TypeParameterId, TypeParameterScope, TypeTruth,
+    DeclarationFacts, MemberFacts, ResolvedSignature, ResolvedType, SemanticMemberKind,
+    SemanticModel, SignatureIndex, TypeEnvironment, TypeParameterId, TypeParameterScope, TypeTruth,
 };
-pub use type_index::{
-    InheritedParameterNames, LibrarySource, MemberKind, MemberResult, SubtypeResult, TypeIndex,
-    TypeKind,
-};
+pub use type_index::{LibrarySource, MemberKind, MemberResult, SubtypeResult, TypeIndex, TypeKind};
 
 use falcon_syntax::ast::DartType;
 

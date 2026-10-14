@@ -17,8 +17,7 @@
 //! 2. **A curated builtin table** — Dart core-library members whose return
 //!    matters to the rule. This is a heuristic *dominant-return* table, not
 //!    ground truth: entries capture the conventional return of a name across its
-//!    common receivers (mirroring the intent of the rule's old side-effect
-//!    allowlist), which is sound enough for a rule that is off by default.
+//!    common receivers.
 //!
 //! User declarations take precedence over builtins for the same name.
 
@@ -46,13 +45,6 @@ pub struct ProjectIndex {
 }
 
 impl ProjectIndex {
-    /// An empty index (builtins only are added by [`ProjectIndex::with_builtins`]).
-    pub fn new() -> Self {
-        Self {
-            decls: HashMap::new(),
-        }
-    }
-
     /// Build a cross-file index from every analyzed file, seeded with the
     /// builtin table. Files with parse errors are skipped for declaration
     /// harvesting (their recovered nodes can be spurious).
@@ -79,7 +71,7 @@ impl ProjectIndex {
     }
 
     /// An index seeded with only the curated builtin table.
-    pub fn with_builtins() -> Self {
+    fn with_builtins() -> Self {
         let mut decls = HashMap::new();
         for (name, ty) in builtin_returns() {
             decls.insert(name.to_string(), ReturnFact::Builtin(ty.clone()));
@@ -177,9 +169,7 @@ fn return_of(ty: Option<&DartType>) -> StaticType {
 /// Curated, receiver-agnostic *dominant-return* table for Dart core-library
 /// members whose return matters to `avoid-ignoring-return-values`.
 ///
-/// `void` entries are the members whose result is conventionally discarded
-/// (collection mutation, listeners, sinks, lifecycle, navigation, logging) —
-/// this reproduces the intent of the rule's former `SIDE_EFFECT_NAMES` list.
+/// `void` entries are members whose result is conventionally discarded.
 /// Non-`void` entries are the well-known pure members whose result *should*
 /// normally be used. Ambiguous names (e.g. `remove` — `bool` on `List`, `V?` on
 /// `Map`, and side-effecting elsewhere) are deliberately omitted so they resolve
@@ -316,7 +306,7 @@ mod tests {
 
     #[test]
     fn absent_name_is_unknown() {
-        let index = ProjectIndex::new();
+        let index = ProjectIndex::default();
         assert_eq!(index.return_type("nope"), StaticType::Unknown);
     }
 

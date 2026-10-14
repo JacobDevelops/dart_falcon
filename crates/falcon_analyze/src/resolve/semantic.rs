@@ -189,6 +189,7 @@ impl TypeParameterScope {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct SemanticModel<'a> {
     file: &'a Path,
     identities: &'a IdentityIndex,
@@ -206,6 +207,17 @@ impl<'a> SemanticModel<'a> {
             identities,
             types,
         }
+    }
+
+    pub(crate) fn for_declaration(
+        &self,
+        identity: &DeclarationIdentity,
+    ) -> Option<SemanticModel<'a>> {
+        Some(Self {
+            file: self.identities.declaration_file(identity)?,
+            identities: self.identities,
+            types: None,
+        })
     }
 
     pub fn resolve_type(&self, ty: &DartType) -> ResolvedType {
@@ -348,32 +360,6 @@ impl<'a> SemanticModel<'a> {
             arguments: Vec::new(),
             nullable,
             extension_type: false,
-        }
-    }
-
-    pub fn is_instance_of(&self, ty: &ResolvedType, library: &str, name: &str) -> TypeTruth {
-        let ResolvedType::Interface { identity, .. } = ty else {
-            return if matches!(ty, ResolvedType::Unknown | ResolvedType::Dynamic) {
-                TypeTruth::Unknown
-            } else {
-                TypeTruth::No
-            };
-        };
-        if matches!(identity, DeclarationIdentity::Sdk { library: found_library, name: found_name }
-            if found_library == library && found_name == name)
-        {
-            return TypeTruth::Yes;
-        }
-        let Some(actual_name) = subtype_name(identity) else {
-            return TypeTruth::Unknown;
-        };
-        if matches!(identity, DeclarationIdentity::Project { .. }) && actual_name == name {
-            return TypeTruth::No;
-        }
-        match self.types.map(|types| types.is_subtype(actual_name, name)) {
-            Some(SubtypeResult::Yes) => TypeTruth::Yes,
-            Some(SubtypeResult::ProvenNo) => TypeTruth::No,
-            Some(SubtypeResult::Unknown) | None => TypeTruth::Unknown,
         }
     }
 
@@ -619,41 +605,17 @@ impl<'a> SemanticModel<'a> {
             | (other, ResolvedType::TypeParameter { bound, .. }) => self.unrelated(bound, other),
             (
                 ResolvedType::Function {
-                    return_type: left_return,
                     positional: left_positional,
                     named: left_named,
                     ..
                 },
                 ResolvedType::Function {
-                    return_type: right_return,
                     positional: right_positional,
                     named: right_named,
                     ..
                 },
-            ) => {
-                if left_positional.len() != right_positional.len()
-                    || left_named.iter().map(|(name, _)| name).collect::<Vec<_>>()
-                        != right_named.iter().map(|(name, _)| name).collect::<Vec<_>>()
-                {
-                    return TypeTruth::Yes;
-                }
-                let pairs = left_positional.iter().zip(right_positional).chain(
-                    left_named
-                        .iter()
-                        .zip(right_named)
-                        .map(|((_, left), (_, right))| (left, right)),
-                );
-                if self.unrelated(left_return, right_return) == TypeTruth::Yes
-                    || pairs
-                        .into_iter()
-                        .any(|(left, right)| self.unrelated(left, right) == TypeTruth::Yes)
-                {
-                    TypeTruth::Yes
-                } else {
-                    TypeTruth::No
-                }
-            }
-            (
+            )
+            | (
                 ResolvedType::Record {
                     positional: left_positional,
                     named: left_named,
@@ -666,8 +628,24 @@ impl<'a> SemanticModel<'a> {
                 },
             ) => {
                 if left_positional.len() != right_positional.len()
-                    || left_named.iter().map(|(name, _)| name).collect::<Vec<_>>()
-                        != right_named.iter().map(|(name, _)| name).collect::<Vec<_>>()
+                    || !left_named
+                        .iter()
+                        .map(|(name, _)| name)
+                        .eq(right_named.iter().map(|(name, _)| name))
+                {
+                    return TypeTruth::Yes;
+                }
+                if let (
+                    ResolvedType::Function {
+                        return_type: left_return,
+                        ..
+                    },
+                    ResolvedType::Function {
+                        return_type: right_return,
+                        ..
+                    },
+                ) = (left, right)
+                    && self.unrelated(left_return, right_return) == TypeTruth::Yes
                 {
                     return TypeTruth::Yes;
                 }
@@ -774,15 +752,20 @@ enum InstanceAccess {
 }
 
 #[derive(Debug, Clone, Default)]
+struct MemberEntry {
+    signature: Option<ResolvedSignature>,
+    is_instance_method: bool,
+    field: Option<(Vec<TypeParameterId>, ResolvedType)>,
+    read: Option<ResolvedType>,
+    write: Option<ResolvedType>,
+    facts: Vec<MemberFacts>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct SignatureIndex {
     functions: HashMap<DeclarationIdentity, ResolvedSignature>,
-    constructors: HashMap<(DeclarationIdentity, String), ResolvedSignature>,
-    members: HashMap<(DeclarationIdentity, String), ResolvedSignature>,
-    instance_members: HashSet<(DeclarationIdentity, String)>,
-    fields: HashMap<(DeclarationIdentity, String), (Vec<TypeParameterId>, ResolvedType)>,
-    instance_reads: HashMap<(DeclarationIdentity, String), (Vec<TypeParameterId>, ResolvedType)>,
-    instance_writes: HashMap<(DeclarationIdentity, String), (Vec<TypeParameterId>, ResolvedType)>,
-    member_facts: HashMap<(DeclarationIdentity, String), Vec<MemberFacts>>,
+    constructors: HashMap<DeclarationIdentity, HashMap<String, ResolvedSignature>>,
+    member_entries: HashMap<DeclarationIdentity, HashMap<String, MemberEntry>>,
     supertypes: HashMap<DeclarationIdentity, (Vec<TypeParameterId>, Vec<ResolvedType>)>,
     member_supertypes: HashMap<DeclarationIdentity, Vec<ResolvedType>>,
     declarations: HashMap<DeclarationIdentity, DeclarationFacts>,
@@ -792,6 +775,10 @@ pub struct SignatureIndex {
 }
 
 impl SignatureIndex {
+    fn member_entry(&self, identity: &DeclarationIdentity, name: &str) -> Option<&MemberEntry> {
+        self.member_entries.get(identity)?.get(name)
+    }
+
     pub fn from_program(program: &Program, model: &SemanticModel<'_>) -> Self {
         let mut index = Self::default();
         index.add_sdk_signatures();
@@ -1131,7 +1118,8 @@ impl SignatureIndex {
         let mut changed = false;
         if let Some(signature) = self
             .constructors
-            .get_mut(&(identity.clone(), constructor_name.to_string()))
+            .get_mut(identity)
+            .and_then(|constructors| constructors.get_mut(constructor_name))
         {
             if matches!(parameter.kind, falcon_syntax::ast::ParamKind::Named { .. }) {
                 if signature.named.get(&parameter.name.name) != Some(&ty) {
@@ -1223,17 +1211,14 @@ impl SignatureIndex {
                                 .or_else(|| {
                                     (parameter.initializing == Some(InitializingFormal::This)).then(
                                         || {
-                                            let key =
-                                                (identity.clone(), parameter.name.name.clone());
-                                            self.member_facts
-                                                .get(&key)
-                                                .filter(|facts| {
-                                                    facts.iter().any(|fact| {
+                                            self.member_entry(&identity, &parameter.name.name)
+                                                .filter(|entry| {
+                                                    entry.facts.iter().any(|fact| {
                                                         fact.kind == SemanticMemberKind::Field
                                                             && !fact.is_static
                                                     })
                                                 })
-                                                .and_then(|_| self.fields.get(&key))
+                                                .and_then(|entry| entry.field.as_ref())
                                                 .map(|(_, ty)| ty.clone())
                                                 .unwrap_or(ResolvedType::Unknown)
                                         },
@@ -1350,12 +1335,13 @@ impl SignatureIndex {
                 },
             );
         }
-        let mut add = |library: &str,
-                       type_name: &str,
-                       arity: usize,
-                       member: &str,
-                       positional: Vec<ResolvedType>,
-                       return_type: ResolvedType| {
+        let add = |index: &mut Self,
+                   library: &str,
+                   type_name: &str,
+                   arity: usize,
+                   member: &str,
+                   positional: Vec<ResolvedType>,
+                   return_type: ResolvedType| {
             let parameters: Vec<_> = (0..arity)
                 .map(|ordinal| TypeParameterId {
                     owner: sdk_owner(type_name),
@@ -1363,24 +1349,24 @@ impl SignatureIndex {
                     name: format!("{type_name}#{ordinal}"),
                 })
                 .collect();
-            let key = (
-                DeclarationIdentity::Sdk {
-                    library: library.to_string(),
-                    name: type_name.to_string(),
-                },
-                member.to_string(),
-            );
-            self.instance_members.insert(key.clone());
-            self.members.insert(
-                key,
-                ResolvedSignature {
-                    owner_parameters: parameters,
-                    call_parameters: Vec::new(),
-                    positional,
-                    named: HashMap::new(),
-                    return_type,
-                },
-            );
+            let identity = DeclarationIdentity::Sdk {
+                library: library.to_string(),
+                name: type_name.to_string(),
+            };
+            let entry = index
+                .member_entries
+                .entry(identity)
+                .or_default()
+                .entry(member.to_string())
+                .or_default();
+            entry.is_instance_method = true;
+            entry.signature = Some(ResolvedSignature {
+                owner_parameters: parameters,
+                call_parameters: Vec::new(),
+                positional,
+                named: HashMap::new(),
+                return_type,
+            });
         };
         let parameter =
             |type_name: &str, _arity: usize, ordinal: usize| ResolvedType::TypeParameter {
@@ -1411,9 +1397,13 @@ impl SignatureIndex {
             ("runtimeType", SemanticMemberKind::Getter, Vec::new()),
             ("toString", SemanticMemberKind::Method, Vec::new()),
         ] {
-            self.member_facts.insert(
-                (object.clone(), name.to_string()),
-                vec![MemberFacts {
+            self.member_entries
+                .entry(object.clone())
+                .or_default()
+                .entry(name.to_string())
+                .or_default()
+                .facts
+                .push(MemberFacts {
                     declaring_type: object.clone(),
                     kind,
                     is_static: false,
@@ -1422,10 +1412,10 @@ impl SignatureIndex {
                     has_getter: kind == SemanticMemberKind::Getter,
                     has_setter: kind == SemanticMemberKind::Setter,
                     positional_parameter_names: parameters,
-                }],
-            );
+                });
         }
         add(
+            self,
             "dart:core",
             "List",
             1,
@@ -1434,6 +1424,7 @@ impl SignatureIndex {
             ResolvedType::Void,
         );
         add(
+            self,
             "dart:core",
             "List",
             1,
@@ -1442,6 +1433,7 @@ impl SignatureIndex {
             ResolvedType::Void,
         );
         add(
+            self,
             "dart:core",
             "Set",
             1,
@@ -1458,6 +1450,7 @@ impl SignatureIndex {
             },
         );
         add(
+            self,
             "dart:collection",
             "Queue",
             1,
@@ -1466,6 +1459,7 @@ impl SignatureIndex {
             ResolvedType::Void,
         );
         add(
+            self,
             "dart:core",
             "Map",
             2,
@@ -1504,39 +1498,36 @@ impl SignatureIndex {
             );
             self.member_supertypes.insert(identity, vec![supertype]);
         }
-        let string_to_upper_case = (
-            DeclarationIdentity::Sdk {
-                library: "dart:core".to_string(),
-                name: "String".to_string(),
-            },
-            "toUpperCase".to_string(),
-        );
-        self.instance_members.insert(string_to_upper_case.clone());
-        self.members.insert(
-            string_to_upper_case,
-            ResolvedSignature {
-                owner_parameters: Vec::new(),
-                call_parameters: Vec::new(),
-                positional: Vec::new(),
-                named: HashMap::new(),
-                return_type: ResolvedType::Interface {
-                    identity: DeclarationIdentity::Sdk {
-                        library: "dart:core".to_string(),
-                        name: "String".to_string(),
-                    },
-                    arguments: Vec::new(),
-                    nullable: false,
-                    extension_type: false,
+        let string = DeclarationIdentity::Sdk {
+            library: "dart:core".to_string(),
+            name: "String".to_string(),
+        };
+        let entry = self
+            .member_entries
+            .entry(string)
+            .or_default()
+            .entry("toUpperCase".to_string())
+            .or_default();
+        entry.is_instance_method = true;
+        entry.signature = Some(ResolvedSignature {
+            owner_parameters: Vec::new(),
+            call_parameters: Vec::new(),
+            positional: Vec::new(),
+            named: HashMap::new(),
+            return_type: ResolvedType::Interface {
+                identity: DeclarationIdentity::Sdk {
+                    library: "dart:core".to_string(),
+                    name: "String".to_string(),
                 },
+                arguments: Vec::new(),
+                nullable: false,
+                extension_type: false,
             },
-        );
-        let iterable_map = (
-            DeclarationIdentity::Sdk {
-                library: "dart:core".to_string(),
-                name: "Iterable".to_string(),
-            },
-            "map".to_string(),
-        );
+        });
+        let iterable = DeclarationIdentity::Sdk {
+            library: "dart:core".to_string(),
+            name: "Iterable".to_string(),
+        };
         let map_parameter = TypeParameterId {
             owner: sdk_owner("Iterable"),
             ordinal: 1,
@@ -1547,34 +1538,37 @@ impl SignatureIndex {
             bound: Box::new(ResolvedType::Dynamic),
             nullable: false,
         };
-        self.instance_members.insert(iterable_map.clone());
-        self.members.insert(
-            iterable_map,
-            ResolvedSignature {
-                owner_parameters: vec![TypeParameterId {
-                    owner: sdk_owner("Iterable"),
-                    ordinal: 0,
-                    name: "Iterable#0".to_string(),
-                }],
-                call_parameters: vec![map_parameter],
-                positional: vec![ResolvedType::Function {
-                    return_type: Box::new(map_type.clone()),
-                    positional: vec![parameter("Iterable", 1, 0)],
-                    named: Vec::new(),
-                    nullable: false,
-                }],
-                named: HashMap::new(),
-                return_type: ResolvedType::Interface {
-                    identity: DeclarationIdentity::Sdk {
-                        library: "dart:core".to_string(),
-                        name: "Iterable".to_string(),
-                    },
-                    arguments: vec![map_type],
-                    nullable: false,
-                    extension_type: false,
+        let entry = self
+            .member_entries
+            .entry(iterable)
+            .or_default()
+            .entry("map".to_string())
+            .or_default();
+        entry.is_instance_method = true;
+        entry.signature = Some(ResolvedSignature {
+            owner_parameters: vec![TypeParameterId {
+                owner: sdk_owner("Iterable"),
+                ordinal: 0,
+                name: "Iterable#0".to_string(),
+            }],
+            call_parameters: vec![map_parameter],
+            positional: vec![ResolvedType::Function {
+                return_type: Box::new(map_type.clone()),
+                positional: vec![parameter("Iterable", 1, 0)],
+                named: Vec::new(),
+                nullable: false,
+            }],
+            named: HashMap::new(),
+            return_type: ResolvedType::Interface {
+                identity: DeclarationIdentity::Sdk {
+                    library: "dart:core".to_string(),
+                    name: "Iterable".to_string(),
                 },
+                arguments: vec![map_type],
+                nullable: false,
+                extension_type: false,
             },
-        );
+        });
 
         let widget = DeclarationIdentity::Package {
             package: "flutter".to_string(),
@@ -1616,8 +1610,8 @@ impl SignatureIndex {
                 .insert(identity.clone(), (Vec::new(), vec![supertype.clone()]));
             self.member_supertypes
                 .insert(identity.clone(), vec![supertype]);
-            self.constructors.insert(
-                (identity, "new".to_string()),
+            self.constructors.entry(identity).or_default().insert(
+                "new".to_string(),
                 ResolvedSignature {
                     owner_parameters: Vec::new(),
                     call_parameters: Vec::new(),
@@ -1627,8 +1621,8 @@ impl SignatureIndex {
                 },
             );
         }
-        self.constructors.insert(
-            (widget, "new".to_string()),
+        self.constructors.entry(widget).or_default().insert(
+            "new".to_string(),
             ResolvedSignature {
                 owner_parameters: Vec::new(),
                 call_parameters: Vec::new(),
@@ -1672,12 +1666,6 @@ impl SignatureIndex {
                     .map(move |declarator| (declarator.name.name.clone(), field_type.clone()))
             })
             .collect::<HashMap<_, _>>();
-        for (field_name, field_type) in &field_types {
-            self.fields.insert(
-                (identity.clone(), field_name.clone()),
-                (owner_parameters.clone(), field_type.clone()),
-            );
-        }
         let mut resolved_supertypes: Vec<_> = supertypes
             .into_iter()
             .map(|supertype| model.resolve_type_in(supertype, &scope))
@@ -1694,154 +1682,133 @@ impl SignatureIndex {
         resolved_member_supertypes.push(model.core_type("Object", false));
         self.member_supertypes
             .insert(identity.clone(), resolved_member_supertypes);
+        let entries = self.member_entries.entry(identity.clone()).or_default();
         for member in members {
             match member {
                 ClassMember::Method(method) => {
-                    self.member_facts
-                        .entry((identity.clone(), method.name.name.clone()))
-                        .or_default()
-                        .push(MemberFacts {
-                            declaring_type: identity.clone(),
-                            kind: SemanticMemberKind::Method,
-                            is_static: method.is_static,
-                            is_abstract: method.is_abstract,
-                            is_covariant: false,
-                            has_getter: false,
-                            has_setter: false,
-                            positional_parameter_names: positional_parameter_names(&method.params),
-                        });
+                    let entry = entries.entry(method.name.name.clone()).or_default();
+                    entry.facts.push(MemberFacts {
+                        declaring_type: identity.clone(),
+                        kind: SemanticMemberKind::Method,
+                        is_static: method.is_static,
+                        is_abstract: method.is_abstract,
+                        is_covariant: false,
+                        has_getter: false,
+                        has_setter: false,
+                        positional_parameter_names: positional_parameter_names(&method.params),
+                    });
                     scope.push(&method.type_params, model);
-                    let key = (identity.clone(), method.name.name.clone());
-                    if !method.is_static {
-                        self.instance_members.insert(key.clone());
-                    }
-                    self.members.insert(
-                        key,
-                        signature(
-                            &scope,
-                            &owner_parameters,
-                            &method.type_params,
-                            Some(&method.params),
-                            method.return_type.as_ref(),
-                            None,
-                            model,
-                        ),
-                    );
+                    entry.is_instance_method |= !method.is_static;
+                    entry.signature = Some(signature(
+                        &scope,
+                        &owner_parameters,
+                        &method.type_params,
+                        Some(&method.params),
+                        method.return_type.as_ref(),
+                        None,
+                        model,
+                    ));
                     scope.pop();
                 }
                 ClassMember::Constructor(constructor) => {
-                    self.constructors.insert(
-                        (
-                            identity.clone(),
+                    self.constructors
+                        .entry(identity.clone())
+                        .or_default()
+                        .insert(
                             constructor
                                 .constructor_name
                                 .as_ref()
                                 .map(|name| name.name.clone())
                                 .unwrap_or_else(|| "new".to_string()),
-                        ),
-                        signature(
-                            &scope,
-                            &owner_parameters,
-                            &[],
-                            Some(&constructor.params),
-                            None,
-                            Some(&field_types),
-                            model,
-                        ),
-                    );
+                            signature(
+                                &scope,
+                                &owner_parameters,
+                                &[],
+                                Some(&constructor.params),
+                                None,
+                                Some(&field_types),
+                                model,
+                            ),
+                        );
                 }
                 ClassMember::Field(field) => {
-                    for declarator in &field.declarators {
-                        self.member_facts
-                            .entry((identity.clone(), declarator.name.name.clone()))
-                            .or_default()
-                            .push(MemberFacts {
-                                declaring_type: identity.clone(),
-                                kind: SemanticMemberKind::Field,
-                                is_static: field.is_static,
-                                is_abstract: field.is_abstract,
-                                is_covariant: field.is_covariant,
-                                has_getter: true,
-                                has_setter: field.keyword == falcon_syntax::ast::VarKeyword::Var,
-                                positional_parameter_names: Vec::new(),
-                            });
-                    }
                     let field_type = field
                         .field_type
                         .as_ref()
                         .map(|ty| model.resolve_type_in(ty, &scope))
                         .unwrap_or(ResolvedType::Unknown);
                     for declarator in &field.declarators {
-                        let key = (identity.clone(), declarator.name.name.clone());
-                        let indexed_type = (owner_parameters.clone(), field_type.clone());
-                        self.fields.insert(key.clone(), indexed_type.clone());
+                        let entry = entries.entry(declarator.name.name.clone()).or_default();
+                        entry.facts.push(MemberFacts {
+                            declaring_type: identity.clone(),
+                            kind: SemanticMemberKind::Field,
+                            is_static: field.is_static,
+                            is_abstract: field.is_abstract,
+                            is_covariant: field.is_covariant,
+                            has_getter: true,
+                            has_setter: field.keyword == falcon_syntax::ast::VarKeyword::Var,
+                            positional_parameter_names: Vec::new(),
+                        });
+                        entry.field = Some((owner_parameters.clone(), field_type.clone()));
                         if !field.is_static {
-                            self.instance_reads
-                                .insert(key.clone(), indexed_type.clone());
+                            entry.read = Some(field_type.clone());
                             if field.keyword == falcon_syntax::ast::VarKeyword::Var {
-                                self.instance_writes.insert(key, indexed_type);
+                                entry.write = Some(field_type.clone());
                             }
                         }
                     }
                 }
                 ClassMember::Getter(getter) => {
-                    self.member_facts
-                        .entry((identity.clone(), getter.name.name.clone()))
-                        .or_default()
-                        .push(MemberFacts {
-                            declaring_type: identity.clone(),
-                            kind: SemanticMemberKind::Getter,
-                            is_static: getter.is_static,
-                            is_abstract: getter.is_abstract,
-                            is_covariant: false,
-                            has_getter: true,
-                            has_setter: false,
-                            positional_parameter_names: Vec::new(),
-                        });
+                    let entry = entries.entry(getter.name.name.clone()).or_default();
+                    entry.facts.push(MemberFacts {
+                        declaring_type: identity.clone(),
+                        kind: SemanticMemberKind::Getter,
+                        is_static: getter.is_static,
+                        is_abstract: getter.is_abstract,
+                        is_covariant: false,
+                        has_getter: true,
+                        has_setter: false,
+                        positional_parameter_names: Vec::new(),
+                    });
                     let return_type = getter
                         .return_type
                         .as_ref()
                         .map(|ty| model.resolve_type_in(ty, &scope))
                         .unwrap_or(ResolvedType::Unknown);
-                    let key = (identity.clone(), getter.name.name.clone());
-                    let indexed_type = (owner_parameters.clone(), return_type);
-                    self.fields.insert(key.clone(), indexed_type.clone());
+                    entry.field = Some((owner_parameters.clone(), return_type.clone()));
                     if !getter.is_static {
-                        self.instance_reads.insert(key, indexed_type);
+                        entry.read = Some(return_type);
                     }
                 }
                 ClassMember::Setter(setter) => {
-                    self.member_facts
-                        .entry((identity.clone(), setter.name.name.clone()))
-                        .or_default()
-                        .push(MemberFacts {
-                            declaring_type: identity.clone(),
-                            kind: SemanticMemberKind::Setter,
-                            is_static: setter.is_static,
-                            is_abstract: setter.is_abstract,
-                            is_covariant: false,
-                            has_getter: false,
-                            has_setter: true,
-                            positional_parameter_names: vec![setter.param.name.clone()],
-                        });
+                    let entry = entries.entry(setter.name.name.clone()).or_default();
+                    entry.facts.push(MemberFacts {
+                        declaring_type: identity.clone(),
+                        kind: SemanticMemberKind::Setter,
+                        is_static: setter.is_static,
+                        is_abstract: setter.is_abstract,
+                        is_covariant: false,
+                        has_getter: false,
+                        has_setter: true,
+                        positional_parameter_names: vec![setter.param.name.clone()],
+                    });
                     let parameter_type = setter
                         .param_type
                         .as_ref()
                         .map(|ty| model.resolve_type_in(ty, &scope))
                         .unwrap_or(ResolvedType::Dynamic);
-                    let key = (identity.clone(), setter.name.name.clone());
-                    let indexed_type = (owner_parameters.clone(), parameter_type);
-                    self.fields
-                        .entry(key.clone())
-                        .or_insert_with(|| indexed_type.clone());
+                    entry
+                        .field
+                        .get_or_insert_with(|| (owner_parameters.clone(), parameter_type.clone()));
                     if !setter.is_static {
-                        self.instance_writes.insert(key, indexed_type);
+                        entry.write = Some(parameter_type);
                     }
                 }
                 ClassMember::Operator(operator) => {
-                    self.member_facts
-                        .entry((identity.clone(), operator.op.clone()))
+                    entries
+                        .entry(operator.op.clone())
                         .or_default()
+                        .facts
                         .push(MemberFacts {
                             declaring_type: identity.clone(),
                             kind: SemanticMemberKind::Operator,
@@ -1897,7 +1864,7 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         name: &str,
     ) -> Option<&ResolvedSignature> {
-        self.constructors.get(&(identity.clone(), name.to_string()))
+        self.constructors.get(identity)?.get(name)
     }
 
     pub fn resolved_constructor(
@@ -1924,7 +1891,7 @@ impl SignatureIndex {
     }
 
     pub fn member(&self, identity: &DeclarationIdentity, name: &str) -> Option<&ResolvedSignature> {
-        self.members.get(&(identity.clone(), name.to_string()))
+        self.member_entry(identity, name)?.signature.as_ref()
     }
 
     fn has_instance_declaration(
@@ -1933,35 +1900,32 @@ impl SignatureIndex {
         name: &str,
         access: InstanceAccess,
     ) -> bool {
-        let key = (identity.clone(), name.to_string());
+        let Some(entry) = self.member_entry(identity, name) else {
+            return false;
+        };
         (match access {
-            InstanceAccess::Read => {
-                self.instance_members.contains(&key) || self.instance_reads.contains_key(&key)
+            InstanceAccess::Read | InstanceAccess::Invoke => {
+                entry.is_instance_method || entry.read.is_some()
             }
-            InstanceAccess::Write => self.instance_writes.contains_key(&key),
-            InstanceAccess::Invoke => {
-                self.instance_members.contains(&key) || self.instance_reads.contains_key(&key)
-            }
-        }) || self.member_facts.get(&key).is_some_and(|facts| {
-            facts.iter().any(|fact| {
-                !fact.is_static
-                    && (match access {
-                        InstanceAccess::Read => matches!(
-                            fact.kind,
-                            SemanticMemberKind::Method
-                                | SemanticMemberKind::Getter
-                                | SemanticMemberKind::Field
-                        ),
-                        InstanceAccess::Write => fact.has_setter,
-                        InstanceAccess::Invoke => matches!(
-                            fact.kind,
-                            SemanticMemberKind::Method
-                                | SemanticMemberKind::Getter
-                                | SemanticMemberKind::Field
-                                | SemanticMemberKind::Operator
-                        ),
-                    })
-            })
+            InstanceAccess::Write => entry.write.is_some(),
+        }) || entry.facts.iter().any(|fact| {
+            !fact.is_static
+                && (match access {
+                    InstanceAccess::Read => matches!(
+                        fact.kind,
+                        SemanticMemberKind::Method
+                            | SemanticMemberKind::Getter
+                            | SemanticMemberKind::Field
+                    ),
+                    InstanceAccess::Write => fact.has_setter,
+                    InstanceAccess::Invoke => matches!(
+                        fact.kind,
+                        SemanticMemberKind::Method
+                            | SemanticMemberKind::Getter
+                            | SemanticMemberKind::Field
+                            | SemanticMemberKind::Operator
+                    ),
+                })
         })
     }
 
@@ -1970,11 +1934,12 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         name: &str,
     ) -> Option<&ResolvedSignature> {
-        let key = (identity.clone(), name.to_string());
-        self.instance_members
-            .contains(&key)
-            .then(|| self.members.get(&key))
-            .flatten()
+        let entry = self.member_entry(identity, name)?;
+        if entry.is_instance_method {
+            entry.signature.as_ref()
+        } else {
+            None
+        }
     }
 
     pub fn inherited_member_facts(
@@ -2013,10 +1978,9 @@ impl SignatureIndex {
         }
         if !name.starts_with('_') || same_library(owner, identity) {
             facts.extend(
-                self.member_facts
-                    .get(&(identity.clone(), name.to_string()))
+                self.member_entry(identity, name)
                     .into_iter()
-                    .flatten()
+                    .flat_map(|entry| &entry.facts)
                     .filter(|member| !member.is_static)
                     .cloned(),
             );
@@ -2258,9 +2222,8 @@ impl SignatureIndex {
         model: &SemanticModel<'_>,
     ) -> Option<&[MemberFacts]> {
         let owner = self.resolved_member_owner(receiver, name, model)?;
-        self.member_facts
-            .get(&(owner, name.to_string()))
-            .map(Vec::as_slice)
+        let facts = &self.member_entry(&owner, name)?.facts;
+        (!facts.is_empty()).then_some(facts.as_slice())
     }
 
     pub fn resolved_member(
@@ -2301,7 +2264,8 @@ impl SignatureIndex {
         else {
             return None;
         };
-        let (parameters, field) = self.instance_reads.get(&(identity, name.to_string()))?;
+        let field = self.member_entry(&identity, name)?.read.as_ref()?;
+        let (parameters, _) = self.supertypes.get(&identity)?;
         let substitutions = parameters.iter().cloned().zip(arguments).collect();
         Some((field.clone(), substitutions))
     }
@@ -2320,7 +2284,8 @@ impl SignatureIndex {
         else {
             return None;
         };
-        let (parameters, field) = self.instance_writes.get(&(identity, name.to_string()))?;
+        let field = self.member_entry(&identity, name)?.write.as_ref()?;
+        let (parameters, _) = self.supertypes.get(&identity)?;
         let substitutions = parameters.iter().cloned().zip(arguments).collect();
         Some((field.clone(), substitutions))
     }
@@ -2330,7 +2295,7 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         name: &str,
     ) -> Option<&(Vec<TypeParameterId>, ResolvedType)> {
-        self.fields.get(&(identity.clone(), name.to_string()))
+        self.member_entry(identity, name)?.field.as_ref()
     }
 }
 
@@ -2344,7 +2309,7 @@ fn constructed_identity(
             _ => None,
         },
         Expr::Call { callee, .. } => {
-            let mut segments = expression_segments(callee)?;
+            let mut segments = expression_segments(callee, false)?;
             model.resolve_name(&segments).or_else(|| {
                 segments.pop();
                 model.resolve_name(&segments)
@@ -2354,7 +2319,10 @@ fn constructed_identity(
     }
 }
 
-fn expression_segments(expression: &Expr) -> Option<Vec<String>> {
+pub(crate) fn expression_segments(
+    expression: &Expr,
+    allow_generic_instantiation: bool,
+) -> Option<Vec<String>> {
     let mut current = expression;
     let mut segments = Vec::new();
     loop {
@@ -2367,6 +2335,9 @@ fn expression_segments(expression: &Expr) -> Option<Vec<String>> {
             Expr::Field { object, field, .. } => {
                 segments.push(field.name.clone());
                 current = object;
+            }
+            Expr::GenericInstantiation { target, .. } if allow_generic_instantiation => {
+                current = target;
             }
             _ => return None,
         }
@@ -2401,7 +2372,7 @@ fn annotation_targets_library(
 fn target_kind_library(expression: &Expr, model: &SemanticModel<'_>) -> bool {
     match expression {
         Expr::Field { object, field, .. } if field.name == "library" => {
-            let Some(segments) = expression_name(object) else {
+            let Some(segments) = expression_segments(object, false) else {
                 return false;
             };
             matches!(
@@ -2428,7 +2399,7 @@ fn infer_const_initializer_type(
     match initializer {
         Expr::New { dart_type, .. } => model.resolve_type_in(dart_type, scope).with_nullable(false),
         Expr::Call { callee, .. } => {
-            let Some(mut segments) = expression_name(callee) else {
+            let Some(mut segments) = expression_segments(callee, false) else {
                 return ResolvedType::Unknown;
             };
             let identity = model.resolve_name(&segments).or_else(|| {
@@ -2456,25 +2427,6 @@ fn infer_const_initializer_type(
             }
         }
         _ => ResolvedType::Unknown,
-    }
-}
-
-fn expression_name(expression: &Expr) -> Option<Vec<String>> {
-    let mut current = expression;
-    let mut segments = Vec::new();
-    loop {
-        match current {
-            Expr::Ident(identifier) => {
-                segments.push(identifier.name.clone());
-                segments.reverse();
-                return Some(segments);
-            }
-            Expr::Field { object, field, .. } => {
-                segments.push(field.name.clone());
-                current = object;
-            }
-            _ => return None,
-        }
     }
 }
 
@@ -2643,8 +2595,25 @@ impl TypeEnvironment {
         signatures: &SignatureIndex,
         type_parameters: &TypeParameterScope,
     ) -> ResolvedType {
+        self.infer_with_signatures_using_lookup(expr, model, signatures, type_parameters, &|_| None)
+    }
+
+    pub(crate) fn infer_with_signatures_using_lookup(
+        &self,
+        expr: &Expr,
+        model: &SemanticModel<'_>,
+        signatures: &SignatureIndex,
+        type_parameters: &TypeParameterScope,
+        lookup: &impl Fn(&str) -> Option<ResolvedType>,
+    ) -> ResolvedType {
         if let Expr::Field { object, field, .. } = expr {
-            let receiver = self.infer_with_signatures(object, model, signatures, type_parameters);
+            let receiver = self.infer_with_signatures_using_lookup(
+                object,
+                model,
+                signatures,
+                type_parameters,
+                lookup,
+            );
             if let Some((original, substitutions)) =
                 signatures.resolved_field(&receiver, &field.name, model)
             {
@@ -2656,7 +2625,9 @@ impl TypeEnvironment {
         } = expr
         {
             match callee.as_ref() {
-                Expr::Ident(identifier) if !self.is_bound(&identifier.name) => {
+                Expr::Ident(identifier)
+                    if !self.is_bound(&identifier.name) && lookup(&identifier.name).is_none() =>
+                {
                     if let Some(identity) =
                         model.resolve_value(std::slice::from_ref(&identifier.name))
                         && let Some(signature) = signatures.function(&identity)
@@ -2689,8 +2660,13 @@ impl TypeEnvironment {
                     }
                 }
                 Expr::Field { object, field, .. } => {
-                    let receiver =
-                        self.infer_with_signatures(object, model, signatures, type_parameters);
+                    let receiver = self.infer_with_signatures_using_lookup(
+                        object,
+                        model,
+                        signatures,
+                        type_parameters,
+                        lookup,
+                    );
                     if let Some((signature, mut substitutions)) =
                         signatures.resolved_member(&receiver, &field.name, model)
                     {
@@ -2733,7 +2709,79 @@ impl TypeEnvironment {
             }
         }
         match expr {
-            Expr::As { dart_type, .. } | Expr::New { dart_type, .. } => model
+            Expr::FuncExpr {
+                type_params,
+                params,
+                body,
+                ..
+            } => {
+                let mut function_parameters = type_parameters.clone();
+                function_parameters.push(type_params, model);
+                let positional = params
+                    .positional()
+                    .map(|param| {
+                        param
+                            .param_type
+                            .as_ref()
+                            .map(|ty| model.resolve_type_in(ty, &function_parameters))
+                            .unwrap_or(ResolvedType::Dynamic)
+                    })
+                    .collect();
+                let named = params
+                    .named()
+                    .map(|param| {
+                        (
+                            param.name.name.clone(),
+                            param
+                                .param_type
+                                .as_ref()
+                                .map(|ty| model.resolve_type_in(ty, &function_parameters))
+                                .unwrap_or(ResolvedType::Dynamic),
+                        )
+                    })
+                    .collect();
+                let return_type = match body.as_ref() {
+                    FunctionBody::Arrow(expression, _) => self.infer_with_signatures_using_lookup(
+                        expression,
+                        model,
+                        signatures,
+                        &function_parameters,
+                        lookup,
+                    ),
+                    FunctionBody::Block(_) | FunctionBody::Native(_, _) => ResolvedType::Unknown,
+                };
+                ResolvedType::Function {
+                    return_type: Box::new(return_type),
+                    positional,
+                    named,
+                    nullable: false,
+                }
+            }
+            _ => self.infer(expr, model, type_parameters, lookup),
+        }
+    }
+
+    fn infer(
+        &self,
+        expr: &Expr,
+        model: &SemanticModel<'_>,
+        type_parameters: &TypeParameterScope,
+        lookup: &impl Fn(&str) -> Option<ResolvedType>,
+    ) -> ResolvedType {
+        match expr {
+            Expr::IntLit { .. } => model.core_type("int", false),
+            Expr::DoubleLit { .. } => model.core_type("double", false),
+            Expr::StringLit(_) => model.core_type("String", false),
+            Expr::BoolLit { .. } => model.core_type("bool", false),
+            Expr::NullLit { .. } => ResolvedType::Null,
+            Expr::Ident(identifier) => {
+                lookup(&identifier.name).unwrap_or_else(|| self.lookup(&identifier.name))
+            }
+            Expr::As { dart_type, .. } => model.resolve_type_in(dart_type, type_parameters),
+            Expr::NullAssert { operand, .. } => self
+                .infer(operand, model, type_parameters, lookup)
+                .with_nullable(false),
+            Expr::New { dart_type, .. } => model
                 .resolve_type_in(dart_type, type_parameters)
                 .with_nullable(false),
             Expr::List { type_arg, .. } => ResolvedType::Interface {
@@ -2776,105 +2824,6 @@ impl TypeEnvironment {
                 nullable: false,
                 extension_type: false,
             },
-            Expr::FuncExpr {
-                type_params,
-                params,
-                body,
-                ..
-            } => {
-                let mut function_parameters = type_parameters.clone();
-                function_parameters.push(type_params, model);
-                let positional = params
-                    .positional()
-                    .map(|param| {
-                        param
-                            .param_type
-                            .as_ref()
-                            .map(|ty| model.resolve_type_in(ty, &function_parameters))
-                            .unwrap_or(ResolvedType::Dynamic)
-                    })
-                    .collect();
-                let named = params
-                    .named()
-                    .map(|param| {
-                        (
-                            param.name.name.clone(),
-                            param
-                                .param_type
-                                .as_ref()
-                                .map(|ty| model.resolve_type_in(ty, &function_parameters))
-                                .unwrap_or(ResolvedType::Dynamic),
-                        )
-                    })
-                    .collect();
-                let return_type = match body.as_ref() {
-                    FunctionBody::Arrow(expression, _) => self.infer_with_signatures(
-                        expression,
-                        model,
-                        signatures,
-                        &function_parameters,
-                    ),
-                    FunctionBody::Block(_) | FunctionBody::Native(_, _) => ResolvedType::Unknown,
-                };
-                ResolvedType::Function {
-                    return_type: Box::new(return_type),
-                    positional,
-                    named,
-                    nullable: false,
-                }
-            }
-            _ => self.infer(expr, model),
-        }
-    }
-
-    pub fn infer(&self, expr: &Expr, model: &SemanticModel<'_>) -> ResolvedType {
-        match expr {
-            Expr::IntLit { .. } => model.core_type("int", false),
-            Expr::DoubleLit { .. } => model.core_type("double", false),
-            Expr::StringLit(_) => model.core_type("String", false),
-            Expr::BoolLit { .. } => model.core_type("bool", false),
-            Expr::NullLit { .. } => ResolvedType::Null,
-            Expr::Ident(identifier) => self.lookup(&identifier.name),
-            Expr::As { dart_type, .. } => model.resolve_type(dart_type),
-            Expr::NullAssert { operand, .. } => self.infer(operand, model).with_nullable(false),
-            Expr::New { dart_type, .. } => model.resolve_type(dart_type).with_nullable(false),
-            Expr::List { type_arg, .. } => ResolvedType::Interface {
-                identity: DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "List".to_string(),
-                },
-                arguments: vec![
-                    type_arg
-                        .as_ref()
-                        .map(|ty| model.resolve_type(ty))
-                        .unwrap_or(ResolvedType::Dynamic),
-                ],
-                nullable: false,
-                extension_type: false,
-            },
-            Expr::Set { type_arg, .. } => ResolvedType::Interface {
-                identity: DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "Set".to_string(),
-                },
-                arguments: vec![
-                    type_arg
-                        .as_ref()
-                        .map(|ty| model.resolve_type(ty))
-                        .unwrap_or(ResolvedType::Dynamic),
-                ],
-                nullable: false,
-                extension_type: false,
-            },
-            Expr::Map { type_args, .. } => ResolvedType::Interface {
-                identity: DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "Map".to_string(),
-                },
-                arguments: type_args.iter().map(|ty| model.resolve_type(ty)).collect(),
-                nullable: false,
-                extension_type: false,
-            },
             Expr::Binary {
                 op, left, right, ..
             } => match op {
@@ -2887,8 +2836,8 @@ impl TypeEnvironment {
                 | BinaryOp::And
                 | BinaryOp::Or => model.core_type("bool", false),
                 _ => {
-                    let left = self.infer(left, model);
-                    let right = self.infer(right, model);
+                    let left = self.infer(left, model, type_parameters, lookup);
+                    let right = self.infer(right, model, type_parameters, lookup);
                     if left == right {
                         left
                     } else {
@@ -2901,8 +2850,8 @@ impl TypeEnvironment {
                 else_expr,
                 ..
             } => {
-                let then_type = self.infer(then_expr, model);
-                let else_type = self.infer(else_expr, model);
+                let then_type = self.infer(then_expr, model, type_parameters, lookup);
+                let else_type = self.infer(else_expr, model, type_parameters, lookup);
                 if then_type == else_type {
                     then_type
                 } else {
@@ -3076,6 +3025,123 @@ mod tests {
     }
 
     #[test]
+    fn field_formal_signatures_include_fields_declared_after_constructors() {
+        with_model(
+            "class Value<T> { Value(this.value); final T value; T read() => value; }",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let identity = model.resolve_name(&["Value".to_string()]).unwrap();
+                let constructor = signatures.constructor(&identity, "new").unwrap();
+                let (parameters, field) = signatures.field(&identity, "value").unwrap();
+                assert_eq!(&constructor.owner_parameters, parameters);
+                assert_eq!(&constructor.positional[0], field);
+                assert_eq!(
+                    &signatures.member(&identity, "read").unwrap().return_type,
+                    field
+                );
+                let facts = signatures.declaration(&identity).unwrap();
+                assert_eq!(&facts.constructors[0].parameters[0].ty, field);
+            },
+        );
+    }
+
+    #[test]
+    fn inference_lookup_override_reaches_recursive_expressions() {
+        with_model(
+            "Object direct() => value; Object asserted() => value!; Object binary() => value + value; Object conditional() => true ? value : value; Object method() => value.toUpperCase(); Object closure() => () => value;",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let scope = TypeParameterScope::default();
+                let mut environment = TypeEnvironment::new();
+                environment.declare("value", model.core_type("int", false));
+                let expected = model.core_type("String", false);
+                let lookup = |name: &str| (name == "value").then(|| expected.clone());
+                for (index, declaration) in program.declarations.iter().enumerate() {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        panic!()
+                    };
+                    let Some(FunctionBody::Arrow(expression, _)) = function.body.as_ref() else {
+                        panic!()
+                    };
+                    let inferred = environment.infer_with_signatures_using_lookup(
+                        expression,
+                        model,
+                        &signatures,
+                        &scope,
+                        &lookup,
+                    );
+                    if index == 5 {
+                        let ResolvedType::Function { return_type, .. } = inferred else {
+                            panic!()
+                        };
+                        assert_eq!(*return_type, expected);
+                    } else {
+                        assert_eq!(inferred, expected);
+                    }
+                    if index == 0 {
+                        assert_eq!(
+                            environment.infer_with_signatures_using_lookup(
+                                expression,
+                                model,
+                                &signatures,
+                                &scope,
+                                &|_| Some(ResolvedType::Unknown),
+                            ),
+                            ResolvedType::Unknown,
+                        );
+                        assert!(
+                            environment
+                                .infer_with_signatures_using_lookup(
+                                    expression,
+                                    model,
+                                    &signatures,
+                                    &scope,
+                                    &|_| None,
+                                )
+                                .interface("dart:core", "int")
+                        );
+                    }
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn cast_inference_preserves_written_nullability_and_type_parameter_scope() {
+        with_model(
+            "int? nullable(Object? value) => value as int?; int nonNullable(Object value) => value as int; T? generic<T>(Object? value) => value as T?;",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                for (index, declaration) in program.declarations.iter().enumerate() {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        panic!()
+                    };
+                    let Some(FunctionBody::Arrow(expression, _)) = function.body.as_ref() else {
+                        panic!()
+                    };
+                    let mut scope = TypeParameterScope::default();
+                    scope.push(&function.type_params, model);
+                    let expected =
+                        model.resolve_type_in(function.return_type.as_ref().unwrap(), &scope);
+                    let environment = TypeEnvironment::new();
+                    assert_eq!(
+                        environment.infer(expression, model, &scope, &|_| None),
+                        expected
+                    );
+                    assert_eq!(
+                        environment.infer_with_signatures(expression, model, &signatures, &scope),
+                        expected,
+                    );
+                    assert_eq!(expected.nullable(), index != 1);
+                    if index == 2 {
+                        assert!(matches!(expected, ResolvedType::TypeParameter { .. }));
+                    }
+                }
+            },
+        );
+    }
+
+    #[test]
     fn inherited_method_calls_use_instantiated_return_types() {
         with_model(
             "class Base { int value() => 0; } class Child extends Base {} int inherited(Child child) => child.value(); class GenericBase<T> { T value() => throw UnimplementedError(); } class GenericChild extends GenericBase<int> {} int generic(GenericChild child) => child.value();",
@@ -3226,12 +3292,13 @@ mod tests {
 
     #[test]
     fn setter_does_not_overwrite_getter_return_type_index() {
-        with_model(
+        for source in [
             "class Value { String get value => ''; set value(num next) {} }",
-            |program, model| {
+            "class Value { set value(num next) {} String get value => ''; }",
+        ] {
+            with_model(source, |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let identity = model.resolve_name(&["Value".to_string()]).unwrap();
-
                 assert!(
                     signatures
                         .field(&identity, "value")
@@ -3239,8 +3306,8 @@ mod tests {
                         .1
                         .interface("dart:core", "String")
                 );
-            },
-        );
+            });
+        }
     }
 
     #[test]

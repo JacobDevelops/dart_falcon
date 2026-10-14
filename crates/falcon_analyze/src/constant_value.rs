@@ -1,9 +1,10 @@
 //! Conservative Dart constant evaluation used by semantic lint rules.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use falcon_syntax::ast::*;
 
+use crate::resolve::expression_segments;
 use crate::{DeclarationIdentity, ResolvedType, SemanticModel, SignatureIndex};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -50,6 +51,7 @@ impl Number {
     }
 }
 
+/// Evaluates an expression from the owner's declaring library, using `model` when the owner has no project file.
 pub fn evaluate_constant(
     expression: &Expr,
     owner: &DeclarationIdentity,
@@ -57,185 +59,256 @@ pub fn evaluate_constant(
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> Option<ConstantValue> {
-    constant_value(
-        expression,
-        owner,
-        fields,
-        model,
-        signatures,
-        &mut HashSet::new(),
-    )
+    ConstEvaluator::new(owner, fields, model, signatures).evaluate(expression)
 }
 
-fn constant_value(
-    expression: &Expr,
-    owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-    visiting: &mut HashSet<String>,
-) -> Option<ConstantValue> {
-    match expression {
-        Expr::IntLit { value, .. } => {
-            parse_int(value).map(|value| ConstantValue::Number(Number::Int(value)))
-        }
-        Expr::DoubleLit { value, .. } => value
-            .replace('_', "")
-            .parse::<f64>()
-            .ok()
-            .map(Number::from_float)
-            .map(ConstantValue::Number),
-        Expr::BoolLit { value, .. } => Some(ConstantValue::Bool(*value)),
-        Expr::NullLit { .. } => Some(ConstantValue::Null),
-        Expr::StringLit(value) => decode_string(value).map(ConstantValue::String),
-        Expr::Ident(identifier) => resolve_constant_name(
-            std::slice::from_ref(&identifier.name),
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum ConstantKey<'a> {
+    Field(&'a str),
+    TopLevel(DeclarationIdentity),
+}
+
+enum ConstantState {
+    Evaluating,
+    Evaluated(Option<ConstantValue>),
+}
+
+struct ConstEvaluator<'a, 'model> {
+    owner: &'a DeclarationIdentity,
+    fields: &'a HashMap<&'a str, &'a Expr>,
+    owner_model: SemanticModel<'model>,
+    model: SemanticModel<'model>,
+    unqualified_fields: bool,
+    signatures: &'a SignatureIndex,
+    constants: HashMap<ConstantKey<'a>, ConstantState>,
+}
+
+impl<'a, 'model> ConstEvaluator<'a, 'model> {
+    fn new(
+        owner: &'a DeclarationIdentity,
+        fields: &'a HashMap<&'a str, &'a Expr>,
+        model: &SemanticModel<'model>,
+        signatures: &'a SignatureIndex,
+    ) -> Self {
+        let model = model.for_declaration(owner).unwrap_or(*model);
+        Self {
             owner,
             fields,
+            owner_model: model,
             model,
+            unqualified_fields: true,
             signatures,
-            visiting,
-        ),
-        Expr::Field { .. } => resolve_constant_name(
-            &expression_name(expression)?,
-            owner,
-            fields,
-            model,
-            signatures,
-            visiting,
-        ),
-        Expr::Unary { op, operand, .. } => {
-            let value = constant_value(operand, owner, fields, model, signatures, visiting)?;
-            eval_unary(op, value)
+            constants: HashMap::new(),
         }
-        Expr::Binary {
-            op, left, right, ..
-        } => {
-            let left = constant_value(left, owner, fields, model, signatures, visiting)?;
-            if matches!(op, BinaryOp::NullCoalesce) {
-                return if left == ConstantValue::Null {
-                    constant_value(right, owner, fields, model, signatures, visiting)
-                } else {
-                    Some(left)
-                };
+    }
+
+    fn evaluate(&mut self, expression: &Expr) -> Option<ConstantValue> {
+        match expression {
+            Expr::IntLit { value, .. } => {
+                parse_int(value).map(|value| ConstantValue::Number(Number::Int(value)))
             }
-            let right = constant_value(right, owner, fields, model, signatures, visiting)?;
-            eval_binary(op, left, right)
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => match constant_value(condition, owner, fields, model, signatures, visiting)? {
-            ConstantValue::Bool(true) => {
-                constant_value(then_expr, owner, fields, model, signatures, visiting)
+            Expr::DoubleLit { value, .. } => value
+                .replace('_', "")
+                .parse::<f64>()
+                .ok()
+                .map(Number::from_float)
+                .map(ConstantValue::Number),
+            Expr::BoolLit { value, .. } => Some(ConstantValue::Bool(*value)),
+            Expr::NullLit { .. } => Some(ConstantValue::Null),
+            Expr::StringLit(value) => decode_string(value).map(ConstantValue::String),
+            Expr::Ident(identifier) => self.resolve_name(std::slice::from_ref(&identifier.name)),
+            Expr::Field { .. } => self.resolve_name(&expression_segments(expression, true)?),
+            Expr::Unary { op, operand, .. } => {
+                let value = self.evaluate(operand)?;
+                eval_unary(op, value)
             }
-            ConstantValue::Bool(false) => {
-                constant_value(else_expr, owner, fields, model, signatures, visiting)
-            }
-            _ => None,
-        },
-        Expr::New {
-            is_const,
-            dart_type,
-            constructor_name,
-            args,
-            ..
-        } => {
-            if !is_const {
-                return None;
-            }
-            let identity = match model.resolve_type(dart_type) {
-                ResolvedType::Interface { identity, .. } => identity,
-                _ => return None,
-            };
-            let constructor = constructor_name
-                .as_ref()
-                .map_or("new", |name| name.name.as_str());
-            constant_call(
-                const_constructor_identity(identity, constructor, signatures)?,
-                args,
-                owner,
-                fields,
-                model,
-                signatures,
-                visiting,
-            )
-        }
-        Expr::Call { callee, args, .. } => {
-            let (identity, constructor) = resolve_call_constructor(callee, model)?;
-            constant_call(
-                const_constructor_identity(identity, &constructor, signatures)?,
-                args,
-                owner,
-                fields,
-                model,
-                signatures,
-                visiting,
-            )
-        }
-        Expr::List { elements, .. } => {
-            plain_collection(elements, owner, fields, model, signatures, visiting)
-                .map(ConstantValue::List)
-        }
-        Expr::Set { elements, .. } => {
-            let mut values =
-                plain_collection(elements, owner, fields, model, signatures, visiting)?;
-            values.sort();
-            values.dedup();
-            Some(ConstantValue::Set(values))
-        }
-        Expr::Map { elements, .. } => {
-            let mut values = elements
-                .iter()
-                .map(|element| {
-                    let MapElement::Entry(entry) = element else {
-                        return None;
+            Expr::Binary {
+                op, left, right, ..
+            } => {
+                let left = self.evaluate(left)?;
+                if matches!(op, BinaryOp::NullCoalesce) {
+                    return if left == ConstantValue::Null {
+                        self.evaluate(right)
+                    } else {
+                        Some(left)
                     };
-                    Some((
-                        constant_value(&entry.key, owner, fields, model, signatures, visiting)?,
-                        constant_value(&entry.value, owner, fields, model, signatures, visiting)?,
-                    ))
-                })
-                .collect::<Option<Vec<_>>>()?;
-            values.sort();
-            Some(ConstantValue::Map(values))
+                }
+                let right = self.evaluate(right)?;
+                eval_binary(op, left, right)
+            }
+            Expr::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => match self.evaluate(condition)? {
+                ConstantValue::Bool(true) => self.evaluate(then_expr),
+                ConstantValue::Bool(false) => self.evaluate(else_expr),
+                _ => None,
+            },
+            Expr::New {
+                is_const,
+                dart_type,
+                constructor_name,
+                args,
+                ..
+            } => {
+                if !is_const {
+                    return None;
+                }
+                let identity = match self.model.resolve_type(dart_type) {
+                    ResolvedType::Interface { identity, .. } => identity,
+                    _ => return None,
+                };
+                let constructor = constructor_name
+                    .as_ref()
+                    .map_or("new", |name| name.name.as_str());
+                self.call(
+                    const_constructor_identity(identity, constructor, self.signatures)?,
+                    args,
+                )
+            }
+            Expr::Call { callee, args, .. } => {
+                let (identity, constructor) = resolve_call_constructor(callee, &self.model)?;
+                self.call(
+                    const_constructor_identity(identity, &constructor, self.signatures)?,
+                    args,
+                )
+            }
+            Expr::List { elements, .. } => self.collection(elements).map(ConstantValue::List),
+            Expr::Set { elements, .. } => {
+                let mut values = self.collection(elements)?;
+                values.sort();
+                values.dedup();
+                Some(ConstantValue::Set(values))
+            }
+            Expr::Map { elements, .. } => {
+                let mut values = elements
+                    .iter()
+                    .map(|element| {
+                        let MapElement::Entry(entry) = element else {
+                            return None;
+                        };
+                        Some((self.evaluate(&entry.key)?, self.evaluate(&entry.value)?))
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                values.sort();
+                Some(ConstantValue::Map(values))
+            }
+            Expr::Record { fields: values, .. } => {
+                let mut values = values
+                    .iter()
+                    .map(|field| {
+                        Some((
+                            field.name.as_ref().map(|name| name.name.clone()),
+                            self.evaluate(&field.value)?,
+                        ))
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                let positional = values.iter().take_while(|(name, _)| name.is_none()).count();
+                values[positional..].sort();
+                Some(ConstantValue::Record(values))
+            }
+            Expr::NullAssert { operand, .. } => {
+                let value = self.evaluate(operand)?;
+                (value != ConstantValue::Null).then_some(value)
+            }
+            Expr::This { .. }
+            | Expr::Super { .. }
+            | Expr::PostfixIncDec { .. }
+            | Expr::Assign { .. }
+            | Expr::Is { .. }
+            | Expr::As { .. }
+            | Expr::Index { .. }
+            | Expr::Cascade { .. }
+            | Expr::FuncExpr { .. }
+            | Expr::DotShorthand { .. }
+            | Expr::Await { .. }
+            | Expr::Throw { .. }
+            | Expr::Switch { .. }
+            | Expr::SymbolLit { .. }
+            | Expr::GenericInstantiation { .. }
+            | Expr::Error { .. } => None,
         }
-        Expr::Record { fields: values, .. } => {
-            let mut values = values
-                .iter()
-                .map(|field| {
-                    Some((
-                        field.name.as_ref().map(|name| name.name.clone()),
-                        constant_value(&field.value, owner, fields, model, signatures, visiting)?,
-                    ))
-                })
-                .collect::<Option<Vec<_>>>()?;
-            let positional = values.iter().take_while(|(name, _)| name.is_none()).count();
-            values[positional..].sort();
-            Some(ConstantValue::Record(values))
+    }
+
+    fn resolve_name(&mut self, names: &[String]) -> Option<ConstantValue> {
+        let local_name = names.last()?;
+        let local_owner = if names.len() == 1 {
+            self.unqualified_fields
+        } else {
+            self.model.resolve_name(&names[..names.len() - 1]).as_ref() == Some(self.owner)
+        };
+        if local_owner
+            && let Some((&name, &expression)) = self.fields.get_key_value(local_name.as_str())
+        {
+            return self.initializer(ConstantKey::Field(name), expression, Some(self.owner_model));
         }
-        Expr::NullAssert { operand, .. } => {
-            let value = constant_value(operand, owner, fields, model, signatures, visiting)?;
-            (value != ConstantValue::Null).then_some(value)
+        let identity = self.model.resolve_value(names)?;
+        let expression = self.signatures.constant_initializer(&identity)?;
+        let model = self.model.for_declaration(&identity)?;
+        self.initializer(ConstantKey::TopLevel(identity), expression, Some(model))
+    }
+
+    fn initializer(
+        &mut self,
+        key: ConstantKey<'a>,
+        expression: &Expr,
+        model: Option<SemanticModel<'model>>,
+    ) -> Option<ConstantValue> {
+        if let Some(state) = self.constants.get(&key) {
+            return match state {
+                ConstantState::Evaluating => None,
+                ConstantState::Evaluated(value) => value.clone(),
+            };
         }
-        Expr::This { .. }
-        | Expr::Super { .. }
-        | Expr::PostfixIncDec { .. }
-        | Expr::Assign { .. }
-        | Expr::Is { .. }
-        | Expr::As { .. }
-        | Expr::Index { .. }
-        | Expr::Cascade { .. }
-        | Expr::FuncExpr { .. }
-        | Expr::DotShorthand { .. }
-        | Expr::Await { .. }
-        | Expr::Throw { .. }
-        | Expr::Switch { .. }
-        | Expr::SymbolLit { .. }
-        | Expr::GenericInstantiation { .. }
-        | Expr::Error { .. } => None,
+        self.constants
+            .insert(key.clone(), ConstantState::Evaluating);
+        let previous = model.map(|model| {
+            (
+                std::mem::replace(&mut self.model, model),
+                std::mem::replace(
+                    &mut self.unqualified_fields,
+                    matches!(key, ConstantKey::Field(_)),
+                ),
+            )
+        });
+        let value = self.evaluate(expression);
+        if let Some((model, unqualified_fields)) = previous {
+            self.model = model;
+            self.unqualified_fields = unqualified_fields;
+        }
+        self.constants
+            .insert(key, ConstantState::Evaluated(value.clone()));
+        value
+    }
+
+    fn collection(&mut self, elements: &[CollectionElement]) -> Option<Vec<ConstantValue>> {
+        elements
+            .iter()
+            .map(|element| match element {
+                CollectionElement::Expr(expression) => self.evaluate(expression),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn call(&mut self, callee: String, args: &ArgList) -> Option<ConstantValue> {
+        let positional = args
+            .positional
+            .iter()
+            .map(|argument| self.evaluate(argument))
+            .collect::<Option<Vec<_>>>()?;
+        let mut named = args
+            .named
+            .iter()
+            .map(|argument| {
+                self.evaluate(&argument.value)
+                    .map(|value| (argument.name.name.clone(), value))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        named.sort();
+        Some(ConstantValue::Instance(callee, positional, named))
     }
 }
 
@@ -292,70 +365,11 @@ fn decode_string(node: &StringLitNode) -> Option<String> {
     Some(output)
 }
 
-fn resolve_constant_name(
-    names: &[String],
-    owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-    visiting: &mut HashSet<String>,
-) -> Option<ConstantValue> {
-    let local_name = names.last()?;
-    let local_owner = if names.len() == 1 {
-        true
-    } else {
-        model.resolve_name(&names[..names.len() - 1]).as_ref() == Some(owner)
-    };
-    if local_owner && let Some(expression) = fields.get(local_name.as_str()) {
-        let key = format!("field:{local_name}");
-        if !visiting.insert(key.clone()) {
-            return None;
-        }
-        let value = constant_value(expression, owner, fields, model, signatures, visiting);
-        visiting.remove(&key);
-        return value;
-    }
-    let identity = model.resolve_value(names)?;
-    let key = format!("top:{identity:?}");
-    if !visiting.insert(key.clone()) {
-        return None;
-    }
-    let value = constant_value(
-        signatures.constant_initializer(&identity)?,
-        owner,
-        fields,
-        model,
-        signatures,
-        visiting,
-    );
-    visiting.remove(&key);
-    value
-}
-
-fn plain_collection(
-    elements: &[CollectionElement],
-    owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-    visiting: &mut HashSet<String>,
-) -> Option<Vec<ConstantValue>> {
-    elements
-        .iter()
-        .map(|element| match element {
-            CollectionElement::Expr(expression) => {
-                constant_value(expression, owner, fields, model, signatures, visiting)
-            }
-            _ => None,
-        })
-        .collect()
-}
-
 fn resolve_call_constructor(
     callee: &Expr,
     model: &SemanticModel<'_>,
 ) -> Option<(DeclarationIdentity, String)> {
-    let mut segments = expression_name(callee)?;
+    let mut segments = expression_segments(callee, true)?;
     if let Some(identity) = model.resolve_name(&segments) {
         return Some((identity, "new".to_string()));
     }
@@ -376,32 +390,6 @@ fn const_constructor_identity(
         .iter()
         .find(|facts| facts.name == constructor && facts.is_const)?;
     Some(format!("{identity:?}::{constructor}"))
-}
-
-fn constant_call(
-    callee: String,
-    args: &ArgList,
-    owner: &DeclarationIdentity,
-    fields: &HashMap<&str, &Expr>,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-    visiting: &mut HashSet<String>,
-) -> Option<ConstantValue> {
-    let positional = args
-        .positional
-        .iter()
-        .map(|argument| constant_value(argument, owner, fields, model, signatures, visiting))
-        .collect::<Option<Vec<_>>>()?;
-    let mut named = args
-        .named
-        .iter()
-        .map(|argument| {
-            constant_value(&argument.value, owner, fields, model, signatures, visiting)
-                .map(|value| (argument.name.name.clone(), value))
-        })
-        .collect::<Option<Vec<_>>>()?;
-    named.sort();
-    Some(ConstantValue::Instance(callee, positional, named))
 }
 
 fn eval_unary(op: &UnaryOp, value: ConstantValue) -> Option<ConstantValue> {
@@ -522,26 +510,6 @@ pub fn parse_int(value: &str) -> Option<i128> {
     }
 }
 
-fn expression_name(expression: &Expr) -> Option<Vec<String>> {
-    let mut current = expression;
-    let mut names = Vec::new();
-    loop {
-        match current {
-            Expr::Ident(identifier) => {
-                names.push(identifier.name.clone());
-                names.reverse();
-                return Some(names);
-            }
-            Expr::Field { object, field, .. } => {
-                names.push(field.name.clone());
-                current = object;
-            }
-            Expr::GenericInstantiation { target, .. } => current = target,
-            _ => return None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -584,6 +552,14 @@ final explicitNonConst = new ConstBox<int>(1);
 const implicitNonConst = MutableBox<int>(1);
 final explicitConst = const ConstBox<int>(1);
 const implicitConst = ConstBox<int>(1);
+const cycleA = cycleB;
+const cycleB = cycleA;
+const leaf = 2;
+const repeated = leaf + leaf;
+class Foo { static const a = 1; }
+const a = 2;
+const b = a;
+const qualifiedOwner = Foo.a;
 "#;
         let path = PathBuf::from("/project/lib/main.dart");
         let (program, errors) = parse(source);
@@ -651,6 +627,164 @@ const implicitConst = ConstBox<int>(1);
                 ));
             }
         });
+    }
+
+    #[test]
+    fn constant_cycles_stop_without_rejecting_repeated_references() {
+        with_constants(|program, model, signatures| {
+            assert_eq!(evaluate_named(program, model, signatures, "cycleA"), None);
+            assert_eq!(
+                evaluate_named(program, model, signatures, "repeated"),
+                Some(ConstantValue::Number(Number::Int(4)))
+            );
+        });
+    }
+
+    #[test]
+    fn top_level_initializers_do_not_capture_class_fields() {
+        with_constants(|program, model, signatures| {
+            let field = program
+                .declarations
+                .iter()
+                .find_map(|declaration| {
+                    let TopLevelDecl::Class(class) = declaration else {
+                        return None;
+                    };
+                    if class.name.name != "Foo" {
+                        return None;
+                    }
+                    class.members.iter().find_map(|member| {
+                        let ClassMember::Field(field) = member else {
+                            return None;
+                        };
+                        field.declarators.first()?.initializer.as_ref()
+                    })
+                })
+                .unwrap();
+            let owner = model.resolve_name(&["Foo".into()]).unwrap();
+            let fields = HashMap::from([("a", field)]);
+            let mut evaluator = ConstEvaluator::new(&owner, &fields, model, signatures);
+            assert_eq!(
+                evaluator.resolve_name(&["b".into()]),
+                Some(ConstantValue::Number(Number::Int(2)))
+            );
+            assert_eq!(
+                evaluator.resolve_name(&["qualifiedOwner".into()]),
+                Some(ConstantValue::Number(Number::Int(1)))
+            );
+            assert_eq!(
+                evaluator.resolve_name(&["a".into()]),
+                Some(ConstantValue::Number(Number::Int(1)))
+            );
+        });
+    }
+
+    #[test]
+    fn completed_constants_are_reused() {
+        with_constants(|_, model, signatures| {
+            let owner = model.resolve_value(&["repeated".into()]).unwrap();
+            let fields = HashMap::new();
+            let expression = signatures.constant_initializer(&owner).unwrap();
+            let mut evaluator = ConstEvaluator::new(&owner, &fields, model, signatures);
+            let expected = Some(ConstantValue::Number(Number::Int(4)));
+            assert_eq!(evaluator.evaluate(expression), expected);
+            assert_eq!(evaluator.constants.len(), 1);
+            assert_eq!(evaluator.evaluate(expression), expected);
+            assert_eq!(evaluator.constants.len(), 1);
+            assert!(matches!(
+                evaluator.constants.values().next(),
+                Some(ConstantState::Evaluated(Some(ConstantValue::Number(
+                    Number::Int(2)
+                ))))
+            ));
+        });
+    }
+
+    #[test]
+    fn imported_constants_resolve_private_names_in_their_declaring_library() {
+        let inputs = [
+            (
+                PathBuf::from("/project/lib/origin.dart"),
+                "import 'box.dart' as box; const _y = 2; const x = _y; class Foo { static const a = _y; static const boxed = box.ConstBox(_y); static const c = qualified; } const qualified = Foo.a;",
+            ),
+            (
+                PathBuf::from("/project/lib/main.dart"),
+                "import 'origin.dart' as origin; const _y = 1; const value = origin.x;",
+            ),
+            (
+                PathBuf::from("/project/lib/box.dart"),
+                "class ConstBox { final int value; const ConstBox(this.value); }",
+            ),
+        ];
+        let programs: Vec<_> = inputs
+            .iter()
+            .map(|(_, source)| {
+                let (program, errors) = parse(source);
+                assert!(errors.is_empty(), "{errors:?}");
+                program
+            })
+            .collect();
+        let sources: Vec<_> = inputs
+            .iter()
+            .zip(&programs)
+            .map(|((path, _), program)| IdentitySource {
+                path,
+                program,
+                has_parse_errors: false,
+            })
+            .collect();
+        let identities = IdentityIndex::from_project_files(&sources, &[]);
+        let types = TypeIndex::from_program(&programs[0]);
+        let files: Vec<_> = inputs
+            .iter()
+            .zip(&programs)
+            .map(|((path, _), program)| (path.clone(), program))
+            .collect();
+        let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
+        let model = SemanticModel::new(&inputs[1].0, &identities, Some(&types));
+        assert_eq!(
+            evaluate_named(&programs[1], &model, &signatures, "value"),
+            Some(ConstantValue::Number(Number::Int(2)))
+        );
+        let owner = model
+            .resolve_name(&["origin".into(), "Foo".into()])
+            .unwrap();
+        let class = programs[0]
+            .declarations
+            .iter()
+            .find_map(|declaration| {
+                let TopLevelDecl::Class(class) = declaration else {
+                    return None;
+                };
+                (class.name.name == "Foo").then_some(class)
+            })
+            .unwrap();
+        let fields: HashMap<_, _> = class
+            .members
+            .iter()
+            .filter_map(|member| {
+                let ClassMember::Field(field) = member else {
+                    return None;
+                };
+                Some(field.declarators.iter().filter_map(|declarator| {
+                    Some((
+                        declarator.name.name.as_str(),
+                        declarator.initializer.as_ref()?,
+                    ))
+                }))
+            })
+            .flatten()
+            .collect();
+        for name in ["a", "c"] {
+            assert_eq!(
+                evaluate_constant(fields[name], &owner, &fields, &model, &signatures),
+                Some(ConstantValue::Number(Number::Int(2)))
+            );
+        }
+        assert!(matches!(
+            evaluate_constant(fields["boxed"], &owner, &fields, &model, &signatures),
+            Some(ConstantValue::Instance(..))
+        ));
     }
 
     #[test]

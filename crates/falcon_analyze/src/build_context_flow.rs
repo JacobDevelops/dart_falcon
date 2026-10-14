@@ -7,24 +7,48 @@ use crate::{
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, bound_names, walk_expr};
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct BindingId(usize);
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum Token {
+    State,
+    This,
+    Binding(BindingId),
+    Unbound(Box<str>),
+    Field(Box<Token>, Box<str>),
+}
+
+impl Token {
+    fn rooted_at(&self, root: &Self) -> bool {
+        self == root || matches!(self, Self::Field(parent, _) if parent.rooted_at(root))
+    }
+
+    fn binding(&self) -> Option<BindingId> {
+        match self {
+            Self::Binding(binding) => Some(*binding),
+            Self::Field(parent, _) => parent.binding(),
+            Self::State | Self::This | Self::Unbound(_) => None,
+        }
+    }
+}
+
 #[derive(Clone, Default, PartialEq, Eq)]
 struct State {
-    after_gap: bool,
-    mounted: HashSet<String>,
-    inferred_types: HashMap<String, Vec<ResolvedType>>,
+    mounted: Option<HashSet<Token>>,
+    inferred_types: HashMap<BindingId, Vec<ResolvedType>>,
 }
 
 impl State {
     fn join(left: &Self, right: &Self) -> Self {
-        let mounted = match (left.after_gap, right.after_gap) {
-            (true, true) => left.mounted.intersection(&right.mounted).cloned().collect(),
-            (true, false) => left.mounted.clone(),
-            (false, true) => right.mounted.clone(),
-            (false, false) => HashSet::new(),
+        let mounted = match (&left.mounted, &right.mounted) {
+            (Some(left), Some(right)) => Some(left.intersection(right).cloned().collect()),
+            (Some(mounted), None) | (None, Some(mounted)) => Some(mounted.clone()),
+            (None, None) => None,
         };
         let mut inferred_types = left.inferred_types.clone();
         for (binding, types) in &right.inferred_types {
-            let joined = inferred_types.entry(binding.clone()).or_default();
+            let joined = inferred_types.entry(*binding).or_default();
             for ty in types {
                 if !joined.contains(ty) {
                     joined.push(ty.clone());
@@ -32,10 +56,19 @@ impl State {
             }
         }
         Self {
-            after_gap: left.after_gap || right.after_gap,
             mounted,
             inferred_types,
         }
+    }
+
+    fn assume(&mut self, tokens: HashSet<Token>) {
+        if let Some(mounted) = &mut self.mounted {
+            mounted.extend(tokens);
+        }
+    }
+
+    fn gap(&mut self) {
+        self.mounted = Some(HashSet::new());
     }
 }
 
@@ -91,16 +124,16 @@ impl Outcome {
 
 #[derive(Default)]
 struct Guard {
-    when_true: HashSet<String>,
-    when_false: HashSet<String>,
+    when_true: HashSet<Token>,
+    when_false: HashSet<Token>,
 }
 
 pub struct BuildContextFlowAnalyzer<'a> {
     model: &'a SemanticModel<'a>,
     signatures: &'a SignatureIndex,
     environment: TypeEnvironment,
-    binding_scopes: Vec<HashMap<String, String>>,
-    inferred_bindings: HashSet<String>,
+    binding_scopes: Vec<HashMap<String, BindingId>>,
+    inferred_bindings: HashSet<BindingId>,
     next_binding_id: usize,
     type_parameters: TypeParameterScope,
     state_class: bool,
@@ -171,11 +204,11 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         self.binding_scopes.pop();
     }
 
-    fn bind_name(&mut self, name: &str) -> String {
-        let token = format!("{name}#{}", self.next_binding_id);
+    fn bind_name(&mut self, name: &str) -> BindingId {
+        let token = BindingId(self.next_binding_id);
         self.next_binding_id += 1;
         if let Some(scope) = self.binding_scopes.last_mut() {
-            scope.insert(name.to_string(), token.clone());
+            scope.insert(name.to_string(), token);
         }
         token
     }
@@ -187,19 +220,26 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
 
     fn declare_inferred(&mut self, name: String, ty: ResolvedType, state: &mut State) {
         let token = self.bind_name(&name);
-        self.inferred_bindings.insert(token.clone());
+        self.inferred_bindings.insert(token);
         state.inferred_types.insert(token, vec![ty.clone()]);
         self.environment.declare(name, ty);
     }
 
     fn mark_inferred(&mut self, name: &str, ty: ResolvedType, state: &mut State) {
-        let token = self.binding_token(name);
-        self.inferred_bindings.insert(token.clone());
-        state.inferred_types.insert(token, vec![ty]);
+        if let Some(token) = self
+            .binding_scopes
+            .last()
+            .and_then(|scope| scope.get(name))
+            .copied()
+        {
+            self.inferred_bindings.insert(token);
+            state.inferred_types.insert(token, vec![ty]);
+        }
     }
 
     fn is_inferred(&self, name: &str) -> bool {
-        self.inferred_bindings.contains(&self.binding_token(name))
+        self.binding_id(name)
+            .is_some_and(|binding| self.inferred_bindings.contains(&binding))
     }
 
     fn is_bound_in_current_scope(&self, name: &str) -> bool {
@@ -214,13 +254,17 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         }
     }
 
-    fn binding_token(&self, name: &str) -> String {
+    fn binding_id(&self, name: &str) -> Option<BindingId> {
         self.binding_scopes
             .iter()
             .rev()
             .find_map(|scope| scope.get(name))
-            .cloned()
-            .unwrap_or_else(|| name.to_string())
+            .copied()
+    }
+
+    fn binding_token(&self, name: &str) -> Token {
+        self.binding_id(name)
+            .map_or_else(|| Token::Unbound(name.into()), Token::Binding)
     }
 
     fn function_body(&mut self, body: &FunctionBody, mut state: State) -> Outcome {
@@ -240,9 +284,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         type_params: &[TypeParam],
         body: &FunctionBody,
     ) {
-        let saved_environment = self.environment.clone();
-        let saved_bindings = self.binding_scopes.clone();
-        let saved_inferred = self.inferred_bindings.clone();
+        let first_nested_binding = self.next_binding_id;
         let saved_parameters = self.type_parameters.clone();
         self.type_parameters.push(type_params, self.model);
         self.push_scope();
@@ -250,40 +292,30 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             .bind_params(params, self.model, &self.type_parameters);
         self.bind_param_names(params);
         self.function_body(body, State::default());
-        self.environment = saved_environment;
-        self.binding_scopes = saved_bindings;
-        self.inferred_bindings = saved_inferred;
+        self.pop_scope();
+        self.inferred_bindings
+            .retain(|binding| binding.0 < first_nested_binding);
         self.type_parameters = saved_parameters;
     }
 
-    fn flow_environment(&self, state: &State) -> TypeEnvironment {
-        let mut environment = self.environment.clone();
-        let mut visible = HashSet::new();
-        for scope in self.binding_scopes.iter().rev() {
-            for (name, token) in scope {
-                if !visible.insert(name) {
-                    continue;
-                }
-                if let Some(types) = state.inferred_types.get(token) {
-                    let ty = types
-                        .iter()
-                        .find(|ty| self.is_build_context(ty))
-                        .or_else(|| types.first())
-                        .cloned()
-                        .unwrap_or(ResolvedType::Unknown);
-                    environment.assign(name, ty);
-                }
-            }
-        }
-        environment
-    }
-
     fn infer_type(&self, expression: &Expr, state: &State) -> ResolvedType {
-        self.flow_environment(state).infer_with_signatures(
+        self.environment.infer_with_signatures_using_lookup(
             expression,
             self.model,
             self.signatures,
             &self.type_parameters,
+            &|name| {
+                self.binding_id(name)
+                    .and_then(|binding| state.inferred_types.get(&binding))
+                    .map(|types| {
+                        types
+                            .iter()
+                            .find(|ty| self.is_build_context(ty))
+                            .or_else(|| types.first())
+                            .cloned()
+                            .unwrap_or(ResolvedType::Unknown)
+                    })
+            },
         )
     }
 
@@ -560,8 +592,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             }
             Stmt::Yield(statement) => {
                 self.expression(&statement.value, &mut state);
-                state.after_gap = true;
-                state.mounted.clear();
+                state.gap();
                 Outcome::normal(state)
             }
             Stmt::Labeled(statement) => match statement.stmt.as_ref() {
@@ -633,10 +664,10 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                     self.expression(guard, &mut then_state);
                     let guard_false = {
                         let mut state = then_state.clone();
-                        state.mounted.extend(guards.when_false);
+                        state.assume(guards.when_false);
                         state
                     };
-                    then_state.mounted.extend(guards.when_true);
+                    then_state.assume(guards.when_true);
                     else_state = State::join(&else_state, &guard_false);
                 }
                 let then_out = self.statement(&statement.then_branch, then_state);
@@ -651,10 +682,10 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                 let guards = self.guard(condition, &state);
                 self.expression(condition, &mut state);
                 let mut then_state = state.clone();
-                then_state.mounted.extend(guards.when_true);
+                then_state.assume(guards.when_true);
                 let then_out = self.scoped_statement(&statement.then_branch, then_state);
                 let mut else_state = state;
-                else_state.mounted.extend(guards.when_false);
+                else_state.assume(guards.when_false);
                 let else_out = match &statement.else_branch {
                     Some(branch) => self.scoped_statement(branch, else_state),
                     None => Outcome::normal(else_state),
@@ -671,9 +702,9 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         let mut condition_state = state.clone();
         self.expression(&statement.condition, &mut condition_state);
         let mut condition_exit = condition_state.clone();
-        condition_exit.mounted.extend(guards.when_false.clone());
+        condition_exit.assume(guards.when_false.clone());
         let mut body_input = condition_state;
-        body_input.mounted.extend(guards.when_true.clone());
+        body_input.assume(guards.when_true.clone());
         let first = self.scoped_statement(&statement.body, body_input);
         let (backedge, break_state, mut abrupt) = loop_paths(first, label);
         let mut exits = vec![condition_exit];
@@ -687,9 +718,9 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                 let mut repeated_condition = backedge;
                 self.expression(&statement.condition, &mut repeated_condition);
                 let mut repeated_exit = repeated_condition.clone();
-                repeated_exit.mounted.extend(guards.when_false);
+                repeated_exit.assume(guards.when_false);
                 exits.push(repeated_exit);
-                repeated_condition.mounted.extend(guards.when_true);
+                repeated_condition.assume(guards.when_true);
                 let repeated = self.scoped_statement(&statement.body, repeated_condition);
                 let (_, repeated_break, repeated_abrupt) = loop_paths(repeated, label);
                 for (exit, state) in repeated_abrupt {
@@ -724,13 +755,13 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         if let Some(mut condition_state) = backedge {
             self.expression(&statement.condition, &mut condition_state);
             let mut condition_exit = condition_state.clone();
-            condition_exit.mounted.extend(guards.when_false.clone());
+            condition_exit.assume(guards.when_false.clone());
             exits.push(condition_exit);
             if !reanalyze {
                 exits.push(gap_state(condition_state));
             } else {
                 let mut repeated_input = condition_state;
-                repeated_input.mounted.extend(guards.when_true.clone());
+                repeated_input.assume(guards.when_true.clone());
                 let repeated = self.scoped_statement(&statement.body, repeated_input);
                 let (repeated_backedge, repeated_break, repeated_abrupt) =
                     loop_paths(repeated, label);
@@ -742,7 +773,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                 }
                 if let Some(mut repeated_condition) = repeated_backedge {
                     self.expression(&statement.condition, &mut repeated_condition);
-                    repeated_condition.mounted.extend(guards.when_false);
+                    repeated_condition.assume(guards.when_false);
                     exits.push(repeated_condition);
                 }
             }
@@ -793,8 +824,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         self.push_scope();
         let reanalyze = self.enter_loop();
         if statement.is_await {
-            state.after_gap = true;
-            state.mounted.clear();
+            state.gap();
         }
         if let Some(init) = &statement.init {
             state = self.for_init(init, state);
@@ -813,9 +843,9 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             self.expression(condition, &mut state);
         }
         let mut condition_exit = state.clone();
-        condition_exit.mounted.extend(guards.when_false.clone());
+        condition_exit.assume(guards.when_false.clone());
         let mut body_input = state;
-        body_input.mounted.extend(guards.when_true.clone());
+        body_input.assume(guards.when_true.clone());
         let first = self.scoped_statement(&statement.body, body_input);
         let (backedge, break_state, mut abrupt) = loop_paths(first, label);
         let mut exits = Vec::new();
@@ -836,12 +866,12 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                     self.expression(condition, &mut repeated_condition);
                 }
                 let mut repeated_exit = repeated_condition.clone();
-                repeated_exit.mounted.extend(guards.when_false);
+                repeated_exit.assume(guards.when_false);
                 if may_skip_body {
                     exits.push(repeated_exit);
                 }
                 let mut repeated_input = repeated_condition;
-                repeated_input.mounted.extend(guards.when_true);
+                repeated_input.assume(guards.when_true);
                 let repeated = self.scoped_statement(&statement.body, repeated_input);
                 let (_, repeated_break, repeated_abrupt) = loop_paths(repeated, label);
                 for (exit, state) in repeated_abrupt {
@@ -937,9 +967,9 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                             let mut guard_state = label_input.clone();
                             self.expression(guard, &mut guard_state);
                             let mut body_state = guard_state.clone();
-                            body_state.mounted.extend(guards.when_true);
+                            body_state.assume(guards.when_true);
                             body_inputs.push(body_state);
-                            guard_state.mounted.extend(guards.when_false);
+                            guard_state.assume(guards.when_false);
                             label_input = if irrefutable {
                                 guard_state
                             } else {
@@ -1007,7 +1037,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             exits.push(unmatched);
         }
         let mut processed_jumps = HashMap::<String, State>::new();
-        while let Some((target, jump_state)) = pending_jumps.pop() {
+        while let Some((target, mut jump_state)) = pending_jumps.pop() {
             let Some(case) = statement.cases.iter().find(|case| {
                 case.labels
                     .iter()
@@ -1016,6 +1046,17 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                 push_abrupt_path(&mut abrupt, Exit::Continue(Some(target)), jump_state);
                 continue;
             };
+            let is_live = |binding: BindingId| {
+                self.binding_scopes
+                    .iter()
+                    .any(|scope| scope.values().any(|id| *id == binding))
+            };
+            jump_state
+                .inferred_types
+                .retain(|binding, _| is_live(*binding));
+            if let Some(mounted) = &mut jump_state.mounted {
+                mounted.retain(|token| token.binding().is_none_or(is_live));
+            }
             let jump_state = match processed_jumps.get(&target) {
                 Some(current) => {
                     let joined = State::join(current, &jump_state);
@@ -1071,38 +1112,30 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                 }
             }
             Expr::Binary {
-                op: BinaryOp::And,
+                op: op @ (BinaryOp::And | BinaryOp::Or),
                 left,
                 right,
                 ..
             } => {
-                let left = self.guard(left, state);
-                let right = self.guard(right, state);
-                Guard {
+                let mut left = self.guard(left, state);
+                let mut right = self.guard(right, state);
+                let is_or = matches!(op, BinaryOp::Or);
+                if is_or {
+                    std::mem::swap(&mut left.when_true, &mut left.when_false);
+                    std::mem::swap(&mut right.when_true, &mut right.when_false);
+                }
+                let mut guard = Guard {
                     when_true: left.when_true.union(&right.when_true).cloned().collect(),
                     when_false: left
                         .when_false
                         .intersection(&right.when_false)
                         .cloned()
                         .collect(),
+                };
+                if is_or {
+                    std::mem::swap(&mut guard.when_true, &mut guard.when_false);
                 }
-            }
-            Expr::Binary {
-                op: BinaryOp::Or,
-                left,
-                right,
-                ..
-            } => {
-                let left = self.guard(left, state);
-                let right = self.guard(right, state);
-                Guard {
-                    when_true: left
-                        .when_true
-                        .intersection(&right.when_true)
-                        .cloned()
-                        .collect(),
-                    when_false: left.when_false.union(&right.when_false).cloned().collect(),
-                }
+                guard
             }
             Expr::Binary {
                 op, left, right, ..
@@ -1128,14 +1161,14 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         }
     }
 
-    fn mounted_token(&self, expression: &Expr, state: &State) -> Option<String> {
+    fn mounted_token(&self, expression: &Expr, state: &State) -> Option<Token> {
         match expression {
             Expr::Ident(identifier)
                 if identifier.name == "mounted"
                     && self.state_class
                     && !self.environment.is_bound("mounted") =>
             {
-                Some("$state".to_string())
+                Some(Token::State)
             }
             Expr::Field { object, field, .. } if field.name == "mounted" => {
                 self.context_token(object, state)
@@ -1145,14 +1178,14 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         }
     }
 
-    fn context_token(&self, expression: &Expr, state: &State) -> Option<String> {
+    fn context_token(&self, expression: &Expr, state: &State) -> Option<Token> {
         match expression {
             Expr::Ident(identifier) if self.is_context_name(&identifier.name, state) => Some(
                 if self.state_class
                     && identifier.name == "context"
                     && !self.environment.is_bound("context")
                 {
-                    "$state".to_string()
+                    Token::State
                 } else {
                     self.binding_token(&identifier.name)
                 },
@@ -1162,12 +1195,15 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                     && field.name == "context"
                     && matches!(object.as_ref(), Expr::This { .. }) =>
             {
-                Some("$state".to_string())
+                Some(Token::State)
             }
             Expr::Field { object, field, .. } => {
                 let ty = self.infer_type(expression, state);
                 if self.is_build_context(&ty) {
-                    Some(format!("{}.{}", self.expression_token(object)?, field.name))
+                    Some(Token::Field(
+                        Box::new(self.expression_token(object)?),
+                        field.name.as_str().into(),
+                    ))
                 } else {
                     None
                 }
@@ -1177,13 +1213,14 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         }
     }
 
-    fn expression_token(&self, expression: &Expr) -> Option<String> {
+    fn expression_token(&self, expression: &Expr) -> Option<Token> {
         match expression {
             Expr::Ident(identifier) => Some(self.binding_token(&identifier.name)),
-            Expr::This { .. } => Some("this".to_string()),
-            Expr::Field { object, field, .. } => {
-                Some(format!("{}.{}", self.expression_token(object)?, field.name))
-            }
+            Expr::This { .. } => Some(Token::This),
+            Expr::Field { object, field, .. } => Some(Token::Field(
+                Box::new(self.expression_token(object)?),
+                field.name.as_str().into(),
+            )),
             Expr::NullAssert { operand: expr, .. } => self.expression_token(expr),
             _ => None,
         }
@@ -1200,16 +1237,21 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         self.invalidate_token(&token, state);
     }
 
-    fn invalidate_token(&self, token: &str, state: &mut State) {
-        let property_prefix = format!("{token}.");
-        state
-            .mounted
-            .retain(|mounted| mounted != token && !mounted.starts_with(&property_prefix));
+    fn invalidate_token(&self, token: &Token, state: &mut State) {
+        if let Some(mounted) = &mut state.mounted {
+            mounted.retain(|mounted| !mounted.rooted_at(token));
+        }
     }
 
     fn is_context_name(&self, name: &str, state: &State) -> bool {
         (self.state_class && name == "context" && !self.environment.is_bound(name))
-            || self.is_build_context(&self.flow_environment(state).lookup(name))
+            || self
+                .binding_id(name)
+                .and_then(|binding| state.inferred_types.get(&binding))
+                .map_or_else(
+                    || self.is_build_context(&self.environment.lookup(name)),
+                    |types| types.iter().any(|ty| self.is_build_context(ty)),
+                )
     }
 
     fn is_build_context(&self, ty: &ResolvedType) -> bool {
@@ -1222,14 +1264,14 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
     }
 
     fn use_context(&mut self, expression: &Expr, state: &State) {
-        if !state.after_gap {
+        let Some(mounted) = &state.mounted else {
             return;
-        }
+        };
         let Some(token) = self.context_token(expression, state) else {
             return;
         };
         let span = expression.span();
-        if !state.mounted.contains(&token) && self.reported.insert(span.start) {
+        if !mounted.contains(&token) && self.reported.insert(span.start) {
             self.diagnostics.push(*span);
         }
     }
@@ -1245,44 +1287,29 @@ impl Visitor for ExprScanner<'_, '_> {
     fn visit_expr(&mut self, node: &Expr) {
         match node {
             Expr::Await { expr, .. } => {
-                visit_expression(self, expr);
-                self.state.after_gap = true;
-                self.state.mounted.clear();
+                self.visit_expr(expr);
+                self.state.gap();
             }
             Expr::Field { object, field, .. } if field.name == "mounted" => {
                 let saved = self.suppress_exact.replace(object.span().start);
-                visit_expression(self, object);
+                self.visit_expr(object);
                 self.suppress_exact = saved;
             }
             Expr::Binary {
-                op: BinaryOp::And,
+                op: op @ (BinaryOp::And | BinaryOp::Or),
                 left,
                 right,
                 ..
             } => {
-                let guard = self.analyzer.guard(left, self.state);
-                visit_expression(self, left);
-                let base = self.state.clone();
-                let mut short_circuit = base.clone();
-                short_circuit.mounted.extend(guard.when_false);
-                let mut right_state = base;
-                right_state.mounted.extend(guard.when_true);
-                self.analyzer.expression(right, &mut right_state);
-                *self.state = State::join(&short_circuit, &right_state);
-            }
-            Expr::Binary {
-                op: BinaryOp::Or,
-                left,
-                right,
-                ..
-            } => {
-                let guard = self.analyzer.guard(left, self.state);
-                visit_expression(self, left);
-                let base = self.state.clone();
-                let mut short_circuit = base.clone();
-                short_circuit.mounted.extend(guard.when_true);
-                let mut right_state = base;
-                right_state.mounted.extend(guard.when_false);
+                let mut guard = self.analyzer.guard(left, self.state);
+                if matches!(op, BinaryOp::Or) {
+                    std::mem::swap(&mut guard.when_true, &mut guard.when_false);
+                }
+                self.visit_expr(left);
+                let mut short_circuit = self.state.clone();
+                short_circuit.assume(guard.when_false);
+                let mut right_state = self.state.clone();
+                right_state.assume(guard.when_true);
                 self.analyzer.expression(right, &mut right_state);
                 *self.state = State::join(&short_circuit, &right_state);
             }
@@ -1294,22 +1321,22 @@ impl Visitor for ExprScanner<'_, '_> {
             } => {
                 match target.as_ref() {
                     Expr::Ident(_) => {}
-                    Expr::Field { object, .. } => visit_expression(self, object),
+                    Expr::Field { object, .. } => self.visit_expr(object),
                     Expr::Index { object, index, .. } => {
-                        visit_expression(self, object);
-                        visit_expression(self, index);
+                        self.visit_expr(object);
+                        self.visit_expr(index);
                     }
-                    other => visit_expression(self, other),
+                    other => self.visit_expr(other),
                 }
-                visit_expression(self, value);
+                self.visit_expr(value);
                 // Indexed targets invalidate nothing: `expression_token` has no
                 // token for `a[i]`, so `a[i] = x` leaves mounted facts standing.
                 self.analyzer.invalidate_assignment(target, self.state);
                 if let Expr::Ident(identifier) = target.as_ref()
                     && self.analyzer.is_inferred(&identifier.name)
+                    && let Some(token) = self.analyzer.binding_id(&identifier.name)
                 {
                     let ty = self.analyzer.infer_initializer_type(value, self.state);
-                    let token = self.analyzer.binding_token(&identifier.name);
                     self.state.inferred_types.insert(token, vec![ty]);
                 }
             }
@@ -1320,13 +1347,13 @@ impl Visitor for ExprScanner<'_, '_> {
                 ..
             } => {
                 let guard = self.analyzer.guard(condition, self.state);
-                visit_expression(self, condition);
+                self.visit_expr(condition);
                 let base = self.state.clone();
                 let mut then_state = base.clone();
-                then_state.mounted.extend(guard.when_true);
+                then_state.assume(guard.when_true);
                 self.analyzer.expression(then_expr, &mut then_state);
                 let mut else_state = base;
-                else_state.mounted.extend(guard.when_false);
+                else_state.assume(guard.when_false);
                 self.analyzer.expression(else_expr, &mut else_state);
                 *self.state = State::join(&then_state, &else_state);
             }
@@ -1395,8 +1422,7 @@ fn loop_paths(
 /// The state to fall back on when a path is not analyzed: nothing is known to
 /// be mounted, and an async gap may have happened.
 fn gap_state(mut state: State) -> State {
-    state.after_gap = true;
-    state.mounted.clear();
+    state.gap();
     state
 }
 
@@ -1422,6 +1448,119 @@ fn join_outcomes(mut left: Outcome, right: Outcome) -> Outcome {
     left
 }
 
-fn visit_expression(visitor: &mut impl Visitor, expression: &Expr) {
-    visitor.visit_expr(expression);
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use falcon_dart_parser::parse;
+
+    use super::*;
+    use crate::resolve::{IdentityIndex, IdentitySource, TypeIndex};
+
+    #[test]
+    fn flow_token_roots_distinguish_state_and_field_paths() {
+        let unbound_state = Token::Unbound("$state".into());
+        assert!(!unbound_state.rooted_at(&Token::State));
+        assert!(!Token::State.rooted_at(&unbound_state));
+
+        let root = Token::Unbound("a".into());
+        let field = Token::Field(Box::new(root.clone()), "b".into());
+        let descendant = Token::Field(Box::new(field.clone()), "context".into());
+        let sibling = Token::Field(Box::new(root.clone()), "bc".into());
+        assert!(descendant.rooted_at(&field));
+        assert!(descendant.rooted_at(&root));
+        assert!(!sibling.rooted_at(&field));
+        assert!(!field.rooted_at(&descendant));
+    }
+
+    #[test]
+    fn labeled_switch_continue_converges_with_inferred_locals() {
+        let source = r#"
+void f(int value) async {
+  switch (value) {
+    again:
+    case 0:
+      var temporary = 0;
+      await tick();
+      context.toString();
+      continue again;
+    default:
+      return;
+  }
+}
+"#;
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "parse errors: {errors:?}");
+        let path = Path::new("/project/lib/main.dart");
+        let sources = [IdentitySource {
+            path,
+            program: &program,
+            has_parse_errors: false,
+        }];
+        let identities = IdentityIndex::from_project_files(&sources, &[]);
+        let types = TypeIndex::from_program(&program);
+        let model = SemanticModel::new(path, &identities, Some(&types));
+        let signatures = SignatureIndex::from_program(&program, &model);
+        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            panic!("expected function");
+        };
+        let diagnostics = BuildContextFlowAnalyzer::new(&model, &signatures, true).analyze(
+            function.params(),
+            &function.type_params,
+            function.body.as_ref().unwrap(),
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].start,
+            source.find("context.toString").unwrap()
+        );
+    }
+
+    #[test]
+    fn nested_malformed_object_pattern_does_not_mark_outer_binding_inferred() {
+        let (mut program, errors) =
+            parse("void nested() { var (Object(outer: var local),) = value; }");
+        assert!(errors.is_empty(), "parse errors: {errors:?}");
+        let TopLevelDecl::Function(function) = &mut program.declarations[0] else {
+            panic!("expected function");
+        };
+        let Some(FunctionBody::Block(block)) = &mut function.body else {
+            panic!("expected block");
+        };
+        let Stmt::PatternDecl(declaration) = &mut block.stmts[0] else {
+            panic!("expected pattern declaration");
+        };
+        let Pattern::Record(record) = &mut declaration.pattern else {
+            panic!("expected record pattern");
+        };
+        let Pattern::Object(object) = &mut record.fields[0].pattern else {
+            panic!("expected object pattern");
+        };
+        object.fields[0].pattern = None;
+
+        let path = Path::new("/project/lib/main.dart");
+        let sources = [IdentitySource {
+            path,
+            program: &program,
+            has_parse_errors: false,
+        }];
+        let identities = IdentityIndex::from_project_files(&sources, &[]);
+        let types = TypeIndex::from_program(&program);
+        let model = SemanticModel::new(path, &identities, Some(&types));
+        let signatures = SignatureIndex::from_program(&program, &model);
+        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            panic!("expected function");
+        };
+        let mut analyzer = BuildContextFlowAnalyzer::new(&model, &signatures, false);
+        analyzer.declare("outer".into(), ResolvedType::Unknown);
+        let outer_binding = analyzer.binding_id("outer");
+        analyzer.nested_function(
+            function.params().unwrap(),
+            &function.type_params,
+            function.body.as_ref().unwrap(),
+        );
+        assert!(analyzer.binding_id("outer") == outer_binding);
+        assert!(!analyzer.is_inferred("outer"));
+        assert_eq!(analyzer.environment.lookup("outer"), ResolvedType::Unknown);
+    }
 }

@@ -1,27 +1,4 @@
-//! File-local, per-function-body scope tracker.
-//!
-//! [`LocalTypes`] models the lexical scopes of a single function/method/getter/
-//! constructor body as a stack of name→[`StaticType`] maps. A rule drives it
-//! while descending the AST: push a scope on entering a block, declare bindings
-//! as it meets them, note reassignments, and query [`LocalTypes::of_expr`] at
-//! any point. Identifier lookup walks the stack innermost-first, so shadowing
-//! works naturally.
-//!
-//! Soundness over precision. The tracker only records a concrete type when it is
-//! certain (declared type, or a trivially-inferable initializer); anything else
-//! is [`StaticType::Unknown`]. A reassignment whose new type differs from the
-//! recorded one degrades the binding to `Unknown` rather than guess.
-//!
-//! ## What is and isn't tracked
-//!
-//! * Bound: signature parameters (including `this.x` field/`super.x` formals when
-//!   they carry a written type), local `var`/typed declarations, for-loop
-//!   variables, catch clause parameters, and simple Dart 3 pattern variable
-//!   bindings ([`Pattern::Variable`]) that carry a written type.
-//! * Not bound (left `Unknown`): destructured record/list/map/object pattern
-//!   fields without a written type, closure captures reassigned across scopes,
-//!   and field formals without a written type (resolving them needs the class's
-//!   field type, which is out of this layer's file-local, non-lookup budget).
+//! Uncertain or conflicting local type facts degrade to [`StaticType::Unknown`].
 
 use std::collections::HashMap;
 
@@ -29,7 +6,6 @@ use falcon_syntax::ast::*;
 
 use super::StaticType;
 
-/// A stack of lexical scopes mapping local names to their coarse static type.
 #[derive(Debug, Clone)]
 pub struct LocalTypes {
     scopes: Vec<HashMap<String, StaticType>>,
@@ -42,35 +18,29 @@ impl Default for LocalTypes {
 }
 
 impl LocalTypes {
-    /// A tracker with a single (root) scope.
     pub fn new() -> Self {
         Self {
             scopes: vec![HashMap::new()],
         }
     }
 
-    /// Enter a nested lexical scope.
     pub fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
 
-    /// Leave the innermost scope. The root scope is never popped.
+    /// The root scope is never popped.
     pub fn pop_scope(&mut self) {
         if self.scopes.len() > 1 {
             self.scopes.pop();
         }
     }
 
-    /// Declare (or shadow, in the current scope) a binding with a known type.
     pub fn declare(&mut self, name: impl Into<String>, ty: StaticType) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.into(), ty);
         }
     }
 
-    /// Look up a name through the scope stack (innermost first). Returns
-    /// [`StaticType::Unknown`] when the name is not a tracked local — it may be
-    /// a field, a top-level, or simply unbound; the resolver never guesses.
     pub fn lookup(&self, name: &str) -> StaticType {
         for scope in self.scopes.iter().rev() {
             if let Some(ty) = scope.get(name) {
@@ -80,17 +50,12 @@ impl LocalTypes {
         StaticType::Unknown
     }
 
-    /// Whether `name` is a tracked local binding in any scope, regardless of its
-    /// type. Unlike [`Self::lookup`], this distinguishes an absent binding from a
-    /// local whose recorded type is [`StaticType::Unknown`].
+    /// Unlike [`Self::lookup`], distinguishes absent bindings from unknown types.
     pub fn is_bound(&self, name: &str) -> bool {
         self.scopes.iter().any(|scope| scope.contains_key(name))
     }
 
-    /// Record an assignment to `name`. If `name` is a tracked local whose new
-    /// type does not match the recorded one, the binding degrades to
-    /// [`StaticType::Unknown`] (we can no longer state its type soundly).
-    /// Assignments to unknown names (fields, globals) are ignored.
+    /// Conflicting assignments discard type facts; assignments to unbound names are ignored.
     pub fn reassign(&mut self, name: &str, ty: StaticType) {
         for scope in self.scopes.iter_mut().rev() {
             if let Some(existing) = scope.get_mut(name) {
@@ -102,11 +67,6 @@ impl LocalTypes {
         }
     }
 
-    // ── Convenience binders (single-pass AST walking) ──────────────────────────
-
-    /// Bind every parameter of a signature into the current scope. A parameter's
-    /// type comes from its written type; untyped parameters (including field/
-    /// super formals without a written type) bind as [`StaticType::Unknown`].
     pub fn bind_params(&mut self, params: &FormalParamList) {
         for p in params.params.iter() {
             let ty = p
@@ -118,9 +78,6 @@ impl LocalTypes {
         }
     }
 
-    /// Declare the variables of a `var`/typed local declaration. Each declarator
-    /// takes the written type if present, else the inferred initializer type,
-    /// else [`StaticType::Unknown`].
     pub fn declare_local(&mut self, decl: &LocalVarDecl) {
         let declared = decl.var_type.as_ref().map(StaticType::from_dart_type);
         for d in &decl.declarators {
@@ -136,8 +93,6 @@ impl LocalTypes {
         }
     }
 
-    /// Bind a `for`-loop initializer's variables (both C-style `var i = 0` and
-    /// `for-in` loop variables).
     pub fn bind_for_init(&mut self, init: &ForInit) {
         match init {
             ForInit::VarDecl(decl) => self.declare_local(decl),
@@ -148,16 +103,12 @@ impl LocalTypes {
                     .unwrap_or(StaticType::Unknown);
                 self.declare(name.name.clone(), ty);
             }
-            // Pattern for-in / expression init: bind what is cheap (typed pattern
-            // variables); the rest stays Unknown.
             ForInit::PatternForIn { pattern, .. } => self.bind_pattern(pattern),
             ForInit::Exprs(_) => {}
         }
     }
 
-    /// Bind a catch clause's exception and stack-trace variables. The exception
-    /// takes its written `on` type if present, else `Unknown`; the stack trace is
-    /// always `Unknown` (its type — `StackTrace` — is irrelevant to consumers).
+    /// Stack-trace types stay unknown because consumers do not need them.
     pub fn bind_catch(&mut self, catch: &CatchClause) {
         if let Some(var) = &catch.exception_var {
             let ty = catch
@@ -172,10 +123,7 @@ impl LocalTypes {
         }
     }
 
-    /// Bind the variables of a Dart 3 pattern. Only [`Pattern::Variable`] with a
-    /// written type contributes a concrete type; every other bound variable is
-    /// recorded as [`StaticType::Unknown`] (destructured element types are not
-    /// inferred in this minimal layer). Recurses through composite patterns.
+    /// Destructured element types remain unknown without a written type.
     pub fn bind_pattern(&mut self, pattern: &Pattern) {
         match pattern {
             Pattern::Variable { type_, name, .. } => {
@@ -223,15 +171,6 @@ impl LocalTypes {
         }
     }
 
-    // ── Expression inference ───────────────────────────────────────────────────
-
-    /// Infer the coarse static type of an expression.
-    ///
-    /// Handles literals, `is`/`is!` tests, comparison and logical operators,
-    /// `!`, arithmetic over numeric operands, `as` casts, `!` null-assertions,
-    /// collection literals, `new`/constructor calls, and identifier resolution
-    /// through the scope stack. Everything else — and any case where certainty
-    /// is lost — returns [`StaticType::Unknown`].
     pub fn of_expr(&self, expr: &Expr) -> StaticType {
         match expr {
             Expr::IntLit { .. } => StaticType::Int { nullable: false },
@@ -262,8 +201,6 @@ impl LocalTypes {
                 | BinaryOp::GtEq
                 | BinaryOp::And
                 | BinaryOp::Or => StaticType::Bool { nullable: false },
-                // `String + String` is concatenation, yielding a non-nullable
-                // `String`; otherwise `+` is numeric.
                 BinaryOp::Add => {
                     let l = self.of_expr(left);
                     let r = self.of_expr(right);
@@ -287,8 +224,7 @@ impl LocalTypes {
                 | BinaryOp::UShr => numeric_result(self.of_expr(left), self.of_expr(right)),
                 // `/` on num always yields double in Dart.
                 BinaryOp::Div => StaticType::Double { nullable: false },
-                // `a ?? b` is only sound to type when both sides agree; keep it
-                // conservative rather than model the null-elimination.
+                // Null elimination is not modeled, so coalescing cannot prove a type.
                 BinaryOp::NullCoalesce => StaticType::Unknown,
             },
 
@@ -320,7 +256,6 @@ impl LocalTypes {
             },
 
             Expr::New { dart_type, .. } => {
-                // A constructor invocation always yields a non-null instance.
                 StaticType::from_dart_type(dart_type).with_nullable(false)
             }
 
@@ -329,8 +264,6 @@ impl LocalTypes {
     }
 }
 
-/// Keep a numeric type (int/double/num) from a unary numeric operator; anything
-/// else becomes `Unknown`.
 fn numeric_or_unknown(ty: StaticType) -> StaticType {
     match ty {
         StaticType::Int { .. } => StaticType::Int { nullable: false },
@@ -340,9 +273,6 @@ fn numeric_or_unknown(ty: StaticType) -> StaticType {
     }
 }
 
-/// Coarse numeric join for a binary arithmetic/bitwise operator: `int op int`
-/// stays `int`, any `double` operand yields `double`, otherwise `num` when both
-/// are numeric, else `Unknown`.
 fn numeric_result(l: StaticType, r: StaticType) -> StaticType {
     let l_num = matches!(
         l,
@@ -372,7 +302,6 @@ mod tests {
     use super::*;
     use falcon_dart_parser::parse;
 
-    /// Parse `src` and return the body of its first top-level function.
     fn first_fn_body(src: &str) -> FunctionBody {
         let (program, errors) = parse(src);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
@@ -384,7 +313,6 @@ mod tests {
         panic!("no top-level function found in: {src}");
     }
 
-    /// The statements of a block-bodied first top-level function.
     fn first_fn_stmts(src: &str) -> Vec<Stmt> {
         match first_fn_body(src) {
             FunctionBody::Block(b) => b.stmts,
@@ -437,7 +365,6 @@ mod tests {
 
     #[test]
     fn declared_bool_param_resolves_through_scope() {
-        // `bool ok` param → of_expr(ok) is non-nullable bool; `bool? maybe` → nullable.
         let (program, errors) = parse("void f(bool ok, bool? maybe) {}");
         assert!(errors.is_empty());
         let TopLevelDecl::Function(f) = &program.declarations[0] else {
@@ -460,9 +387,7 @@ mod tests {
                 lt.declare_local(lv);
             }
         }
-        // Declared type wins even over an uninferable initializer.
         assert_eq!(lt.lookup("a"), StaticType::Bool { nullable: false });
-        // Inferred from `1 == 2`.
         assert_eq!(lt.lookup("b"), StaticType::Bool { nullable: false });
         assert_eq!(lt.lookup("s"), StaticType::String { nullable: false });
     }
@@ -486,7 +411,6 @@ mod tests {
         lt.declare("x", StaticType::String { nullable: false });
         assert_eq!(lt.lookup("x"), StaticType::String { nullable: false });
         lt.pop_scope();
-        // Outer binding is visible again after leaving the nested scope.
         assert_eq!(lt.lookup("x"), StaticType::Bool { nullable: false });
     }
 
@@ -525,7 +449,6 @@ mod tests {
 
     #[test]
     fn as_cast_and_null_assert() {
-        // `x as bool` → non-null bool; `(x as bool?)!` → non-null bool.
         let stmts = first_fn_stmts("void f() { var a = x as bool; var b = (y as bool?)!; }");
         let lt = LocalTypes::new();
         let inits: Vec<&Expr> = stmts
@@ -550,14 +473,11 @@ mod tests {
             }
         }
         assert_eq!(lt.lookup("c"), StaticType::Int { nullable: false });
-        // `/` always yields double.
         assert_eq!(lt.lookup("d"), StaticType::Double { nullable: false });
     }
 
     #[test]
     fn string_concatenation_is_string() {
-        // `String + String` is concatenation → non-nullable String; a `String + int`
-        // mismatch is not provable and falls back to Unknown.
         let stmts = first_fn_stmts(
             "void f(String a, int n) { var c = a + a; var d = a + n; var e = 'x' + 'y'; }",
         );
@@ -625,13 +545,11 @@ mod tests {
             })
             .collect();
         assert_eq!(lt.of_expr(inits[0]), StaticType::Bool { nullable: false });
-        // Divergent branch types → Unknown.
         assert_eq!(lt.of_expr(inits[1]), StaticType::Unknown);
     }
 
     #[test]
     fn catch_and_pattern_bindings() {
-        // Typed catch var resolves; pattern variable with a written type resolves.
         let (program, errors) = parse(
             "void f() { try {} on FormatException catch (e, st) {} final (bool flag,) = r; }",
         );
@@ -668,7 +586,6 @@ mod tests {
     #[test]
     fn no_panic_on_empty_or_malformed() {
         let lt = LocalTypes::new();
-        // Error expression → Unknown, no panic.
         assert_eq!(
             lt.of_expr(&Expr::Error {
                 span: Span::default()

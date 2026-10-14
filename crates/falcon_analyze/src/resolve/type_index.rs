@@ -1,19 +1,16 @@
 //! Cross-file *type* index — the shape of the project's named types.
 //!
-//! Where [`crate::resolve::ProjectIndex`] answers "what does a call named `foo`
-//! return?", [`TypeIndex`] answers "what is type `Foo` — its kind, its
-//! supertypes, and its members?". It is the substrate a receiver-typed rule
-//! stands on: given a receiver whose static type is `Other { name }`, ask
-//! whether that type (or any ancestor) declares a member, or whether it is a
-//! subtype of some other type.
+//! [`TypeIndex`] records named declarations, their supertypes, members,
+//! immutability, and constructor constness. Member and subtype queries share a
+//! borrowed ancestor walk; constructor names use `"new"` for unnamed constructors.
 //!
 //! Three sources feed it:
 //!
 //! 1. **User declarations** — every class / mixin / mixin-class / enum /
 //!    extension-type across the project, keyed by simple name. Because lookups
-//!    are name-keyed and falcon has no full resolver, two declarations of the
-//!    same name are recorded as *ambiguous*: every lookup through them poisons to
-//!    [`MemberResult::Unknown`] / [`SubtypeResult::Unknown`] rather than pick one.
+//!    are name-keyed, two declarations of the same name are recorded as
+//!    *ambiguous*: every lookup through them poisons to [`MemberResult::Unknown`]
+//!    / [`SubtypeResult::Unknown`] rather than pick one.
 //! 2. **A curated CORE table** — `dart:core` / `dart:collection` types falcon
 //!    cannot see (`Object`, `Iterable`, `List`, `Map`, `String`, `num`, …) with
 //!    their common members and the subtype edges between them.
@@ -31,6 +28,7 @@
 //! fact, but must never be told a wrong one.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
 use std::sync::OnceLock;
 
 use falcon_syntax::ast::*;
@@ -80,18 +78,10 @@ pub enum SubtypeResult {
     Unknown,
 }
 
-/// Parameter-name facts for inherited instance members.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InheritedParameterNames {
-    Known(Vec<Vec<String>>),
-    Unknown,
-}
-
 /// A single user-declared type's recorded shape.
 #[derive(Debug, Clone)]
 struct TypeEntry {
     kind: TypeKind,
-    type_param_count: usize,
     /// Last-segment names from `extends` / `with` / `implements` / `on`.
     supertypes: Vec<String>,
     /// Own declared member names → their kind.
@@ -101,16 +91,10 @@ struct TypeEntry {
     is_immutable: bool,
     /// Direct superclass, excluding mixins and implemented interfaces.
     superclass: Option<String>,
-    /// Declared constructors keyed by `""` for unnamed or their source name.
+    /// Declared constructors keyed by `"new"` for unnamed or their source name.
     constructors: HashMap<String, bool>,
     /// Whether every instance field can participate in a const constructor.
     all_instance_fields_final: bool,
-    /// Parameter names for method/operator members, used by override-sensitive
-    /// lints. Each vector follows source order across all parameter sections.
-    member_parameters: HashMap<String, Vec<String>>,
-    /// Fields declared `covariant`; an implementing field may legally specialize
-    /// their type without `overridden-fields` treating it as an accidental shadow.
-    covariant_fields: HashSet<String>,
     /// The declaring library has an unresolved `part`, so this type's member set
     /// may be incomplete — poisons any proof of absence through it.
     has_unresolved_parts: bool,
@@ -125,6 +109,7 @@ enum Slot {
 }
 
 /// A resolved view of a type name: a user entry, a core entry, or ambiguous.
+#[derive(Clone, Copy)]
 enum Resolved<'a> {
     User(&'a TypeEntry),
     Core(&'a CoreType),
@@ -154,14 +139,6 @@ pub struct TypeIndex {
 }
 
 impl TypeIndex {
-    /// An empty index (core-library types only).
-    pub fn new() -> Self {
-        Self {
-            types: HashMap::new(),
-            incomplete: false,
-        }
-    }
-
     /// Build a cross-file index from every analyzed library file. Every type
     /// inherits its file's `has_unresolved_parts` flag.
     ///
@@ -175,7 +152,7 @@ impl TypeIndex {
     where
         I: IntoIterator<Item = LibrarySource<'a>>,
     {
-        let mut index = Self::new();
+        let mut index = Self::default();
         for file in files {
             if file.has_parse_errors {
                 index.incomplete = true;
@@ -191,7 +168,7 @@ impl TypeIndex {
     /// complete its types are not available in single-file mode.
     pub fn from_program(program: &Program) -> Self {
         let unresolved = !program.part_directives.is_empty() || program.part_of_directive.is_some();
-        let mut index = Self::new();
+        let mut index = Self::default();
         index.add_program(program, unresolved);
         index
     }
@@ -219,15 +196,6 @@ impl TypeIndex {
         }
     }
 
-    /// The declared type-parameter count of a *user* type `name`, or `None` when
-    /// it is unknown, ambiguous, or a core type.
-    pub fn type_param_count(&self, name: &str) -> Option<usize> {
-        match self.resolve(name) {
-            Some(Resolved::User(e)) => Some(e.type_param_count),
-            _ => None,
-        }
-    }
-
     /// Look up `member` on `type_name`, walking the supertype chain.
     ///
     /// Returns [`MemberResult::Found`] on the first ancestor declaring it,
@@ -235,159 +203,14 @@ impl TypeIndex {
     /// none declares it, and [`MemberResult::Unknown`] whenever the chain has any
     /// unresolved edge (unknown ancestor, ambiguity, or unresolved part).
     pub fn member_lookup(&self, type_name: &str, member: &str) -> MemberResult {
-        if self.incomplete {
-            return MemberResult::Unknown;
-        }
-        let mut visited = HashSet::new();
-        let mut stack = vec![type_name.to_string()];
-        let mut fully_resolved = true;
-        while let Some(name) = stack.pop() {
-            if !visited.insert(name.clone()) {
-                continue;
-            }
-            match self.resolve(&name) {
-                None | Some(Resolved::Ambiguous) => fully_resolved = false,
-                Some(Resolved::User(e)) => {
-                    if let Some(kind) = e.members.get(member) {
-                        return MemberResult::Found(*kind);
-                    }
-                    if e.has_unresolved_parts {
-                        fully_resolved = false;
-                    }
-                    push_ancestors(&name, e.supertypes.iter().map(String::as_str), &mut stack);
-                }
-                Some(Resolved::Core(c)) => {
-                    if let Some(kind) = core_member(c, member) {
-                        return MemberResult::Found(kind);
-                    }
-                    push_ancestors(&name, c.supertypes.iter().copied(), &mut stack);
-                }
-            }
-        }
-        if fully_resolved {
-            MemberResult::ProvenAbsent
-        } else {
-            MemberResult::Unknown
-        }
-    }
-
-    /// Look up a member only on ancestors of `type_name`, excluding the type's
-    /// own declaration. This is the identity-preserving query override rules need.
-    pub fn inherited_member_lookup(&self, type_name: &str, member: &str) -> MemberResult {
-        if self.incomplete {
-            return MemberResult::Unknown;
-        }
-        let Some(Resolved::User(entry)) = self.resolve(type_name) else {
-            return MemberResult::Unknown;
-        };
-        let mut ancestors = entry.supertypes.clone();
-        ancestors.push("Object".to_string());
-        self.lookup_from_names(&ancestors, member)
-    }
-
-    /// Parameter-name lists from every known ancestor instance member named
-    /// `member`. Any incomplete or unresolved branch poisons the result.
-    pub fn inherited_parameter_names(
-        &self,
-        type_name: &str,
-        member: &str,
-    ) -> InheritedParameterNames {
-        if self.incomplete {
-            return InheritedParameterNames::Unknown;
-        }
-        let Some(Resolved::User(entry)) = self.resolve(type_name) else {
-            return InheritedParameterNames::Unknown;
-        };
-        let mut out = Vec::new();
-        let mut visited = HashSet::new();
-        let mut stack = entry.supertypes.clone();
-        stack.push("Object".to_string());
-        while let Some(name) = stack.pop() {
-            if !visited.insert(name.clone()) {
-                continue;
-            }
-            match self.resolve(&name) {
-                None | Some(Resolved::Ambiguous) => return InheritedParameterNames::Unknown,
-                Some(Resolved::User(ancestor)) => {
-                    if ancestor.has_unresolved_parts {
-                        return InheritedParameterNames::Unknown;
-                    }
-                    if let Some(params) = ancestor.member_parameters.get(member) {
-                        out.push(params.clone());
-                    }
-                    push_ancestors(
-                        &name,
-                        ancestor.supertypes.iter().map(String::as_str),
-                        &mut stack,
-                    );
-                }
-                Some(Resolved::Core(core)) => {
-                    if let Some(params) = core.member_parameters.get(member) {
-                        out.push(params.iter().map(|name| (*name).to_string()).collect());
-                    }
-                    push_ancestors(&name, core.supertypes.iter().copied(), &mut stack);
-                }
-            }
-        }
-        InheritedParameterNames::Known(out)
-    }
-
-    /// Whether any known inherited field named `member` is covariant.
-    pub fn inherited_field_is_covariant(&self, type_name: &str, member: &str) -> bool {
-        let Some(Resolved::User(entry)) = self.resolve(type_name) else {
-            return false;
-        };
-        let mut visited = HashSet::new();
-        let mut stack = entry.supertypes.clone();
-        while let Some(name) = stack.pop() {
-            if !visited.insert(name.clone()) {
-                continue;
-            }
-            if let Some(Resolved::User(ancestor)) = self.resolve(&name) {
-                if ancestor.covariant_fields.contains(member) {
-                    return true;
-                }
-                stack.extend(ancestor.supertypes.iter().cloned());
-            }
-        }
-        false
-    }
-
-    fn lookup_from_names(&self, names: &[String], member: &str) -> MemberResult {
-        let mut visited = HashSet::new();
-        let mut stack = names.to_vec();
-        let mut fully_resolved = true;
-        while let Some(name) = stack.pop() {
-            if !visited.insert(name.clone()) {
-                continue;
-            }
-            match self.resolve(&name) {
-                None | Some(Resolved::Ambiguous) => fully_resolved = false,
-                Some(Resolved::User(entry)) => {
-                    if let Some(kind) = entry.members.get(member) {
-                        return MemberResult::Found(*kind);
-                    }
-                    if entry.has_unresolved_parts {
-                        fully_resolved = false;
-                    }
-                    push_ancestors(
-                        &name,
-                        entry.supertypes.iter().map(String::as_str),
-                        &mut stack,
-                    );
-                }
-                Some(Resolved::Core(core)) => {
-                    if let Some(kind) = core_member(core, member) {
-                        return MemberResult::Found(kind);
-                    }
-                    push_ancestors(&name, core.supertypes.iter().copied(), &mut stack);
-                }
-            }
-        }
-        if fully_resolved {
-            MemberResult::ProvenAbsent
-        } else {
-            MemberResult::Unknown
+        match self.walk_ancestors(type_name, |_, resolved| match resolved {
+            Some(Resolved::User(entry)) => entry.members.get(member).copied(),
+            Some(Resolved::Core(core)) => core_member(core, member),
+            _ => None,
+        }) {
+            ControlFlow::Break(kind) => MemberResult::Found(kind),
+            ControlFlow::Continue(true) => MemberResult::ProvenAbsent,
+            ControlFlow::Continue(false) => MemberResult::Unknown,
         }
     }
 
@@ -400,72 +223,58 @@ impl TypeIndex {
         if sub == super_ {
             return SubtypeResult::Yes;
         }
-        if self.incomplete {
-            return SubtypeResult::Unknown;
-        }
-        let mut visited = HashSet::new();
-        let mut stack = vec![sub.to_string()];
-        let mut fully_resolved = true;
-        while let Some(name) = stack.pop() {
-            if name == super_ {
-                return SubtypeResult::Yes;
-            }
-            if !visited.insert(name.clone()) {
-                continue;
-            }
-            match self.resolve(&name) {
-                None | Some(Resolved::Ambiguous) => fully_resolved = false,
-                Some(Resolved::User(e)) => {
-                    if e.has_unresolved_parts {
-                        fully_resolved = false;
-                    }
-                    push_ancestors(&name, e.supertypes.iter().map(String::as_str), &mut stack);
-                }
-                Some(Resolved::Core(c)) => {
-                    push_ancestors(&name, c.supertypes.iter().copied(), &mut stack);
-                }
-            }
-        }
-        if fully_resolved {
-            SubtypeResult::ProvenNo
-        } else {
-            SubtypeResult::Unknown
+        match self.walk_ancestors(sub, |name, _| (name == super_).then_some(())) {
+            ControlFlow::Break(()) => SubtypeResult::Yes,
+            ControlFlow::Continue(true) => SubtypeResult::ProvenNo,
+            ControlFlow::Continue(false) => SubtypeResult::Unknown,
         }
     }
 
     /// Whether a type is directly or transitively immutable.
     pub fn is_immutable_type(&self, type_name: &str) -> Option<bool> {
+        match self.walk_ancestors(type_name, |_, resolved| {
+            matches!(resolved, Some(Resolved::User(entry)) if entry.is_immutable).then_some(())
+        }) {
+            ControlFlow::Break(()) => Some(true),
+            ControlFlow::Continue(complete) => complete.then_some(false),
+        }
+    }
+
+    fn walk_ancestors<'a, T>(
+        &'a self,
+        root: &'a str,
+        mut find: impl FnMut(&str, Option<Resolved<'a>>) -> Option<T>,
+    ) -> ControlFlow<T, bool> {
         if self.incomplete {
-            return None;
+            return ControlFlow::Continue(false);
         }
         let mut visited = HashSet::new();
-        let mut stack = vec![type_name.to_string()];
-        let mut fully_resolved = true;
+        let mut stack = vec![root];
+        let mut complete = true;
         while let Some(name) = stack.pop() {
-            if !visited.insert(name.clone()) {
+            if !visited.insert(name) {
                 continue;
             }
-            match self.resolve(&name) {
-                None | Some(Resolved::Ambiguous) => fully_resolved = false,
+            let resolved = self.resolve(name);
+            if let Some(found) = find(name, resolved) {
+                return ControlFlow::Break(found);
+            }
+            match resolved {
+                None | Some(Resolved::Ambiguous) => complete = false,
                 Some(Resolved::User(entry)) => {
-                    if entry.is_immutable {
-                        return Some(true);
-                    }
-                    if entry.has_unresolved_parts {
-                        fully_resolved = false;
-                    }
+                    complete &= !entry.has_unresolved_parts;
                     push_ancestors(
-                        &name,
+                        name,
                         entry.supertypes.iter().map(String::as_str),
                         &mut stack,
                     );
                 }
                 Some(Resolved::Core(core)) => {
-                    push_ancestors(&name, core.supertypes.iter().copied(), &mut stack);
+                    push_ancestors(name, core.supertypes.iter().copied(), &mut stack);
                 }
             }
         }
-        fully_resolved.then_some(false)
+        ControlFlow::Continue(complete)
     }
 
     /// Whether a named constructor is declared or implicitly available as const.
@@ -473,21 +282,22 @@ impl TypeIndex {
         if self.incomplete {
             return None;
         }
-        self.constructor_is_const_inner(type_name, name.unwrap_or(""), &mut HashSet::new())
+        let name = name.filter(|name| !name.is_empty()).unwrap_or("new");
+        self.constructor_is_const_inner(type_name, name, &mut HashSet::new())
     }
 
-    fn constructor_is_const_inner(
-        &self,
-        type_name: &str,
-        name: &str,
-        visited: &mut HashSet<String>,
+    fn constructor_is_const_inner<'a>(
+        &'a self,
+        type_name: &'a str,
+        name: &'a str,
+        visited: &mut HashSet<(&'a str, &'a str)>,
     ) -> Option<bool> {
-        if !visited.insert(format!("{type_name}.{name}")) {
+        if !visited.insert((type_name, name)) {
             return None;
         }
         match self.resolve(type_name)? {
             Resolved::Ambiguous => None,
-            Resolved::Core(_) => Some(type_name == "Object" && name.is_empty()),
+            Resolved::Core(_) => Some(type_name == "Object" && name == "new"),
             Resolved::User(entry) => {
                 if entry.has_unresolved_parts {
                     return None;
@@ -496,13 +306,13 @@ impl TypeIndex {
                     return Some(*is_const);
                 }
                 if !entry.constructors.is_empty()
-                    || !name.is_empty()
+                    || name != "new"
                     || !entry.all_instance_fields_final
                 {
                     return Some(false);
                 }
                 let superclass = entry.superclass.as_deref().unwrap_or("Object");
-                self.constructor_is_const_inner(superclass, "", visited)
+                self.constructor_is_const_inner(superclass, "new", visited)
             }
         }
     }
@@ -545,15 +355,12 @@ impl TypeIndex {
                         &c.name.name,
                         TypeEntry {
                             kind: TypeKind::Class,
-                            type_param_count: c.type_params.len(),
                             supertypes,
                             members: collect_members(&c.members),
                             is_immutable: immutable_annotation(&c.annotations, program),
                             superclass: c.extends.as_ref().and_then(last_segment),
                             constructors: collect_constructors(&c.members),
                             all_instance_fields_final: all_instance_fields_final(&c.members),
-                            member_parameters: collect_member_parameters(&c.members),
-                            covariant_fields: collect_covariant_fields(&c.members),
                             has_unresolved_parts,
                         },
                     );
@@ -564,15 +371,12 @@ impl TypeIndex {
                         &m.name.name,
                         TypeEntry {
                             kind: TypeKind::Mixin,
-                            type_param_count: m.type_params.len(),
                             supertypes,
                             members: collect_members(&m.members),
                             is_immutable: false,
                             superclass: None,
                             constructors: HashMap::new(),
                             all_instance_fields_final: all_instance_fields_final(&m.members),
-                            member_parameters: collect_member_parameters(&m.members),
-                            covariant_fields: collect_covariant_fields(&m.members),
                             has_unresolved_parts,
                         },
                     );
@@ -589,15 +393,12 @@ impl TypeIndex {
                         &m.name.name,
                         TypeEntry {
                             kind: TypeKind::MixinClass,
-                            type_param_count: m.type_params.len(),
                             supertypes,
                             members: collect_members(&m.members),
                             is_immutable: immutable_annotation(&m.annotations, program),
                             superclass: m.extends.as_ref().and_then(last_segment),
                             constructors: collect_constructors(&m.members),
                             all_instance_fields_final: all_instance_fields_final(&m.members),
-                            member_parameters: collect_member_parameters(&m.members),
-                            covariant_fields: collect_covariant_fields(&m.members),
                             has_unresolved_parts,
                         },
                     );
@@ -617,15 +418,12 @@ impl TypeIndex {
                         &e.name.name,
                         TypeEntry {
                             kind: TypeKind::Enum,
-                            type_param_count: e.type_params.len(),
                             supertypes,
                             members,
                             is_immutable: false,
                             superclass: None,
                             constructors: collect_constructors(&e.members),
                             all_instance_fields_final: all_instance_fields_final(&e.members),
-                            member_parameters: collect_member_parameters(&e.members),
-                            covariant_fields: collect_covariant_fields(&e.members),
                             has_unresolved_parts,
                         },
                     );
@@ -636,15 +434,12 @@ impl TypeIndex {
                         &e.name.name,
                         TypeEntry {
                             kind: TypeKind::ExtensionType,
-                            type_param_count: e.type_params.len(),
                             supertypes,
                             members: collect_members(&e.members),
                             is_immutable: false,
                             superclass: None,
                             constructors: collect_constructors(&e.members),
                             all_instance_fields_final: all_instance_fields_final(&e.members),
-                            member_parameters: collect_member_parameters(&e.members),
-                            covariant_fields: collect_covariant_fields(&e.members),
                             has_unresolved_parts,
                         },
                     );
@@ -674,13 +469,11 @@ impl TypeIndex {
 fn push_ancestors<'a>(
     name: &str,
     supertypes: impl Iterator<Item = &'a str>,
-    stack: &mut Vec<String>,
+    stack: &mut Vec<&'a str>,
 ) {
-    for s in supertypes {
-        stack.push(s.to_string());
-    }
+    stack.extend(supertypes);
     if name != "Object" {
-        stack.push("Object".to_string());
+        stack.push("Object");
     }
 }
 
@@ -728,7 +521,7 @@ fn collect_constructors(members: &[ClassMember]) -> HashMap<String, bool> {
                     .constructor_name
                     .as_ref()
                     .map(|name| name.name.clone())
-                    .unwrap_or_default(),
+                    .unwrap_or_else(|| "new".to_string()),
                 constructor.is_const,
             )),
             _ => None,
@@ -740,50 +533,6 @@ fn all_instance_fields_final(members: &[ClassMember]) -> bool {
     members.iter().all(|member| {
         !matches!(member, ClassMember::Field(field) if !field.is_static && field.keyword == falcon_syntax::ast::VarKeyword::Var)
     })
-}
-
-/// Collect the instance methods, operators, and setters of a member list into a
-/// name → parameter-names map. Static members contribute nothing.
-fn collect_member_parameters(members: &[ClassMember]) -> HashMap<String, Vec<String>> {
-    let mut map = HashMap::new();
-    for member in members {
-        match member {
-            ClassMember::Method(method) if !method.is_static => {
-                map.insert(method.name.name.clone(), parameter_names(&method.params));
-            }
-            ClassMember::Operator(operator) => {
-                map.insert(operator.op.clone(), parameter_names(&operator.params));
-            }
-            ClassMember::Setter(setter) if !setter.is_static => {
-                map.insert(setter.name.name.clone(), vec![setter.param.name.clone()]);
-            }
-            _ => {}
-        }
-    }
-    map
-}
-
-fn parameter_names(params: &FormalParamList) -> Vec<String> {
-    params
-        .positional()
-        .map(|param| param.name.name.clone())
-        .collect()
-}
-
-fn collect_covariant_fields(members: &[ClassMember]) -> HashSet<String> {
-    members
-        .iter()
-        .filter_map(|member| match member {
-            ClassMember::Field(field) if field.is_covariant => Some(
-                field
-                    .declarators
-                    .iter()
-                    .map(|declarator| declarator.name.name.clone()),
-            ),
-            _ => None,
-        })
-        .flatten()
-        .collect()
 }
 
 fn collect_members(members: &[ClassMember]) -> HashMap<String, MemberKind> {
@@ -819,7 +568,6 @@ fn collect_members(members: &[ClassMember]) -> HashMap<String, MemberKind> {
 struct CoreType {
     supertypes: Vec<&'static str>,
     members: Vec<(&'static str, MemberKind)>,
-    member_parameters: HashMap<&'static str, Vec<&'static str>>,
 }
 
 fn core_member(c: &CoreType, member: &str) -> Option<MemberKind> {
@@ -842,10 +590,9 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     let ty = |supertypes: &[&'static str], members: Vec<(&'static str, MemberKind)>| CoreType {
         supertypes: supertypes.to_vec(),
         members,
-        member_parameters: HashMap::new(),
     };
 
-    let mut object = ty(
+    let object = ty(
         &[],
         vec![
             ("==", Operator),
@@ -855,10 +602,6 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
             ("noSuchMethod", Method),
         ],
     );
-    object.member_parameters.insert("==", vec!["other"]);
-    object
-        .member_parameters
-        .insert("noSuchMethod", vec!["invocation"]);
     t.insert("Object", object);
 
     t.insert(
@@ -1133,10 +876,9 @@ mod tests {
     // ── Recording ───────────────────────────────────────────────────────────────
 
     #[test]
-    fn records_kind_and_type_param_count() {
+    fn records_type_kinds() {
         let idx = index("class Box<T, U> {} mixin M {} enum E { a } extension type X(int it) {}");
         assert_eq!(idx.type_kind("Box"), Some(TypeKind::Class));
-        assert_eq!(idx.type_param_count("Box"), Some(2));
         assert_eq!(idx.type_kind("M"), Some(TypeKind::Mixin));
         assert_eq!(idx.type_kind("E"), Some(TypeKind::Enum));
         assert_eq!(idx.type_kind("X"), Some(TypeKind::ExtensionType));
@@ -1179,31 +921,11 @@ mod tests {
     }
 
     #[test]
-    fn ancestor_only_queries_preserve_override_identity() {
-        let idx = index(
-            "abstract class A { covariant num field; void method(int original); } \
-             class B extends A { int field = 0; void method(int renamed) {} }",
-        );
-        assert_eq!(
-            idx.inherited_member_lookup("B", "field"),
-            MemberResult::Found(MemberKind::Field)
-        );
-        assert_eq!(
-            idx.inherited_parameter_names("B", "method"),
-            InheritedParameterNames::Known(vec![vec!["original".to_string()]])
-        );
-        assert!(idx.inherited_field_is_covariant("B", "field"));
-        assert_eq!(
-            idx.inherited_member_lookup("A", "method"),
-            MemberResult::ProvenAbsent
-        );
-    }
-
-    #[test]
     fn absent_member_on_fully_resolved_chain_is_proven_absent() {
         // C's only ancestor is the implicit Object, which lacks `foo`.
         let idx = index("class C {}");
         assert_eq!(idx.member_lookup("C", "foo"), MemberResult::ProvenAbsent);
+        assert_eq!(idx.is_immutable_type("C"), Some(false));
         // Object's own members remain findable through the implicit edge.
         assert_eq!(
             idx.member_lookup("C", "toString"),
@@ -1216,6 +938,7 @@ mod tests {
         // `Widget` is external/unknown → cannot prove `foo` absent.
         let idx = index("class C extends Widget {}");
         assert_eq!(idx.member_lookup("C", "foo"), MemberResult::Unknown);
+        assert_eq!(idx.is_immutable_type("C"), None);
         // But an own member is still found despite the unresolved ancestor.
         let idx2 = index("class C extends Widget { void foo() {} }");
         assert_eq!(
@@ -1240,7 +963,7 @@ mod tests {
 
     #[test]
     fn core_members_and_subtype_edges() {
-        let idx = TypeIndex::new();
+        let idx = TypeIndex::default();
         assert_eq!(
             idx.member_lookup("List", "whereType"),
             MemberResult::Found(MemberKind::Method)
@@ -1284,28 +1007,6 @@ mod tests {
     }
 
     #[test]
-    fn object_override_parameter_names_are_available() {
-        let idx = index("class C {}");
-        assert_eq!(
-            idx.inherited_parameter_names("C", "=="),
-            InheritedParameterNames::Known(vec![vec!["other".to_string()]])
-        );
-        assert_eq!(
-            idx.inherited_parameter_names("C", "noSuchMethod"),
-            InheritedParameterNames::Known(vec![vec!["invocation".to_string()]])
-        );
-    }
-
-    #[test]
-    fn inherited_parameter_names_are_unknown_on_unresolved_ancestor() {
-        let idx = index("class C extends Missing { void method(int value) {} }");
-        assert_eq!(
-            idx.inherited_parameter_names("C", "method"),
-            InheritedParameterNames::Unknown
-        );
-    }
-
-    #[test]
     fn immutable_and_const_constructor_facts_follow_inheritance() {
         let idx = index(
             "import 'package:meta/meta.dart';
@@ -1315,6 +1016,27 @@ mod tests {
         assert_eq!(idx.is_immutable_type("B"), Some(true));
         assert_eq!(idx.constructor_is_const("A", Some("named")), Some(true));
         assert_eq!(idx.constructor_is_const("Object", None), Some(true));
+    }
+
+    #[test]
+    fn unnamed_constructor_keys_match_explicit_new() {
+        let idx = index(
+            "class A { const A(); const A.named(); }
+             class B extends A {}
+             class C { C(); }
+             class D { int value = 0; }
+             class E { const E.named(); }",
+        );
+        for name in [None, Some("new"), Some("")] {
+            assert_eq!(idx.constructor_is_const("Object", name), Some(true));
+            assert_eq!(idx.constructor_is_const("A", name), Some(true));
+            assert_eq!(idx.constructor_is_const("B", name), Some(true));
+            assert_eq!(idx.constructor_is_const("C", name), Some(false));
+            assert_eq!(idx.constructor_is_const("D", name), Some(false));
+            assert_eq!(idx.constructor_is_const("E", name), Some(false));
+        }
+        assert_eq!(idx.constructor_is_const("A", Some("named")), Some(true));
+        assert_eq!(idx.constructor_is_const("A", Some("missing")), Some(false));
     }
 
     // ── Subtype ──────────────────────────────────────────────────────────────────
@@ -1411,6 +1133,7 @@ mod tests {
         // an ancestor we never saw, so no definite answer through it is sound.
         assert_eq!(idx.member_lookup("Good", "m"), MemberResult::Unknown);
         assert_eq!(idx.is_subtype("Good", "Object"), SubtypeResult::Unknown);
+        assert_eq!(idx.is_immutable_type("Good"), None);
         // Reflexive subtyping is a syntactic identity, unaffected by the drop.
         assert_eq!(idx.is_subtype("Good", "Good"), SubtypeResult::Yes);
         assert!(!idx.is_known_type("Bad"));
@@ -1459,6 +1182,7 @@ mod tests {
         let idx = TypeIndex::from_library_files(sources);
         // A member could live in the unseen part → cannot prove absence.
         assert_eq!(idx.member_lookup("C", "ghost"), MemberResult::Unknown);
+        assert_eq!(idx.is_immutable_type("C"), None);
         // A member we *do* see is still a definite Found.
         assert_eq!(
             idx.member_lookup("C", "own"),
