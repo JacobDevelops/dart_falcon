@@ -6,9 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use lsp_server::{Connection, Message, Notification, Request, RequestId};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId};
 use lsp_types::notification::Notification as _;
 use lsp_types::request::Request as _;
 use lsp_types::{
@@ -20,8 +20,6 @@ use tempfile::TempDir;
 use falcon_lsp::{ServerOptions, run_with_connection};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(5);
-/// Quiet window used to confirm no further publish arrives.
-const QUIET: Duration = Duration::from_millis(200);
 
 /// Only `unused-files` is enabled as a cross-file rule (recommended preset off, so
 /// `unused-code` stays quiet); the linter defaults remain on.
@@ -127,17 +125,44 @@ impl TestClient {
         }
     }
 
-    /// Drain every publish currently queued (within a short quiet window).
-    fn drain_publishes(&self) -> Vec<PublishDiagnosticsParams> {
+    /// The FIFO server completes prior notification handlers before answering this request.
+    fn drain_publishes(&mut self) -> Vec<PublishDiagnosticsParams> {
+        let deadline = Instant::now() + RECV_TIMEOUT;
+        let id = self.request("falcon/testBarrier", ());
         let mut out = Vec::new();
-        while let Ok(Message::Notification(note)) = self.client.receiver.recv_timeout(QUIET) {
-            assert_eq!(
-                note.method,
-                lsp_types::notification::PublishDiagnostics::METHOD
-            );
-            out.push(serde_json::from_value(note.params).expect("PublishDiagnosticsParams shape"));
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .expect("timed out waiting for publish barrier");
+            match self
+                .client
+                .receiver
+                .recv_timeout(remaining)
+                .expect("timed out waiting for publish barrier")
+            {
+                Message::Notification(note) => {
+                    assert_eq!(
+                        note.method,
+                        lsp_types::notification::PublishDiagnostics::METHOD
+                    );
+                    out.push(
+                        serde_json::from_value(note.params)
+                            .expect("PublishDiagnosticsParams shape"),
+                    );
+                }
+                Message::Response(resp) => {
+                    assert_eq!(resp.id, id, "barrier response must echo the request id");
+                    assert_eq!(
+                        resp.error
+                            .expect("unsupported barrier method must fail")
+                            .code,
+                        ErrorCode::MethodNotFound as i32
+                    );
+                    return out;
+                }
+                other => panic!("expected publish or barrier response, got {other:?}"),
+            }
         }
-        out
     }
 
     fn initialize(&mut self) {

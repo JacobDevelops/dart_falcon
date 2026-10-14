@@ -355,7 +355,6 @@ dependencies = [
  "falcon_diagnostics",
  "falcon_lsp",
  "falcon_rules",
- "glob",
  "insta",
  "serde_json",
  "serde_yaml",
@@ -372,6 +371,7 @@ dependencies = [
  "glob",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -405,12 +405,10 @@ dependencies = [
  "falcon_diagnostics",
  "falcon_rules",
  "falcon_syntax",
- "glob",
  "lsp-server",
  "lsp-types",
  "serde",
  "serde_json",
- "serde_yaml",
  "tempfile",
  "tracing",
  "walkdir",
@@ -430,6 +428,7 @@ dependencies = [
  "regex",
  "serde_json",
  "serde_yaml",
+ "walkdir",
 ]
 
 [[package]]
@@ -1396,6 +1395,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strsim 0.10.0",
+ "walkdir",
 ]
 
 [[package]]

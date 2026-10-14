@@ -1,4 +1,4 @@
-//! Diagnostic output formatting: text, JSON, quiet.
+//! Diagnostic output formatting: text and JSON.
 
 use falcon_diagnostics::Diagnostic;
 
@@ -14,9 +14,4 @@ pub fn format_text(diagnostics: &[Diagnostic]) -> String {
 /// Format diagnostics as a JSON array string.
 pub fn format_json(diagnostics: &[Diagnostic]) -> String {
     serde_json::to_string_pretty(diagnostics).expect("diagnostics are JSON serializable")
-}
-
-/// Format diagnostics in quiet mode: no output (exit code communicates result).
-pub fn format_quiet(_diagnostics: &[Diagnostic]) -> String {
-    String::new()
 }

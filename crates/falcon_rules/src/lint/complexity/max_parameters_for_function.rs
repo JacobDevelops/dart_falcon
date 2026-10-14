@@ -39,7 +39,7 @@ impl Rule for MaxParametersForFunction {
 
 fn max_parameters_option(ctx: &AnalyzeContext) -> usize {
     crate::meta::meta_for("max-parameters-for-function")
-        .and_then(|m| ctx.rule_options(m.group, "max-parameters-for-function"))
+        .and_then(|m| ctx.rule_options(m.group.as_str(), "max-parameters-for-function"))
         .and_then(|o| o.get("max_parameters"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)

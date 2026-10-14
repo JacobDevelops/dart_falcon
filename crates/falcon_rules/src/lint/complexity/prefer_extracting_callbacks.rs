@@ -21,7 +21,7 @@ struct Cfg {
 
 fn cfg(ctx: &AnalyzeContext) -> Cfg {
     let opts = crate::meta::meta_for("prefer-extracting-callbacks")
-        .and_then(|m| ctx.rule_options(m.group, "prefer-extracting-callbacks"));
+        .and_then(|m| ctx.rule_options(m.group.as_str(), "prefer-extracting-callbacks"));
     Cfg {
         allowed_line_count: opts
             .and_then(|o| o.get("allowed_line_count"))

@@ -20,7 +20,7 @@ pub struct MaxLinesForFile;
 /// Read the `max_lines` option (default 200). Malformed/missing → default.
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
     crate::meta::meta_for("max-lines-for-file")
-        .and_then(|m| ctx.rule_options(m.group, "max-lines-for-file"))
+        .and_then(|m| ctx.rule_options(m.group.as_str(), "max-lines-for-file"))
         .and_then(|o| o.get("max_lines"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)

@@ -149,7 +149,7 @@ fn is_test_file(path: &std::path::Path) -> bool {
     let Some(root) = pubspec.parent() else {
         return false;
     };
-    let canonical = crate::cross_file::canonical_or_lexical(path);
+    let canonical = falcon_analyze::canonical_or_lexical(path);
     canonical
         .strip_prefix(root)
         .is_ok_and(|relative| relative.components().any(|c| c.as_os_str() == "test"))

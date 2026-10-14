@@ -1,85 +1,8 @@
-//! Contract tests binding the rule metadata table to the registered rule set.
-//!
-//! Every rule in `all_rules()` must have exactly one metadata entry, every
-//! metadata entry must match a registered rule, and every group must be one of
-//! the known categories. This replaces the earlier "falcon.json enumerates
-//! every rule" contract: the metadata table is now the single source of truth
-//! that ties each rule to the biome-style config schema.
+//! Metadata, schema, and legacy configuration contracts.
 
 use std::collections::HashSet;
 
-use falcon_rules::meta::{DOMAINS, GROUPS, RULE_METADATA, RuleSource, meta_for};
-use falcon_rules::{all_cross_file_rules, all_rules};
-
-/// Every registered rule name — per-file rules plus cross-file rules,
-/// which share the metadata table and config schema.
-fn registered_rule_names() -> Vec<&'static str> {
-    all_rules()
-        .iter()
-        .map(|r| r.name())
-        .chain(all_cross_file_rules().iter().map(|r| r.name()))
-        .collect()
-}
-
-#[test]
-fn every_registered_rule_has_exactly_one_metadata_entry() {
-    for name in registered_rule_names() {
-        let matches = RULE_METADATA.iter().filter(|m| m.name == name).count();
-        assert_eq!(
-            matches, 1,
-            "rule `{name}` must have exactly one metadata entry, found {matches}"
-        );
-    }
-}
-
-#[test]
-fn every_metadata_entry_matches_a_registered_rule() {
-    let registered: HashSet<&str> = registered_rule_names().into_iter().collect();
-    for meta in RULE_METADATA {
-        assert!(
-            registered.contains(meta.name),
-            "metadata entry `{}` matches no registered rule",
-            meta.name
-        );
-    }
-}
-
-#[test]
-fn metadata_groups_are_from_the_known_set() {
-    let known: HashSet<&str> = GROUPS.iter().copied().collect();
-    for meta in RULE_METADATA {
-        assert!(
-            known.contains(meta.group),
-            "rule `{}` has unknown group `{}`",
-            meta.name,
-            meta.group
-        );
-    }
-}
-
-#[test]
-fn metadata_domains_are_from_the_known_set() {
-    let known: HashSet<&str> = DOMAINS.iter().copied().collect();
-    for meta in RULE_METADATA {
-        for domain in meta.domains {
-            assert!(
-                known.contains(domain),
-                "rule `{}` has unknown domain `{}`",
-                meta.name,
-                domain
-            );
-        }
-    }
-}
-
-#[test]
-fn metadata_count_matches_registered_rule_count() {
-    assert_eq!(
-        RULE_METADATA.len(),
-        all_rules().len() + all_cross_file_rules().len(),
-        "metadata table must match the per-file plus cross-file rule count"
-    );
-}
+use falcon_rules::meta::{RULE_METADATA, RuleKind, RuleSource, meta_for};
 
 #[test]
 fn committed_schema_matches_generator() {
@@ -109,38 +32,14 @@ fn metadata_names_are_unique() {
 }
 
 #[test]
-fn cross_file_flag_matches_the_cross_file_rule_set() {
-    let cross_file_rule_names: HashSet<&str> =
-        all_cross_file_rules().iter().map(|r| r.name()).collect();
-    let file_rule_names: HashSet<&str> = all_rules().iter().map(|r| r.name()).collect();
-
+fn metadata_names_match_rule_constructors() {
     for meta in RULE_METADATA {
-        if cross_file_rule_names.contains(meta.name) {
-            assert!(
-                meta.cross_file,
-                "cross-file rule `{}` must have cross_file=true",
-                meta.name
-            );
-        }
-        if file_rule_names.contains(meta.name) {
-            assert!(
-                !meta.cross_file,
-                "file rule `{}` must have cross_file=false",
-                meta.name
-            );
-        }
+        let name = match meta.kind {
+            RuleKind::File { make, .. } => make().name(),
+            RuleKind::CrossFile(make) => make().name(),
+        };
+        assert_eq!(name, meta.name);
     }
-
-    // Exactly the three known cross-file rules carry the flag.
-    let flagged: HashSet<&str> = RULE_METADATA
-        .iter()
-        .filter(|m| m.cross_file)
-        .map(|m| m.name)
-        .collect();
-    assert_eq!(
-        flagged, cross_file_rule_names,
-        "cross_file=true set must equal all_cross_file_rules()"
-    );
 }
 
 #[test]

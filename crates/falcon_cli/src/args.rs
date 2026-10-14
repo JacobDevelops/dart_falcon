@@ -31,31 +31,7 @@ pub enum LogFormat {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Lint one or more Dart files or directories
-    Check {
-        /// Paths to lint
-        paths: Vec<std::path::PathBuf>,
-        /// Path to falcon.json config
-        #[arg(long)]
-        config: Option<std::path::PathBuf>,
-        /// Output format for diagnostics
-        #[arg(long, default_value = "text", value_name = "FORMAT")]
-        format: OutputFormat,
-        /// Glob patterns to exclude (repeatable)
-        #[arg(long, value_name = "GLOB")]
-        exclude: Vec<String>,
-        /// Stop after this many diagnostics
-        #[arg(long, value_name = "N")]
-        max_errors: Option<usize>,
-        /// Suppress all diagnostic output
-        #[arg(long)]
-        quiet: bool,
-        /// Exit code to use when violations are found (default: 1)
-        #[arg(long, value_name = "N", default_value_t = 1)]
-        exit_code: i32,
-        /// Use Rayon parallel file analysis instead of sequential
-        #[arg(long)]
-        parallel: bool,
-    },
+    Check(crate::analyze_pipeline::CheckOptions),
     /// Migrate to falcon.json. Converts a dart_code_linter / pyramid_lint
     /// analysis_options.yaml, or upgrades an existing falcon.json by rewriting
     /// legacy rule ids to their canonical form (auto-detected from the input).

@@ -1,16 +1,16 @@
-//! M6.1 benchmark harness: full-pipeline benchmarks against the jfit mobile lib.
+//! Full-pipeline benchmarks against the jfit mobile lib.
 //!
-//! Stages measured (plan M6.1):
+//! Stages measured:
 //!   1. `parse`         — parser alone over every corpus file
 //!   2. `parse_analyze` — parser + all enabled rules (sequential vs. Rayon parallel)
 //!   3. `full_pipeline` — parser + analyze + diagnostic sort + text output
 //!
-//! Target (plan M6 exit criterion): <1000ms total for parse + analyze + output
+//! Target: <1000ms total for parse + analyze + output
 //! on the full jfit mobile lib, reference hardware Linux x86_64, 8+ cores.
 //!
-//! Corpus location: `$JFIT_PATH` (default `/home/jacob/Documents/Developer/jfit`),
-//! benchmarked subtree `apps/mobile/lib`. All benchmarks return early without
-//! error when the corpus is absent so `cargo bench` works on any machine.
+//! Set `$JFIT_PATH` to the external corpus checkout; benchmarks use its
+//! `apps/mobile/lib` subtree. Benchmarks are omitted when this opt-in variable
+//! is unset or the corpus is absent.
 //!
 //! Profiling: `[profile.bench] debug = true` is set in the workspace manifest so
 //! flamegraphs resolve symbols:
@@ -20,19 +20,16 @@ use std::path::PathBuf;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
-use falcon_analyze::{RuleRegistry, analyze_parallel, analyze_sequential};
+use falcon_analyze::{analyze_parallel, analyze_sequential};
 use falcon_cli::{format_text, walk_files};
-use falcon_config::FalconConfig;
+use falcon_config::{FalconConfig, PathFilter};
 use falcon_dart_parser::parse;
 use falcon_diagnostics::Diagnostic;
-use falcon_rules::enabled_rules;
+use falcon_rules::build_registry;
 
 /// Locate the jfit mobile lib corpus, or None when not present.
 fn corpus_root() -> Option<PathBuf> {
-    let root = std::env::var("JFIT_PATH")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/home/jacob/Documents/Developer/jfit"));
+    let root = PathBuf::from(std::env::var_os("JFIT_PATH")?);
     let mobile_lib = root.join("apps/mobile/lib");
     mobile_lib.exists().then_some(mobile_lib)
 }
@@ -40,24 +37,16 @@ fn corpus_root() -> Option<PathBuf> {
 /// Load every .dart file in the corpus via the same walker the CLI uses.
 fn load_corpus() -> Option<Vec<(PathBuf, String)>> {
     let root = corpus_root()?;
-    let files = walk_files(&[root], &[]);
+    let files = walk_files(&[root], &PathFilter::default());
     (!files.is_empty()).then_some(files)
 }
 
-/// Build the rule registry exactly as the CLI does for a default config.
-fn build_registry(config: &FalconConfig) -> RuleRegistry {
-    let mut registry = RuleRegistry::new();
-    for rule in enabled_rules(config) {
-        registry.register(rule);
-    }
-    registry
-}
-
-/// Deterministic sort applied by the CLI before output (analyze_pipeline.rs).
+/// Stable output order for the benchmark's diagnostics.
 fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
     diagnostics.sort_by(|a, b| {
         a.file_path
             .cmp(&b.file_path)
+            .then((a.rule != "syntax-error").cmp(&(b.rule != "syntax-error")))
             .then(a.span.start.cmp(&b.span.start))
             .then(a.rule.cmp(b.rule))
     });

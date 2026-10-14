@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use falcon_rules::meta::{DOMAINS, GROUPS, RULE_METADATA, RuleMeta, RuleSource};
+use falcon_rules::meta::{Domain, RULE_METADATA, RuleGroup, RuleMeta, RuleSource};
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 use std::fs;
@@ -36,7 +36,7 @@ enum Task {
 #[derive(Subcommand)]
 enum Codegen {
     Rule {
-        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(GROUPS))]
+        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(RuleGroup::ALL.iter().map(|group| group.as_str())))]
         group: String,
         #[arg(long, help = "Rule id, used verbatim")]
         name: String,
@@ -217,15 +217,16 @@ fn codegen(group: String, rule_id: String) {
         "  1. add `pub mod {};` to crates/falcon_rules/src/lint/{}.rs",
         module, group
     );
+    let category = RuleGroup::ALL
+        .iter()
+        .find(|category| category.as_str() == group)
+        .unwrap();
     println!(
-        "  2. register `Box::new(lint::{}::{}::{})` in all_rules() (crates/falcon_rules/src/lib.rs)",
-        group, module, struct_name
+        "  2. add `{rule_id}` to RULE_METADATA (crates/falcon_rules/src/meta.rs) with \
+         group RuleGroup::{category:?}, domains, recommended, source, and \
+         RuleKind::File {{ make: || Box::new(lint::{group}::{module}::{struct_name}), needs_resolution }}"
     );
-    println!(
-        "  3. add a `RuleMeta {{ name: \"{}\", group: \"{}\", domains, recommended, cross_file: false, \
-         source: RuleSource::Falcon }}` entry to RULE_METADATA (crates/falcon_rules/src/meta.rs)",
-        rule_id, group
-    );
+    println!("  3. add `{rule_id}` under linter.rules.{group} in the root falcon.json showcase");
     println!(
         "  4. implement the rule, fill in fixtures, then run `cargo xtask validate-rules --rule {}`",
         rule_id
@@ -420,24 +421,16 @@ fn validate_file(
 }
 
 fn recursive_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(dir) = pending.pop() {
-        let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
-            .unwrap_or_else(|_| panic!("cannot read {}", dir.display()))
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .collect();
-        entries.sort();
-        for path in entries.into_iter().rev() {
-            if path.is_dir() {
-                pending.push(path);
-            } else {
-                files.push(path);
-            }
-        }
-    }
-    files.sort();
+    let mut files: Vec<_> = walkdir::WalkDir::new(root)
+        .follow_links(true)
+        .into_iter()
+        .map(|entry| {
+            entry.unwrap_or_else(|error| panic!("cannot walk {}: {error}", root.display()))
+        })
+        .filter(|entry| entry.file_type().is_file())
+        .map(|entry| entry.into_path())
+        .collect();
+    files.sort_unstable();
     files
 }
 
@@ -845,12 +838,13 @@ fn snake_of(name: &str) -> String {
 /// The source file path for a rule's implementation.
 fn rule_source_path(root: &Path, meta: &RuleMeta) -> PathBuf {
     let snake = snake_of(meta.name);
-    if meta.cross_file {
+    if meta.is_cross_file() {
         root.join(format!("crates/falcon_rules/src/cross_file/{snake}.rs"))
     } else {
         root.join(format!(
             "crates/falcon_rules/src/lint/{}/{}.rs",
-            meta.group, snake
+            meta.group.as_str(),
+            snake
         ))
     }
 }
@@ -1072,9 +1066,9 @@ fn docgen_config_for(corpus_root: &Path, meta: &RuleMeta, temp_path: &Path) -> O
 
     let mut rules = Map::new();
     rules.insert("recommended".to_string(), json!(false));
-    rules.insert(meta.group.to_string(), Value::Object(group_map));
+    rules.insert(meta.group.as_str().to_string(), Value::Object(group_map));
 
-    let cfg = if meta.cross_file {
+    let cfg = if meta.is_cross_file() {
         json!({
             "linter": { "rules": { "recommended": false } },
             "cross-file": { "rules": rules },
@@ -1398,7 +1392,12 @@ fn docgen() {
 
     // Deterministic order: by group, then name.
     let mut metas: Vec<&RuleMeta> = RULE_METADATA.iter().collect();
-    metas.sort_by(|a, b| a.group.cmp(b.group).then(a.name.cmp(b.name)));
+    metas.sort_by(|a, b| {
+        a.group
+            .as_str()
+            .cmp(b.group.as_str())
+            .then(a.name.cmp(b.name))
+    });
 
     let mut records: Vec<Value> = Vec::with_capacity(metas.len());
     let mut with_bad = 0usize;
@@ -1463,7 +1462,7 @@ fn docgen() {
 
         let mut diagnostics: Vec<Value> = Vec::new();
         let had_fixture;
-        if meta.cross_file && !cross_file_sources.is_empty() {
+        if meta.is_cross_file() && !cross_file_sources.is_empty() {
             had_fixture = true;
             for d in cross_file_project_roots(&cross_file_dir)
                 .into_iter()
@@ -1509,10 +1508,10 @@ fn docgen() {
 
         records.push(json!({
             "name": meta.name,
-            "group": meta.group,
-            "domains": meta.domains,
+            "group": meta.group.as_str(),
+            "domains": meta.domain_names(),
             "recommended": meta.recommended,
-            "crossFile": meta.cross_file,
+            "crossFile": meta.is_cross_file(),
             "source": source_json(&meta.source),
             "description": description,
             "docs": docs,
@@ -1525,7 +1524,7 @@ fn docgen() {
         }));
     }
 
-    let domains: Vec<Value> = DOMAINS
+    let domains: Vec<Value> = Domain::ALL
         .iter()
         .map(|domain| {
             let mut rules: Vec<&str> = metas
@@ -1534,7 +1533,7 @@ fn docgen() {
                 .map(|m| m.name)
                 .collect();
             rules.sort_unstable();
-            json!({ "name": domain, "rules": rules })
+            json!({ "name": domain.as_str(), "rules": rules })
         })
         .collect();
 
@@ -1578,7 +1577,7 @@ fn docgen() {
     println!("  With diagnostics:   {with_diags}");
     println!(
         "  Cross-file rules:   {}",
-        metas.iter().filter(|m| m.cross_file).count()
+        metas.iter().filter(|m| m.is_cross_file()).count()
     );
     if !zero_diag_with_fixture.is_empty() {
         println!(

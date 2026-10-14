@@ -51,7 +51,7 @@ fn parse_config_items(ctx: &AnalyzeContext) -> Vec<(String, Option<String>)> {
         return Vec::new();
     };
     let Some(items_array) = ctx
-        .rule_options(group, "use-design-system-item")
+        .rule_options(group.as_str(), "use-design-system-item")
         .and_then(|opts| opts.get("items"))
         .and_then(|v| v.as_array())
     else {

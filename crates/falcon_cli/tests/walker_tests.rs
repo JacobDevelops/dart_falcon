@@ -1,4 +1,5 @@
-use falcon_cli::walk_files;
+use falcon_cli::{file_walker::walk_pubspecs, walk_files};
+use falcon_config::PathFilter;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
@@ -9,7 +10,7 @@ fn test_walk_single_dart_file() {
     let dart_file = temp.path().join("test.dart");
     fs::write(&dart_file, "void main() {}").unwrap();
 
-    let results = walk_files(std::slice::from_ref(&dart_file), &[]);
+    let results = walk_files(std::slice::from_ref(&dart_file), &PathFilter::default());
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].0, dart_file);
     assert_eq!(results[0].1, "void main() {}");
@@ -28,7 +29,7 @@ fn test_walk_directory_finds_dart_files() {
     fs::write(&dart3, "dart3").unwrap();
     fs::write(&rust_file, "rust").unwrap();
 
-    let results = walk_files(&[temp.path().to_path_buf()], &[]);
+    let results = walk_files(&[temp.path().to_path_buf()], &PathFilter::default());
     assert_eq!(results.len(), 3);
 
     let paths: Vec<_> = results.iter().map(|(p, _)| p).collect();
@@ -40,7 +41,7 @@ fn test_walk_directory_finds_dart_files() {
 #[test]
 fn test_walk_empty_directory() {
     let temp = tempdir().unwrap();
-    let results = walk_files(&[temp.path().to_path_buf()], &[]);
+    let results = walk_files(&[temp.path().to_path_buf()], &PathFilter::default());
     assert_eq!(results.len(), 0);
 }
 
@@ -58,8 +59,8 @@ fn test_walk_exclude_pattern() {
     fs::write(&lib_main, "lib").unwrap();
     fs::write(&build_output, "build").unwrap();
 
-    let exclude_patterns = vec!["**/build/**".to_string()];
-    let results = walk_files(&[temp.path().to_path_buf()], &exclude_patterns);
+    let filter = PathFilter::from_includes(&["!**/build/**".to_string()]);
+    let results = walk_files(&[temp.path().to_path_buf()], &filter);
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].0, lib_main);
@@ -79,7 +80,7 @@ fn test_walk_nested_directory() {
     fs::write(&b_dart, "nested").unwrap();
     fs::write(&c_dart, "shallow").unwrap();
 
-    let results = walk_files(&[temp.path().to_path_buf()], &[]);
+    let results = walk_files(&[temp.path().to_path_buf()], &PathFilter::default());
     assert_eq!(results.len(), 2);
 
     let paths: Vec<_> = results.iter().map(|(p, _)| p).collect();
@@ -90,27 +91,8 @@ fn test_walk_nested_directory() {
 #[test]
 fn test_walk_nonexistent_path_returns_empty() {
     let nonexistent = PathBuf::from("/nonexistent/path/to/file.dart");
-    let results = walk_files(&[nonexistent], &[]);
+    let results = walk_files(&[nonexistent], &PathFilter::default());
     assert_eq!(results.len(), 0);
-}
-
-/// Integration test: walk jfit mobile lib and verify the walker finds the Dart files.
-/// Skipped automatically if the jfit corpus is not present on this machine.
-#[test]
-fn test_walk_jfit_mobile_lib_dart_files() {
-    let jfit_lib = PathBuf::from("/home/jacob/Documents/Developer/jfit/apps/mobile/lib");
-    if !jfit_lib.exists() {
-        eprintln!("jfit corpus not found at {}; skipping", jfit_lib.display());
-        return;
-    }
-    let results = walk_files(&[jfit_lib], &[]);
-    // Floor, not an exact count: the external corpus grows over time, so assert a
-    // lower bound that still guards against walker regressions (missing files).
-    assert!(
-        results.len() >= 445,
-        "expected at least 445 dart files in jfit mobile lib, found {}",
-        results.len()
-    );
 }
 
 #[cfg(unix)]
@@ -125,7 +107,35 @@ fn test_walk_does_not_follow_symlinked_dirs() {
     // A self-referential link must not cycle the walk either.
     std::os::unix::fs::symlink(temp.path(), temp.path().join("self_link")).unwrap();
 
-    let results = walk_files(&[temp.path().to_path_buf()], &[]);
+    let results = walk_files(&[temp.path().to_path_buf()], &PathFilter::default());
     assert_eq!(results.len(), 1);
     assert!(results[0].0.ends_with("local.dart"));
+}
+
+#[test]
+fn test_walk_pubspec_only_package() {
+    let temp = tempdir().unwrap();
+    let pubspec = temp.path().join("pubspec.yaml");
+    fs::write(&pubspec, "name: package\n").unwrap();
+    let results = walk_pubspecs(&[temp.path().to_path_buf()], &PathFilter::default());
+    assert_eq!(results, [(pubspec, "name: package\n".to_string())]);
+}
+
+#[test]
+fn dart_includes_do_not_hide_package_manifests() {
+    let temp = tempdir().unwrap();
+    let lib = temp.path().join("lib");
+    fs::create_dir(&lib).unwrap();
+    fs::write(lib.join("main.dart"), "void main() {}").unwrap();
+    fs::write(temp.path().join("other.dart"), "void other() {}").unwrap();
+    let pubspec = temp.path().join("pubspec.yaml");
+    fs::write(&pubspec, "name: package\n").unwrap();
+    let mut filter = PathFilter::from_includes(&["**/lib/**".to_string()]);
+    assert_eq!(walk_files(&[temp.path().to_path_buf()], &filter).len(), 1);
+    assert_eq!(
+        walk_pubspecs(&[temp.path().to_path_buf()], &filter).len(),
+        1
+    );
+    filter.extend_excludes(&["**/pubspec.yaml".to_string()]);
+    assert!(walk_pubspecs(&[temp.path().to_path_buf()], &filter).is_empty());
 }

@@ -6,8 +6,8 @@ falcon reads a biome 2.x-shaped `falcon.json`. Discovery order (first match wins
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon runs with defaults: every rule enabled at its
-default severity (warning).
+If no config is found, falcon runs with defaults: every recommended rule enabled
+at its default severity (warning).
 
 A config that **is** found but fails to load is a hard **error** — falcon prints
 a message and exits non-zero rather than silently falling back to defaults. This
@@ -88,6 +88,10 @@ A single mixed list of globs:
 
 Exclusions and any CLI `--exclude` patterns are unioned.
 
+Invalid glob patterns produce a warning and are skipped consistently in CLI
+file selection, LSP selection, and overrides. If no valid positive patterns
+remain, positive filtering is unrestricted; valid exclusions still win.
+
 Positive globs match paths **as walked from the CLI argument**, not as absolute
 paths. Running `falcon check .` from the project root walks paths like
 `lib/foo.dart`, so `lib/**` matches; passing an absolute path to `falcon check`
@@ -143,7 +147,7 @@ For each rule falcon resolves an effective severity (or "disabled"):
    disabled.
 4. Otherwise (no domains): enabled iff the recommended preset is active.
 
-Net effect: with no config file, every rule is on at warning.
+Net effect: with no config file, every recommended rule is on at warning.
 
 ## `max-errors`
 
@@ -361,10 +365,10 @@ dynamic payload = decode(bytes); // falcon-ignore lint/suspicious/avoid-dynamic:
 
 ## `cross-file` — cross-file rules
 
-Most rules analyze one file at a time. A small set of **cross-file rules** instead
-reason across the whole analyzed file set — they need to see every file to decide
-whether something is referenced anywhere. They are a **separate feature** from the
-linter and live under their own top-level `cross-file` block, *not* under
+Most rules analyze one file at a time. **Cross-file rules** instead reason across
+the analyzed file set or package manifests, checking references and package
+metadata. They are a **separate feature** from the linter and live under their
+own top-level `cross-file` block, *not* under
 `linter`. The pre-1.0 spellings `project` and `cross_file` (underscore) are still
 accepted as deprecated aliases (each warns on load — run `falcon migrate`):
 
@@ -386,7 +390,7 @@ accepted as deprecated aliases (each warns on load — run `falcon migrate`):
   as `linter.rules` (level strings or `{ "level", "options" }` objects), but with
   **no `domains`** gating, since cross-file rules are not domain-scoped.
 
-Cross-file rules are grouped under their category (all three are `correctness`),
+Cross-file rules are grouped under their category (`correctness`, `style`, or `suspicious`),
 share the same metadata table as file rules, and are suppressible with
 `// falcon-ignore cross-file/<group>/<rule>: <reason>` comments (or the
 `// falcon-ignore-all` variant). Configuring a cross-file rule under
@@ -399,19 +403,27 @@ effect.
 | `unused-files`           | correctness  | yes         | `check-unused-files`          |
 | `unused-code`            | correctness  | yes         | `check-unused-code`           |
 | `unnecessary-nullable`   | correctness  | yes         | `check-unnecessary-nullable`  |
+| `depend-on-referenced-packages` | correctness | yes | — |
+| `package-names`          | style        | yes         | —                            |
+| `secure-pubspec-urls`    | suspicious   | yes         | —                            |
 
 Notes:
 
 - **Where they run.** Cross-file rules run in the `falcon check` pipeline's
   cross-file pass, after the per-file pass, over every collected file. The **LSP
   server also runs them**: it walks the workspace (open buffers overlaid on the
-  on-disk files) on didOpen/didSave/config-reload — not on every keystroke — and
-  republishes the merged per-file plus cross-file diagnostics for open documents.
+  on-disk files) on didOpen, didSave, didClose, config reload, and each debounced
+  didChange flush. With debouncing disabled, every didChange triggers the pass.
+  It republishes merged per-file and cross-file diagnostics for open documents.
 - **Scope.** `unused-files` and `unused-code` only flag files/declarations under
   the package `lib/` directory (resolved from the nearest `pubspec.yaml`), while
   counting references from every analyzed file (including `test/`). Exclude
   generated code (`lib/gen/**`, `*.pb*.dart`, etc.) via `files.includes` the same
   way you would for any rule.
+- **Package boundaries.** The CLI and LSP preserve every discovered
+  `pubspec.yaml` as a package boundary, even when it is unreadable or invalid.
+  Such a package has no known name: files below it do not inherit the enclosing
+  package's name or resolve through that enclosing package's `package:` mapping.
 - **`unnecessary-nullable` is resolver-backed** and on by the recommended preset.
   It still restricts itself to `_`-prefixed private declarations (so every call
   site is visible in-project), but falcon's type-resolution layer now decides

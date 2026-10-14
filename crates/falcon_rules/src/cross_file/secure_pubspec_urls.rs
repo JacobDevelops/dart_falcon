@@ -1,14 +1,13 @@
 //! Disallow insecure URL schemes in `pubspec.yaml` string values.
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use serde_yaml::Value;
 
-use super::{enclosing_pubspec, yaml_string_span};
+use super::{project_pubspecs, yaml_string_span};
 
 pub struct SecurePubspecUrls;
 
@@ -51,19 +50,6 @@ fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
             Some(diagnostic)
         })
         .collect()
-}
-
-fn project_pubspecs(files: &[ProjectFile]) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    let mut paths = Vec::new();
-    for file in files {
-        if let Some(path) = enclosing_pubspec(&file.path)
-            && seen.insert(path.clone())
-        {
-            paths.push(path);
-        }
-    }
-    paths
 }
 
 fn insecure_protocol(value: &str) -> Option<&'static str> {

@@ -1,14 +1,13 @@
 //! Require package names to be valid `lower_case_with_underscores` identifiers.
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use serde_yaml::Value;
 
-use super::{enclosing_pubspec, yaml_string_span};
+use super::{project_pubspecs, yaml_string_span};
 
 pub struct PackageNames;
 
@@ -45,19 +44,6 @@ fn check_pubspec(path: &Path) -> Option<Diagnostic> {
     );
     diagnostic.resolve_position(&source);
     Some(diagnostic)
-}
-
-fn project_pubspecs(files: &[ProjectFile]) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    let mut paths = Vec::new();
-    for file in files {
-        if let Some(path) = enclosing_pubspec(&file.path)
-            && seen.insert(path.clone())
-        {
-            paths.push(path);
-        }
-    }
-    paths
 }
 
 fn is_valid_package_name(name: &str) -> bool {

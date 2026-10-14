@@ -168,7 +168,7 @@ fn candidates(program: &Program) -> Vec<Candidate> {
 /// Files that appear as the target of an `export` directive anywhere in the set.
 fn collect_exported_files(
     files: &[ProjectFile],
-    pkg: Option<&super::PackageInfo>,
+    pkg: Option<&falcon_analyze::PackageIdentity>,
 ) -> super::ReferenceSet {
     let mut refs = super::ReferenceSet::default();
     for f in files {

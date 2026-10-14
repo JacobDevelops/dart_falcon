@@ -7,9 +7,9 @@ commitment. Items and order will shift.
 
 1.0 is a rule-catalog and readiness push. The full planned catalog — every rule,
 with falcon group, analysis type, and priority — lives in
-[`docs/rule-catalog-1.0.md`](docs/rule-catalog-1.0.md). Baseline today is **148
-rules shipped**; the plan adds **387 candidate rules** (104 must-have that block
-1.0, 255 nice-to-have stretch, 28 explicitly post-1.0).
+[`docs/rule-catalog-1.0.md`](docs/rule-catalog-1.0.md). The shipped registry is
+defined by `RULE_METADATA` in `crates/falcon_rules/src/meta.rs`; the catalog
+records candidate rules and their priorities, some of which have since shipped.
 
 - **Rule-catalog expansion.** Three sources feed 1.0:
   - **Remaining official lints — 145.** Every live `dart-lang/linter` rule falcon

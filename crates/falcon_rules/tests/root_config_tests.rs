@@ -19,9 +19,10 @@ fn listed_rules(section: &serde_json::Value, section_name: &str) -> BTreeSet<&'s
             let meta = meta_for(name)
                 .unwrap_or_else(|| panic!("{section_name} lists unknown rule `{name}`"));
             assert_eq!(
-                meta.group, group,
+                meta.group.as_str(),
+                group.as_str(),
                 "{section_name} places `{name}` under `{group}` but meta says `{}`",
-                meta.group
+                meta.group.as_str()
             );
             listed.insert(meta.name);
         }
@@ -47,13 +48,13 @@ fn root_falcon_json_splits_file_and_cross_file_rules() {
     // Neither section may contain the other kind of rule.
     for name in &linter_listed {
         assert!(
-            !meta_for(name).unwrap().cross_file,
+            !meta_for(name).unwrap().is_cross_file(),
             "linter.rules must not list cross-file rule `{name}`"
         );
     }
     for name in &cross_file_listed {
         assert!(
-            meta_for(name).unwrap().cross_file,
+            meta_for(name).unwrap().is_cross_file(),
             "cross_file.rules must not list file rule `{name}`"
         );
     }
@@ -62,7 +63,7 @@ fn root_falcon_json_splits_file_and_cross_file_rules() {
     // cross_file.rules. No rule is listed in both.
     let missing_file: Vec<_> = RULE_METADATA
         .iter()
-        .filter(|m| !m.cross_file && !linter_listed.contains(m.name))
+        .filter(|m| !m.is_cross_file() && !linter_listed.contains(m.name))
         .map(|m| m.name)
         .collect();
     assert!(
@@ -71,7 +72,7 @@ fn root_falcon_json_splits_file_and_cross_file_rules() {
     );
     let missing_cross_file: Vec<_> = RULE_METADATA
         .iter()
-        .filter(|m| m.cross_file && !cross_file_listed.contains(m.name))
+        .filter(|m| m.is_cross_file() && !cross_file_listed.contains(m.name))
         .map(|m| m.name)
         .collect();
     assert!(

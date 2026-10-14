@@ -1,22 +1,20 @@
 //! Analyze pipeline: config loading, file walking, parallel analysis, and diagnostic output.
 
 use std::path::PathBuf;
-use tracing::{info, warn};
+use tracing::info;
 
 use std::collections::HashMap;
 
-use clap::ValueEnum;
+use clap::{Args, ValueEnum};
 use falcon_analyze::{
-    CrossFileRuleRegistry, FileSuppressions, PackageIdentity, ProjectFile, RuleRegistry,
-    analyze_parallel_collecting_resolving, analyze_sequential_collecting_resolving,
+    ProjectFile, analyze_parallel_collecting_resolving, analyze_sequential_collecting_resolving,
 };
-use falcon_config::{FalconConfig, load_config, load_or_default};
+use falcon_config::{load_config, load_or_default};
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
-    ResolvedCrossFileRules, ResolvedRules, apply_severities, meta::suppression_lookup,
-    resolve_cross_file_rules, resolve_rules, rule_requires_resolution,
+    apply_severities, build_cross_file_registry, build_registry, package_identities,
+    requires_resolution, run_cross_file,
 };
-use glob::Pattern;
 
 use crate::file_walker::{walk_files, walk_pubspecs};
 use crate::output;
@@ -29,23 +27,35 @@ pub enum OutputFormat {
 }
 
 /// Options for the check pipeline.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Args)]
 pub struct CheckOptions {
-    /// Paths to check (files or directories).
+    /// Paths to lint
     pub paths: Vec<PathBuf>,
-    /// Optional config file path. If None, will search for config.
+    /// Path to falcon.json config
+    #[arg(id = "config", long = "config", value_name = "CONFIG")]
     pub config_path: Option<PathBuf>,
-    /// Glob patterns to exclude from analysis.
-    pub exclude_patterns: Vec<String>,
-    /// Maximum number of diagnostics to report. None = unlimited.
-    pub max_errors: Option<usize>,
-    /// If true, suppress all output to stdout.
-    pub quiet: bool,
-    /// Output format for diagnostics.
+    /// Output format for diagnostics
+    #[arg(long, default_value = "text", value_name = "FORMAT")]
     pub format: OutputFormat,
-    /// Exit code returned when violations are found. Default: 1.
+    /// Glob patterns to exclude (repeatable)
+    #[arg(id = "exclude", long = "exclude", value_name = "GLOB")]
+    pub exclude_patterns: Vec<String>,
+    /// Stop after this many diagnostics
+    #[arg(long, value_name = "N")]
+    pub max_errors: Option<usize>,
+    /// Suppress all diagnostic output
+    #[arg(long)]
+    pub quiet: bool,
+    /// Exit code to use when violations are found (default: 1)
+    #[arg(
+        id = "exit_code",
+        long = "exit-code",
+        value_name = "N",
+        default_value_t = 1
+    )]
     pub error_exit_code: i32,
-    /// If true, use Rayon parallel analysis; otherwise sequential.
+    /// Use Rayon parallel file analysis instead of sequential
+    #[arg(long)]
     pub parallel: bool,
 }
 
@@ -64,111 +74,12 @@ impl Default for CheckOptions {
     }
 }
 
-/// Result of a check run (plan M3.3.1).
+/// Result of a check run.
 #[derive(Debug)]
 pub struct CheckOutput {
     pub diagnostics: Vec<Diagnostic>,
     pub total_files: usize,
     pub exit_code: i32,
-}
-
-/// Build a registry from the resolved rule set (enablement semantics live in
-/// `falcon_rules::resolve_rules`).
-fn build_registry(resolved: ResolvedRules) -> RuleRegistry {
-    let mut registry = RuleRegistry::with_lookup(suppression_lookup);
-    for rule in resolved.rules {
-        registry.register(rule);
-    }
-    registry
-}
-
-/// Build a cross-file-rule registry from the resolved cross-file rule set.
-fn build_cross_file_registry(resolved: ResolvedCrossFileRules) -> CrossFileRuleRegistry {
-    let mut registry = CrossFileRuleRegistry::new();
-    for rule in resolved.rules {
-        registry.register(rule);
-    }
-    registry
-}
-
-/// Honor inline `// falcon-ignore` / `// falcon-ignore-all` suppressions for
-/// cross-file-rule diagnostics, mirroring the per-file pass. Suppressions are
-/// read from the diagnostic's own file (matched by path) and parsed lazily. This
-/// pass only *filters*; malformed-suppression diagnostics are emitted once, by
-/// the per-file pass over the same sources.
-fn suppress_cross_file_diags(diags: &mut Vec<Diagnostic>, files: &[ProjectFile]) {
-    if diags.is_empty() {
-        return;
-    }
-    let sources: HashMap<String, &str> = files
-        .iter()
-        .map(|f| (f.path.to_string_lossy().into_owned(), f.source.as_str()))
-        .collect();
-    let mut cache: HashMap<String, FileSuppressions> = HashMap::new();
-    diags.retain(|diag| {
-        let Some(src) = sources.get(&diag.file_path) else {
-            return true;
-        };
-        let sup = cache
-            .entry(diag.file_path.clone())
-            .or_insert_with(|| FileSuppressions::parse(src, &diag.file_path, suppression_lookup));
-        if sup.is_empty() {
-            return true;
-        }
-        let line = sup.line_for_offset(diag.span.start);
-        !sup.is_suppressed(diag.rule, line)
-    });
-}
-
-/// Run the cross-file pass and fold its diagnostics into `diagnostics`, applying
-/// inline suppressions and the same path-aware severity resolution as the
-/// per-file pass.
-fn run_cross_file_pass(
-    registry: &CrossFileRuleRegistry,
-    project_files: &[ProjectFile],
-    config: &FalconConfig,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let mut cross_file_diags = registry.run_all(project_files, config);
-    suppress_cross_file_diags(&mut cross_file_diags, project_files);
-    apply_severities(&mut cross_file_diags, config);
-    diagnostics.extend(cross_file_diags);
-}
-
-/// Keep only files matching at least one positive include glob. A non-empty
-/// `includes` list restricts the walked set; an empty one means "no filtering".
-fn apply_includes(files: &mut Vec<(PathBuf, String)>, includes: &[String]) {
-    if includes.is_empty() {
-        return;
-    }
-    let compiled: Vec<Pattern> = includes
-        .iter()
-        .filter_map(|p| match Pattern::new(p) {
-            Ok(pat) => Some(pat),
-            Err(_) => {
-                warn!("invalid include pattern: {}", p);
-                None
-            }
-        })
-        .collect();
-    files.retain(|(path, _)| {
-        let s = path.to_string_lossy();
-        compiled.iter().any(|p| p.matches(&s))
-    });
-}
-
-fn package_identities(manifests: &[(PathBuf, String)]) -> Vec<PackageIdentity> {
-    manifests
-        .iter()
-        .filter_map(|(path, source)| {
-            let manifest = serde_yaml::from_str::<serde_yaml::Value>(source).ok()?;
-            let name = manifest.get("name")?.as_str()?.to_owned();
-            Some(PackageIdentity {
-                name,
-                lib_root: path.parent()?.join("lib"),
-            })
-        })
-        .collect()
 }
 
 /// Run analysis and collect results without printing diagnostics.
@@ -190,33 +101,34 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     // falcon.json files keep resolving.
     falcon_rules::meta::canonicalize_config(&mut config);
 
-    // Config exclude patterns and CLI --exclude patterns are unioned.
-    let mut exclude_patterns = config.files.exclude_patterns();
-    exclude_patterns.extend(options.exclude_patterns.iter().cloned());
-
-    let mut files = walk_files(&options.paths, &exclude_patterns);
-    apply_includes(&mut files, &config.files.include_patterns());
-
-    let resolved = resolve_rules(&config);
-    let registry = build_registry(resolved);
-    // Cross-file rules run a second pass over the retained programs; only collect
-    // programs and package manifests when at least one is enabled.
-    let cross_file_registry = build_cross_file_registry(resolve_cross_file_rules(&config));
+    let mut cli_filter;
+    let filter = if options.exclude_patterns.is_empty() {
+        config.files.path_filter()
+    } else {
+        cli_filter = config.files.path_filter().clone();
+        cli_filter.extend_excludes(&options.exclude_patterns);
+        &cli_filter
+    };
+    let files = walk_files(&options.paths, filter);
+    let registry = build_registry(&config);
+    let cross_file_registry = build_cross_file_registry(&config);
     let collect_programs = !cross_file_registry.is_empty();
-    // Resolver seam: enable cross-file type resolution only when a per-file rule
-    // that consumes it is active, so a default run pays nothing. When set, the
-    // engine parses all files first and builds one shared `ProjectIndex` (every
-    // file's declarations + builtins) attached to each per-file context.
-    let resolve = registry
-        .rules()
-        .iter()
-        .any(|rule| rule_requires_resolution(rule.name()));
+    let resolve = requires_resolution(registry.rules());
     let manifests = if collect_programs || resolve {
-        walk_pubspecs(&options.paths, &exclude_patterns)
+        walk_pubspecs(&options.paths, filter)
     } else {
         Vec::new()
     };
-    let packages = package_identities(&manifests);
+    let packages = if resolve {
+        package_identities(
+            files
+                .iter()
+                .chain(manifests.iter())
+                .map(|(path, _)| path.as_path()),
+        )
+    } else {
+        Vec::new()
+    };
     if files.is_empty() && manifests.is_empty() {
         return Ok(CheckOutput {
             diagnostics: vec![],
@@ -263,12 +175,11 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     apply_severities(&mut diagnostics, &config);
 
     if collect_programs {
-        run_cross_file_pass(
+        diagnostics.extend(run_cross_file(
             &cross_file_registry,
             &project_files,
             &config,
-            &mut diagnostics,
-        );
+        ));
     }
 
     // Resolve 1-based line/col for every diagnostic from its file's source, so

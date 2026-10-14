@@ -37,7 +37,7 @@ impl Rule for MaximumNestingLevel {
 /// Read the `max_nesting` option (default 5). Malformed/missing → default.
 fn max_nesting_option(ctx: &AnalyzeContext) -> usize {
     crate::meta::meta_for("maximum-nesting-level")
-        .and_then(|m| ctx.rule_options(m.group, "maximum-nesting-level"))
+        .and_then(|m| ctx.rule_options(m.group.as_str(), "maximum-nesting-level"))
         .and_then(|o| o.get("max_nesting"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)

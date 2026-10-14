@@ -7,148 +7,155 @@
 //! by the `source` field of its `RuleMeta` entry (see `meta.rs`). Cross-file
 //! rules live under `cross_file/`.
 
-pub mod cross_file;
+pub(crate) mod cross_file;
 pub mod lint;
-pub mod member_order;
+pub(crate) mod member_order;
 pub mod meta;
 pub mod schema;
 
-use falcon_analyze::{CrossFileRule, Rule};
+use std::collections::HashMap;
+use std::path::Path;
+
+use falcon_analyze::{
+    CrossFileRule, CrossFileRuleRegistry, FileSuppressions, PackageIdentity, ProjectFile, Rule,
+    RuleRegistry, canonical_or_lexical,
+};
 use falcon_config::{FalconConfig, ResolvedSeverity, Rules};
 use falcon_diagnostics::{Diagnostic, Severity};
 
-use crate::meta::meta_for;
+use crate::meta::{RULE_METADATA, RuleKind, meta_for, suppression_lookup};
 
-/// Per-file rules that consume resolver-backed project, type, identity, signature,
-/// or library facts. Drivers use this to preserve the single-file fast path when
-/// none are enabled and to build one shared semantic snapshot when any are active.
-///
-/// Public only so the corpus harness can drive the same list; go through
-/// [`rule_requires_resolution`] instead.
-#[doc(hidden)]
-pub const RESOLVER_DEPENDENT_RULES: &[&str] = &[
-    "no-boolean-literal-compare",
-    "avoid-unnecessary-type-assertions",
-    "avoid-unnecessary-type-casts",
-    "avoid-unrelated-type-assertions",
-    "avoid-print",
-    "valid-regexps",
-    "avoid-passing-async-when-sync-expected",
-    "avoid-ignoring-return-values",
-    "proper-controller-dispose",
-    "unnecessary-string-interpolations",
-    "prefer-is-empty",
-    "prefer-is-not-empty",
-    "prefer-iterable-where-type",
-    "prefer-collection-literals",
-    "prefer-final-fields",
-    "unrelated-type-equality-checks",
-    "collection-methods-unrelated-type",
-    "annotate-overrides",
-    "avoid-renaming-method-parameters",
-    "overridden-fields",
-    "use-key-in-widget-constructors",
-    "prefer-const-constructors-in-immutables",
-    "prefer-contains",
-    "prefer-interpolation-to-compose-strings",
-    "await-only-futures",
-    "null-check-on-nullable-type-parameter",
-    "null-closures",
-    "void-checks",
-    "implicit-call-tearoffs",
-    "library-annotations",
-    "type-literal-in-constant-pattern",
-    "avoid-types-as-parameter-names",
-    "exhaustive-cases",
-    "invalid-runtime-check-with-js-interop-types",
-    "use-build-context-synchronously",
-    "library-private-types-in-public-api",
-    "prefer-extracting-callbacks",
-    "no-logic-in-create-state",
-    "use-full-hex-values-for-flutter-colors",
-    "implementation-imports",
-    "avoid-non-null-assertion",
-    "no-self-comparisons",
-    "proper-super-init-state",
-    "no-duplicate-case-values",
-    "unnecessary-flutter-imports",
-    "prefer-declaring-const-constructor",
-];
-
-/// Whether a per-file rule needs resolver-backed semantic context.
 pub fn rule_requires_resolution(name: &str) -> bool {
-    RESOLVER_DEPENDENT_RULES.contains(&name)
+    meta_for(name).is_some_and(|meta| {
+        matches!(
+            meta.kind,
+            RuleKind::File {
+                needs_resolution: true,
+                ..
+            }
+        )
+    })
 }
 
-/// The enabled rule set: every rule that could fire for at least one path.
-pub struct ResolvedRules {
-    pub rules: Vec<Box<dyn Rule>>,
+pub fn requires_resolution(rules: &[Box<dyn Rule>]) -> bool {
+    rules
+        .iter()
+        .any(|rule| rule_requires_resolution(rule.name()))
 }
 
-/// The enabled cross-file rule set. Run by both the CLI and LSP cross-file passes.
-pub struct ResolvedCrossFileRules {
-    pub rules: Vec<Box<dyn CrossFileRule>>,
-}
-
-/// Resolve the rule set to register from `config`.
-///
-/// A rule is registered if it is enabled for **any** path — the base config or
-/// any override turns it on (see
-/// [`falcon_config::FalconConfig::is_rule_enabled_anywhere`]). Per-file severity
-/// and off-scoping are applied afterwards by [`apply_severities`], which drops
-/// diagnostics that a matching override disables. Shared by the CLI pipeline and
-/// the LSP server so both behave identically. Warns about config entries that
-/// name no registered rule or sit under the wrong group.
-pub fn resolve_rules(config: &FalconConfig) -> ResolvedRules {
-    warn_unknown_config(config);
-
-    let mut rules = Vec::new();
-    for rule in all_rules() {
-        let name = rule.name();
-        // Every registered rule has a metadata entry (enforced by tests).
-        let Some(meta) = meta_for(name) else {
-            eprintln!("warning: rule `{name}` has no metadata entry; skipping");
-            continue;
-        };
-        if config.is_rule_enabled_anywhere(meta.group, meta.name, meta.recommended, meta.domains) {
-            rules.push(rule);
-        }
+fn resolve_rules(config: &FalconConfig) -> impl Iterator<Item = Box<dyn Rule>> + '_ {
+    for warning in config_warnings(config) {
+        eprintln!("{warning}");
     }
-    ResolvedRules { rules }
+    RULE_METADATA.iter().filter_map(|meta| match meta.kind {
+        RuleKind::File { make, .. }
+            if config.is_rule_enabled_anywhere(
+                meta.group.as_str(),
+                meta.name,
+                meta.recommended,
+                meta.domain_names(),
+            ) =>
+        {
+            Some(make())
+        }
+        _ => None,
+    })
 }
 
-/// Apply per-file severity resolution to each diagnostic and drop those the
-/// resolved config disables for that file.
-///
-/// For every diagnostic, the base rule resolution is patched by any override
-/// whose `includes` match the diagnostic's `file_path` (see
-/// [`falcon_config::FalconConfig::resolve_rule_for`]): a resolved severity
-/// rewrites `diag.severity`; `None` (rule off for this path) removes the
-/// diagnostic. Diagnostics whose rule has no metadata entry are left unchanged.
-///
-/// Correctness-first: globs are matched per diagnostic. If this ever shows up in
-/// profiles, cache the per-path resolution (keyed by `file_path`).
+pub fn build_registry(config: &FalconConfig) -> RuleRegistry {
+    let mut registry = RuleRegistry::with_lookup(suppression_lookup);
+    for rule in resolve_rules(config) {
+        registry.register(rule);
+    }
+    registry
+}
+
+pub fn build_cross_file_registry(config: &FalconConfig) -> CrossFileRuleRegistry {
+    let mut registry = CrossFileRuleRegistry::new();
+    for rule in resolve_cross_file_rules(config) {
+        registry.register(rule);
+    }
+    registry
+}
+
+pub fn run_cross_file(
+    registry: &CrossFileRuleRegistry,
+    files: &[ProjectFile],
+    config: &FalconConfig,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = registry.run_all(files, config);
+    let sources: HashMap<_, &str> = files
+        .iter()
+        .map(|file| (file.path.to_string_lossy(), file.source.as_str()))
+        .collect();
+    let mut suppressions = HashMap::new();
+    diagnostics.retain(|diagnostic| {
+        let Some((path, source)) = sources.get_key_value(diagnostic.file_path.as_str()) else {
+            return true;
+        };
+        let suppression = suppressions
+            .entry(path.as_ref())
+            .or_insert_with(|| FileSuppressions::parse(source, path, suppression_lookup));
+        !suppression.is_suppressed(
+            diagnostic.rule,
+            suppression.line_for_offset(diagnostic.span.start),
+        )
+    });
+    apply_severities(&mut diagnostics, config);
+    diagnostics
+}
+
+pub fn package_identities<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Vec<PackageIdentity> {
+    let mut directories: Vec<_> = paths
+        .into_iter()
+        .filter_map(Path::parent)
+        .flat_map(Path::ancestors)
+        .collect();
+    directories.sort_unstable();
+    directories.dedup();
+    let mut packages: Vec<_> = directories
+        .into_iter()
+        .map(|directory| directory.join("pubspec.yaml"))
+        .filter(|manifest| manifest.is_file())
+        .map(|manifest| package_identity(&manifest))
+        .collect();
+    packages.sort_unstable_by(|left, right| left.lib_root.cmp(&right.lib_root));
+    packages.dedup_by(|left, right| left.lib_root == right.lib_root);
+    packages
+}
+
+fn package_identity(manifest: &Path) -> PackageIdentity {
+    let name = std::fs::read(manifest)
+        .ok()
+        .and_then(|source| serde_yaml::from_slice::<serde_yaml::Value>(&source).ok())
+        .and_then(|manifest| manifest.get("name")?.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    PackageIdentity {
+        name,
+        lib_root: canonical_or_lexical(&manifest.parent().unwrap().join("lib")),
+    }
+}
+
+/// Resolve per-path severities and discard diagnostics disabled by configuration.
 pub fn apply_severities(diags: &mut Vec<Diagnostic>, config: &FalconConfig) {
     diags.retain_mut(|diag| {
         let Some(meta) = meta_for(diag.rule) else {
             return true;
         };
-        // Route by rule kind: cross-file rules resolve against the `cross_file`
-        // config path, file rules against `linter`.
-        let resolved = if meta.cross_file {
+        let resolved = if meta.is_cross_file() {
             config.resolve_cross_file_rule_for(
                 &diag.file_path,
-                meta.group,
+                meta.group.as_str(),
                 meta.name,
                 meta.recommended,
             )
         } else {
             config.resolve_rule_for(
                 &diag.file_path,
-                meta.group,
+                meta.group.as_str(),
                 meta.name,
                 meta.recommended,
-                meta.domains,
+                meta.domain_names(),
             )
         };
         match resolved {
@@ -161,11 +168,6 @@ pub fn apply_severities(diags: &mut Vec<Diagnostic>, config: &FalconConfig) {
     });
 }
 
-/// Thin wrapper returning only the enabled rule set (severities discarded).
-pub fn enabled_rules(config: &FalconConfig) -> Vec<Box<dyn Rule>> {
-    resolve_rules(config).rules
-}
-
 fn to_severity(sev: ResolvedSeverity) -> Severity {
     match sev {
         ResolvedSeverity::Info => Severity::Info,
@@ -174,19 +176,6 @@ fn to_severity(sev: ResolvedSeverity) -> Severity {
     }
 }
 
-/// Warn about configured rule entries that match no registered rule, or that
-/// are placed under a group the rule does not belong to — across the base
-/// `linter.rules` and every `overrides[].linter.rules` entry.
-fn warn_unknown_config(config: &FalconConfig) {
-    for warning in config_warnings(config) {
-        eprintln!("{warning}");
-    }
-}
-
-/// Collect the config warnings that [`warn_unknown_config`] prints. Returning
-/// them (rather than printing inline) keeps the check unit-testable. Each entry
-/// names its source context — `falcon.json` for the base config, `overrides[i]`
-/// for the i-th override — so a warning points the user at the offending block.
 fn config_warnings(config: &FalconConfig) -> Vec<String> {
     let mut warnings = Vec::new();
     check_rule_groups(
@@ -213,18 +202,12 @@ fn config_warnings(config: &FalconConfig) -> Vec<String> {
     warnings
 }
 
-/// Which config section a `Rules` block came from, so misplaced rules can be
-/// steered to the right one.
 #[derive(Clone, Copy)]
 enum Section {
     Linter,
     CrossFile,
 }
 
-/// Push a warning for every rule in `rules` that names no registered rule, sits
-/// under the wrong group, or is configured in the wrong top-level section (a
-/// cross-file rule under `linter.rules`, or a file rule under `cross_file.rules`).
-/// `ctx` labels the source block (e.g. `falcon.json` or `overrides[1]`).
 fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut Vec<String>) {
     for (group, group_rules) in &rules.groups {
         for name in group_rules.keys() {
@@ -234,15 +217,15 @@ fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut 
                 ));
                 continue;
             };
-            if meta.group != group.as_str() {
+            if meta.group.as_str() != group.as_str() {
                 warnings.push(format!(
                     "warning: {ctx} configures rule `{name}` under group `{group}`, \
                      but it belongs to `{}`",
-                    meta.group
+                    meta.group.as_str()
                 ));
                 continue;
             }
-            match (section, meta.cross_file) {
+            match (section, meta.is_cross_file()) {
                 (Section::Linter, true) => warnings.push(format!(
                     "warning: {ctx} configures `{name}` under `linter.rules`, but it is a \
                      cross-file rule; configure it under `cross-file.rules`"
@@ -257,238 +240,48 @@ fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut 
     }
 }
 
-/// Return all implemented lint rules.
 pub fn all_rules() -> Vec<Box<dyn Rule>> {
-    vec![
-        // ── complexity ──
-        Box::new(lint::complexity::avoid_unnecessary_containers::AvoidUnnecessaryContainers),
-        Box::new(lint::complexity::unnecessary_overrides::UnnecessaryOverrides),
-        Box::new(lint::complexity::avoid_function_literals_in_foreach_calls::AvoidFunctionLiteralsInForeachCalls),
-        Box::new(lint::complexity::prefer_conditional_assignment::PreferConditionalAssignment),
-        Box::new(lint::complexity::prefer_for_elements_to_map_from_iterable::PreferForElementsToMapFromIterable),
-        Box::new(lint::complexity::prefer_if_null_operators::PreferIfNullOperators),
-        Box::new(lint::complexity::prefer_null_aware_operators::PreferNullAwareOperators),
-        Box::new(lint::complexity::unnecessary_const::UnnecessaryConst),
-        Box::new(lint::complexity::unnecessary_getters_setters::UnnecessaryGettersSetters),
-        Box::new(lint::complexity::avoid_inverted_boolean_expressions::AvoidInvertedBooleanExpressions),
-        Box::new(lint::complexity::avoid_nested_conditional_expressions::AvoidNestedConditionalExpressions),
-        Box::new(lint::complexity::avoid_nested_if::AvoidNestedIf),
-        Box::new(lint::complexity::avoid_redundant_async::AvoidRedundantAsync),
-        Box::new(lint::complexity::avoid_unnecessary_type_assertions::AvoidUnnecessaryTypeAssertions),
-        Box::new(lint::complexity::avoid_unnecessary_type_casts::AvoidUnnecessaryTypeCasts),
-        Box::new(lint::complexity::cyclomatic_complexity::CyclomaticComplexity),
-        Box::new(lint::complexity::max_lines_for_file::MaxLinesForFile),
-        Box::new(lint::complexity::max_lines_for_function::MaxLinesForFunction),
-        Box::new(lint::complexity::max_parameters_for_function::MaxParametersForFunction),
-        Box::new(lint::complexity::max_switch_cases::MaxSwitchCases),
-        Box::new(lint::complexity::maximum_nesting_level::MaximumNestingLevel),
-        Box::new(lint::complexity::no_boolean_literal_compare::NoBooleanLiteralCompare),
-        Box::new(lint::complexity::prefer_conditional_expressions::PreferConditionalExpressions),
-        Box::new(lint::complexity::prefer_extracting_callbacks::PreferExtractingCallbacks),
-        Box::new(lint::complexity::prefer_immediate_return::PreferImmediateReturn),
-        Box::new(lint::complexity::prefer_iterable_any::PreferIterableAny),
-        Box::new(lint::complexity::prefer_iterable_every::PreferIterableEvery),
-        Box::new(lint::complexity::prefer_moving_to_variable::PreferMovingToVariable),
-        // ── correctness ──
-        Box::new(lint::correctness::avoid_web_libraries_in_flutter::AvoidWebLibrariesInFlutter),
-        Box::new(lint::correctness::no_logic_in_create_state::NoLogicInCreateState),
-        Box::new(lint::correctness::avoid_relative_lib_imports::AvoidRelativeLibImports),
-        Box::new(lint::correctness::hash_and_equals::HashAndEquals),
-        Box::new(lint::correctness::valid_regexps::ValidRegexps),
-        Box::new(lint::correctness::implementation_imports::ImplementationImports),
-        Box::new(lint::correctness::avoid_global_state::AvoidGlobalState),
-        Box::new(lint::correctness::avoid_mutable_global_variables::AvoidMutableGlobalVariables),
-        Box::new(lint::correctness::avoid_returning_widgets::AvoidReturningWidgets),
-        Box::new(lint::correctness::avoid_unused_parameters::AvoidUnusedParameters),
-        Box::new(lint::correctness::correct_order_for_super_dispose::CorrectOrderForSuperDispose),
-        Box::new(lint::correctness::proper_controller_dispose::ProperControllerDispose),
-        Box::new(lint::correctness::proper_expanded_and_flexible::ProperExpandedAndFlexible),
-        Box::new(lint::correctness::proper_from_environment::ProperFromEnvironment),
-        Box::new(lint::correctness::proper_super_init_state::ProperSuperInitState),
-        Box::new(lint::correctness::unnecessary_flutter_imports::UnnecessaryFlutterImports),
-        Box::new(lint::correctness::unnecessary_nullable_return_type::UnnecessaryNullableReturnType),
-        Box::new(lint::correctness::use_once_constructors_once_provider::UseOnceConstructorsOnceProvider),
-        Box::new(lint::correctness::unrelated_type_equality_checks::UnrelatedTypeEqualityChecks),
-        Box::new(lint::correctness::collection_methods_unrelated_type::CollectionMethodsUnrelatedType),
-        Box::new(lint::correctness::use_build_context_synchronously::UseBuildContextSynchronously),
-        Box::new(lint::correctness::use_key_in_widget_constructors::UseKeyInWidgetConstructors),
-        Box::new(lint::correctness::await_only_futures::AwaitOnlyFutures),
-        Box::new(lint::correctness::void_checks::VoidChecks),
-        Box::new(lint::correctness::null_closures::NullClosures),
-        Box::new(lint::correctness::null_check_on_nullable_type_parameter::NullCheckOnNullableTypeParameter),
-        Box::new(lint::correctness::type_literal_in_constant_pattern::TypeLiteralInConstantPattern),
-        Box::new(lint::correctness::exhaustive_cases::ExhaustiveCases),
-        Box::new(lint::correctness::library_private_types_in_public_api::LibraryPrivateTypesInPublicApi),
-        Box::new(lint::correctness::invalid_runtime_check_with_js_interop_types::InvalidRuntimeCheckWithJsInteropTypes),
-        // ── performance ──
-        Box::new(lint::performance::sized_box_for_whitespace::SizedBoxForWhitespace),
-        Box::new(lint::performance::unnecessary_to_list_in_spreads::UnnecessaryToListInSpreads),
-        Box::new(lint::performance::prefer_const_border_radius::PreferConstBorderRadius),
-        Box::new(lint::performance::prefer_correct_edge_insets_constructor::PreferCorrectEdgeInsetsConstructor),
-        Box::new(lint::performance::prefer_declaring_const_constructor::PreferDeclaringConstConstructor),
-        Box::new(lint::performance::prefer_contains::PreferContains),
-        // ── style ──
-        Box::new(lint::style::sort_child_properties_last::SortChildPropertiesLast),
-        Box::new(lint::style::use_full_hex_values_for_flutter_colors::UseFullHexValuesForFlutterColors),
-        Box::new(lint::style::camel_case_extensions::CamelCaseExtensions),
-        Box::new(lint::style::camel_case_types::CamelCaseTypes),
-        Box::new(lint::style::curly_braces_in_flow_control_structures::CurlyBracesInFlowControlStructures),
-        Box::new(lint::style::dangling_library_doc_comments::DanglingLibraryDocComments),
-        Box::new(lint::style::non_constant_identifier_names::NonConstantIdentifierNames),
-        Box::new(lint::style::prefer_generic_function_type_aliases::PreferGenericFunctionTypeAliases),
-        Box::new(lint::style::prefer_is_empty::PreferIsEmpty),
-        Box::new(lint::style::prefer_is_not_empty::PreferIsNotEmpty),
-        Box::new(lint::style::prefer_iterable_where_type::PreferIterableWhereType),
-        Box::new(lint::style::prefer_typing_uninitialized_variables::PreferTypingUninitializedVariables),
-        Box::new(lint::style::provide_deprecation_message::ProvideDeprecationMessage),
-        Box::new(lint::style::unintended_html_in_doc_comment::UnintendedHtmlInDocComment),
-        Box::new(lint::style::use_string_in_part_of_directives::UseStringInPartOfDirectives),
-        Box::new(lint::style::avoid_init_to_null::AvoidInitToNull),
-        Box::new(lint::style::avoid_return_types_on_setters::AvoidReturnTypesOnSetters),
-        Box::new(lint::style::avoid_single_cascade_in_expression_statements::AvoidSingleCascadeInExpressionStatements),
-        Box::new(lint::style::constant_identifier_names::ConstantIdentifierNames),
-        Box::new(lint::style::empty_constructor_bodies::EmptyConstructorBodies),
-        Box::new(lint::style::library_prefixes::LibraryPrefixes),
-        Box::new(lint::style::no_leading_underscores_for_library_prefixes::NoLeadingUnderscoresForLibraryPrefixes),
-        Box::new(lint::style::no_leading_underscores_for_local_identifiers::NoLeadingUnderscoresForLocalIdentifiers),
-        Box::new(lint::style::prefer_adjacent_string_concatenation::PreferAdjacentStringConcatenation),
-        Box::new(lint::style::prefer_collection_literals::PreferCollectionLiterals),
-        Box::new(lint::style::prefer_final_fields::PreferFinalFields),
-        Box::new(lint::style::prefer_function_declarations_over_variables::PreferFunctionDeclarationsOverVariables),
-        Box::new(lint::style::prefer_initializing_formals::PreferInitializingFormals),
-        Box::new(lint::style::prefer_inlined_adds::PreferInlinedAdds),
-        Box::new(lint::style::prefer_is_not_operator::PreferIsNotOperator),
-        Box::new(lint::style::prefer_spread_collections::PreferSpreadCollections),
-        Box::new(lint::style::slash_for_doc_comments::SlashForDocComments),
-        Box::new(lint::style::type_init_formals::TypeInitFormals),
-        Box::new(lint::style::unnecessary_brace_in_string_interps::UnnecessaryBraceInStringInterps),
-        Box::new(lint::style::unnecessary_constructor_name::UnnecessaryConstructorName),
-        Box::new(lint::style::unnecessary_late::UnnecessaryLate),
-        Box::new(lint::style::unnecessary_library_name::UnnecessaryLibraryName),
-        Box::new(lint::style::unnecessary_new::UnnecessaryNew),
-        Box::new(lint::style::unnecessary_nullable_for_final_variable_declarations::UnnecessaryNullableForFinalVariableDeclarations),
-        Box::new(lint::style::unnecessary_string_escapes::UnnecessaryStringEscapes),
-        Box::new(lint::style::unnecessary_string_interpolations::UnnecessaryStringInterpolations),
-        Box::new(lint::style::unnecessary_this::UnnecessaryThis),
-        Box::new(lint::style::use_function_type_syntax_for_parameters::UseFunctionTypeSyntaxForParameters),
-        Box::new(lint::style::use_super_parameters::UseSuperParameters),
-        Box::new(lint::style::avoid_abbreviations_in_doc_comments::AvoidAbbreviationsInDocComments),
-        Box::new(lint::style::avoid_late_keyword::AvoidLateKeyword),
-        Box::new(lint::style::avoid_non_null_assertion::AvoidNonNullAssertion),
-        Box::new(lint::style::avoid_positional_fields_in_records::AvoidPositionalFieldsInRecords),
-        Box::new(lint::style::avoid_redundant_pattern_field_names::AvoidRedundantPatternFieldNames),
-        Box::new(lint::style::avoid_single_child_column_or_row::AvoidSingleChildColumnOrRow),
-        Box::new(lint::style::avoid_top_level_member_access::AvoidTopLevelMemberAccess),
-        Box::new(lint::style::binary_expression_operand_order::BinaryExpressionOperandOrder),
-        Box::new(lint::style::boolean_prefixes::BooleanPrefixes),
-        Box::new(lint::style::class_members_ordering::ClassMembersOrdering),
-        Box::new(lint::style::double_literal_format::DoubleLiteralFormat),
-        Box::new(lint::style::format_comment::FormatComment),
-        Box::new(lint::style::member_ordering::MemberOrdering),
-        Box::new(lint::style::newline_before_return::NewlineBeforeReturn),
-        Box::new(lint::style::no_magic_number::NoMagicNumber),
-        Box::new(lint::style::no_object_declaration::NoObjectDeclaration),
-        Box::new(lint::style::prefer_async_await::PreferAsyncAwait),
-        Box::new(lint::style::prefer_async_callback::PreferAsyncCallback),
-        Box::new(lint::style::prefer_correct_identifier_length::PreferCorrectIdentifierLength),
-        Box::new(lint::style::prefer_correct_type_name::PreferCorrectTypeName),
-        Box::new(lint::style::prefer_dedicated_media_query_methods::PreferDedicatedMediaQueryMethods),
-        Box::new(lint::style::prefer_first::PreferFirst),
-        Box::new(lint::style::prefer_iterable_of::PreferIterableOf),
-        Box::new(lint::style::prefer_last::PreferLast),
-        Box::new(lint::style::prefer_trailing_comma::PreferTrailingComma),
-        Box::new(lint::style::prefer_underscore_for_unused_callback_parameters::PreferUnderscoreForUnusedCallbackParameters),
-        Box::new(lint::style::use_design_system_item::UseDesignSystemItem),
-        Box::new(lint::style::use_spacer_as_expanded_child::UseSpacerAsExpandedChild),
-        Box::new(lint::style::annotate_overrides::AnnotateOverrides),
-        Box::new(lint::style::avoid_renaming_method_parameters::AvoidRenamingMethodParameters),
-        Box::new(lint::style::prefer_const_constructors_in_immutables::PreferConstConstructorsInImmutables),
-        Box::new(lint::style::library_annotations::LibraryAnnotations),
-        Box::new(lint::style::prefer_interpolation_to_compose_strings::PreferInterpolationToComposeStrings),
-        Box::new(lint::style::implicit_call_tearoffs::ImplicitCallTearoffs),
-        Box::new(lint::style::file_names::FileNames),
-        // ── suspicious ──
-        Box::new(lint::suspicious::avoid_print::AvoidPrint),
-        Box::new(lint::suspicious::avoid_empty_else::AvoidEmptyElse),
-        Box::new(lint::suspicious::avoid_shadowing_type_parameters::AvoidShadowingTypeParameters),
-        Box::new(lint::suspicious::empty_catches::EmptyCatches),
-        Box::new(lint::suspicious::no_wildcard_variable_uses::NoWildcardVariableUses),
-        Box::new(lint::suspicious::avoid_returning_null_for_void::AvoidReturningNullForVoid),
-        Box::new(lint::suspicious::control_flow_in_finally::ControlFlowInFinally),
-        Box::new(lint::suspicious::empty_statements::EmptyStatements),
-        Box::new(lint::suspicious::recursive_getters::RecursiveGetters),
-        Box::new(lint::suspicious::unnecessary_null_aware_assignments::UnnecessaryNullAwareAssignments),
-        Box::new(lint::suspicious::unnecessary_null_in_if_null_operators::UnnecessaryNullInIfNullOperators),
-        Box::new(lint::suspicious::use_rethrow_when_possible::UseRethrowWhenPossible),
-        Box::new(lint::suspicious::avoid_dynamic::AvoidDynamic),
-        Box::new(lint::suspicious::avoid_ignoring_return_values::AvoidIgnoringReturnValues),
-        Box::new(lint::suspicious::avoid_passing_async_when_sync_expected::AvoidPassingAsyncWhenSyncExpected),
-        Box::new(lint::suspicious::avoid_throw_in_catch_block::AvoidThrowInCatchBlock),
-        Box::new(lint::suspicious::avoid_unrelated_type_assertions::AvoidUnrelatedTypeAssertions),
-        Box::new(lint::suspicious::no_duplicate_case_values::NoDuplicateCaseValues),
-        Box::new(lint::suspicious::no_empty_block::NoEmptyBlock),
-        Box::new(lint::suspicious::no_equal_arguments::NoEqualArguments),
-        Box::new(lint::suspicious::no_equal_then_else::NoEqualThenElse),
-        Box::new(lint::suspicious::no_self_comparisons::NoSelfComparisons),
-        Box::new(lint::suspicious::overridden_fields::OverriddenFields),
-        Box::new(lint::suspicious::avoid_types_as_parameter_names::AvoidTypesAsParameterNames),
-    ]
+    RULE_METADATA
+        .iter()
+        .filter_map(|meta| match meta.kind {
+            RuleKind::File { make, .. } => Some(make()),
+            RuleKind::CrossFile(_) => None,
+        })
+        .collect()
 }
 
-/// Return all implemented cross-file rules. These share the metadata table and
-/// config schema with per-file rules, but run in the cross-file pass over every
-/// parsed file at once (see `falcon_analyze::CrossFileRule`).
 pub fn all_cross_file_rules() -> Vec<Box<dyn CrossFileRule>> {
-    vec![
-        Box::new(cross_file::unused_files::UnusedFiles),
-        Box::new(cross_file::unused_code::UnusedCode),
-        Box::new(cross_file::unnecessary_nullable::UnnecessaryNullable),
-        Box::new(cross_file::depend_on_referenced_packages::DependOnReferencedPackages),
-        Box::new(cross_file::package_names::PackageNames),
-        Box::new(cross_file::secure_pubspec_urls::SecurePubspecUrls),
-    ]
+    RULE_METADATA
+        .iter()
+        .filter_map(|meta| match meta.kind {
+            RuleKind::CrossFile(make) => Some(make()),
+            RuleKind::File { .. } => None,
+        })
+        .collect()
 }
 
-/// Resolve the enabled cross-file rule set from `config`, using the same
-/// enablement semantics as [`resolve_rules`] (a rule registers if it is enabled
-/// for any path). Rules with no metadata entry are skipped with a warning.
-pub fn resolve_cross_file_rules(config: &FalconConfig) -> ResolvedCrossFileRules {
-    let mut rules = Vec::new();
-    for rule in all_cross_file_rules() {
-        let name = rule.name();
-        let Some(meta) = meta_for(name) else {
-            eprintln!("warning: cross-file rule `{name}` has no metadata entry; skipping");
-            continue;
-        };
-        if config.is_cross_file_rule_enabled_anywhere(meta.group, meta.name, meta.recommended) {
-            rules.push(rule);
+fn resolve_cross_file_rules(
+    config: &FalconConfig,
+) -> impl Iterator<Item = Box<dyn CrossFileRule>> + '_ {
+    RULE_METADATA.iter().filter_map(|meta| match meta.kind {
+        RuleKind::CrossFile(make)
+            if config.is_cross_file_rule_enabled_anywhere(
+                meta.group.as_str(),
+                meta.name,
+                meta.recommended,
+            ) =>
+        {
+            Some(make())
         }
-    }
-    ResolvedCrossFileRules { rules }
+        _ => None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{config_warnings, rule_requires_resolution};
+    use super::config_warnings;
     use falcon_config::FalconConfig;
 
-    /// Every gated rule must name a registered rule (a typo would silently drop
-    /// it back onto the single-file fast path) and appear exactly once.
-    #[test]
-    fn resolver_gating_matches_current_semantic_consumers() {
-        let rules = super::all_rules();
-        let registered: std::collections::HashSet<&str> =
-            rules.iter().map(|rule| rule.name()).collect();
-        let mut seen = std::collections::HashSet::new();
-        for rule in super::RESOLVER_DEPENDENT_RULES {
-            assert!(registered.contains(rule), "not a registered rule: {rule}");
-            assert!(seen.insert(rule), "duplicate entry: {rule}");
-        }
-        assert!(!rule_requires_resolution("avoid-dynamic"));
-    }
-
-    /// `config_warnings` flags unknown/misgrouped rules in the base config *and*
-    /// in every override, tagging each with its source block.
     #[test]
     fn config_warnings_cover_base_and_overrides() {
         let config: FalconConfig = serde_json::from_value(serde_json::json!({
@@ -535,10 +328,6 @@ mod tests {
         assert_eq!(warnings.len(), 3, "unexpected warnings: {warnings:?}");
     }
 
-    /// A cross-file rule under `linter.rules` (and a file rule under
-    /// `cross_file.rules`) is flagged with a message steering it to the correct
-    /// section. The legacy `project` key is used here to confirm the serde alias
-    /// still lands rules in the cross-file section.
     #[test]
     fn config_warnings_flag_wrong_section() {
         let config: FalconConfig = serde_json::from_value(serde_json::json!({

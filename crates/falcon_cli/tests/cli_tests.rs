@@ -1,79 +1,69 @@
 use clap::{CommandFactory, Parser};
-use falcon_cli::args::Cli;
+use falcon_cli::args::{Cli, Command, LogFormat};
 use falcon_cli::{CheckOptions, run_check};
 use std::fs;
 use tempfile::tempdir;
 
 #[test]
-fn test_version_flag_parses() {
-    let cmd = Cli::command();
-    assert!(cmd.get_version().is_some());
-}
-
-#[test]
-fn test_check_format_json_parses() {
-    let args = vec!["falcon", "check", ".", "--format", "json"];
-    let result = Cli::try_parse_from(&args);
-    assert!(result.is_ok());
-    let cli = result.unwrap();
-    match cli.command {
-        falcon_cli::args::Command::Check { format, .. } => {
-            assert_eq!(format, falcon_cli::args::OutputFormat::Json);
-        }
-        _ => panic!("Expected Check command"),
+fn check_options_parse_with_stable_argument_ids() {
+    let command = Cli::command();
+    assert!(command.get_version().is_some());
+    let check = command.find_subcommand("check").unwrap();
+    let ids: Vec<_> = check
+        .get_arguments()
+        .map(|arg| arg.get_id().as_str())
+        .collect();
+    for id in [
+        "paths",
+        "config",
+        "format",
+        "exclude",
+        "max_errors",
+        "quiet",
+        "exit_code",
+        "parallel",
+    ] {
+        assert!(ids.contains(&id), "missing argument id {id}");
     }
-}
-
-#[test]
-fn test_check_exclude_parses() {
-    let args = vec![
+    let config = check
+        .get_arguments()
+        .find(|arg| arg.get_id() == "config")
+        .unwrap();
+    assert_eq!(config.get_value_names().unwrap()[0].as_str(), "CONFIG");
+    let cli = Cli::try_parse_from([
         "falcon",
         "check",
         ".",
+        "--config",
+        "falcon.json",
+        "--format",
+        "json",
         "--exclude",
         "**/build/**",
         "--exclude",
         "**/.dart_tool/**",
-    ];
-    let result = Cli::try_parse_from(&args);
-    assert!(result.is_ok());
-    let cli = result.unwrap();
-    match cli.command {
-        falcon_cli::args::Command::Check { exclude, .. } => {
-            assert_eq!(exclude.len(), 2);
-            assert_eq!(exclude[0], "**/build/**");
-            assert_eq!(exclude[1], "**/.dart_tool/**");
-        }
-        _ => panic!("Expected Check command"),
-    }
-}
-
-#[test]
-fn test_check_max_errors_parses() {
-    let args = vec!["falcon", "check", ".", "--max-errors", "10"];
-    let result = Cli::try_parse_from(&args);
-    assert!(result.is_ok());
-    let cli = result.unwrap();
-    match cli.command {
-        falcon_cli::args::Command::Check { max_errors, .. } => {
-            assert_eq!(max_errors, Some(10));
-        }
-        _ => panic!("Expected Check command"),
-    }
-}
-
-#[test]
-fn test_check_quiet_parses() {
-    let args = vec!["falcon", "check", ".", "--quiet"];
-    let result = Cli::try_parse_from(&args);
-    assert!(result.is_ok());
-    let cli = result.unwrap();
-    match cli.command {
-        falcon_cli::args::Command::Check { quiet, .. } => {
-            assert!(quiet);
-        }
-        _ => panic!("Expected Check command"),
-    }
+        "--max-errors",
+        "10",
+        "--quiet",
+        "--exit-code",
+        "2",
+        "--parallel",
+    ])
+    .unwrap();
+    let Command::Check(options) = cli.command else {
+        panic!("Expected Check command")
+    };
+    assert_eq!(options.paths, [std::path::PathBuf::from(".")]);
+    assert_eq!(options.config_path, Some("falcon.json".into()));
+    assert_eq!(options.format, falcon_cli::OutputFormat::Json);
+    assert_eq!(
+        options.exclude_patterns,
+        ["**/build/**", "**/.dart_tool/**"]
+    );
+    assert_eq!(options.max_errors, Some(10));
+    assert!(options.quiet);
+    assert_eq!(options.error_exit_code, 2);
+    assert!(options.parallel);
 }
 
 #[test]
@@ -95,44 +85,28 @@ fn test_run_check_integration_clean_file_exit_zero() {
 }
 
 #[test]
-fn test_check_exit_code_parses() {
-    let args = vec!["falcon", "check", ".", "--exit-code", "2"];
-    let result = Cli::try_parse_from(&args);
-    assert!(result.is_ok());
-    let cli = result.unwrap();
-    match cli.command {
-        falcon_cli::args::Command::Check { exit_code, .. } => {
-            assert_eq!(exit_code, 2);
+fn check_and_logging_defaults_and_global_flags() {
+    for (flags, verbose, log_format) in [
+        (vec![], false, LogFormat::Text),
+        (vec!["--verbose"], true, LogFormat::Text),
+        (vec!["--log-format", "json"], false, LogFormat::Json),
+        (vec!["--log-format", "text"], false, LogFormat::Text),
+    ] {
+        for subcommand in ["check", "lsp"] {
+            let mut argv = vec!["falcon", subcommand];
+            argv.extend(flags.iter().copied());
+            let cli = Cli::try_parse_from(argv).unwrap();
+            assert_eq!(cli.verbose, verbose);
+            assert_eq!(cli.log_format, log_format);
+            if let Command::Check(options) = cli.command {
+                assert_eq!(options.error_exit_code, 1);
+                assert_eq!(options.format, falcon_cli::OutputFormat::Text);
+                assert!(!options.quiet);
+                assert!(!options.parallel);
+            } else {
+                assert!(matches!(cli.command, Command::Lsp));
+            }
         }
-        _ => panic!("Expected Check command"),
-    }
-}
-
-#[test]
-fn test_check_exit_code_default_one() {
-    let args = vec!["falcon", "check", "."];
-    let result = Cli::try_parse_from(&args);
-    assert!(result.is_ok());
-    let cli = result.unwrap();
-    match cli.command {
-        falcon_cli::args::Command::Check { exit_code, .. } => {
-            assert_eq!(exit_code, 1);
-        }
-        _ => panic!("Expected Check command"),
-    }
-}
-
-#[test]
-fn test_check_parallel_flag_parses() {
-    let args = vec!["falcon", "check", ".", "--parallel"];
-    let result = Cli::try_parse_from(&args);
-    assert!(result.is_ok());
-    let cli = result.unwrap();
-    match cli.command {
-        falcon_cli::args::Command::Check { parallel, .. } => {
-            assert!(parallel);
-        }
-        _ => panic!("Expected Check command"),
     }
 }
 

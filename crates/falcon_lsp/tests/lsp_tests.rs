@@ -1,8 +1,8 @@
-//! LSP protocol tests (M5.1): a mock client drives the real server loop over
+//! LSP protocol tests: a mock client drives the real server loop over
 //! `Connection::memory()`, so the exact production code path is exercised.
 //!
-//! JSON-RPC 2.0 / LSP 3.17 compliance is checked the way the plan specifies:
-//! every server message is deserialized back into the corresponding
+//! JSON-RPC 2.0 / LSP 3.17 message shapes are checked by deserializing
+//! every server message into the corresponding
 //! `lsp_types` type — malformed shapes fail the test at the serde layer.
 
 use std::fs;
@@ -142,7 +142,7 @@ impl TestClient {
             lsp_types::InitializeParams::default(),
         );
         let resp = self.recv_response(&id);
-        // Plan M5.1: validate the message shape against lsp_types.
+        // Validate the message shape against lsp_types.
         let result: InitializeResult =
             serde_json::from_value(resp.result.expect("initialize must return a result"))
                 .expect("InitializeResult shape");
@@ -218,14 +218,14 @@ fn has_rule(params: &PublishDiagnosticsParams, rule: &str) -> bool {
         .any(|d| matches!(&d.code, Some(lsp_types::NumberOrString::String(code)) if code == rule))
 }
 
-/// M5.1: initialize/initialized/shutdown cycle with shape validation.
+/// Initialize/initialized/shutdown cycle with shape validation.
 #[test]
 fn initialize_shutdown_cycle() {
     let mut client = TestClient::start(Duration::ZERO, None);
     client.shutdown();
 }
 
-/// M5.1: didOpen publishes diagnostics for a violating file.
+/// didOpen publishes diagnostics for a violating file.
 #[test]
 fn did_open_publishes_diagnostics() {
     let mut client = TestClient::start(Duration::ZERO, None);
@@ -244,7 +244,7 @@ fn did_open_publishes_diagnostics() {
     client.shutdown();
 }
 
-/// M5.1/M5.2: didChange re-analyzes and republishes; fixing the violation
+/// didChange re-analyzes and republishes; fixing the violation
 /// clears the diagnostic; the version is echoed.
 #[test]
 fn did_change_republishes() {
@@ -634,7 +634,7 @@ fn did_close_refreshes_buffer_and_restored_disk_part_owners() {
     client.shutdown();
 }
 
-/// M5.1: didSave re-analyzes (with included text refreshing the cache).
+/// didSave re-analyzes (with included text refreshing the cache).
 #[test]
 fn did_save_republishes() {
     let mut client = TestClient::start(Duration::ZERO, None);
@@ -655,7 +655,7 @@ fn did_save_republishes() {
     client.shutdown();
 }
 
-/// M5.1: didClose publishes an empty diagnostic set to clear the editor.
+/// didClose publishes an empty diagnostic set to clear the editor.
 #[test]
 fn did_close_clears_diagnostics() {
     let mut client = TestClient::start(Duration::ZERO, None);
@@ -675,7 +675,7 @@ fn did_close_clears_diagnostics() {
     client.shutdown();
 }
 
-/// M5.1: hover over a diagnostic returns its rule and message; hover over
+/// Hover over a diagnostic returns its rule and message; hover over
 /// clean code returns null.
 #[test]
 fn hover_reports_diagnostics_under_cursor() {
@@ -718,7 +718,7 @@ fn hover_reports_diagnostics_under_cursor() {
     client.shutdown();
 }
 
-/// M5.1: unknown request methods get a MethodNotFound error response.
+/// Unknown request methods get a MethodNotFound error response.
 #[test]
 fn unsupported_request_returns_method_not_found() {
     let mut client = TestClient::start(Duration::ZERO, None);
@@ -729,7 +729,7 @@ fn unsupported_request_returns_method_not_found() {
     client.shutdown();
 }
 
-/// M5.2: rules disabled in falcon.json never fire in LSP mode.
+/// Rules disabled in falcon.json never fire in LSP mode.
 #[test]
 fn config_disabled_rule_not_published() {
     let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#;
@@ -764,7 +764,7 @@ fn config_rule_level_sets_published_severity() {
     client.shutdown();
 }
 
-/// M5.2: workspace/didChangeWatchedFiles reloads falcon.json and republishes
+/// workspace/didChangeWatchedFiles reloads falcon.json and republishes
 /// every open document against its cached AST.
 #[test]
 fn watched_files_change_reloads_config() {
@@ -797,7 +797,7 @@ fn watched_files_change_reloads_config() {
     client.shutdown();
 }
 
-/// M5.2 (design §4): rapid didChange events are debounced into one
+/// Rapid didChange events are debounced into one
 /// analysis/publish reflecting the final text.
 #[test]
 fn debounce_coalesces_rapid_changes() {

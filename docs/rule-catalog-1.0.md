@@ -1,13 +1,10 @@
 # Falcon 1.0 Rule Catalog (planned)
 
-This is the planned rule catalog for falcon 1.0. It enumerates every rule
-falcon does **not** yet ship, drawn from three sources — remaining official
-Dart/Flutter lints, DCM-inspired rules, and cross-file (whole-project) rules —
-and assigns each a falcon group, an analysis type, and a 1.0 priority.
-
-**Baseline:** falcon currently ships **148 rules** (73 tagged
-`RuleSource::Lints`, plus dart_code_linter / pyramid_lint ports). This document
-lists only the *gaps*.
+This is the planning catalog for falcon 1.0, drawn from remaining official
+Dart/Flutter lints, DCM-inspired rules, and cross-file (whole-project) rules.
+It assigns each candidate a falcon group, an analysis type, and a 1.0 priority.
+Some candidates have since shipped; consult `RULE_METADATA` in
+`crates/falcon_rules/src/meta.rs` for the current registry.
 
 **Priorities**
 
@@ -37,8 +34,8 @@ suspicious`.
 | Cross-file | 4 | 3 | 4 | 11 |
 | **Total (new for 1.0)** | **104** | **255** | **28** | **387** |
 
-Shipped baseline (not counted above): **148**. Full projected 1.0 registry if
-every must-have + nice-to-have lands: **148 + 104 + 255 = 507**.
+The projected registry is the union of the shipped metadata and the must-have
+and nice-to-have candidates below; candidates already shipped count only once.
 
 Six DCM rows were deduplicated against the official-lints and cross-file lists (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
@@ -578,15 +575,16 @@ mocktail (4), get_it (1), and fake_async (1) niche-package rule sets.
 
 # 3. Cross-file rules (11)
 
-Whole-project / app-wide rules, living in the `cross-file` config section
-(renamed from `project`; see the roadmap). Falcon already ships three cross-file
-rules; these 11 are the proposed additions. Difficulty reflects existing
-infrastructure: **A** reuses the resolved directive graph / lexical name index /
-`ProjectIndex` as-is; **B** needs a new pubspec index
+Whole-project / app-wide rules live in the `cross-file` config section.
+The current shipped set is defined by the cross-file entries in `RULE_METADATA`;
+the rows below record the planned additions. Difficulty reflects existing
+infrastructure: **A** reuses the resolved directive graph / lexical name index;
+**B** needs a new pubspec index
 (`dependencies`/`dev_dependencies`/`flutter.assets`); **C** needs a new
 asset/l10n index (filesystem walk and/or `.arb` parsing).
 
-**Shipped baseline:** `unused-code`, `unused-files`, `unnecessary-nullable`.
+**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`,
+`depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`.
 
 ## 3a. Tier 1 — must-have (4)
 

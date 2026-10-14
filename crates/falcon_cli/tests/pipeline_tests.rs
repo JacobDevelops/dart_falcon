@@ -210,10 +210,7 @@ fn test_syntax_error_listed_before_lints() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Config-as-Contract: falcon.json must control rule enablement, severity,
-// excludes, and max_errors (plan M2.3 / M3.3 / Phase-1 acceptance criteria).
-// ---------------------------------------------------------------------------
+// Config controls rule enablement, severity, excludes, and max_errors.
 
 use std::path::PathBuf;
 
@@ -680,4 +677,63 @@ fn resolver_backed_rule_has_cli_lsp_parity() {
         .count();
     assert_eq!(cli_count, 1);
     assert_eq!(lsp_count, cli_count);
+}
+
+#[test]
+fn package_discovery_retains_invalid_and_unreadable_nested_manifest_boundaries() {
+    let temp = tempdir().unwrap();
+    let outer_lib = temp.path().join("lib");
+    let nested = temp.path().join("tools/nested");
+    let nested_lib = nested.join("lib");
+    fs::create_dir_all(&outer_lib).unwrap();
+    fs::create_dir_all(&nested_lib).unwrap();
+    fs::write(temp.path().join("pubspec.yaml"), "name: outer\n").unwrap();
+    let outer_file = outer_lib.join("outer.dart");
+    let nested_file = nested_lib.join("nested.dart");
+    let outer_root = falcon_analyze::canonical_or_lexical(&outer_lib);
+    let nested_root = falcon_analyze::canonical_or_lexical(&nested_lib);
+    for manifest in [b"name: [\n".as_slice(), &[0xff]] {
+        fs::write(nested.join("pubspec.yaml"), manifest).unwrap();
+        let packages = falcon_rules::package_identities([
+            outer_file.as_path(),
+            nested_file.as_path(),
+            nested_file.as_path(),
+        ]);
+        let outer: Vec<_> = packages
+            .iter()
+            .filter(|package| package.lib_root == outer_root)
+            .collect();
+        let inner: Vec<_> = packages
+            .iter()
+            .filter(|package| package.lib_root == nested_root)
+            .collect();
+        assert_eq!(outer.len(), 1);
+        assert_eq!(outer[0].name, "outer");
+        assert_eq!(inner.len(), 1);
+        assert_eq!(inner[0].name, "");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn package_discovery_deduplicates_real_and_symlinked_package_paths() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().join("package");
+    let lib = root.join("lib");
+    fs::create_dir_all(&lib).unwrap();
+    fs::write(root.join("pubspec.yaml"), "name: shared\n").unwrap();
+    let link = temp.path().join("link");
+    std::os::unix::fs::symlink(&root, &link).unwrap();
+    let real_file = lib.join("main.dart");
+    let linked_file = link.join("lib/main.dart");
+    let packages = falcon_rules::package_identities([real_file.as_path(), linked_file.as_path()]);
+    let discovered: Vec<_> = packages
+        .iter()
+        .filter(|package| package.name == "shared")
+        .collect();
+    assert_eq!(discovered.len(), 1);
+    assert_eq!(
+        discovered[0].lib_root,
+        falcon_analyze::canonical_or_lexical(&lib)
+    );
 }

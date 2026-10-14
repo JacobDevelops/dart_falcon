@@ -1,6 +1,6 @@
 //! CLI argument parsing and command dispatch.
 //!
-//! Commands: `falcon check [paths]`, `falcon lsp`, `falcon version`, `falcon --version`.
+//! Commands: `falcon check [paths]`, `falcon migrate`, `falcon lsp`, `falcon version`, `falcon --version`.
 
 pub mod analyze_pipeline;
 pub mod args;

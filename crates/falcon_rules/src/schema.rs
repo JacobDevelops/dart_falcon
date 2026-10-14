@@ -8,7 +8,7 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::meta::{DOMAINS, RULE_METADATA};
+use crate::meta::{Domain, RULE_METADATA};
 
 /// Canonical published location of the schema — the value users point `$schema`
 /// at, and the schema's own `$id`. Served raw from the default branch so it
@@ -21,18 +21,23 @@ pub const SCHEMA_URL: &str =
 fn section_rules(cross_file: bool) -> Value {
     let mut groups: Map<String, Value> = Map::new();
     for meta in RULE_METADATA {
-        if meta.cross_file != cross_file {
+        if meta.is_cross_file() != cross_file {
             continue;
         }
-        let entry = groups.entry(meta.group.to_string()).or_insert_with(|| {
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {},
-            })
-        });
+        let entry = groups
+            .entry(meta.group.as_str().to_string())
+            .or_insert_with(|| {
+                json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {},
+                })
+            });
         if entry.get("description").is_none() {
-            let desc = format!("Per-rule severity levels for the `{}` group.", meta.group);
+            let desc = format!(
+                "Per-rule severity levels for the `{}` group.",
+                meta.group.as_str()
+            );
             entry
                 .as_object_mut()
                 .expect("group object")
@@ -72,7 +77,8 @@ fn section_rules(cross_file: bool) -> Value {
 /// Build the complete JSON Schema (draft-07) for falcon.json.
 pub fn config_schema() -> Value {
     let mut domain_props = Map::new();
-    for domain in DOMAINS {
+    for domain in Domain::ALL {
+        let domain = domain.as_str();
         domain_props.insert(
             domain.to_string(),
             json!({

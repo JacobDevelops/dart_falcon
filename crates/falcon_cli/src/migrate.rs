@@ -131,13 +131,13 @@ impl Migration {
             self.unrecognized.push(id);
             return;
         };
-        let target = if meta.cross_file {
+        let target = if meta.is_cross_file() {
             &mut self.cross_file_groups
         } else {
             &mut self.linter_groups
         };
         target
-            .entry(meta.group.to_string())
+            .entry(meta.group.as_str().to_string())
             .or_default()
             .insert(meta.name.to_string(), config_to_json(cfg));
         self.migrated_count += 1;

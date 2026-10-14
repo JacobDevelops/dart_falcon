@@ -13,6 +13,8 @@
 //!   * clean files (zero annotations) produce zero diagnostics;
 //!   * source and corpus fixtures contain no explicit stub/placeholder markers.
 
+mod support;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,7 +27,7 @@ use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
 use falcon_rules::lint::style::class_members_ordering::ClassMembersOrdering;
 use falcon_rules::lint::style::use_design_system_item::UseDesignSystemItem;
-use falcon_rules::{RESOLVER_DEPENDENT_RULES, all_cross_file_rules, all_rules};
+use falcon_rules::{all_cross_file_rules, all_rules, rule_requires_resolution};
 
 /// Rules registered as deliberate stubs. A name here exempts the rule from the
 /// corpus-coverage invariants, and every entry must still have both a
@@ -86,7 +88,7 @@ fn run_rule(
     config: &FalconConfig,
 ) -> Vec<(String, usize)> {
     let (program, errors) = parse(source);
-    let resolver_dependent = RESOLVER_DEPENDENT_RULES.contains(&rule.name());
+    let resolver_dependent = rule_requires_resolution(rule.name());
     let index = resolver_dependent.then(|| ProjectIndex::from_program(&program));
     let types = resolver_dependent.then(|| TypeIndex::from_program(&program));
     let identity_sources = [IdentitySource {
@@ -140,17 +142,6 @@ fn corpus_config(rule_dir: &Path) -> FalconConfig {
     }
 }
 
-fn dart_files(dir: &Path) -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("dart"))
-        .collect();
-    files.sort();
-    files
-}
-
 fn cross_file_project_dirs(dir: &Path) -> Vec<PathBuf> {
     let mut projects: Vec<PathBuf> = fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
@@ -169,28 +160,6 @@ fn cross_file_project_dirs(dir: &Path) -> Vec<PathBuf> {
         projects.push(dir.to_path_buf());
     }
     projects
-}
-
-fn files_recursive(dir: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    let mut pending = vec![dir.to_path_buf()];
-    while let Some(dir) = pending.pop() {
-        let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .collect();
-        entries.sort();
-        for path in entries.into_iter().rev() {
-            if path.is_dir() {
-                pending.push(path);
-            } else {
-                files.push(path);
-            }
-        }
-    }
-    files.sort();
-    files
 }
 
 fn has_rule_expectation(source: &str, rule_name: &str) -> bool {
@@ -272,7 +241,7 @@ fn registered_rules_have_real_corpus_coverage() {
                     .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or_default();
-                let sources: Vec<String> = files_recursive(&project)
+                let sources: Vec<String> = support::files(&project, usize::MAX, None)
                     .iter()
                     .filter_map(|path| fs::read_to_string(path).ok())
                     .collect();
@@ -300,7 +269,7 @@ fn registered_rules_have_real_corpus_coverage() {
                 failures.push(format!("NO CLEAN `{rule_name}` good cross-file project"));
             }
         } else {
-            let files = collect_dart_files_recursive(&rule_dir, 10_000);
+            let files = support::files(&rule_dir, usize::MAX, Some("dart"));
             let sources: Vec<(PathBuf, String)> = files
                 .into_iter()
                 .map(|path| {
@@ -360,10 +329,7 @@ fn registered_rules_have_no_unlisted_stub_source_markers() {
     let allowed: HashSet<&str> = KNOWN_STUB_RULES.iter().copied().collect();
     let mut found = HashSet::new();
     let mut failures = Vec::new();
-    for path in files_recursive(&source_root) {
-        if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
-            continue;
-        }
+    for path in support::files(&source_root, usize::MAX, Some("rs")) {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
         if source.contains("Stub registration") {
@@ -400,7 +366,7 @@ fn corpus_has_no_unlisted_placeholder_text() {
     let allowed: HashSet<&str> = KNOWN_STUB_RULES.iter().copied().collect();
     let mut found = HashSet::new();
     let mut failures = Vec::new();
-    for path in files_recursive(&corpus) {
+    for path in support::files(&corpus, usize::MAX, None) {
         let Ok(source) = fs::read_to_string(&path) else {
             continue;
         };
@@ -528,7 +494,7 @@ fn corpus_matches_expectations() {
         };
 
         let config = corpus_config(dir);
-        for file in dart_files(dir) {
+        for file in support::files(dir, 1, Some("dart")) {
             total_files += 1;
             let source = fs::read_to_string(&file)
                 .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
@@ -653,8 +619,7 @@ Widget build(BuildContext context) {
         diags[0].message
     );
 
-    // Named constructors / static access on the type are out of Phase-1 scope: `Container.of(x)`
-    // must NOT be flagged (it is a static call, not a construction).
+    // Static calls are not constructions.
     let static_src = "Widget f(BuildContext c) => Container.of(c);";
     let (static_program, _e) = parse(static_src);
     let ctx = AnalyzeContext {
@@ -759,37 +724,6 @@ class Bar {
     );
 }
 
-fn collect_dart_files_recursive(root: &Path, limit: usize) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    collect_dart_files_recursive_inner(root, &mut out, limit);
-    out
-}
-
-fn collect_dart_files_recursive_inner(dir: &Path, out: &mut Vec<PathBuf>, limit: usize) {
-    if out.len() >= limit {
-        return;
-    }
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    entries.sort_by_key(|e| e.path());
-    for entry in entries {
-        if out.len() >= limit {
-            return;
-        }
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !matches!(name, ".dart_tool" | "build" | ".pub-cache" | ".direnv") {
-                collect_dart_files_recursive_inner(&path, out, limit);
-            }
-        } else if path.extension().and_then(|e| e.to_str()) == Some("dart") {
-            out.push(path);
-        }
-    }
-}
-
 /// In-process validation of cross-file rules against their multi-file fixtures
 /// under `corpus/<rule>/cross-file/`. Each fixture directory is run as one unit;
 /// `/* expect: <rule> */` annotations are matched by (file, line).
@@ -809,10 +743,11 @@ fn cross_file_corpus_matches_expectations() {
         );
 
         for project in cross_file_project_dirs(&dir) {
-            let fixture_sources: Vec<(PathBuf, String)> = files_recursive(&project)
-                .into_iter()
-                .filter_map(|path| fs::read_to_string(&path).ok().map(|source| (path, source)))
-                .collect();
+            let fixture_sources: Vec<(PathBuf, String)> =
+                support::files(&project, usize::MAX, None)
+                    .into_iter()
+                    .filter_map(|path| fs::read_to_string(&path).ok().map(|source| (path, source)))
+                    .collect();
             let mut files: Vec<ProjectFile> = fixture_sources
                 .iter()
                 .filter(|(path, _)| {
@@ -917,22 +852,22 @@ fn resolver_dependent_per_file_project_corpus() {
     use falcon_syntax::ast::Program;
 
     let rules = all_rules();
-    let by_name: HashMap<&str, &dyn Rule> = rules.iter().map(|r| (r.name(), r.as_ref())).collect();
     let corpus = corpus_dir();
     let config = FalconConfig::default();
     let mut failures: Vec<String> = Vec::new();
     let mut total_expectations = 0usize;
 
-    for rule_name in RESOLVER_DEPENDENT_RULES {
+    for rule in rules
+        .iter()
+        .filter(|rule| rule_requires_resolution(rule.name()))
+    {
+        let rule_name = rule.name();
         let dir = corpus.join(rule_name).join("project");
         if !dir.is_dir() {
             continue;
         }
-        let Some(rule) = by_name.get(rule_name) else {
-            continue;
-        };
 
-        let paths = collect_dart_files_recursive(&dir, 1_000);
+        let paths = support::files(&dir, usize::MAX, Some("dart"));
         let sources: Vec<String> = paths
             .iter()
             .map(|p| fs::read_to_string(p).unwrap())
@@ -981,13 +916,13 @@ fn resolver_dependent_per_file_project_corpus() {
             let mut diag_lines: Vec<usize> = rule
                 .analyze(programs[i], &ctx)
                 .into_iter()
-                .filter(|d| d.rule == *rule_name)
+                .filter(|d| d.rule == rule_name)
                 .map(|d| byte_offset_to_line(&sources[i], d.span.start))
                 .collect();
 
             let expectations: Vec<usize> = parse_expectations(&sources[i])
                 .into_iter()
-                .filter(|e| e.rule == *rule_name)
+                .filter(|e| e.rule == rule_name)
                 .map(|e| e.line)
                 .collect();
             total_expectations += expectations.len();
@@ -1022,128 +957,5 @@ fn resolver_dependent_per_file_project_corpus() {
         failures.is_empty(),
         "resolver-dependent per-file project corpus failed:\n{}",
         failures.join("\n")
-    );
-}
-
-#[test]
-fn all_rules_no_name_collisions() {
-    let rules = all_rules();
-    let mut seen = std::collections::HashSet::new();
-    for rule in &rules {
-        let name = rule.name();
-        assert!(!name.is_empty(), "rule has empty name");
-        assert!(seen.insert(name), "duplicate rule name: {name}");
-    }
-    // Sanity: we have at least 60 rules
-    assert!(rules.len() >= 60, "expected ≥60 rules, got {}", rules.len());
-}
-
-#[test]
-fn all_rules_run_jfit_20_files_no_panic() {
-    let jfit_lib = Path::new("/home/jacob/Documents/Developer/jfit/apps/mobile/lib");
-    if !jfit_lib.exists() {
-        eprintln!("jfit corpus not found at {}, skipping", jfit_lib.display());
-        return;
-    }
-
-    let dart_files: Vec<PathBuf> = collect_dart_files_recursive(jfit_lib, 20);
-    assert!(!dart_files.is_empty(), "no dart files found in jfit corpus");
-
-    let rules = all_rules();
-    let config = FalconConfig::default();
-    let mut total_diags = 0usize;
-
-    for path in &dart_files {
-        let source = fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        let (program, _errors) = parse(&source);
-        let ctx = AnalyzeContext {
-            file_path: path,
-            source: &source,
-            config: &config,
-            project: None,
-            types: None,
-            identities: None,
-            signatures: None,
-            library: None,
-        };
-        for rule in &rules {
-            let diags = rule.analyze(&program, &ctx);
-            total_diags += diags.len();
-        }
-    }
-
-    eprintln!(
-        "jfit integration: {} files, {} total diagnostics across {} rules",
-        dart_files.len(),
-        total_diags,
-        rules.len()
-    );
-    // At least one rule must fire somewhere across 20 real-world files
-    assert!(
-        total_diags > 0,
-        "no diagnostics emitted on jfit corpus — rules may not be scanning"
-    );
-}
-
-#[test]
-fn all_rules_order_independence() {
-    let snippet = r#"
-class Foo {
-  dynamic x;
-  void doThing(a, b, c, d, e, f) {
-    var result = null;
-    if (result == null) {
-      print(result!);
-    }
-  }
-}
-"#;
-    let (program, _errors) = parse(snippet);
-    let config = FalconConfig::default();
-    let ctx = AnalyzeContext {
-        file_path: Path::new("test.dart"),
-        source: snippet,
-        config: &config,
-        project: None,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
-
-    let rules = all_rules();
-    let mid = rules.len() / 2;
-
-    // Collect all diagnostics running the full set
-    let all_diags: Vec<String> = rules
-        .iter()
-        .flat_map(|r| r.analyze(&program, &ctx))
-        .map(|d| format!("{}:{}", d.rule, d.span.start))
-        .collect();
-
-    // Collect first-half then second-half diagnostics
-    let first_half: Vec<String> = rules[..mid]
-        .iter()
-        .flat_map(|r| r.analyze(&program, &ctx))
-        .map(|d| format!("{}:{}", d.rule, d.span.start))
-        .collect();
-    let second_half: Vec<String> = rules[mid..]
-        .iter()
-        .flat_map(|r| r.analyze(&program, &ctx))
-        .map(|d| format!("{}:{}", d.rule, d.span.start))
-        .collect();
-
-    let mut combined = first_half;
-    combined.extend(second_half);
-
-    // Both must produce identical diagnostics (same rules, same input, no shared mutable state)
-    let mut all_sorted = all_diags.clone();
-    let mut combined_sorted = combined.clone();
-    all_sorted.sort();
-    combined_sorted.sort();
-    assert_eq!(
-        all_sorted, combined_sorted,
-        "rule execution is not order-independent — possible shared mutable state"
     );
 }

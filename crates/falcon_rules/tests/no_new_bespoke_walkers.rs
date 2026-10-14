@@ -22,6 +22,8 @@
 //! Run with `UPDATE_BESPOKE_WALKER_BASELINE=1` to rewrite the baseline after a
 //! deliberate migration.
 
+mod support;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -34,23 +36,6 @@ fn src_dir() -> PathBuf {
 
 fn baseline_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(BASELINE)
-}
-
-/// Every `.rs` file under the crate's `src/`, sorted for stable output.
-fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let mut entries: Vec<_> = fs::read_dir(dir)
-        .expect("readable source directory")
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .collect();
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            rust_files(&path, out);
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            out.push(path);
-        }
-    }
 }
 
 /// The body of the block that starts at the first `{` at or after `from`.
@@ -120,8 +105,7 @@ fn walkers_in(src: &str) -> Vec<String> {
 
 fn current_set() -> BTreeSet<String> {
     let src = src_dir();
-    let mut files = Vec::new();
-    rust_files(&src, &mut files);
+    let files = support::files(&src, usize::MAX, Some("rs"));
     let mut set = BTreeSet::new();
     for file in files {
         let text = fs::read_to_string(&file).expect("readable rule source");

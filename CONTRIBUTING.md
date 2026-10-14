@@ -53,10 +53,9 @@ regenerates it and compares), so this isn't optional.
 Fix issues at the root cause — don't silence clippy, `#[allow]` around a real
 problem, or loosen a test to go green.
 
-Note: some root-level tests (`tests/jfit_pipeline.rs`) and benchmarks
-(`benches/jfit_mobile_bench.rs`) run against a **private benchmark corpus** that
-isn't in the repo. They skip silently when the corpus is absent, so they're
-effectively no-ops on a normal checkout — you don't need it to contribute.
+The benchmark in `benches/jfit_mobile_bench.rs` optionally uses a private corpus
+outside the repository. Set `JFIT_PATH` to opt in; there is no machine-specific
+fallback path. The corpus is not required to contribute or run the test suite.
 
 ## The golden corpus
 
@@ -102,22 +101,26 @@ notes, is in
    > a **`Call` chain**, not `Expr::New`. A rule that detects object construction
    > must handle both shapes, or it will silently miss the common `X()` case.
 
-3. **Register** the rule in `all_rules()`
-   (`crates/falcon_rules/src/lib.rs`) with `Box::new(...)`.
+3. **Declare the module** in `crates/falcon_rules/src/lint/<group>/mod.rs`
+   (or `src/cross_file.rs` for a cross-file rule).
 
-4. **Add metadata**: a `RuleMeta` entry in
-   `crates/falcon_rules/src/meta.rs` with the correct `group`, `domains`,
-   `recommended`, `cross_file`, and a `source` — `RuleSource::DartCodeLinter("...")`,
-   `RuleSource::PyramidLint("...")`, or `RuleSource::Falcon` for original rules.
+4. **Register the rule** with one `RuleMeta` entry in
+   `crates/falcon_rules/src/meta.rs`. Choose a typed `RuleGroup` and `Domain`
+   slice, set `recommended`, and supply its constructor through `RuleKind::File`
+   (including `needs_resolution`) or `RuleKind::CrossFile`. Set `source` to
+   `RuleSource::DartCodeLinter("...")`, `RuleSource::PyramidLint("...")`,
+   `RuleSource::Lints("...")`, or `RuleSource::Falcon` for original rules.
+   Registries and schemas derive from this table; there is no separate
+   registration list.
 
 5. **Add a showcase entry**: list the rule in the root `falcon.json` under its
    group (`linter.rules.<group>` for file rules, `"cross-file".rules.<group>` for
    cross-file rules).
 
-   Steps 3–5 are not optional: **contract tests enforce them.** `meta_tests.rs`
-   requires every rule to have metadata with a non-empty source id, and
+   Compilation checks module declarations and constructors. `meta_tests.rs`
+   checks constructor names, metadata uniqueness, and source ids;
    `root_config_tests.rs` requires the root `falcon.json` to list every rule
-   exactly once. A rule that's missing from either will fail `cargo test`.
+   exactly once.
 
 6. **Write the corpus** (`bad.dart` + `good.dart`, plus `config.json` if the rule
    takes options), then run `cargo xtask validate-rules --rule <rule-id>` until green.

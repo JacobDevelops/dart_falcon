@@ -36,7 +36,7 @@ impl Rule for ImplementationImports {
 fn source_package(path: &Path) -> Option<String> {
     let pubspec = crate::cross_file::enclosing_pubspec(path)?;
     let root = pubspec.parent()?;
-    let canonical = crate::cross_file::canonical_or_lexical(path);
+    let canonical = falcon_analyze::canonical_or_lexical(path);
     let relative = canonical.strip_prefix(root).ok()?;
     if relative.components().next()?.as_os_str() != "lib" {
         return None;

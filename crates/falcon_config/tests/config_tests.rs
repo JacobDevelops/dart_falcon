@@ -29,7 +29,7 @@ fn from_json(value: serde_json::Value) -> FalconConfig {
 fn test_default_config() {
     let cfg = FalconConfig::default();
     assert!(cfg.schema.is_none());
-    assert!(cfg.files.includes.is_empty());
+    assert!(cfg.files.includes.patterns().is_empty());
     assert!(cfg.linter.enabled);
     assert_eq!(cfg.linter.rules.recommended, None);
     assert!(cfg.linter.rules.groups.is_empty());
@@ -60,16 +60,16 @@ fn test_parse_full_example() {
         cfg.schema.as_deref(),
         Some("https://example.invalid/falcon-schema.json")
     );
-    assert_eq!(
-        cfg.files.exclude_patterns(),
-        vec![
-            ".dart_tool/**".to_string(),
-            "build/**".to_string(),
-            "**/*.g.dart".to_string()
-        ]
-    );
-    // "**" present → no positive filtering.
-    assert!(cfg.files.include_patterns().is_empty());
+    let filter = cfg.files.path_filter();
+    for path in [
+        ".dart_tool/cache.dart",
+        "build/output.dart",
+        "lib/model.g.dart",
+    ] {
+        assert!(filter.excludes(path));
+        assert!(!filter.admits(path));
+    }
+    assert!(filter.admits("lib/main.dart"));
     assert!(cfg.linter.enabled);
     assert_eq!(cfg.linter.rules.recommended, Some(true));
     assert_eq!(
@@ -148,11 +148,12 @@ fn test_files_include_patterns_semantics() {
     let cfg = from_json(serde_json::json!({
         "files": { "includes": ["src/**", "lib/**", "!lib/gen/**"] }
     }));
-    assert_eq!(cfg.files.exclude_patterns(), vec!["lib/gen/**".to_string()]);
-    assert_eq!(
-        cfg.files.include_patterns(),
-        vec!["src/**".to_string(), "lib/**".to_string()]
-    );
+    let filter = cfg.files.path_filter();
+    assert!(filter.admits("src/main.dart"));
+    assert!(filter.admits("lib/main.dart"));
+    assert!(filter.excludes("lib/gen/model.dart"));
+    assert!(!filter.admits("lib/gen/model.dart"));
+    assert!(!filter.admits("test/main.dart"));
 }
 
 // ── resolution matrix ─────────────────────────────────────────────────────────
@@ -343,8 +344,9 @@ fn test_include_patterns_catch_all_star_star_slash_star() {
     let cfg = from_json(serde_json::json!({
         "files": { "includes": ["**/*", "!build/**"] }
     }));
-    assert!(cfg.files.include_patterns().is_empty());
-    assert_eq!(cfg.files.exclude_patterns(), vec!["build/**".to_string()]);
+    assert!(cfg.files.path_filter().admits("main.dart"));
+    assert!(cfg.files.path_filter().admits("lib/main.dart"));
+    assert!(cfg.files.path_filter().excludes("build/output.dart"));
 }
 
 // ── loading & discovery ───────────────────────────────────────────────────────
@@ -360,7 +362,7 @@ fn test_load_valid_config() {
     fs::write(&path, json).expect("write temp file");
 
     let cfg = load_config(&path).expect("load valid config");
-    assert_eq!(cfg.files.exclude_patterns(), vec!["*.tmp".to_string()]);
+    assert!(cfg.files.path_filter().excludes("generated.tmp"));
     assert_eq!(cfg.max_errors, Some(100));
 
     cleanup(&path);
@@ -932,4 +934,20 @@ fn test_override_without_options_keeps_base_options() {
             .and_then(|v| v.as_u64()),
         Some(400)
     );
+}
+
+#[test]
+fn compiled_path_filter_skips_invalid_globs_and_extends_exclusions() {
+    let mut filter = falcon_config::PathFilter::from_includes(&[
+        "[".to_string(),
+        "lib/**".to_string(),
+        "![".to_string(),
+    ]);
+    assert!(filter.admits("lib/main.dart"));
+    assert!(!filter.admits("test/main.dart"));
+    filter.extend_excludes(&["lib/generated/**".to_string(), "[".to_string()]);
+    assert!(!filter.admits("lib/generated/model.dart"));
+    assert!(filter.excludes("lib/generated/model.dart"));
+    assert!(filter.admits("lib/main.dart"));
+    assert!(falcon_config::PathFilter::from_includes(&["[".to_string()]).admits("main.dart"));
 }

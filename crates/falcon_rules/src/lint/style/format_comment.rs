@@ -33,7 +33,7 @@ struct CommentCfg {
 
 fn comment_cfg(ctx: &AnalyzeContext) -> CommentCfg {
     let opts = crate::meta::meta_for("format-comment")
-        .and_then(|m| ctx.rule_options(m.group, "format-comment"));
+        .and_then(|m| ctx.rule_options(m.group.as_str(), "format-comment"));
 
     let only_doc_comments = opts
         .and_then(|o| o.get("only_doc_comments"))

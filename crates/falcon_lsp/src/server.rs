@@ -2,8 +2,6 @@
 //!
 //! Transport-agnostic: `run_server` binds stdio for production; tests drive
 //! the identical loop through `run_with_connection` + `Connection::memory()`.
-//! Debounce strategy and cache model are specified in
-//! `.omc/docs/LSP_CACHING_DESIGN.md`.
 
 use std::collections::HashSet;
 use std::error::Error;
@@ -34,7 +32,7 @@ use falcon_diagnostics::{Diagnostic, lsp_position_to_byte};
 use crate::state::LspState;
 
 /// Server configuration. `debounce` is the quiet period after the last
-/// `didChange` before re-analysis (design doc §4); tests use `Duration::ZERO`.
+/// `didChange` before re-analysis; tests use `Duration::ZERO`.
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
     pub debounce: Duration,
@@ -48,6 +46,35 @@ impl Default for ServerOptions {
             debounce: Duration::from_millis(500),
             config_path: None,
         }
+    }
+}
+
+type ServerError = Box<dyn Error + Send + Sync>;
+
+#[derive(Default)]
+struct Debounce {
+    dirty: HashSet<String>,
+    deadline: Option<Instant>,
+}
+
+impl Debounce {
+    fn clear(&mut self, uri: &str) {
+        self.dirty.remove(uri);
+        if self.dirty.is_empty() {
+            self.deadline = None;
+        }
+    }
+
+    fn schedule(&mut self, uri: String, delay: Duration) {
+        self.dirty.insert(uri);
+        self.deadline = Some(Instant::now() + delay);
+    }
+
+    fn drain(&mut self) -> Vec<String> {
+        self.deadline = None;
+        let mut uris = self.dirty.drain().collect::<Vec<_>>();
+        uris.sort();
+        uris
     }
 }
 
@@ -75,7 +102,7 @@ fn server_capabilities() -> ServerCapabilities {
 
 /// Start the LSP server on stdio. Blocks until the client disconnects or
 /// completes the shutdown/exit sequence.
-pub fn run_server() -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn run_server() -> Result<(), ServerError> {
     let (connection, io_threads) = Connection::stdio();
     run_with_connection(connection, ServerOptions::default())?;
     io_threads.join()?;
@@ -88,7 +115,7 @@ pub fn run_server() -> Result<(), Box<dyn Error + Send + Sync>> {
 pub fn run_with_connection(
     connection: Connection,
     options: ServerOptions,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<(), ServerError> {
     // Initialize handshake (JSON-RPC request id is echoed by initialize_finish).
     let (initialize_id, _initialize_params) = connection.initialize_start()?;
     let initialize_result = InitializeResult {
@@ -102,9 +129,7 @@ pub fn run_with_connection(
     info!("LSP server initialized");
 
     let mut state = LspState::new(options.config_path.clone());
-    // Documents with un-analyzed edits, and the trailing-edge debounce deadline.
-    let mut dirty: HashSet<String> = HashSet::new();
-    let mut deadline: Option<Instant> = None;
+    let mut debounce = Debounce::default();
 
     // Deserialize a notification's params or skip the message: a single
     // malformed notification must not tear down the session (LSP spec).
@@ -121,7 +146,7 @@ pub fn run_with_connection(
     }
 
     loop {
-        let message = match deadline {
+        let message = match debounce.deadline {
             Some(at) => {
                 let timeout = at.saturating_duration_since(Instant::now());
                 match connection.receiver.recv_timeout(timeout) {
@@ -138,13 +163,11 @@ pub fn run_with_connection(
 
         let Some(message) = message else {
             // Debounce window elapsed: flush every dirty document.
-            let mut uris: Vec<String> = dirty.drain().collect();
-            uris.sort();
+            let uris = debounce.drain();
             for (affected_uri, diagnostics) in state.analyze_affected_many(&uris) {
                 publish(&connection, &state, &affected_uri, &diagnostics)?;
             }
-            cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
-            deadline = None;
+            cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
             continue;
         };
 
@@ -164,12 +187,9 @@ pub fn run_with_connection(
                         params.text_document.text,
                         Some(params.text_document.version),
                     );
-                    dirty.remove(&uri);
-                    if dirty.is_empty() {
-                        deadline = None;
-                    }
+                    debounce.clear(&uri);
                     publish_affected_with_current(&connection, &mut state, &uri, &diagnostics)?;
-                    cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
+                    cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
                 }
                 DidChangeTextDocument::METHOD => {
                     let params: DidChangeTextDocumentParams = parse_params!(&method, params);
@@ -183,10 +203,9 @@ pub fn run_with_connection(
                     }
                     if options.debounce.is_zero() {
                         analyze_affected_and_publish(&connection, &mut state, &uri)?;
-                        cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
+                        cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
                     } else {
-                        dirty.insert(uri);
-                        deadline = Some(Instant::now() + options.debounce);
+                        debounce.schedule(uri, options.debounce);
                     }
                 }
                 DidSaveTextDocument::METHOD => {
@@ -194,11 +213,8 @@ pub fn run_with_connection(
                     let uri = params.text_document.uri.as_str().to_string();
                     let diagnostics = state.save(&uri, params.text);
                     publish_affected_with_current(&connection, &mut state, &uri, &diagnostics)?;
-                    dirty.remove(&uri);
-                    if dirty.is_empty() {
-                        deadline = None;
-                    }
-                    cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
+                    debounce.clear(&uri);
+                    cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
                 }
                 DidCloseTextDocument::METHOD => {
                     let params: DidCloseTextDocumentParams = parse_params!(&method, params);
@@ -208,10 +224,7 @@ pub fn run_with_connection(
                     affected.extend(state.affected_open_uris(&uri));
                     affected.sort();
                     affected.dedup();
-                    dirty.remove(&uri);
-                    if dirty.is_empty() {
-                        deadline = None;
-                    }
+                    debounce.clear(&uri);
                     // Clear stale squiggles before refreshing dependents against
                     // the closed document's on-disk workspace state.
                     publish(&connection, &state, &uri, &[])?;
@@ -222,18 +235,15 @@ pub fn run_with_connection(
                         let diagnostics = state.analyze(&affected_uri);
                         publish(&connection, &state, &affected_uri, &diagnostics)?;
                     }
-                    cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
+                    cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
                 }
                 DidChangeWatchedFiles::METHOD => {
                     debug!("watched files changed — reloading config");
                     for (uri, diagnostics) in state.reload_config() {
-                        dirty.remove(&uri);
+                        debounce.clear(&uri);
                         publish(&connection, &state, &uri, &diagnostics)?;
                     }
-                    cross_file_pass_and_publish(&connection, &mut state, &mut dirty)?;
-                    if dirty.is_empty() {
-                        deadline = None;
-                    }
+                    cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
                 }
                 // `handle_shutdown` consumes the `exit` that follows a `shutdown`
                 // request, so reaching this arm means `exit` arrived with no prior
@@ -241,7 +251,6 @@ pub fn run_with_connection(
                 "exit" => return Err("exit notification received without prior shutdown".into()),
                 other => debug!(method = other, "ignoring notification"),
             },
-            // Phase 1 sends no server→client requests, so no responses arrive.
             Message::Response(_) => {}
         }
     }
@@ -251,7 +260,7 @@ fn handle_request(
     connection: &Connection,
     state: &LspState,
     request: Request,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<(), ServerError> {
     match request.method.as_str() {
         HoverRequest::METHOD => {
             let params: HoverParams = match serde_json::from_value(request.params) {
@@ -325,13 +334,16 @@ fn hover(state: &LspState, params: &HoverParams) -> Option<Hover> {
 fn cross_file_pass_and_publish(
     connection: &Connection,
     state: &mut LspState,
-    dirty: &mut HashSet<String>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+    debounce: &mut Debounce,
+) -> Result<(), ServerError> {
     if !state.cross_file_rules_enabled() {
         return Ok(());
     }
+    let uris = debounce.drain();
+    for (uri, diagnostics) in state.analyze_affected_many(&uris) {
+        publish(connection, state, &uri, &diagnostics)?;
+    }
     for (uri, diagnostics) in state.cross_file_pass() {
-        dirty.remove(&uri);
         publish(connection, state, &uri, &diagnostics)?;
     }
     Ok(())
@@ -344,7 +356,7 @@ fn publish_affected_with_current(
     state: &mut LspState,
     uri: &str,
     diagnostics: &[Diagnostic],
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<(), ServerError> {
     for affected_uri in state.affected_open_uris(uri) {
         if affected_uri == uri {
             publish(connection, state, &affected_uri, diagnostics)?;
@@ -361,8 +373,8 @@ fn analyze_affected_and_publish(
     connection: &Connection,
     state: &mut LspState,
     uri: &str,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    for (affected_uri, diagnostics) in state.analyze_affected(uri) {
+) -> Result<(), ServerError> {
+    for (affected_uri, diagnostics) in state.analyze_affected_many(&[uri.to_string()]) {
         publish(connection, state, &affected_uri, &diagnostics)?;
     }
     Ok(())
@@ -374,7 +386,7 @@ fn publish(
     state: &LspState,
     uri: &str,
     diagnostics: &[Diagnostic],
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<(), ServerError> {
     let (lsp_diagnostics, version) = match state.document(uri) {
         Some(document) => (
             diagnostics
@@ -395,4 +407,33 @@ fn publish(
         .sender
         .send(ServerNotification::new(PublishDiagnostics::METHOD.to_string(), params).into())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod debounce_tests {
+    use super::*;
+
+    #[test]
+    fn clearing_last_dirty_document_cancels_deadline() {
+        let mut debounce = Debounce::default();
+        debounce.schedule("file:///b.dart".into(), Duration::from_secs(1));
+        debounce.schedule("file:///a.dart".into(), Duration::from_secs(1));
+        let deadline = debounce.deadline;
+        debounce.clear("file:///b.dart");
+        assert_eq!(debounce.deadline, deadline);
+        debounce.clear("file:///a.dart");
+        assert!(debounce.deadline.is_none());
+        assert!(debounce.dirty.is_empty());
+    }
+
+    #[test]
+    fn drain_deduplicates_documents_and_resets_deadline() {
+        let mut debounce = Debounce::default();
+        for uri in ["file:///b.dart", "file:///a.dart", "file:///b.dart"] {
+            debounce.schedule(uri.into(), Duration::from_secs(1));
+        }
+        assert_eq!(debounce.drain(), ["file:///a.dart", "file:///b.dart"]);
+        assert!(debounce.deadline.is_none());
+        assert!(debounce.dirty.is_empty());
+    }
 }

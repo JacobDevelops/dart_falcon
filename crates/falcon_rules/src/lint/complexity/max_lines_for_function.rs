@@ -39,7 +39,7 @@ fn line_of(source: &str, offset: usize) -> usize {
 /// Read the `max_lines` option (default 100). Malformed/missing → default.
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
     crate::meta::meta_for("max-lines-for-function")
-        .and_then(|m| ctx.rule_options(m.group, "max-lines-for-function"))
+        .and_then(|m| ctx.rule_options(m.group.as_str(), "max-lines-for-function"))
         .and_then(|o| o.get("max_lines"))
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)

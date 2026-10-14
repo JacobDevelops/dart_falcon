@@ -49,8 +49,8 @@ pub struct FalconConfig {
 pub struct Override {
     /// Glob patterns selecting the files this override applies to. Same syntax
     /// as `files.includes`: plain entries are positive includes, `!`-prefixed
-    /// entries are exclusions. Paths are matched as walked (see
-    /// [`FilesConfig::include_patterns`] for the relative-path caveat).
+    /// entries are exclusions. Relative globs match paths as walked; absolute
+    /// paths require absolute globs or a leading `**/`.
     pub includes: PathFilter,
     /// Partial linter (file-rule) configuration applied to matching files. Rule
     /// levels, per-rule `options`, and an optional `enabled` master switch are
@@ -91,8 +91,8 @@ impl Override {
     }
 }
 
-/// Immutable override globs, compiled once. Invalid globs are ignored;
-/// exclusions win, and no valid positive globs means every path is included.
+/// Compiled globs. Invalid patterns are warned about and skipped; exclusions
+/// win, and no valid positive globs means every path is included.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(from = "Vec<String>")]
 pub struct PathFilter {
@@ -114,9 +114,16 @@ impl From<Vec<String>> for PathFilter {
                 Some(raw) => (&mut exclude, raw),
                 None => (&mut include, pattern.as_str()),
             };
-            if let Ok(pattern) = Pattern::new(raw) {
-                target.push(pattern);
+            match Pattern::new(raw) {
+                Ok(pattern) => target.push(pattern),
+                Err(error) => tracing::warn!(pattern = raw, %error, "invalid path pattern"),
             }
+        }
+        if patterns
+            .iter()
+            .any(|pattern| pattern == "**" || pattern == "**/*")
+        {
+            include.clear();
         }
         Self {
             patterns,
@@ -133,12 +140,32 @@ impl Serialize for PathFilter {
 }
 
 impl PathFilter {
+    pub fn from_includes(patterns: &[String]) -> Self {
+        patterns.to_vec().into()
+    }
+
+    pub fn extend_excludes(&mut self, patterns: &[String]) {
+        for raw in patterns {
+            match Pattern::new(raw) {
+                Ok(pattern) => {
+                    self.exclude.push(pattern);
+                    self.patterns.push(format!("!{raw}"));
+                }
+                Err(error) => tracing::warn!(pattern = raw, %error, "invalid path pattern"),
+            }
+        }
+    }
+
+    pub fn excludes(&self, path: &str) -> bool {
+        self.exclude.iter().any(|pattern| pattern.matches(path))
+    }
+
     pub fn patterns(&self) -> &[String] {
         &self.patterns
     }
 
     pub fn admits(&self, path: &str) -> bool {
-        !self.exclude.iter().any(|pattern| pattern.matches(path))
+        !self.excludes(path)
             && (self.include.is_empty() || self.include.iter().any(|pattern| pattern.matches(path)))
     }
 }
@@ -150,36 +177,12 @@ impl PathFilter {
 pub struct FilesConfig {
     /// Glob patterns. Entries starting with `!` are exclusions; the rest are
     /// positive includes. Empty means "include everything".
-    pub includes: Vec<String>,
+    pub includes: PathFilter,
 }
 
 impl FilesConfig {
-    /// Exclusion globs (the `!`-prefixed entries, with the `!` stripped).
-    pub fn exclude_patterns(&self) -> Vec<String> {
-        self.includes
-            .iter()
-            .filter_map(|p| p.strip_prefix('!').map(str::to_string))
-            .collect()
-    }
-
-    /// Positive include globs. An empty list — or a catch-all entry (`**` or
-    /// `**/*`) — means no positive filtering (include everything), so this
-    /// returns an empty vec in that case.
-    ///
-    /// Positive globs match paths as walked from the CLI argument (e.g. `lib/**`
-    /// matches when running `falcon check .` from the project root). Absolute
-    /// patterns match absolute paths.
-    pub fn include_patterns(&self) -> Vec<String> {
-        let positives: Vec<String> = self
-            .includes
-            .iter()
-            .filter(|p| !p.starts_with('!'))
-            .cloned()
-            .collect();
-        if positives.iter().any(|p| p == "**" || p == "**/*") {
-            return Vec::new();
-        }
-        positives
+    pub fn path_filter(&self) -> &PathFilter {
+        &self.includes
     }
 }
 
@@ -834,8 +837,6 @@ mod warning_tests {
     use super::top_level_key_warnings;
     use serde_json::json;
 
-    /// Finding 3: an unknown top-level section (a mistyped `linter`) is warned
-    /// about by name, not silently dropped.
     #[test]
     fn unknown_top_level_key_is_warned() {
         let warnings = top_level_key_warnings(&json!({ "linterr": {}, "totallyBogus": 5 }));

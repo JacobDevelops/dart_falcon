@@ -14,51 +14,20 @@ pub mod unused_code;
 pub mod unused_files;
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
-use falcon_analyze::ProjectFile;
+use falcon_analyze::{PackageIdentity, ProjectFile, canonical_or_lexical};
 use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::ast::{ExportDirective, ImportDirective, PartDirective, Program};
 use marked_yaml::{Node as MarkedNode, parse_yaml};
 use serde_yaml::Value;
 
-/// Resolved package identity: the `name:` from pubspec.yaml and the absolute
-/// `lib/` directory that `package:<name>/...` URIs resolve against.
-pub struct PackageInfo {
-    pub name: String,
-    pub lib_root: PathBuf,
-}
-
-/// A resolved reference target: either a concrete file path or, when the target
-/// package/path can't be pinned to an analyzed file, a `lib/...` path suffix to
-/// match tolerantly.
+/// Unknown packages use a tolerant `lib/...` suffix instead of a concrete path.
 pub enum ResolvedRef {
     Path(PathBuf),
     Suffix(String),
 }
 
-/// Lexically normalize a path (resolve `.`/`..` without touching the FS).
-fn lexical_normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-/// Canonical path when the file exists (resolving symlinks so two spellings of
-/// the same file compare equal), falling back to lexical normalization.
-pub fn canonical_or_lexical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| lexical_normalize(path))
-}
-
-/// Forward-slash string form of a path, for suffix comparisons.
 fn slashed(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
@@ -258,43 +227,22 @@ fn enclosing_block_scalar(source: &str, value_start: usize) -> Option<DiagSpan> 
     }
 }
 
-/// Discover the enclosing package by walking up from the analyzed files to the
-/// first `pubspec.yaml`, reading its `name:`. Tolerant: any read/parse failure
-/// yields `None` and callers fall back to suffix matching.
-pub fn detect_package(files: &[ProjectFile]) -> Option<PackageInfo> {
-    for f in files {
-        if let Some(pubspec) = enclosing_pubspec(&f.path) {
-            let root = pubspec.parent().unwrap_or_else(|| Path::new(""));
-            return read_pubspec_name(&pubspec).map(|name| PackageInfo {
-                name,
-                lib_root: canonical_or_lexical(&root.join("lib")),
-            });
-        }
-    }
-    None
+/// Missing package names leave URI resolution in tolerant suffix-matching mode.
+pub fn detect_package(files: &[ProjectFile]) -> Option<PackageIdentity> {
+    let pubspec = files
+        .iter()
+        .find_map(|file| enclosing_pubspec(&file.path))?;
+    let package = crate::package_identity(&pubspec);
+    (!package.name.is_empty()).then_some(package)
 }
 
-/// Extract the top-level `name:` value from a pubspec.yaml (first match wins).
-fn read_pubspec_name(path: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
-    for line in content.lines() {
-        // Only a top-level `name:` (no indentation) is the package name.
-        if line.starts_with(char::is_whitespace) {
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("name:") {
-            let name = rest
-                .trim()
-                .trim_matches('"')
-                .trim_matches('\'')
-                .trim()
-                .to_string();
-            if !name.is_empty() {
-                return Some(name);
-            }
-        }
-    }
-    None
+fn project_pubspecs(files: &[ProjectFile]) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    files
+        .iter()
+        .filter_map(|file| enclosing_pubspec(&file.path))
+        .filter(|path| seen.insert(path.clone()))
+        .collect()
 }
 
 /// Resolve an `import`/`export`/`part` URI (already the string value, without
@@ -302,7 +250,7 @@ fn read_pubspec_name(path: &Path) -> Option<String> {
 pub fn resolve_directive_uri(
     from_file: &Path,
     uri: &str,
-    pkg: Option<&PackageInfo>,
+    pkg: Option<&PackageIdentity>,
 ) -> Option<ResolvedRef> {
     if uri.starts_with("dart:") {
         return None;
@@ -327,15 +275,11 @@ pub fn resolve_directive_uri(
             None => return Some(ResolvedRef::Suffix(format!("lib/{sub}"))),
         }
     }
-    // Relative URI, resolved against the importing file's directory.
     let from_dir = from_file.parent().unwrap_or_else(|| Path::new(""));
     Some(ResolvedRef::Path(canonical_or_lexical(&from_dir.join(uri))))
 }
 
-/// All directive URIs a program declares, as `(uri_value)` — imports, exports,
-/// and `part` directives (the things that reference another file). Each
-/// import/export also yields its `configurable_uris` targets, so conditional
-/// (`if (dart.library.io) '...'`) platform-specific files count as referenced.
+/// Conditional alternatives also keep platform-specific files reachable.
 fn program_reference_uris(program: &Program) -> impl Iterator<Item = &str> {
     let imports = program.imports.iter().flat_map(|i: &ImportDirective| {
         std::iter::once(i.uri.value.as_str())
@@ -352,8 +296,6 @@ fn program_reference_uris(program: &Program) -> impl Iterator<Item = &str> {
     imports.chain(exports).chain(parts)
 }
 
-/// A set of resolved reference targets: concrete canonical paths plus tolerant
-/// path suffixes. Used to answer "is this file referenced by anything?".
 #[derive(Default)]
 pub struct ReferenceSet {
     paths: HashSet<PathBuf>,
@@ -370,7 +312,6 @@ impl ReferenceSet {
         }
     }
 
-    /// Whether `path` (a canonical file path) is one of the referenced targets.
     pub fn contains(&self, path: &Path) -> bool {
         if self.paths.contains(path) {
             return true;
@@ -386,7 +327,7 @@ impl ReferenceSet {
 /// unused-* rules flag within). With a known package this is a prefix check;
 /// without pubspec metadata every analyzed file is treated as in-scope (callers
 /// that need the stricter documented `lib/`-only scope apply it themselves).
-pub fn is_under_lib(path: &Path, pkg: Option<&PackageInfo>) -> bool {
+pub fn is_under_lib(path: &Path, pkg: Option<&PackageIdentity>) -> bool {
     match pkg {
         Some(pkg) => path.starts_with(&pkg.lib_root),
         None => true,
@@ -410,7 +351,7 @@ pub fn has_lib_component(path: &Path) -> bool {
 pub fn build_reference_graph(
     files: &[ProjectFile],
     canons: &[PathBuf],
-    pkg: Option<&PackageInfo>,
+    pkg: Option<&PackageIdentity>,
 ) -> Vec<Vec<usize>> {
     let mut by_path: HashMap<&Path, usize> = HashMap::with_capacity(canons.len());
     for (i, c) in canons.iter().enumerate() {
@@ -442,38 +383,43 @@ pub fn build_reference_graph(
     adj
 }
 
-/// Collect every file's resolved outgoing references into one [`ReferenceSet`].
-pub fn collect_references(files: &[ProjectFile], pkg: Option<&PackageInfo>) -> ReferenceSet {
-    let mut refs = ReferenceSet::default();
-    for f in files {
-        let from = canonical_or_lexical(&f.path);
-        for uri in program_reference_uris(&f.program) {
-            if let Some(r) = resolve_directive_uri(&from, uri, pkg) {
-                refs.insert(r);
-            }
-        }
-    }
-    refs
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use falcon_dart_parser::parser::parse;
 
-    fn project_file(path: &str, source: &str) -> ProjectFile {
-        let (program, errors) = parse(source);
-        assert!(errors.is_empty(), "fixture must parse: {errors:?}");
-        ProjectFile {
-            path: PathBuf::from(path),
-            source: source.to_string(),
+    #[cfg(unix)]
+    #[test]
+    fn detect_package_keeps_symlinked_lib_identity() {
+        let root = std::env::temp_dir().join(format!(
+            "falcon-package-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let package_root = root.join("package");
+        let sources = root.join("sources");
+        std::fs::create_dir_all(&package_root).unwrap();
+        std::fs::create_dir(&sources).unwrap();
+        std::fs::write(package_root.join("pubspec.yaml"), "name: 'pkg' # comment\n").unwrap();
+        std::os::unix::fs::symlink(&sources, package_root.join("lib")).unwrap();
+        let (program, errors) = parse("");
+        assert!(errors.is_empty());
+        let package = detect_package(&[ProjectFile {
+            path: package_root.join("test.dart"),
+            source: String::new(),
             program,
             has_parse_errors: false,
-        }
+        }]);
+        let expected_root = canonical_or_lexical(&sources);
+        std::fs::remove_dir_all(root).unwrap();
+        let package = package.unwrap();
+        assert_eq!(package.name, "pkg");
+        assert_eq!(package.lib_root, expected_root);
     }
 
-    // Finding: conditional import/export URIs were ignored, so platform-specific
-    // impl files were falsely reported unused.
     #[test]
     fn program_reference_uris_yields_configurable_uris() {
         let src = "export 'src/impl_stub.dart'\n    if (dart.library.io) 'src/impl_io.dart'\n    if (dart.library.html) 'src/impl_web.dart';";
@@ -496,21 +442,6 @@ mod tests {
         assert!(uris.contains(&"src/io.dart"), "import branch: {uris:?}");
     }
 
-    #[test]
-    fn collect_references_resolves_conditional_impl_files() {
-        let f = project_file(
-            "/pkg/lib/api.dart",
-            "export 'src/impl_stub.dart' if (dart.library.io) 'src/impl_io.dart' if (dart.library.html) 'src/impl_web.dart';",
-        );
-        let refs = collect_references(std::slice::from_ref(&f), None);
-        for target in ["impl_stub", "impl_io", "impl_web"] {
-            let p = PathBuf::from(format!("/pkg/lib/src/{target}.dart"));
-            assert!(refs.contains(&p), "{target} should be referenced");
-        }
-    }
-
-    // Finding: with no pubspec, unused-files flagged test/bin/tool files. The
-    // pubspec-less scope fallback must accept only paths with a `lib/` component.
     #[test]
     fn has_lib_component_restricts_pubspec_less_scope() {
         assert!(has_lib_component(Path::new("/proj/lib/foo.dart")));

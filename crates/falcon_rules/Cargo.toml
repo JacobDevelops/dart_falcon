@@ -16,12 +16,8 @@ serde_yaml = { workspace = true }
 marked-yaml = { workspace = true }
 
 [dev-dependencies]
-# In-process golden-corpus runner (tests/corpus_tests.rs) parses fixtures directly.
-falcon_dart_parser = { path = "../falcon_dart_parser" }
-serde_json = { workspace = true }
 criterion = { workspace = true }
-falcon_analyze = { path = "../falcon_analyze" }
-falcon_config = { path = "../falcon_config" }
+walkdir = { workspace = true }
 
 [[bench]]
 name = "rules_bench"

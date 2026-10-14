@@ -1,6 +1,6 @@
 use clap::Parser;
 
-use crate::analyze_pipeline::{CheckOptions, run_check};
+use crate::analyze_pipeline::run_check;
 use crate::args::Cli;
 
 pub fn run_cli() -> i32 {
@@ -8,25 +8,7 @@ pub fn run_cli() -> i32 {
     crate::logging::init(cli.verbose, cli.log_format);
 
     match cli.command {
-        crate::args::Command::Check {
-            paths,
-            config,
-            format,
-            exclude,
-            max_errors,
-            quiet,
-            exit_code,
-            parallel,
-        } => run_check(CheckOptions {
-            paths,
-            config_path: config,
-            exclude_patterns: exclude,
-            max_errors,
-            quiet,
-            format,
-            error_exit_code: exit_code,
-            parallel,
-        }),
+        crate::args::Command::Check(options) => run_check(options),
         crate::args::Command::Migrate {
             input,
             write,

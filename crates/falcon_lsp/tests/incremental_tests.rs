@@ -1,8 +1,7 @@
-//! Incremental analysis & caching tests (M5.2), against `LspState` directly.
+//! Incremental analysis and caching tests against `LspState` directly.
 //!
-//! These prove the two cache-invalidation axes from LSP_CACHING_DESIGN.md:
-//! text changes re-parse only the changed document; config changes rebuild
-//! the rule set and re-analyze cached ASTs without any re-parse.
+//! Text changes reparse only the changed document; config changes rerun rules
+//! over cached ASTs without reparsing.
 
 use std::fs;
 use std::time::{Duration, Instant};
@@ -71,7 +70,7 @@ fn non_resolving_rules_keep_the_single_document_fast_path() {
     );
 
     assert!(state.change(&uri, CLEAN_SRC.to_string(), Some(2)));
-    let affected = state.analyze_affected(&uri);
+    let affected = state.analyze_affected_many(std::slice::from_ref(&uri));
     assert_eq!(affected.len(), 1);
     assert_eq!(state.semantic_snapshot_build_count(), 0);
 }
@@ -101,7 +100,7 @@ fn changing_part_owner_refreshes_old_and_new_libraries() {
     state.open(&pivot_uri, "part of 'old.dart';\n".to_string(), Some(1));
 
     assert!(state.change(&pivot_uri, "part of 'new.dart';\n".to_string(), Some(2)));
-    let affected = state.analyze_affected(&pivot_uri);
+    let affected = state.analyze_affected_many(std::slice::from_ref(&pivot_uri));
     let affected_uris = affected
         .iter()
         .map(|(uri, _)| uri.as_str())
@@ -148,7 +147,7 @@ fn rebuilt_intermediate_graph_is_merged_into_pending_affected_documents() {
     assert!(state.change(&pivot_uri, "part of 'c.dart';\n".to_string(), Some(3)));
 
     let affected = state
-        .analyze_affected(&pivot_uri)
+        .analyze_affected_many(std::slice::from_ref(&pivot_uri))
         .into_iter()
         .map(|(uri, _)| uri)
         .collect::<Vec<_>>();
@@ -204,7 +203,7 @@ fn cross_file_publication_rebuild_is_merged_into_pending_affected_documents() {
     assert!(state.change(&pivot_uri, "part of 'c.dart';\n".to_string(), Some(3)));
 
     let affected = state
-        .analyze_affected(&pivot_uri)
+        .analyze_affected_many(std::slice::from_ref(&pivot_uri))
         .into_iter()
         .map(|(uri, _)| uri)
         .collect::<Vec<_>>();
@@ -242,7 +241,7 @@ fn opening_buffer_with_new_part_owner_refreshes_disk_and_buffer_libraries() {
     state.open(&old_uri, "library old;\n".to_string(), Some(1));
     state.open(&new_uri, "library new;\n".to_string(), Some(1));
     state.open(&pivot_uri, "part of 'new.dart';\n".to_string(), Some(1));
-    let affected = state.analyze_affected(&pivot_uri);
+    let affected = state.analyze_affected_many(std::slice::from_ref(&pivot_uri));
     let affected_uris = affected
         .iter()
         .map(|(uri, _)| uri.as_str())
@@ -333,7 +332,7 @@ fn affected_documents_share_one_invalidated_semantic_snapshot() {
         2,
         "repeated changes must not recompute intermediate dependency topologies"
     );
-    let affected = state.analyze_affected(&api_uri);
+    let affected = state.analyze_affected_many(std::slice::from_ref(&api_uri));
     assert_eq!(
         affected.len(),
         2,
@@ -492,7 +491,7 @@ fn current_package_import_resolves_and_invalidates_importer() {
         "the current package import must bind its workspace declaration: {diagnostics:?}"
     );
 
-    let affected = state.analyze_affected(&api_uri);
+    let affected = state.analyze_affected_many(std::slice::from_ref(&api_uri));
     assert!(
         affected.iter().any(|(uri, _)| uri == &consumer_uri),
         "changing a current-package library must invalidate its importer: {affected:?}"
@@ -534,7 +533,7 @@ fn workspace_package_import_resolves_and_refreshes_semantic_diagnostics() {
     );
 
     assert!(state.change(&api_uri, returning_void.to_string(), Some(2)));
-    let affected = state.analyze_affected(&api_uri);
+    let affected = state.analyze_affected_many(std::slice::from_ref(&api_uri));
     let (_, diagnostics) = affected
         .iter()
         .find(|(uri, _)| uri == &consumer_uri)
@@ -547,7 +546,7 @@ fn workspace_package_import_resolves_and_refreshes_semantic_diagnostics() {
     );
 
     assert!(state.change(&api_uri, returning.to_string(), Some(3)));
-    let affected = state.analyze_affected(&api_uri);
+    let affected = state.analyze_affected_many(std::slice::from_ref(&api_uri));
     let (_, diagnostics) = affected
         .iter()
         .find(|(uri, _)| uri == &consumer_uri)
@@ -560,7 +559,7 @@ fn workspace_package_import_resolves_and_refreshes_semantic_diagnostics() {
     );
 }
 
-/// M5.4 gate: single-file incremental re-analyze (change + analyze) must
+/// Single-file incremental re-analysis (change + analyze) must
 /// complete in <100ms on a release build, <400ms under `cargo test`'s debug
 /// build. Uses a generated ~800-line file so the bound is exercised on a
 /// realistically large document.

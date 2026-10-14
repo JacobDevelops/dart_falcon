@@ -17,14 +17,13 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{CrossFileRule, ProjectFile};
+use falcon_analyze::{CrossFileRule, PackageIdentity, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::{Program, TopLevelDecl};
 
 use super::{
-    PackageInfo, build_reference_graph, canonical_or_lexical, detect_package, has_lib_component,
-    is_under_lib,
+    build_reference_graph, canonical_or_lexical, detect_package, has_lib_component, is_under_lib,
 };
 
 pub struct UnusedFiles;
@@ -112,7 +111,7 @@ impl CrossFileRule for UnusedFiles {
 
 /// Whether `canon` is an entrypoint that is always considered used, seeding the
 /// reachability search. See the module docs for the three root kinds.
-fn is_root(program: &Program, canon: &Path, pkg: Option<&PackageInfo>) -> bool {
+fn is_root(program: &Program, canon: &Path, pkg: Option<&PackageIdentity>) -> bool {
     if has_main(program) {
         return true;
     }
