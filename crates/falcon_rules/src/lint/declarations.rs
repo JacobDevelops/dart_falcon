@@ -78,7 +78,7 @@ mod tests {
             (
                 "prefer-moving-to-variable",
                 &["Enum", "Extension", "ExtensionType"],
-                "void f() { final first = compute(); final second = compute(); }",
+                "void f(Object root) { final first = root.value; final second = root.value; }",
             ),
             (
                 "correct-order-for-super-dispose",

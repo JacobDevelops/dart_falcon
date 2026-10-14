@@ -36,3 +36,52 @@ List<dynamic> listOfDynamic = []; /* expect: avoid-dynamic */
 Route<dynamic>? routeField; /* expect: avoid-dynamic */
 
 Map<String, List<dynamic>> nested = {}; /* expect: avoid-dynamic */
+
+typedef DynamicAlias = List<dynamic>; /* expect: avoid-dynamic */
+
+(dynamic, {dynamic value}) recordTypes; /* expect: avoid-dynamic */ /* expect: avoid-dynamic */
+
+class DynamicInitializers {
+  final values = <dynamic>[]; /* expect: avoid-dynamic */
+
+  DynamicInitializers() {
+    final local = <dynamic>[]; /* expect: avoid-dynamic */
+  }
+
+  set value(Object value) {
+    dynamic local = value; /* expect: avoid-dynamic */
+  }
+
+  Object operator +(Object other) {
+    dynamic local = other; /* expect: avoid-dynamic */
+    return local;
+  }
+}
+
+void dynamicSwitch(Object input) {
+  switch (input) {
+    default:
+      dynamic local = input; /* expect: avoid-dynamic */
+  }
+}
+
+typedef BoundedFunction = void Function<T extends List<dynamic>>(); /* expect: avoid-dynamic */
+
+void dynamicPatterns(Object input) {
+  if (input case List<dynamic> values) { /* expect: avoid-dynamic */
+    print(values);
+  }
+  final values = [
+    for (List<dynamic> value in <List<Object>>[]) value, /* expect: avoid-dynamic */
+  ];
+}
+
+class DynamicBase extends Base<List<dynamic>> {} /* expect: avoid-dynamic */
+
+@Annotation<List<dynamic>>() /* expect: avoid-dynamic */
+void annotatedDynamic() {}
+
+Object dynamicSwitchExpression(Object input) => switch (input) {
+  List<dynamic> values => values, /* expect: avoid-dynamic */
+  _ => input,
+};

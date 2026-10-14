@@ -6,11 +6,12 @@
 //! same thing in one line. The rule reports only the outermost `if` of a chain
 //! (whose parent is not an `if` and whose `else` is not an `else if`) where both
 //! branches reduce to a single return, or to a single assignment to the same
-//! variable.
+//! variable. Local functions, closures, and labeled statements are included.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 #[derive(Default)]
 pub struct PreferConditionalExpressions;
@@ -18,53 +19,24 @@ pub struct PreferConditionalExpressions;
 impl Rule for PreferConditionalExpressions {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Function(func) => {
-                    if let Some(body) = &func.body {
-                        check_body(body, &mut diags, ctx);
-                    }
-                }
-                _ => {
-                    for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
-                        check_member(member, &mut diags, ctx);
-                    }
-                }
-            }
+        ConditionalExpressions {
+            diags: &mut diags,
+            ctx,
+            parent_is_if: false,
         }
+        .visit_program(program);
         diags
     }
 }
 
-fn check_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let body = match member {
-        ClassMember::Method(m) => m.body.as_ref(),
-        ClassMember::Constructor(c) => c.body.as_ref(),
-        ClassMember::Getter(g) => g.body.as_ref(),
-        ClassMember::Setter(s) => s.body.as_ref(),
-        ClassMember::Operator(o) => o.body.as_ref(),
-        _ => None,
-    };
-    if let Some(body) = body {
-        check_body(body, diags, ctx);
-    }
-}
-
-fn check_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if let FunctionBody::Block(block) = body {
-        for stmt in &block.stmts {
-            check_stmt(stmt, false, diags, ctx);
+fn unwrap_single(mut stmt: &Stmt) -> &Stmt {
+    while let Stmt::Block(block) = stmt {
+        if block.stmts.len() != 1 {
+            break;
         }
+        stmt = &block.stmts[0];
     }
-}
-
-/// Unwrap a block that contains exactly one statement, recursively, mirroring
-/// dart_code_linter's single-statement branch handling.
-fn unwrap_single(stmt: &Stmt) -> &Stmt {
-    match stmt {
-        Stmt::Block(b) if b.stmts.len() == 1 => unwrap_single(&b.stmts[0]),
-        _ => stmt,
-    }
+    stmt
 }
 
 fn is_return(stmt: &Stmt) -> bool {
@@ -82,65 +54,42 @@ fn assign_target_name(stmt: &Stmt) -> Option<&str> {
     None
 }
 
-fn check_stmt(stmt: &Stmt, parent_is_if: bool, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::If(if_stmt) => {
-            if let Some(else_branch) = &if_stmt.else_branch {
-                // dcl only reports the outermost `if` of a chain (parent not an
-                // `if`) whose else is not itself an `else if`, and where both
-                // branches reduce to a single assignment (to the same target)
-                // or a single return.
-                let else_is_if = matches!(else_branch.as_ref(), Stmt::If(_));
-                if !parent_is_if && !else_is_if {
-                    let both_return = is_return(&if_stmt.then_branch) && is_return(else_branch);
-                    let both_assign = matches!(
-                        (
-                            assign_target_name(&if_stmt.then_branch),
-                            assign_target_name(else_branch),
-                        ),
-                        (Some(a), Some(b)) if a == b
-                    );
-                    if both_return || both_assign {
-                        diags.push(ctx.diagnostic("prefer-conditional-expressions", "Prefer a conditional expression over an if/else with a single statement in each branch", if_stmt.span));
-                    }
-                }
-            }
-            // A then-branch or else-branch statement has the `if` as its parent.
-            check_stmt(&if_stmt.then_branch, true, diags, ctx);
-            if let Some(else_b) = &if_stmt.else_branch {
-                check_stmt(else_b, true, diags, ctx);
+struct ConditionalExpressions<'a, 'ctx> {
+    diags: &'a mut Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
+    parent_is_if: bool,
+}
+
+impl Visitor for ConditionalExpressions<'_, '_> {
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::If(n) = node
+            && let Some(else_branch) = &n.else_branch
+            && !self.parent_is_if
+            && !matches!(else_branch.as_ref(), Stmt::If(_))
+        {
+            let both_return = is_return(&n.then_branch) && is_return(else_branch);
+            let both_assign = matches!(
+                (assign_target_name(&n.then_branch), assign_target_name(else_branch)),
+                (Some(a), Some(b)) if a == b
+            );
+            if both_return || both_assign {
+                self.diags.push(self.ctx.diagnostic(
+                    "prefer-conditional-expressions",
+                    "Prefer a conditional expression over an if/else with a single statement in each branch",
+                    n.span,
+                ));
             }
         }
-        Stmt::Block(block) => {
-            for s in &block.stmts {
-                check_stmt(s, false, diags, ctx);
-            }
-        }
-        Stmt::For(for_stmt) => check_stmt(&for_stmt.body, false, diags, ctx),
-        Stmt::While(s) => check_stmt(&s.body, false, diags, ctx),
-        Stmt::DoWhile(s) => check_stmt(&s.body, false, diags, ctx),
-        Stmt::TryCatch(s) => {
-            for st in &s.body.stmts {
-                check_stmt(st, false, diags, ctx);
-            }
-            for catch in &s.catches {
-                for st in &catch.body.stmts {
-                    check_stmt(st, false, diags, ctx);
-                }
-            }
-            if let Some(fin) = &s.finally {
-                for st in &fin.stmts {
-                    check_stmt(st, false, diags, ctx);
-                }
-            }
-        }
-        Stmt::Switch(sw) => {
-            for case in &sw.cases {
-                for st in &case.body {
-                    check_stmt(st, false, diags, ctx);
-                }
-            }
-        }
-        _ => {}
+        let parent = self.parent_is_if;
+        self.parent_is_if = matches!(node, Stmt::If(_));
+        walk_stmt(self, node);
+        self.parent_is_if = parent;
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        let parent = self.parent_is_if;
+        self.parent_is_if = false;
+        walk_expr(self, node);
+        self.parent_is_if = parent;
     }
 }

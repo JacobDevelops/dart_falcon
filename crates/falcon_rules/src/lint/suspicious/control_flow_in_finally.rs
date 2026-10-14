@@ -95,25 +95,12 @@ impl FinallyScanner<'_, '_, '_> {
         self.loop_labels.remove(&name);
     }
 
-    fn visit_switch(&mut self, switch: &SwitchStmt) {
-        self.visit_expr(&switch.subject);
+    fn visit_switch(&mut self, node: &Stmt, switch: &SwitchStmt) {
         self.with_depth(1, 0, |this| {
             for label in switch.cases.iter().flat_map(|case| &case.labels) {
                 this.loop_labels.insert(label.name.clone());
             }
-            for case in &switch.cases {
-                for kind in &case.cases {
-                    if let SwitchCaseKind::Pattern(pattern, guard) = kind {
-                        this.visit_pattern(pattern);
-                        if let Some(guard) = guard {
-                            this.visit_expr(guard);
-                        }
-                    }
-                }
-                for stmt in &case.body {
-                    this.visit_stmt(stmt);
-                }
-            }
+            walk_stmt(this, node);
             for label in switch.cases.iter().flat_map(|case| &case.labels) {
                 this.loop_labels.remove(&label.name);
             }
@@ -156,7 +143,7 @@ impl Visitor for FinallyScanner<'_, '_, '_> {
             Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_) => {
                 self.with_depth(1, 1, |this| walk_stmt(this, node));
             }
-            Stmt::Switch(switch) => self.visit_switch(switch),
+            Stmt::Switch(switch) => self.visit_switch(node, switch),
             Stmt::Labeled(labeled) => {
                 self.with_label(labeled, |this| walk_stmt(this, node));
             }

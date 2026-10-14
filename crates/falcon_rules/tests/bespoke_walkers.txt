@@ -5,26 +5,10 @@
 # delegate to walk_expr rather than swallowing the node, so they cannot go
 # blind and are pinned here permanently rather than awaiting migration.
 cross_file/unnecessary_nullable.rs::visit_expr
-lint/complexity/avoid_nested_if.rs::count_ifs_including
-lint/complexity/avoid_nested_if.rs::walk
-lint/complexity/cyclomatic_complexity.rs::count_expr
-lint/complexity/cyclomatic_complexity.rs::count_stmt
-lint/complexity/maximum_nesting_level.rs::walk_stmt
-lint/complexity/prefer_conditional_expressions.rs::check_stmt
-lint/complexity/prefer_conditional_expressions.rs::unwrap_single
-lint/complexity/prefer_immediate_return.rs::check_stmts
-lint/complexity/prefer_moving_to_variable.rs::scan_stmt
 lint/correctness/proper_controller_dispose.rs::visit_stmt
-lint/correctness/use_once_constructors_once_provider.rs::scan_expr
-lint/correctness/use_once_constructors_once_provider.rs::scan_stmt
 lint/lexical_usage.rs::visit_expr
 lint/semantic_scope.rs::visit_expr
 lint/style/no_magic_number.rs::root_name
 lint/style/prefer_iterable_of.rs::base_type_name
 lint/style/unnecessary_this.rs::visit_stmt
-lint/suspicious/avoid_print.rs::visit_stmt
-lint/suspicious/empty_catches.rs::walk_expr
-lint/suspicious/empty_catches.rs::walk_stmt
-lint/suspicious/empty_statements.rs::walk_expr
-lint/suspicious/empty_statements.rs::walk_stmt
 lint/suspicious/no_equal_arguments.rs::is_literal

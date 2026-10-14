@@ -7,6 +7,10 @@
 //! `when` guards — counted across the whole body tree, so decision points inside
 //! nested closures and local functions count toward the enclosing function. It
 //! reports at the function name when the total exceeds the threshold.
+//! Operator bodies are included. Collection `if`/`for` elements are not decision
+//! points themselves, but decisions in their conditions and children are counted.
+//! Parameter defaults are constant expressions, not runtime body decisions, and
+//! are excluded for both the declaration and its nested functions.
 //!
 //! ## Options
 //!
@@ -16,6 +20,9 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_stmt};
+
+use super::traversal::for_each_declared_body;
 
 #[derive(Default)]
 pub struct CyclomaticComplexity;
@@ -23,9 +30,9 @@ pub struct CyclomaticComplexity;
 impl Rule for CyclomaticComplexity {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
+        for_each_declared_body(program, ctx.source, &mut |body, name, _| {
+            check_function(body, name, &mut diags, ctx);
+        });
         diags
     }
 }
@@ -53,9 +60,9 @@ fn check_function(
     ctx: &AnalyzeContext,
 ) {
     let threshold = max_complexity_option(ctx);
-    let mut count = 0;
-    count_body(body, &mut count);
-    let complexity = count + 1;
+    let mut counter = DecisionPoints(0);
+    walk_function_body(&mut counter, body);
+    let complexity = counter.0 + 1;
     if complexity > threshold {
         diags.push(ctx.diagnostic(
             "cyclomatic-complexity",
@@ -65,318 +72,47 @@ fn check_function(
     }
 }
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            if let Some(body) = &f.body {
-                check_function(body, &f.name.span, diags, ctx);
-            }
-        }
-        _ => {
-            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
-                scan_member(member, diags, ctx);
-            }
-        }
-    }
-}
+struct DecisionPoints(usize);
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match member {
-        ClassMember::Method(m) => {
-            if let Some(b) = &m.body {
-                check_function(b, &m.name.span, diags, ctx);
-            }
-        }
-        ClassMember::Constructor(c) => {
-            if let Some(b) = &c.body {
-                check_function(b, &c.name.span, diags, ctx);
-            }
-        }
-        ClassMember::Getter(g) => {
-            if let Some(b) = &g.body {
-                check_function(b, &g.name.span, diags, ctx);
-            }
-        }
-        ClassMember::Setter(s) => {
-            if let Some(b) = &s.body {
-                check_function(b, &s.name.span, diags, ctx);
-            }
-        }
-        _ => {}
+impl Visitor for DecisionPoints {
+    fn visit_formal_param(&mut self, _node: &FormalParam) {
+        // Constant defaults are not runtime paths through the enclosing body.
     }
-}
 
-// ── Decision-point counting ───────────────────────────────────────────────────
-
-fn count_body(body: &FunctionBody, count: &mut usize) {
-    match body {
-        FunctionBody::Block(b) => count_stmts(&b.stmts, count),
-        FunctionBody::Arrow(e, _) => count_expr(e, count),
-        FunctionBody::Native(_, _) => {}
+    fn visit_stmt(&mut self, node: &Stmt) {
+        self.0 += match node {
+            Stmt::If(n) => {
+                1 + usize::from(matches!(&n.condition, IfCondition::Case(_, _, Some(_))))
+            }
+            Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_) => 1,
+            Stmt::TryCatch(n) => n.catches.len(),
+            Stmt::Switch(n) => n
+                .cases
+                .iter()
+                .flat_map(|case| &case.cases)
+                .map(|kind| match kind {
+                    SwitchCaseKind::Pattern(_, guard) => 1 + usize::from(guard.is_some()),
+                    SwitchCaseKind::Default => 0,
+                })
+                .sum(),
+            _ => 0,
+        };
+        walk_stmt(self, node);
     }
-}
 
-fn count_stmts(stmts: &[Stmt], count: &mut usize) {
-    for s in stmts {
-        count_stmt(s, count);
-    }
-}
-
-fn count_stmt(stmt: &Stmt, count: &mut usize) {
-    match stmt {
-        Stmt::Block(b) => count_stmts(&b.stmts, count),
-        Stmt::If(i) => {
-            *count += 1;
-            count_if_condition(&i.condition, count);
-            count_stmt(&i.then_branch, count);
-            if let Some(e) = &i.else_branch {
-                count_stmt(e, count);
+    fn visit_expr(&mut self, node: &Expr) {
+        self.0 += match node {
+            Expr::Binary {
+                op: BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce,
+                ..
             }
-        }
-        Stmt::For(f) => {
-            *count += 1;
-            if let Some(init) = &f.init {
-                count_for_init(init, count);
-            }
-            if let Some(c) = &f.condition {
-                count_expr(c, count);
-            }
-            for u in &f.update {
-                count_expr(u, count);
-            }
-            count_stmt(&f.body, count);
-        }
-        Stmt::While(w) => {
-            *count += 1;
-            count_expr(&w.condition, count);
-            count_stmt(&w.body, count);
-        }
-        Stmt::DoWhile(d) => {
-            *count += 1;
-            count_stmt(&d.body, count);
-            count_expr(&d.condition, count);
-        }
-        Stmt::Switch(sw) => {
-            count_expr(&sw.subject, count);
-            for case in &sw.cases {
-                for kind in &case.cases {
-                    if let SwitchCaseKind::Pattern(_, guard) = kind {
-                        *count += 1;
-                        if guard.is_some() {
-                            *count += 1;
-                        }
-                    }
-                }
-                count_stmts(&case.body, count);
-            }
-        }
-        Stmt::TryCatch(tc) => {
-            count_stmts(&tc.body.stmts, count);
-            for catch in &tc.catches {
-                *count += 1;
-                count_stmts(&catch.body.stmts, count);
-            }
-            if let Some(fin) = &tc.finally {
-                count_stmts(&fin.stmts, count);
-            }
-        }
-        Stmt::Return(r) => {
-            if let Some(v) = &r.value {
-                count_expr(v, count);
-            }
-        }
-        Stmt::Throw(t) => count_expr(&t.value, count),
-        Stmt::LocalVar(lv) => {
-            for d in &lv.declarators {
-                if let Some(init) = &d.initializer {
-                    count_expr(init, count);
-                }
-            }
-        }
-        Stmt::LocalFunc(lf) => count_body(&lf.body, count),
-        Stmt::Yield(y) => count_expr(&y.value, count),
-        Stmt::Assert(a) => {
-            count_expr(&a.condition, count);
-            if let Some(m) = &a.message {
-                count_expr(m, count);
-            }
-        }
-        Stmt::Expr(e) => count_expr(&e.expr, count),
-        Stmt::Labeled(l) => count_stmt(&l.stmt, count),
-        _ => {}
-    }
-}
-
-fn count_if_condition(cond: &IfCondition, count: &mut usize) {
-    match cond {
-        IfCondition::Expr(e) => count_expr(e, count),
-        IfCondition::Case(e, _, guard) => {
-            count_expr(e, count);
-            if let Some(g) = guard {
-                *count += 1;
-                count_expr(g, count);
-            }
-        }
-    }
-}
-
-fn count_for_init(init: &ForInit, count: &mut usize) {
-    match init {
-        ForInit::VarDecl(lv) => {
-            for d in &lv.declarators {
-                if let Some(i) = &d.initializer {
-                    count_expr(i, count);
-                }
-            }
-        }
-        ForInit::ForIn { iterable, .. } => count_expr(iterable, count),
-        ForInit::PatternForIn { iterable, .. } => count_expr(iterable, count),
-        ForInit::Exprs(es) => {
-            for e in es {
-                count_expr(e, count);
-            }
-        }
-    }
-}
-
-fn count_expr(expr: &Expr, count: &mut usize) {
-    match expr {
-        Expr::Unary { operand, .. } => count_expr(operand, count),
-        Expr::PostfixIncDec { operand, .. } => count_expr(operand, count),
-        Expr::Binary {
-            op, left, right, ..
-        } => {
-            if matches!(op, BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce) {
-                *count += 1;
-            }
-            count_expr(left, count);
-            count_expr(right, count);
-        }
-        Expr::Assign { target, value, .. } => {
-            count_expr(target, count);
-            count_expr(value, count);
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            *count += 1;
-            count_expr(condition, count);
-            count_expr(then_expr, count);
-            count_expr(else_expr, count);
-        }
-        Expr::Is { expr, .. } => count_expr(expr, count),
-        Expr::As { expr, .. } => count_expr(expr, count),
-        Expr::Field { object, .. } => count_expr(object, count),
-        Expr::Index { object, index, .. } => {
-            count_expr(object, count);
-            count_expr(index, count);
-        }
-        Expr::Call { callee, args, .. } => {
-            count_expr(callee, count);
-            count_args(args, count);
-        }
-        Expr::Cascade {
-            object, sections, ..
-        } => {
-            count_expr(object, count);
-            for s in sections {
-                count_cascade(s, count);
-            }
-        }
-        Expr::List { elements, .. } | Expr::Set { elements, .. } => {
-            for el in elements {
-                count_collection_element(el, count);
-            }
-        }
-        Expr::Map { .. } => {
-            struct Children<'a>(&'a mut usize);
-            impl falcon_syntax::visitor::Visitor for Children<'_> {
-                fn visit_expr(&mut self, node: &Expr) {
-                    count_expr(node, self.0);
-                }
-            }
-            falcon_syntax::visitor::walk_expr(&mut Children(count), expr);
-        }
-        Expr::Record { fields, .. } => {
-            for f in fields {
-                count_expr(&f.value, count);
-            }
-        }
-        Expr::FuncExpr { body, .. } => count_body(body, count),
-        Expr::New { args, .. } => count_args(args, count),
-        Expr::Await { expr, .. } => count_expr(expr, count),
-        Expr::Throw { expr, .. } => count_expr(expr, count),
-        Expr::Switch { subject, arms, .. } => {
-            count_expr(subject, count);
-            for arm in arms {
-                *count += 1;
-                if arm.guard.is_some() {
-                    *count += 1;
-                }
-                count_expr(&arm.body, count);
-            }
-        }
-        Expr::NullAssert { operand, .. } => count_expr(operand, count),
-        _ => {}
-    }
-}
-
-fn count_args(args: &ArgList, count: &mut usize) {
-    for a in &args.positional {
-        count_expr(a, count);
-    }
-    for n in &args.named {
-        count_expr(&n.value, count);
-    }
-}
-
-fn count_cascade(section: &CascadeSection, count: &mut usize) {
-    for op in &section.ops {
-        match op {
-            CascadeOp::Index { index, .. } => count_expr(index, count),
-            CascadeOp::Call(_, _, args) => count_args(args, count),
-            CascadeOp::Assign(target, _, value) => {
-                count_expr(target, count);
-                count_expr(value, count);
-            }
-            CascadeOp::Field { .. } => {}
-        }
-    }
-}
-
-fn count_collection_element(el: &CollectionElement, count: &mut usize) {
-    match el {
-        CollectionElement::Expr(e) => count_expr(e, count),
-        CollectionElement::NullAware { expr, .. } => count_expr(expr, count),
-        CollectionElement::Spread { expr, .. } => count_expr(expr, count),
-        CollectionElement::If {
-            then_elem,
-            else_elem,
-            ..
-        } => {
-            // Collection-level `if` is intentionally not counted as a decision
-            // point (kept simple); still recurse to find nested closures.
-            count_collection_element(then_elem, count);
-            if let Some(e) = else_elem {
-                count_collection_element(e, count);
-            }
-        }
-        CollectionElement::For {
-            header, element, ..
-        } => {
-            if let Some(init) = &header.init {
-                count_for_init(init, count);
-            }
-            if let Some(condition) = &header.condition {
-                count_expr(condition, count);
-            }
-            for update in &header.updates {
-                count_expr(update, count);
-            }
-            count_collection_element(element, count);
-        }
+            | Expr::Conditional { .. } => 1,
+            Expr::Switch { arms, .. } => arms
+                .iter()
+                .map(|arm| 1 + usize::from(arm.guard.is_some()))
+                .sum(),
+            _ => 0,
+        };
+        walk_expr(self, node);
     }
 }

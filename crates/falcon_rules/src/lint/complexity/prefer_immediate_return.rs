@@ -3,9 +3,10 @@
 //! Assigning a value to a variable only to return it on the next line adds an
 //! intermediate name that carries no information; return the expression
 //! directly. The rule fires when a single-declarator local variable declaration
-//! is immediately followed by a `return` of that same variable, and it descends
-//! into blocks and `if`, loop, and try/catch bodies to check nested statements.
+//! is immediately followed by a `return` of that same variable. Every statement
+//! list is checked, including closures, operators, switch cases, and finally blocks.
 
+use super::traversal::for_each_stmt_list;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -16,39 +17,8 @@ pub struct PreferImmediateReturn;
 impl Rule for PreferImmediateReturn {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Function(func) => {
-                    if let Some(body) = &func.body {
-                        check_body(body, &mut diags, ctx);
-                    }
-                }
-                _ => {
-                    for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
-                        check_member(member, &mut diags, ctx);
-                    }
-                }
-            }
-        }
+        for_each_stmt_list(program, &mut |stmts| check_stmts(stmts, &mut diags, ctx));
         diags
-    }
-}
-
-fn check_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let body = match member {
-        ClassMember::Method(m) => m.body.as_ref(),
-        ClassMember::Constructor(c) => c.body.as_ref(),
-        ClassMember::Getter(g) => g.body.as_ref(),
-        _ => None,
-    };
-    if let Some(body) = body {
-        check_body(body, diags, ctx);
-    }
-}
-
-fn check_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if let FunctionBody::Block(block) = body {
-        check_stmts(&block.stmts, diags, ctx);
     }
 }
 
@@ -70,39 +40,5 @@ fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext
                 ));
             }
         }
-    }
-
-    for stmt in stmts {
-        match stmt {
-            Stmt::Block(block) => check_stmts(&block.stmts, diags, ctx),
-            Stmt::If(if_stmt) => {
-                check_nested_stmt(&if_stmt.then_branch, diags, ctx);
-                if let Some(else_b) = &if_stmt.else_branch {
-                    check_nested_stmt(else_b, diags, ctx);
-                }
-            }
-            Stmt::For(for_stmt) => check_nested_stmt(&for_stmt.body, diags, ctx),
-            Stmt::While(s) => check_nested_stmt(&s.body, diags, ctx),
-            Stmt::DoWhile(s) => check_nested_stmt(&s.body, diags, ctx),
-            Stmt::TryCatch(s) => {
-                check_stmts(&s.body.stmts, diags, ctx);
-                for catch in &s.catches {
-                    check_stmts(&catch.body.stmts, diags, ctx);
-                }
-            }
-            Stmt::Switch(s) => {
-                for case in &s.cases {
-                    check_stmts(&case.body, diags, ctx);
-                }
-            }
-            Stmt::LocalFunc(lf) => check_body(&lf.body, diags, ctx),
-            _ => {}
-        }
-    }
-}
-
-fn check_nested_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if let Stmt::Block(block) = stmt {
-        check_stmts(&block.stmts, diags, ctx);
     }
 }

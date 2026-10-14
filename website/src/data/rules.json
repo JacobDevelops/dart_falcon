@@ -298,7 +298,7 @@
         "message": "Avoid nesting if statements. Consider combining conditions or using early returns."
       }
     ],
-    "docs": "Flags an `if` statement whose then-branch contains nested `if` statements.\n\nPyramid-shaped nesting is hard to follow; combining conditions with `&&`,\nusing early returns, or extracting a method flattens it. The rule counts the\n`if` statements within a then-branch subtree and fires when at least two are\npresent (pyramid_lint's default `max_nesting_level` of two), so an `if` whose\nbody nests two further `if`s is reported.",
+    "docs": "Flags an `if` statement whose then-branch contains nested `if` statements.\n\nPyramid-shaped nesting is hard to follow; combining conditions with `&&`,\nusing early returns, or extracting a method flattens it. The rule counts the\n`if` statements within a then-branch subtree and fires when at least two are\npresent (pyramid_lint's default `max_nesting_level` of two), so an `if` whose\nbody nests two further `if`s is reported. Local functions and closures count\nas part of the then-branch subtree, and closures anywhere in the file are checked.",
     "domains": [],
     "examples": {
       "bad": "class NestedIfExamples {\n  // A vertical chain: the outer then-branch contains two further `if`\n  // statements (b and c), so the outermost `if` is flagged.\n  void chain(bool a, bool b, bool c) {\n    if (a) {\n      if (b) {\n        if (c) {\n          print('all true');\n        }\n      }\n    }\n  }\n\n  // Two sibling `if` statements inside the then-branch also reach the\n  // nesting threshold of two.\n  void siblings(bool a, bool b, bool c) {\n    if (a) {\n      if (b) {\n        print('b');\n      }\n      if (c) {\n        print('c');\n      }\n    }\n  }\n\n  // Nested `if` statements reached through an intervening loop still count.\n  void throughLoop(bool a, bool b, List<int> xs) {\n    if (a) {\n      for (final x in xs) {\n        if (b) {\n          if (x > 0) {\n            print(x);\n          }\n        }\n      }\n    }\n  }\n\n  // A label on the nested chain must not hide the `if`s it wraps.\n  void labeledChain(bool a, bool b, bool c) {\n    if (a) {\n      outer:\n      if (b) {\n        if (c) {\n          print('all true');\n        }\n      }\n    }\n  }\n\n  void doSomething() {}\n}",
@@ -722,7 +722,7 @@
         "message": "Function has a cyclomatic complexity of 6 (max 3)."
       }
     ],
-    "docs": "Flags a function whose cyclomatic complexity exceeds the configured threshold.\n\nCyclomatic complexity counts the independent paths through a function; a high\nvalue means many branches to understand and test. The rule computes\ncomplexity as one plus each decision point — `if`, ternary, `&&`, `||`, `??`,\nloops (`for`/`while`/`do`), `catch` clauses, non-default `case`s, and pattern\n`when` guards — counted across the whole body tree, so decision points inside\nnested closures and local functions count toward the enclosing function. It\nreports at the function name when the total exceeds the threshold.\n\n## Options\n\n`max_complexity` (integer, default: 20) — flag when the computed complexity\nexceeds this.",
+    "docs": "Flags a function whose cyclomatic complexity exceeds the configured threshold.\n\nCyclomatic complexity counts the independent paths through a function; a high\nvalue means many branches to understand and test. The rule computes\ncomplexity as one plus each decision point — `if`, ternary, `&&`, `||`, `??`,\nloops (`for`/`while`/`do`), `catch` clauses, non-default `case`s, and pattern\n`when` guards — counted across the whole body tree, so decision points inside\nnested closures and local functions count toward the enclosing function. It\nreports at the function name when the total exceeds the threshold.\nOperator bodies are included. Collection `if`/`for` elements are not decision\npoints themselves, but decisions in their conditions and children are counted.\nParameter defaults are constant expressions, not runtime body decisions, and\nare excluded for both the declaration and its nested functions.\n\n## Options\n\n`max_complexity` (integer, default: 20) — flag when the computed complexity\nexceeds this.",
     "domains": [],
     "examples": {
       "bad": "// Each function below exceeds the configured max_complexity of 3.\n// Complexity = 1 + decision points (if / && / || / ?? / for / while / case / catch / ternary).\n\nint classifyNumber(int a, int b) {\n  if (a > 0) return 1;\n  if (b > 0) return 2;\n  if (a > b && b > 0) return 3;\n  return 0;\n}\n\nint loopScan(List<int> xs, int limit) {\n  var total = 0;\n  for (final x in xs) total += x;\n  while (total > limit) total -= 1;\n  final capped = total > 0 || limit < 0;\n  final safe = total ?? limit;\n  return capped ? safe : 0;\n}\n\nint nestedTernary(int a, int b, int c) {\n  final first = a > 0 ? 1 : (b > 0 ? 2 : 3);\n  final second = c > 0 && a > 0 ? 4 : 5;\n  return first + second;\n}\n\nString describe(int code) {\n  switch (code) {\n    case 1:\n      return 'one';\n    case 2:\n      return 'two';\n    case 3:\n      return 'three';\n    default:\n      return 'other';\n  }\n}\n\nint guarded(Object value) {\n  try {\n    if (value == null) return -1;\n  } on FormatException {\n    return -2;\n  } on StateError {\n    return -3;\n  }\n  return value.hashCode > 0 && value.hashCode < 100 ? 1 : 0;\n}\n\nclass Calculator {\n  int compute(int a, int b) {\n    if (a > b) return a - b;\n    if (a < b) return b - a;\n    if (a == 0 || b == 0) return 0;\n    return a + b;\n  }\n}\n\n// Decision points inside a labeled loop must still count.\nint labeledBranches(List<int> xs) {\n  outer:\n  while (xs.isNotEmpty) {\n    if (xs.first > 0) return 1;\n    if (xs.last < 0) return 2;\n    if (xs.length > 5 && xs.first == 0) break outer;\n    xs.removeAt(0);\n  }\n  return 0;\n}",
@@ -784,7 +784,7 @@
         "message": "Function exceeds the maximum number of lines (100)."
       }
     ],
-    "docs": "Flags a function or method longer than the configured line limit.\n\nLong functions are hard to reason about and test; extracting helpers keeps\neach unit focused. The rule measures a function's span from its declaration\nthrough the end of its body (in source lines) and reports at the declaration\nwhen the length exceeds the threshold. Only functions with a body are\nmeasured — abstract and external declarations are skipped.\n\n## Options\n\n`max_lines` (integer, default: 100) — flag functions/methods spanning more\nthan this many lines.",
+    "docs": "Flags a function or method longer than the configured line limit.\n\nLong functions are hard to reason about and test; extracting helpers keeps\neach unit focused. The rule measures a function's span from its declaration\nthrough the end of its body (in source lines) and reports at the declaration\nwhen the length exceeds the threshold. Operator bodies are included, while\nabstract/external declarations and nested functions or closures are not measured.\n\n## Options\n\n`max_lines` (integer, default: 100) — flag functions/methods spanning more\nthan this many lines.",
     "domains": [],
     "examples": {
       "bad": "// Bad: function with 101+ lines exceeds max (threshold: 100)\nvoid longFunction() {\n  print('Line 2');\n  print('Line 3');\n  print('Line 4');\n  print('Line 5');\n  print('Line 6');\n  print('Line 7');\n  print('Line 8');\n  print('Line 9');\n  print('Line 10');\n  print('Line 11');\n  print('Line 12');\n  print('Line 13');\n  print('Line 14');\n  print('Line 15');\n  print('Line 16');\n  print('Line 17');\n  print('Line 18');\n  print('Line 19');\n  print('Line 20');\n  print('Line 21');\n  print('Line 22');\n  print('Line 23');\n  print('Line 24');\n  print('Line 25');\n  print('Line 26');\n  print('Line 27');\n  print('Line 28');\n  print('Line 29');\n  print('Line 30');\n  print('Line 31');\n  print('Line 32');\n  print('Line 33');\n  print('Line 34');\n  print('Line 35');\n  print('Line 36');\n  print('Line 37');\n  print('Line 38');\n  print('Line 39');\n  print('Line 40');\n  print('Line 41');\n  print('Line 42');\n  print('Line 43');\n  print('Line 44');\n  print('Line 45');\n  print('Line 46');\n  print('Line 47');\n  print('Line 48');\n  print('Line 49');\n  print('Line 50');\n  print('Line 51');\n  print('Line 52');\n  print('Line 53');\n  print('Line 54');\n  print('Line 55');\n  print('Line 56');\n  print('Line 57');\n  print('Line 58');\n  print('Line 59');\n  print('Line 60');\n  print('Line 61');\n  print('Line 62');\n  print('Line 63');\n  print('Line 64');\n  print('Line 65');\n  print('Line 66');\n  print('Line 67');\n  print('Line 68');\n  print('Line 69');\n  print('Line 70');\n  print('Line 71');\n  print('Line 72');\n  print('Line 73');\n  print('Line 74');\n  print('Line 75');\n  print('Line 76');\n  print('Line 77');\n  print('Line 78');\n  print('Line 79');\n  print('Line 80');\n  print('Line 81');\n  print('Line 82');\n  print('Line 83');\n  print('Line 84');\n  print('Line 85');\n  print('Line 86');\n  print('Line 87');\n  print('Line 88');\n  print('Line 89');\n  print('Line 90');\n  print('Line 91');\n  print('Line 92');\n  print('Line 93');\n  print('Line 94');\n  print('Line 95');\n  print('Line 96');\n  print('Line 97');\n  print('Line 98');\n  print('Line 99');\n  print('Line 100');\n  print('Line 101');\n}\n\n// Bad: method with 102 lines\nclass LongMethodClass {\n  void longMethod() {\n    print('Method line 2');\n    print('Method line 3');\n    print('Method line 4');\n    print('Method line 5');\n    print('Method line 6');\n    print('Method line 7');\n    print('Method line 8');\n    print('Method line 9');\n    print('Method line 10');\n    print('Method line 11');\n    print('Method line 12');\n    print('Method line 13');\n    print('Method line 14');\n    print('Method line 15');\n    print('Method line 16');\n    print('Method line 17');\n    print('Method line 18');\n    print('Method line 19');\n    print('Method line 20');\n    print('Method line 21');\n    print('Method line 22');\n    print('Method line 23');\n    print('Method line 24');\n    print('Method line 25');\n    print('Method line 26');\n    print('Method line 27');\n    print('Method line 28');\n    print('Method line 29');\n    print('Method line 30');\n    print('Method line 31');\n    print('Method line 32');\n    print('Method line 33');\n    print('Method line 34');\n    print('Method line 35');\n    print('Method line 36');\n    print('Method line 37');\n    print('Method line 38');\n    print('Method line 39');\n    print('Method line 40');\n    print('Method line 41');\n    print('Method line 42');\n    print('Method line 43');\n    print('Method line 44');\n    print('Method line 45');\n    print('Method line 46');\n    print('Method line 47');\n    print('Method line 48');\n    print('Method line 49');\n    print('Method line 50');\n    print('Method line 51');\n    print('Method line 52');\n    print('Method line 53');\n    print('Method line 54');\n    print('Method line 55');\n    print('Method line 56');\n    print('Method line 57');\n    print('Method line 58');\n    print('Method line 59');\n    print('Method line 60');\n    print('Method line 61');\n    print('Method line 62');\n    print('Method line 63');\n    print('Method line 64');\n    print('Method line 65');\n    print('Method line 66');\n    print('Method line 67');\n    print('Method line 68');\n    print('Method line 69');\n    print('Method line 70');\n    print('Method line 71');\n    print('Method line 72');\n    print('Method line 73');\n    print('Method line 74');\n    print('Method line 75');\n    print('Method line 76');\n    print('Method line 77');\n    print('Method line 78');\n    print('Method line 79');\n    print('Method line 80');\n    print('Method line 81');\n    print('Method line 82');\n    print('Method line 83');\n    print('Method line 84');\n    print('Method line 85');\n    print('Method line 86');\n    print('Method line 87');\n    print('Method line 88');\n    print('Method line 89');\n    print('Method line 90');\n    print('Method line 91');\n    print('Method line 92');\n    print('Method line 93');\n    print('Method line 94');\n    print('Method line 95');\n    print('Method line 96');\n    print('Method line 97');\n    print('Method line 98');\n    print('Method line 99');\n    print('Method line 100');\n    print('Method line 101');\n  }\n}",
@@ -970,7 +970,7 @@
         "message": "Function has a nesting level of 3 (max 2)."
       }
     ],
-    "docs": "Flags a function whose control-flow nesting runs deeper than the configured level.\n\nDeeply nested blocks push logic to the right and make control flow hard to\nfollow; early returns, guard clauses, and extracted helpers flatten it. The\nrule measures the deepest nesting of control structures — `if`, `for`,\n`while`, `do`, `switch`, and `try` — within a function body. A plain block\ndoes not add a level, `else if` chains stay at the same level, and a nested\nlocal function restarts the count. It reports at the function name when the\ndepth exceeds the threshold.\n\n## Options\n\n`max_nesting` (integer, default: 5) — flag when the nesting depth exceeds\nthis.",
+    "docs": "Flags a function whose control-flow nesting runs deeper than the configured level.\n\nDeeply nested blocks push logic to the right and make control flow hard to\nfollow; early returns, guard clauses, and extracted helpers flatten it. The\nrule measures the deepest nesting of control structures — `if`, `for`,\n`while`, `do`, `switch`, and `try` — within a function body. A plain block\ndoes not add a level, `else if` chains stay at the same level, and a nested\nlocal function or closure restarts the count. Their deepest level still\ncontributes to the enclosing declaration's maximum. Operator bodies are\nincluded; the rule reports at the declaration when depth exceeds the threshold.\n\n## Options\n\n`max_nesting` (integer, default: 5) — flag when the nesting depth exceeds\nthis.",
     "domains": [],
     "examples": {
       "bad": "// Each function nests control structures deeper than the configured\n// max_nesting of 2 (deepest point reaches nesting level 3).\n\nvoid ifForIf(bool a, bool b, List<int> xs) {\n  if (a) {\n    for (final x in xs) {\n      if (b) {\n        print(x);\n      }\n    }\n  }\n}\n\nvoid whileIfWhile(int n) {\n  while (n > 0) {\n    if (n.isEven) {\n      while (n > 10) {\n        n -= 1;\n      }\n    }\n    n -= 1;\n  }\n}\n\nvoid switchInLoop(List<int> codes) {\n  for (final code in codes) {\n    if (code > 0) {\n      switch (code) {\n        case 1:\n          print('one');\n        default:\n          print('other');\n      }\n    }\n  }\n}\n\nvoid tryInside(bool a, bool b) {\n  if (a) {\n    if (b) {\n      try {\n        print('run');\n      } catch (e) {\n        print(e);\n      }\n    }\n  }\n}\n\nvoid deepLoops(List<List<int>> grid) {\n  for (final row in grid) {\n    for (final cell in row) {\n      if (cell > 0) {\n        print(cell);\n      }\n    }\n  }\n}\n\nclass Grid {\n  void render(List<List<int>> rows) {\n    for (final row in rows) {\n      for (final cell in row) {\n        while (cell > 0) {\n          print(cell);\n          break;\n        }\n      }\n    }\n  }\n}\n\n// A label on the outer loop must not hide the nesting it wraps.\nvoid labeledDeep(List<int> xs, bool a, bool b) {\n  outer:\n  for (final x in xs) {\n    if (a) {\n      if (b) {\n        print(x);\n        break outer;\n      }\n    }\n  }\n}\n\n// Control flow inside a closure argument counts like a local function does.\nvoid closureDeep(List<int> xs) {\n  run(() {\n    for (final x in xs) {\n      if (x > 0) {\n        while (x > 10) {\n          print(x);\n          break;\n        }\n      }\n    }\n  });\n}",
@@ -1156,7 +1156,7 @@
         "message": "Prefer a conditional expression over an if/else with a single statement in each branch"
       }
     ],
-    "docs": "Flags an `if`/`else` whose branches each reduce to a single return or a\nsingle assignment to the same target.\n\nWhen both branches differ only in the value they return or assign, a\nconditional expression — `return c ? a : b;` or `x = c ? a : b;` — says the\nsame thing in one line. The rule reports only the outermost `if` of a chain\n(whose parent is not an `if` and whose `else` is not an `else if`) where both\nbranches reduce to a single return, or to a single assignment to the same\nvariable.",
+    "docs": "Flags an `if`/`else` whose branches each reduce to a single return or a\nsingle assignment to the same target.\n\nWhen both branches differ only in the value they return or assign, a\nconditional expression — `return c ? a : b;` or `x = c ? a : b;` — says the\nsame thing in one line. The rule reports only the outermost `if` of a chain\n(whose parent is not an `if` and whose `else` is not an `else if`) where both\nbranches reduce to a single return, or to a single assignment to the same\nvariable. Local functions, closures, and labeled statements are included.",
     "domains": [],
     "examples": {
       "bad": "// Bad: a single assignment or single return in each branch.\nString getStatus(bool isActive) {\n  if (isActive) {\n    return 'active';\n  } else {\n    return 'inactive';\n  }\n}\n\nint getValue(bool hasValue) {\n  if (hasValue)\n    return 42;\n  else\n    return 0;\n}\n\nclass Validator {\n  bool isValid(String input) {\n    if (input.isNotEmpty) {\n      return true;\n    } else {\n      return false;\n    }\n  }\n}\n\nvoid setLabel(bool on) {\n  String label;\n  if (on) {\n    label = 'on';\n  } else {\n    label = 'off';\n  }\n  print(label);\n}",
@@ -1354,7 +1354,7 @@
         "message": "Prefer returning the value directly instead of assigning to a variable first"
       }
     ],
-    "docs": "Flags a local variable that is returned on the immediately following statement.\n\nAssigning a value to a variable only to return it on the next line adds an\nintermediate name that carries no information; return the expression\ndirectly. The rule fires when a single-declarator local variable declaration\nis immediately followed by a `return` of that same variable, and it descends\ninto blocks and `if`, loop, and try/catch bodies to check nested statements.",
+    "docs": "Flags a local variable that is returned on the immediately following statement.\n\nAssigning a value to a variable only to return it on the next line adds an\nintermediate name that carries no information; return the expression\ndirectly. The rule fires when a single-declarator local variable declaration\nis immediately followed by a `return` of that same variable. Every statement\nlist is checked, including closures, operators, switch cases, and finally blocks.",
     "domains": [],
     "examples": {
       "bad": "// Bad: unnecessary intermediate variable before return\nString getName() {\n  final result = compute();\n  return result;\n}\n\nint getValue() {\n  final value = 42;\n  return value;\n}\n\nclass Helper {\n  Future<String> fetchData() async {\n    final data = await http.get(url);\n    return data;\n  }\n\n  List<String> getNames(List<User> users) {\n    final names = users.map((u) => u.name).toList();\n    return names;\n  }\n}\n\nbool validate(String input) {\n  final isValid = input.isNotEmpty && input.length > 3;\n  return isValid;\n}",
@@ -1573,7 +1573,7 @@
   },
   {
     "crossFile": false,
-    "description": "Flags a non-trivial expression duplicated across local variable initializers in the same block.",
+    "description": "Flags repeated property/getter chains in local variable initializers.",
     "diagnostics": [
       {
         "column": 13,
@@ -1602,16 +1602,22 @@
       {
         "column": 14,
         "file": null,
-        "line": 29,
+        "line": 30,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 36,
         "message": "Duplicate expression — extract to a shared variable"
       }
     ],
-    "docs": "Flags a non-trivial expression duplicated across local variable initializers\nin the same block.\n\nRepeating the same complex expression risks the copies drifting apart and\nrecomputes the work; binding it to one variable names the value and evaluates\nit once. Within a block, the rule compares local-variable initializer source\ntext (trivial literals and bare identifiers are ignored) and flags a repeat\nonce its occurrence count reaches the threshold.\n\n## Options\n\n`allowed_duplicated_chains` (integer, default: 2) — the occurrence index at\nwhich a repeat is flagged; `2` flags the 2nd and later occurrences, `3` the\n3rd and later. Values below `2` are clamped to `2`.",
+    "docs": "Flags repeated property/getter chains in local variable initializers.\n\nOnly chains rooted in an identifier, `this`, or `super` are candidates;\ncalls, constructors, operators, awaits, and fresh collections must retain\ntheir separate evaluations. Getters are assumed to be observational reads.\nInitializer source text is compared within each statement list, with counts\nreset across non-declaration statements or potentially effectful initializers\nto avoid suggesting stale values after mutation. Late declarations are also\nbarriers: their reads are deferred. Statement lists are checked independently.\n\n## Options\n\n`allowed_duplicated_chains` (integer, default: 2) — the occurrence index at\nwhich a repeat is flagged; `2` flags the 2nd and later occurrences, `3` the\n3rd and later. Values below `2` are clamped to `2`.",
     "domains": [],
     "examples": {
-      "bad": "// Test cases for prefer-moving-to-variable rule\n// violations: same non-trivial expression used to initialize two different variables\n\nvoid duplicateComputation() {\n  final a = calculateExpensive(10);\n  final b = calculateExpensive(10);\n}\n\nvoid duplicateFieldAccess() {\n  final x = obj.property.value;\n  final y = obj.property.value;\n}\n\nclass Processor {\n  void process() {\n    final first = getResult(data);\n    final second = getResult(data);\n    combine(first, second);\n  }\n}\n\nvoid duplicateBinaryExpression() {\n  final x = a + b;\n  final y = a + b;\n}\n\nvoid duplicateMethodCall() {\n  final v1 = list.where((e) => e > 5).toList();\n  final v2 = list.where((e) => e > 5).toList();\n}",
+      "bad": "// Test cases for prefer-moving-to-variable rule\n// Repeated property/getter chains can share a local binding.\n\nvoid duplicateGetterChain() {\n  final a = service.configuration.value;\n  final b = service.configuration.value;\n}\n\nvoid duplicateFieldAccess() {\n  final x = obj.property.value;\n  final y = obj.property.value;\n}\n\nclass Processor {\n  void process() {\n    final first = this.data.value;\n    final second = this.data.value;\n    combine(first, second);\n  }\n}\n\nvoid duplicateNullAwareChain() {\n  final x = obj?.property?.value;\n  final y = obj?.property?.value;\n}\n\nvoid duplicateAcrossReadOnlyDeclaration() {\n  final v1 = obj.property.value;\n  final unrelated = 42;\n  final v2 = obj.property.value;\n}\n\nvoid duplicateAcrossPlainString() {\n  final before = obj.property.value;\n  final separator = ', ';\n  final after = obj.property.value;\n}",
       "crossFile": null,
-      "good": "// Test cases for prefer-moving-to-variable rule\n// No violations: each variable has a distinct initializer or trivial literal\n\nvoid distinctComputations() {\n  final a = calculateExpensive(10);\n  final b = calculateExpensive(20);\n}\n\nvoid singleUse() {\n  final result = getResult(data);\n  print(result);\n}\n\n// Trivial literals are not flagged\nvoid trivialLiterals() {\n  final x = 42;\n  final y = 42;\n  final s1 = \"hello\";\n  final s2 = \"hello\";\n}\n\nclass Processor {\n  void process() {\n    final first = getResult(dataA);\n    final second = getResult(dataB);\n    combine(first, second);\n  }\n}\n\n// Only one assignment of complex expression\nvoid singleComplexAssignment() {\n  final x = obj.method().chain().result;\n  print(x);\n}\n\n// Identifiers (trivial) don't trigger violation\nvoid identifierDuplicates() {\n  final a = variable1;\n  final b = variable1;\n}\n\n// Different chained calls\nvoid differentChains() {\n  final c1 = obj.method1().result;\n  final c2 = obj.method2().result;\n}"
+      "good": "// Test cases for prefer-moving-to-variable rule\n// No violations: unsupported initializers or chains separated by mutation barriers.\n\nvoid distinctComputations() {\n  final a = calculateExpensive(10);\n  final b = calculateExpensive(20);\n}\n\nvoid singleUse() {\n  final result = getResult(data);\n  print(result);\n}\n\n// Trivial literals are not flagged\nvoid trivialLiterals() {\n  final x = 42;\n  final y = 42;\n  final s1 = \"hello\";\n  final s2 = \"hello\";\n}\n\nclass Processor {\n  void process() {\n    final first = getResult(dataA);\n    final second = getResult(dataB);\n    combine(first, second);\n  }\n}\n\n// Only one assignment of complex expression\nvoid singleComplexAssignment() {\n  final x = obj.method().chain().result;\n  print(x);\n}\n\n// Identifiers (trivial) don't trigger violation\nvoid identifierDuplicates() {\n  final a = variable1;\n  final b = variable1;\n}\n\n// Different chained calls\nvoid differentChains() {\n  final c1 = obj.method1().result;\n  final c2 = obj.method2().result;\n}\n\nvoid separateConstructors() {\n  final first = Completer();\n  final second = Completer();\n  final namedFirst = Completer.sync();\n  final namedSecond = Completer.sync();\n}\n\nvoid separateCalls() {\n  final first = calculateExpensive(10);\n  final second = calculateExpensive(10);\n  final value1 = service.nextValue();\n  final value2 = service.nextValue();\n  final chain1 = obj.method().chain().result;\n  final chain2 = obj.method().chain().result;\n  final filtered1 = list.where((e) => e > 5).toList();\n  final filtered2 = list.where((e) => e > 5).toList();\n}\n\nFuture<void> separateAwaits() async {\n  final first = await service.load();\n  final second = await service.load();\n}\n\nvoid freshCollections() {\n  final list1 = <int>[];\n  final list2 = <int>[];\n  final map1 = <String, int>{};\n  final map2 = <String, int>{};\n  final set1 = <int>{};\n  final set2 = <int>{};\n  final completers1 = [Completer()];\n  final completers2 = [Completer()];\n}\n\nvoid separateOperators() {\n  final first = a + b;\n  final second = a + b;\n}\n\nvoid changingState() {\n  final before = notifier.state;\n  notifier.state = nextState;\n  final after = notifier.state;\n}\n\nvoid changingThroughCall() {\n  final before = LoggerService.instance;\n  configureLogger();\n  final after = LoggerService.instance;\n}\n\nvoid effectfulInitializer() {\n  final before = notifier.state;\n  final mutation = notifier.refresh();\n  final after = notifier.state;\n}\n\nFuture<void> stateAcrossAwait() async {\n  final before = notifier.state;\n  await refresh();\n  final after = notifier.state;\n}\n\nvoid nestedMutation() {\n  final before = notifier.state;\n  if (condition) {\n    notifier.state = nextState;\n  }\n  final after = notifier.state;\n}\n\nvoid mutatedInSameDeclaration() {\n  final before = notifier.state,\n      mutation = notifier.refresh(),\n      after = notifier.state;\n}\n\nvoid reboundRoot() {\n  final before = notifier.state;\n  notifier = nextNotifier;\n  final after = notifier.state;\n}\n\nfinal repeatedConstructorsInCallback = () {\n  final first = Completer();\n  final second = Completer();\n};\n\nFuture<void> stateAcrossAwaitInitializer() async {\n  final before = notifier.state;\n  final loaded = await refresh();\n  final after = notifier.state;\n}\n\nvoid deferredReads() {\n  final before = notifier.state;\n  late final after = notifier.state;\n  notifier.state = nextState;\n  use(before, after);\n}\n\nvoid separateDeferredReads() {\n  late final before = notifier.state;\n  late final after = notifier.state;\n  use(before);\n  notifier.state = nextState;\n  use(after);\n}\n\nvoid deferredDeclarationBarrier() {\n  final before = notifier.state;\n  late final deferred = notifier.state;\n  final after = notifier.state;\n}\n\nvoid interpolatedInitializerBarrier() {\n  final before = notifier.state;\n  final text = '${notifier.refresh()}';\n  final after = notifier.state;\n}"
     },
     "group": "complexity",
     "name": "prefer-moving-to-variable",
@@ -2472,7 +2478,7 @@
         "message": "super.dispose() should be called last in the dispose method."
       }
     ],
-    "docs": "Require `super.dispose()` to be the last call in `dispose`.\n\nFlags a `super.dispose()` invocation that is not the final statement of a\n`dispose` method. The base `State.dispose` tears down the framework's own\nbookkeeping for the object, after which touching the widget's fields is\nunsafe, so any cleanup your subclass performs must happen first. A\n`super.dispose()` in the middle of the method leaves the remaining cleanup\nrunning against a half-disposed object. Move the `super.dispose()` call to\nthe end.",
+    "docs": "Require `super.dispose()` to be the last call in `dispose`.\n\nFlags a `super.dispose()` invocation that is not the final statement of a\n`dispose` method. The base `State.dispose` tears down the framework's own\nbookkeeping for the object, after which touching the widget's fields is\nunsafe, so any cleanup your subclass performs must happen first. A\n`super.dispose()` in the middle of the method leaves the remaining cleanup\nrunning against a half-disposed object. Move the `super.dispose()` call to\nthe end.\nChecks direct statements of method block bodies, not nested blocks,\ncallbacks, or other declarations named `dispose`.",
     "domains": [
       "flutter"
     ],
@@ -4369,7 +4375,7 @@
         "message": "OnceProvider and similar Riverpod providers should use .once() factory method"
       }
     ],
-    "docs": "Require Riverpod once-providers to be created through `.once()`.\n\nFlags a direct invocation of `OnceProvider`, `FutureProvider`, or\n`StateProvider` — for example `OnceProvider(...)` — where the `.once()`\nfactory should be used instead. The `.once()` form constructs the provider's\nvalue a single time rather than rebuilding it on each read, which is the\nintended lifecycle for these providers; calling the constructor directly\nopts out of it. Calls already written as `Provider.once(...)` are accepted,\nand explicit `new`/`const` constructions are left alone.",
+    "docs": "Require Riverpod once-providers to be created through `.once()`.\n\nFlags a direct invocation of `OnceProvider`, `FutureProvider`, or\n`StateProvider` — for example `OnceProvider(...)` — where the `.once()`\nfactory should be used instead. The `.once()` form constructs the provider's\nvalue a single time rather than rebuilding it on each read, which is the\nintended lifecycle for these providers; calling the constructor directly\nopts out of it. Calls already written as `Provider.once(...)` are accepted,\nand explicit `new` constructions and explicit or implicit const contexts\nare left alone.\nChecks calls throughout declarations, including initializers, callbacks,\ncollection literals, conditions, and nested call receivers.",
     "domains": [
       "flutter"
     ],
@@ -4390,7 +4396,7 @@
   },
   {
     "crossFile": false,
-    "description": "Disallow statically known invalid `dart:core` regular expressions.",
+    "description": "Disallow statically known invalid `dart:core` regular expressions in single literals.",
     "diagnostics": [
       {
         "column": 20,
@@ -4451,14 +4457,26 @@
         "file": null,
         "line": 12,
         "message": "Invalid regular expression."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 13,
+        "message": "Invalid regular expression."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 14,
+        "message": "Invalid regular expression."
       }
     ],
-    "docs": "Disallow statically known invalid `dart:core` regular expressions.",
+    "docs": "Disallow statically known invalid `dart:core` regular expressions in single literals.",
     "domains": [],
     "examples": {
-      "bad": "// Bad: literal patterns that are structurally invalid regular expressions.\nvoid examples() {\n  final a = RegExp('(');\n  final b = RegExp(')');\n  final c = RegExp('[a-z');\n  final d = RegExp('(abc');\n  final e = RegExp('a(b(c)');\n  final f = new RegExp('foo)');\n  final g = RegExp('*abc');\n  final h = RegExp('[z-a]');\n  final i = RegExp(r'\\xG0');\n  final j = RegExp('a{3,2}');\n  print([a, b, c, d, e, f, g, h, i, j]);\n}",
+      "bad": "// Bad: literal patterns that are structurally invalid regular expressions.\nvoid examples() {\n  final a = RegExp('(');\n  final b = RegExp(')');\n  final c = RegExp('[a-z');\n  final d = RegExp('(abc');\n  final e = RegExp('a(b(c)');\n  final f = new RegExp('foo)');\n  final g = RegExp('*abc');\n  final h = RegExp('[z-a]');\n  final i = RegExp(r'\\xG0');\n  final j = RegExp('a{3,2}');\n  final k = RegExp(r'[z-a]');\n  final l = RegExp(r'\\d{3,2}');\n  print([a, b, c, d, e, f, g, h, i, j, k, l]);\n}",
       "crossFile": null,
-      "good": "// Good: valid patterns, or patterns that are not statically checkable literals.\nvoid examples(String dynamicPattern) {\n  final a = RegExp('abc');\n  final b = RegExp('[a-z]+');\n  final c = RegExp('(foo|bar)');\n  final d = RegExp('a(b(c)d)e'); // balanced nested groups\n  final e = RegExp(r'\\d{3}-\\d{4}'); // raw string, balanced\n  final f = RegExp('\\\\d+'); // non-raw with escapes — pattern not resolved, skipped\n  final g = RegExp(dynamicPattern); // not a literal, skipped\n  final h = RegExp('prefix-${dynamicPattern}'); // interpolated, skipped\n  final i = RegExp(r'(?=foo)foo'); // lookahead\n  final j = RegExp(r'(?:foo)*?'); // non-capturing group and lazy quantifier\n  final k = RegExp('[]'); // ECMAScript empty character class\n  final l = RegExp('[a-]'); // trailing hyphen is a literal, not a range\n  print([a, b, c, d, e, f, g, h, i, j, k, l]);\n}"
+      "good": "// Good: valid patterns, or patterns that are not statically checkable literals.\nvoid examples(String dynamicPattern) {\n  final a = RegExp('abc');\n  final b = RegExp('[a-z]+');\n  final c = RegExp('(foo|bar)');\n  final d = RegExp('a(b(c)d)e'); // balanced nested groups\n  final e = RegExp(r'\\d{3}-\\d{4}'); // raw string, balanced\n  final f = RegExp('\\\\d+'); // non-raw with escapes — pattern not resolved, skipped\n  final g = RegExp(dynamicPattern); // not a literal, skipped\n  final h = RegExp('prefix-${dynamicPattern}'); // interpolated, skipped\n  final i = RegExp(r'(?=foo)foo'); // lookahead\n  final j = RegExp(r'(?:foo)*?'); // non-capturing group and lazy quantifier\n  final k = RegExp('[]'); // ECMAScript empty character class\n  final l = RegExp('[a-]'); // trailing hyphen is a literal, not a range\n  final m = RegExp(r'[a-' r'z]');\n  final n = RegExp(r'\\d{1,' r'3}');\n  final o = RegExp('[a-' 'z]');\n  final p = RegExp(r'''[a-z]+''');\n  print([a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]);\n}"
     },
     "group": "correctness",
     "name": "valid-regexps",
@@ -5549,12 +5567,42 @@
         "file": null,
         "line": 39,
         "message": "Avoid positional fields in records. Use named fields instead."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 45,
+        "message": "Avoid positional fields in records. Use named fields instead."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 48,
+        "message": "Avoid positional fields in records. Use named fields instead."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 49,
+        "message": "Avoid positional fields in records. Use named fields instead."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 50,
+        "message": "Avoid positional fields in records. Use named fields instead."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 55,
+        "message": "Avoid positional fields in records. Use named fields instead."
       }
     ],
     "docs": "Flags positional fields in record types.\n\nPositional record fields are accessed as `$1`, `$2`, and so on, which convey\nnothing about what each field means and break silently when fields are\nreordered. Named fields (`({int x, int y})`) document intent at both the\ndeclaration and every use site. The check recurses through type arguments\nand nested record and function types, so a positional field buried inside a\ngeneric is still reported.",
     "domains": [],
     "examples": {
-      "bad": "class RecordExamples {\n  /// Positional fields in record literal\n  void example1() {\n    final record = (1, 'hello');\n    print(record);\n  }\n\n  /// Positional fields in record type return\n  (int, String) getInfo() {\n    return (42, 'answer');\n  }\n\n  /// Positional fields in record type parameter\n  void processRecord((int, String) data) {\n    print(data);\n  }\n\n  /// Positional fields in record type variable\n  void example2() {\n    (String, bool, int) tuple = ('test', true, 5);\n    print(tuple);\n  }\n\n  /// Positional fields in record literal with multiple\n  void example3() {\n    final result = (1, 2, 3, 'four');\n    print(result);\n  }\n}\n\n// Regression: a declaration nested in a labeled block or a closure body must\n// still be checked — a hand-rolled walk skipped those statement forms.\nvoid containersRegression() {\n  lbl: {\n    final inLabeled = (1, 2);\n    print(inLabeled);\n  }\n  final closure = () {\n    final inClosure = (3, 4);\n    return inClosure;\n  };\n  print(closure);\n}",
+      "bad": "class RecordExamples {\n  /// Positional fields in record literal\n  void example1() {\n    final record = (1, 'hello');\n    print(record);\n  }\n\n  /// Positional fields in record type return\n  (int, String) getInfo() {\n    return (42, 'answer');\n  }\n\n  /// Positional fields in record type parameter\n  void processRecord((int, String) data) {\n    print(data);\n  }\n\n  /// Positional fields in record type variable\n  void example2() {\n    (String, bool, int) tuple = ('test', true, 5);\n    print(tuple);\n  }\n\n  /// Positional fields in record literal with multiple\n  void example3() {\n    final result = (1, 2, 3, 'four');\n    print(result);\n  }\n}\n\n// Regression: a declaration nested in a labeled block or a closure body must\n// still be checked — a hand-rolled walk skipped those statement forms.\nvoid containersRegression() {\n  lbl: {\n    final inLabeled = (1, 2);\n    print(inLabeled);\n  }\n  final closure = () {\n    final inClosure = (3, 4);\n    return inClosure;\n  };\n  print(closure);\n}\n\ntypedef Pair = (int, String);\n\nvoid typePositions(Object value) {\n  final cast = value as (int, String);\n  final test = value is (int, String);\n  final callback = ((int, String) pair) => pair;\n  print([cast, test, callback]);\n}\n\nfinal callback = () {\n  final pair = (1, 2);\n  return pair;\n};",
       "crossFile": null,
       "good": "class RecordExamples {\n  /// Named fields in record literal\n  void example1() {\n    final record = (id: 1, name: 'hello');\n    print(record);\n  }\n\n  /// Named fields in record type return\n  ({int id, String name}) getInfo() {\n    return (id: 42, name: 'answer');\n  }\n\n  /// Named fields in record type parameter\n  void processRecord(({int id, String name}) data) {\n    print(data);\n  }\n\n  /// Named fields in record type variable\n  void example2() {\n    ({String name, bool active, int count}) tuple = (name: 'test', active: true, count: 5);\n    print(tuple);\n  }\n\n  /// Named fields in record literal with multiple\n  void example3() {\n    final result = (a: 1, b: 2, c: 3, d: 'four');\n    print(result);\n  }\n\n  /// Record with mixed named fields\n  void example4() {\n    final data = (userId: 100, isActive: true);\n    print(data.userId);\n    print(data.isActive);\n  }\n}"
     },
@@ -6091,12 +6139,12 @@
         "message": "Avoid placing literal or constant operand on the left side of a binary expression"
       }
     ],
-    "docs": "Flags comparison expressions with a literal on the left-hand side.\n\nWriting the constant first — `if (0 == count)` — is the \"Yoda condition\"\nstyle that reads backwards; putting the variable first (`count == 0`) matches\nhow the comparison is spoken and scanned. The check covers the equality and\nrelational operators (`==`, `!=`, `<`, `>`, `<=`, `>=`) whenever the left\noperand is a literal, with one exception: a `null` on the left compared\nagainst another literal (as in `null == null`) is left alone.",
+    "docs": "Flags comparison expressions with a literal on the left-hand side.\n\nWriting the constant first — `if (0 == count)` — is the \"Yoda condition\"\nstyle that reads backwards; putting the variable first (`count == 0`) matches\nhow the comparison is spoken and scanned. The check covers the equality and\nrelational operators (`==`, `!=`, `<`, `>`, `<=`, `>=`) whenever the left\noperand is a literal, with one exception: a `null` on the left compared\nagainst another literal (as in `null == null`) is left alone.\n\nChecks comparisons throughout the program, including initializers and collections.",
     "domains": [],
     "examples": {
       "bad": "// Test cases for binary-expression-operand-order rule\n// All lines with violations should have an expectation annotation\n\nvoid compareWithLiterals() {\n  if (5 == x) {}\n  if (null == value) {}\n  if (true == isActive) {}\n  if (\"test\" == name) {}\n}\n\nvoid assertLiteralsFirst() {\n  assert(42 < count);\n  assert(0 <= index);\n  assert(100 > percentage);\n}\n\nbool checkValues(int x, String s, bool flag) {\n  return 10 == x || \"hello\" == s || false == flag;\n}\n\nvoid testInequality() {\n  if (5 != x) {}\n  if (null != value) {}\n}\n\nclass Validator {\n  bool isValid(int age, String email) {\n    return 18 <= age && \"example\" == email;\n  }\n}\n\nvoid whileCondition(int count) {\n  while (0 < count) {\n    count--;\n  }\n}\n\nint getValue() {\n  return 5 == null ? 0 : 1;\n}\n\nvoid multipleComparisons(int a, int b, int c) {\n  if (1 < a && 2 < b && 3 < c) {}\n}",
       "crossFile": null,
-      "good": "// Good cases for binary-expression-operand-order rule\n// No violations expected\n\nvoid compareWithVariables() {\n  if (x == 5) {}\n  if (value == null) {}\n  if (isActive == true) {}\n  if (name == \"test\") {}\n}\n\nvoid assertVariablesFirst() {\n  assert(count > 42);\n  assert(index >= 0);\n  assert(percentage < 100);\n}\n\nbool checkValues(int x, String s, bool flag) {\n  return x == 10 || s == \"hello\" || flag == false;\n}\n\nvoid testInequality() {\n  if (x != 5) {}\n  if (value != null) {}\n}\n\nclass Validator {\n  bool isValid(int age, String email) {\n    return age >= 18 && email == \"example\";\n  }\n}\n\nvoid whileCondition(int count) {\n  while (count > 0) {\n    count--;\n  }\n}\n\nint getValue() {\n  return null == 5 ? 0 : 1;\n}\n\nvoid multipleComparisons(int a, int b, int c) {\n  if (a > 1 && b > 2 && c > 3) {}\n}\n\nvoid stringComparisons(String name, String expected) {\n  if (name == expected) {}\n  if (name.isEmpty) {}\n  if (name.isNotEmpty) {}\n}\n\nvoid numericOperations(int x, double y, num z) {\n  assert(x > 0);\n  assert(y < 100.5);\n  assert(z >= 10);\n}\n\nbool logicalCombinations(bool a, bool b, int count) {\n  return a && b || count == 5;\n}"
+      "good": "// Good cases for binary-expression-operand-order rule\n// No violations expected\n\nvoid compareWithVariables() {\n  if (x == 5) {}\n  if (value == null) {}\n  if (isActive == true) {}\n  if (name == \"test\") {}\n}\n\nvoid assertVariablesFirst() {\n  assert(count > 42);\n  assert(index >= 0);\n  assert(percentage < 100);\n}\n\nbool checkValues(int x, String s, bool flag) {\n  return x == 10 || s == \"hello\" || flag == false;\n}\n\nvoid testInequality() {\n  if (x != 5) {}\n  if (value != null) {}\n}\n\nclass Validator {\n  bool isValid(int age, String email) {\n    return age >= 18 && email == \"example\";\n  }\n}\n\nvoid whileCondition(int count) {\n  while (count > 0) {\n    count--;\n  }\n}\n\nint getValue() {\n  return null == 5 ? 0 : 1;\n}\n\nvoid multipleComparisons(int a, int b, int c) {\n  if (a > 1 && b > 2 && c > 3) {}\n}\n\nvoid stringComparisons(String name, String expected) {\n  if (name == expected) {}\n  if (name.isEmpty) {}\n  if (name.isNotEmpty) {}\n}\n\nvoid numericOperations(int x, double y, num z) {\n  assert(x > 0);\n  assert(y < 100.5);\n  assert(z >= 10);\n}\n\nbool logicalCombinations(bool a, bool b, int count) {\n  return a && b || count == 5;\n}\n\nfinal exemptComparisons = [null == 0, null == null, value == 0, 0 + value];\nfinal nestedExemptComparisons = (valid: null == false, other: value < 0);"
     },
     "group": "style",
     "name": "binary-expression-operand-order",
@@ -6153,12 +6201,42 @@
         "file": null,
         "line": 24,
         "message": "Boolean should be named with a valid prefix."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 27,
+        "message": "Boolean should be named with a valid prefix."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 31,
+        "message": "Boolean should be named with a valid prefix."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 36,
+        "message": "Boolean should be named with a valid prefix."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 41,
+        "message": "Boolean should be named with a valid prefix."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 48,
+        "message": "Boolean should be named with a valid prefix."
       }
     ],
     "docs": "Flags boolean identifiers that lack a conventional interrogative prefix.\n\nA boolean named `visible` reads as a value, whereas `isVisible` reads as the\nyes/no question it answers; a consistent prefix (`is`, `has`, `can`, ...)\nmakes conditions self-documenting. Only variables and fields initialized\nwith a boolean *literal*, and `bool`-returning methods, getters, and\nfunctions, are checked — parameters and uninitialized fields are not. A\nsingle leading underscore is stripped before matching, and `@override`\nmembers are exempt because they cannot rename an inherited declaration.\n\n## Options\n\n`valid_prefixes` (list of strings, default: `[\"is\", \"are\", \"was\", \"were\",\n\"has\", \"have\", \"had\", \"can\", \"should\", \"will\", \"do\", \"does\", \"did\"]`) —\naccepted boolean-name prefixes. User-provided entries extend the defaults\nrather than replacing them.",
     "domains": [],
     "examples": {
-      "bad": "// Violations: boolean-literal declarations and bool-returning members whose\n// names lack a valid prefix.\n\nclass Flags {\n  bool active = true;\n  bool loading = false;\n  bool _enabled = true;\n\n  // A non-override method returning bool without a valid prefix.\n  bool getStatus() {\n    return true;\n  }\n\n  // A getter returning bool without a valid prefix.\n  bool get empty => !active;\n\n  void example() {\n    bool complete = false;\n    print(complete);\n  }\n}\n\n// A top-level function returning bool without a valid prefix.\nbool validate() => true;",
+      "bad": "// Violations: boolean-literal declarations and bool-returning members whose\n// names lack a valid prefix.\n\nclass Flags {\n  bool active = true;\n  bool loading = false;\n  bool _enabled = true;\n\n  // A non-override method returning bool without a valid prefix.\n  bool getStatus() {\n    return true;\n  }\n\n  // A getter returning bool without a valid prefix.\n  bool get empty => !active;\n\n  void example() {\n    bool complete = false;\n    print(complete);\n  }\n}\n\n// A top-level function returning bool without a valid prefix.\nbool validate() => true;\n\nfinal callback = () {\n  final active = true;\n};\n\nvoid nestedDeclarations(int value) {\n  for (var ready = false; !ready; ready = true) {\n    print(ready);\n  }\n  switch (value) {\n    case 0:\n      final complete = false;\n      print(complete);\n      break;\n  }\n  label: {\n    final visible = true;\n    print(visible);\n  }\n}\n\nclass Operand {\n  Operand operator +(Operand other) {\n    final enabled = true;\n    return other;\n  }\n}",
       "crossFile": null,
       "good": "// pyramid_lint only inspects variable/field declarations initialised with a\n// boolean *literal*, and bool-returning methods/getters/functions. Parameters,\n// uninitialised fields, and non-literal initialisers are all out of scope.\n\nclass Flags {\n  bool isActive = true;\n  bool hasPermission = false;\n  bool canEdit = true;\n  bool shouldRefresh = false;\n  bool _isDisposed = false; // leading underscore stripped -> isDisposed\n\n  // Uninitialised bool fields have no boolean literal, so they are not checked.\n  final bool active;\n  late bool loading;\n\n  // A non-literal initialiser (`!kDebugMode`) is out of scope.\n  bool enabled = !kDebugMode;\n\n  Flags(this.active);\n\n  // Parameters are never checked, even with a boolean-literal default.\n  void configure(bool ready, {bool fatal = false}) {\n    print(ready);\n    print(fatal);\n    bool isDone = true; // local with a valid prefix\n    print(isDone);\n  }\n\n  bool get isEmpty => !isActive;\n  bool hasValue() => isActive;\n}\n\n// An @override method inherits its name from the supertype and is exempt.\nclass Sub extends Flags {\n  Sub() : super(false);\n\n  @override\n  bool validate() => true;\n}"
     },
@@ -7364,14 +7442,38 @@
         "file": null,
         "line": 33,
         "message": "Add a blank line before return statement"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 38,
+        "message": "Add a blank line before return statement"
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 45,
+        "message": "Add a blank line before return statement"
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 54,
+        "message": "Add a blank line before return statement"
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 61,
+        "message": "Add a blank line before return statement"
       }
     ],
-    "docs": "Flags `return` statements that are not preceded by a blank line.\n\nSeparating a `return` from the statements above it with a blank line makes\nthe exit point of a block visually distinct, so readers can spot where\ncontrol leaves the function without parsing the surrounding code. The rule\nonly checks returns that follow another statement in the same block — the\nfirst statement of a block is never flagged, since there is nothing to\nseparate it from. A blank line is any run of whitespace containing two or\nmore newlines, so intervening spaces and tabs do not matter.",
+    "docs": "Flags `return` statements that are not preceded by a blank line.\n\nSeparating a `return` from the statements above it with a blank line makes\nthe exit point of a block visually distinct, so readers can spot where\ncontrol leaves the function without parsing the surrounding code. The rule\nonly checks returns that follow another statement in the same statement\nlist — the first statement of a block or switch case is never flagged,\nsince there is nothing to separate it from. A blank line is any run of\nwhitespace containing two or more newlines; spaces and tabs do not matter.",
     "domains": [],
     "examples": {
-      "bad": "// Test cases for newline-before-return rule\n// violations: return statement not preceded by a blank line\n\nint badFunction(int x) {\n  final result = x * 2;\n  return result;\n}\n\nString processName(String name) {\n  final trimmed = name.trim();\n  final upper = trimmed.toUpperCase();\n  return upper;\n}\n\nclass Calculator {\n  int add(int a, int b) {\n    final sum = a + b;\n    return sum;\n  }\n\n  int multiply(int a, int b) {\n    final product = a * b;\n    return product;\n  }\n}\n\nvoid nestedReturns() {\n  if (true) {\n    final value = 42;\n    return value;\n  }\n  print('done');\n  return;\n}",
+      "bad": "// Test cases for newline-before-return rule\n// violations: return statement not preceded by a blank line\n\nint badFunction(int x) {\n  final result = x * 2;\n  return result;\n}\n\nString processName(String name) {\n  final trimmed = name.trim();\n  final upper = trimmed.toUpperCase();\n  return upper;\n}\n\nclass Calculator {\n  int add(int a, int b) {\n    final sum = a + b;\n    return sum;\n  }\n\n  int multiply(int a, int b) {\n    final product = a * b;\n    return product;\n  }\n}\n\nvoid nestedReturns() {\n  if (true) {\n    final value = 42;\n    return value;\n  }\n  print('done');\n  return;\n}\n\nfinal callback = () {\n  print('callback');\n  return 1;\n};\n\nint switchReturns(int value) {\n  switch (value) {\n    case 0:\n      print(value);\n      return value;\n    default:\n      return 1;\n  }\n}\n\nvoid labeledReturn() {\n  label: {\n    print('label');\n    return;\n  }\n}\n\nclass Operand {\n  Operand operator +(Operand other) {\n    print(other);\n    return other;\n  }\n}",
       "crossFile": null,
-      "good": "// Test cases for newline-before-return rule\n// No violations: return preceded by blank line or is the only statement\n\nint goodFunction(int x) {\n  final result = x * 2;\n\n  return result;\n}\n\nString processName(String name) {\n  final trimmed = name.trim();\n  final upper = trimmed.toUpperCase();\n\n  return upper;\n}\n\n// Single-statement body: no preceding statement so no blank line needed\nint identity(int x) {\n  return x;\n}\n\nclass Calculator {\n  int add(int a, int b) {\n    final sum = a + b;\n\n    return sum;\n  }\n\n  int multiply(int a, int b) {\n    final product = a * b;\n\n    return product;\n  }\n}\n\n// With blank line in nested blocks\nvoid nestedCorrect() {\n  if (true) {\n    final value = 42;\n\n    return value;\n  }\n\n  print('done');\n\n  return;\n}\n\n// Arrow function: no block, no check needed\nint arrow(int x) => x * 2;\n\n// Conditional with proper spacing\nbool check(int x) {\n  if (x > 0) {\n\n    return true;\n  }\n\n  return false;\n}"
+      "good": "// Test cases for newline-before-return rule\n// No violations: return preceded by blank line or is the only statement\n\nint goodFunction(int x) {\n  final result = x * 2;\n\n  return result;\n}\n\nString processName(String name) {\n  final trimmed = name.trim();\n  final upper = trimmed.toUpperCase();\n\n  return upper;\n}\n\n// Single-statement body: no preceding statement so no blank line needed\nint identity(int x) {\n  return x;\n}\n\nclass Calculator {\n  int add(int a, int b) {\n    final sum = a + b;\n\n    return sum;\n  }\n\n  int multiply(int a, int b) {\n    final product = a * b;\n\n    return product;\n  }\n}\n\n// With blank line in nested blocks\nvoid nestedCorrect() {\n  if (true) {\n    final value = 42;\n\n    return value;\n  }\n\n  print('done');\n\n  return;\n}\n\n// Arrow function: no block, no check needed\nint arrow(int x) => x * 2;\n\n// Conditional with proper spacing\nbool check(int x) {\n  if (x > 0) {\n\n    return true;\n  }\n\n  return false;\n}\n\nfinal callbacks = [\n  () {\n    return 1;\n  },\n];\n\nint firstInEachList(int value) {\n  switch (value) {\n    case 0:\n      return value;\n    default:\n      return 1;\n  }\n}\n\nvoid firstInNestedLists() {\n  try {\n    return;\n  } catch (error) {\n    return;\n  } finally {\n    return;\n  }\n}\n\nvoid singleStatementBranches(bool flag) {\n  if (flag) return;\n  while (flag) return;\n  label: {\n    return;\n  }\n}"
     },
     "group": "style",
     "name": "newline-before-return",
@@ -7597,7 +7699,7 @@
     "examples": {
       "bad": "// Bad: `Object` field types and member return types should be more specific.\nclass Store {\n  Object cache = {};\n\n  Object build() => cache;\n\n  Object get value => cache;\n\n  Object operator +(int other) => cache;\n}\n\nmixin Cacheable {\n  Object? snapshot;\n}",
       "crossFile": null,
-      "good": "// Good: `Object` outside field/return declarations is out of scope.\nclass Store {\n  final Map<String, String> cache = {};\n\n  String build() => 'x';\n\n  int get value => 0;\n\n  // Parameters are not checked, even when typed `Object`.\n  void process(Object input) {\n    final Object local = input; // locals are out of scope\n    print(local);\n  }\n\n  // Setters are not return-type declarations.\n  set data(Object value) {}\n}\n\n// Top-level members are out of scope.\nObject topLevel() => 0;\nObject globalValue = 0;\ndynamic dynamicValue = 42;"
+      "good": "// Good: `Object` outside field/return declarations is out of scope.\nclass Store {\n  final Map<String, String> cache = {};\n\n  String build() => 'x';\n\n  int get value => 0;\n\n  // Parameters are not checked, even when typed `Object`.\n  void process(Object input) {\n    final Object local = input; // locals are out of scope\n    print(local);\n  }\n\n  // Setters are not return-type declarations.\n  set data(Object value) {}\n}\n\n// Top-level members are out of scope.\nObject topLevel() => 0;\nObject globalValue = 0;\ndynamic dynamicValue = 42;\n\nclass ExplicitScope {\n  List<Object> values = [];\n  ExplicitScope(Object value);\n  void callback() {\n    Object localFunction(Object value) => value;\n    final closure = (Object value) => value;\n    print([localFunction, closure]);\n  }\n}"
     },
     "group": "style",
     "name": "no-object-declaration",
@@ -8187,12 +8289,54 @@
         "file": null,
         "line": 42,
         "message": "The hh identifier is 2 characters long. It's recommended to increase it up to 3 chars long."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 49,
+        "message": "The aa identifier is 2 characters long. It's recommended to increase it up to 3 chars long."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 55,
+        "message": "The bb identifier is 2 characters long. It's recommended to increase it up to 3 chars long."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 60,
+        "message": "The cc identifier is 2 characters long. It's recommended to increase it up to 3 chars long."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 65,
+        "message": "The dd identifier is 2 characters long. It's recommended to increase it up to 3 chars long."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 74,
+        "message": "The ee identifier is 2 characters long. It's recommended to increase it up to 3 chars long."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 82,
+        "message": "The ff identifier is 2 characters long. It's recommended to increase it up to 3 chars long."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 88,
+        "message": "The w identifier is 1 characters long. It's recommended to increase it up to 3 chars long."
       }
     ],
-    "docs": "Flags declared identifiers that are shorter or longer than the allowed range.\n\nVery short names rarely convey meaning and very long ones hurt readability, so\nthis rule keeps declared names within a configurable length band. Its scope is\ndeliberately limited to variable and field declarations, getter and setter\nnames, and enum constants; parameters, catch-clause variables, for-each loop\nvariables, and plain function and method names are never checked, because\nshort names are often idiomatic there. A single leading underscore is stripped\nbefore both the length and exception checks, so `_id` is judged as `id`.\n\n## Options\n\n`min_length` (int, default: 3) — flag identifiers shorter than this.\n`max_length` (int, default: 300) — flag identifiers longer than this.\n`exceptions` (list of strings, default: []) — names always allowed regardless of length.",
+    "docs": "Flags declared identifiers that are shorter or longer than the allowed range.\n\nVery short names rarely convey meaning and very long ones hurt readability, so\nthis rule keeps declared names within a configurable length band. Its scope is\ndeliberately limited to variable and field declarations, getter and setter\nnames, and enum constants; parameters, catch-clause variables, for-each loop\nvariables, and plain function and method names are never checked, because\nshort names are often idiomatic there. A single leading underscore is stripped\nbefore both the length and exception checks, so `_id` is judged as `id`.\nDeclarations in initializer closures, arrow bodies, operators, and enum\nmembers follow the same policy as declarations in ordinary function bodies.\n\n## Options\n\n`min_length` (int, default: 3) — flag identifiers shorter than this.\n`max_length` (int, default: 300) — flag identifiers longer than this.\n`exceptions` (list of strings, default: []) — names always allowed regardless of length.",
     "domains": [],
     "examples": {
-      "bad": "// Bad: too-short variable declarations, accessor names and enum constants.\n\nvoid example() {\n  var a = compute();\n  final xy = a;\n  print(xy);\n}\n\nclass Processor {\n  int m = 0;\n\n  String get n => '';\n\n  set v(String value) {}\n}\n\n// A C-style for-loop counter is a variable declaration, so it is checked.\nvoid loop(List<int> items) {\n  for (var i = 0; i < items.length; i++) {\n    print(items[i]);\n  }\n}\n\nenum Size { s, m, l }\n\n// A Dart 3 destructuring declaration declares variables, so every name the\n// pattern binds is length-checked — records, lists, and nested patterns alike.\nvoid patternDeclarations(List<int> items) {\n  final (a, b) = (1, 2);\n  final [c, d] = items;\n  final (e, (f, _)) = (1, (2, 3));\n  print([a, b, c, d, e, f]);\n}\n\n// A declaration inside a labeled block or a closure body is reached too.\nvoid nestedDeclarations() {\n  lbl: {\n    final gg = 1;\n    print(gg);\n  }\n  final callback = () {\n    final hh = 2;\n    return hh;\n  };\n  print(callback);\n}",
+      "bad": "// Bad: too-short variable declarations, accessor names and enum constants.\n\nvoid example() {\n  var a = compute();\n  final xy = a;\n  print(xy);\n}\n\nclass Processor {\n  int m = 0;\n\n  String get n => '';\n\n  set v(String value) {}\n}\n\n// A C-style for-loop counter is a variable declaration, so it is checked.\nvoid loop(List<int> items) {\n  for (var i = 0; i < items.length; i++) {\n    print(items[i]);\n  }\n}\n\nenum Size { s, m, l }\n\n// A Dart 3 destructuring declaration declares variables, so every name the\n// pattern binds is length-checked — records, lists, and nested patterns alike.\nvoid patternDeclarations(List<int> items) {\n  final (a, b) = (1, 2);\n  final [c, d] = items;\n  final (e, (f, _)) = (1, (2, 3));\n  print([a, b, c, d, e, f]);\n}\n\n// A declaration inside a labeled block or a closure body is reached too.\nvoid nestedDeclarations() {\n  lbl: {\n    final gg = 1;\n    print(gg);\n  }\n  final callback = () {\n    final hh = 2;\n    return hh;\n  };\n  print(callback);\n}\n\nfinal topCallback = () {\n  final aa = 1;\n  return aa;\n};\n\nclass ClosureDeclarations {\n  final callback = () {\n    final bb = 2;\n    return bb;\n  };\n\n  Object arrow() => () {\n    final cc = 3;\n    return cc;\n  };\n\n  int operator +(int value) {\n    final dd = value;\n    return dd;\n  }\n}\n\nenum MemberDeclarations {\n  value;\n\n  int read() {\n    final ee = 4;\n    return ee;\n  }\n}\n\nclass InitializerDeclarations {\n  final Object callback;\n  InitializerDeclarations() : callback = (() {\n    final ff = 5;\n    return ff;\n  });\n}\n\nList<int> collectionLoop(int count) => [\n  for (var w = 0; w < count; w++) w,\n];",
       "crossFile": null,
       "good": "// Good: identifiers meet the minimum length (3), plus dcl's scope exemptions.\n// dcl only checks variable declarations, getter/setter names and enum\n// constants — never parameters, catch clauses, for-each variables, or plain\n// method/function names.\n\nvoid example() {\n  var count = compute();\n  final result = count + 1;\n  print(result);\n}\n\nclass Processor {\n  String path = '';\n  int id = 0; // `id` is in the exceptions list\n  int _id = 0; // leading underscore stripped -> `id` -> exempt\n\n  // Method name (`at`) and parameters (`i`, `j`) are out of scope.\n  int at(int i, int j) => i + j;\n\n  // Getter name is >= 3 characters.\n  String get label => path;\n}\n\n// Parameters, catch clauses and for-each variables are never checked, so short\n// names here are fine.\nvoid shortLived(int a, int b) {\n  try {\n    print(a + b);\n  } catch (e) {\n    print(e);\n  }\n  for (final x in [1, 2, 3]) {\n    print(x);\n  }\n}\n\nenum Color { red, green, blue }"
     },
@@ -10423,12 +10567,30 @@
         "file": null,
         "line": 64,
         "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 75,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 80,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 87,
+        "message": "Unnecessary 'this.' qualifier."
       }
     ],
     "docs": "Flags a redundant `this.` qualifier on member access.",
     "domains": [],
     "examples": {
-      "bad": "// `this.` where no parameter or local shadows the member.\nclass A {\n  int x = 0;\n  int y = 0;\n  void m() {\n    this.x = 1;\n    print(this.y);\n  }\n  int get sum => this.x + this.y;\n}\n\nclass B {\n  int value = 0;\n  void update(int v) {\n    this.helper();\n    value = v;\n  }\n  void helper() {}\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    this.count += 1;\n  }\n}\n\nclass SourceOrdered {\n  int value = 0;\n  void run() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n}\n\nclass NestedScopes {\n  int value = 0;\n  void run() {\n    {\n      final value = 1;\n      print(this.value + value);\n    }\n    print(this.value);\n    (() {\n      final value = 2;\n      print(this.value + value);\n    })();\n    print(this.value);\n  }\n}\n\nclass TryScopes {\n  int value = 0;\n  void run() {\n    try {\n      final value = 1;\n      print(value);\n    } catch (_) {\n      print(this.value);\n    } finally {\n      print(this.value);\n    }\n    print(this.value);\n  }\n}",
+      "bad": "// `this.` where no parameter or local shadows the member.\nclass A {\n  int x = 0;\n  int y = 0;\n  void m() {\n    this.x = 1;\n    print(this.y);\n  }\n  int get sum => this.x + this.y;\n}\n\nclass B {\n  int value = 0;\n  void update(int v) {\n    this.helper();\n    value = v;\n  }\n  void helper() {}\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    this.count += 1;\n  }\n}\n\nclass SourceOrdered {\n  int value = 0;\n  void run() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n}\n\nclass NestedScopes {\n  int value = 0;\n  void run() {\n    {\n      final value = 1;\n      print(this.value + value);\n    }\n    print(this.value);\n    (() {\n      final value = 2;\n      print(this.value + value);\n    })();\n    print(this.value);\n  }\n}\n\nclass TryScopes {\n  int value = 0;\n  void run() {\n    try {\n      final value = 1;\n      print(value);\n    } catch (_) {\n      print(this.value);\n    } finally {\n      print(this.value);\n    }\n    print(this.value);\n  }\n}\n\nclass BranchScopes {\n  int value = 0;\n  void run(bool flag, Object subject) {\n    if (flag) {\n      final value = 1;\n      print(this.value + value);\n    } else {\n      print(this.value);\n    }\n    if (subject case final value) {\n      print(this.value + value.hashCode);\n    } else {\n      print(this.value);\n    }\n    while (flag) {\n      final value = 2;\n      print(this.value + value);\n      break;\n    }\n    print(this.value);\n  }\n}",
       "crossFile": null,
       "good": "// `this.` needed because of a shadowing parameter or local, or no `this.`.\nclass A {\n  int x = 0;\n  void m(int x) {\n    this.x = x;\n  }\n}\n\nclass B {\n  int value = 0;\n  void update() {\n    var value = 5;\n    this.value = value;\n  }\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    count += 1;\n  }\n  int get doubled => count * 2;\n}\n\nclass D {\n  int total = 0;\n  void add(int total) {\n    this.total += total;\n  }\n}\n\nclass E {\n  void run(int helper) {\n    this.helper();\n  }\n  void helper() {}\n}\n\nclass ScopedBindings {\n  int value = 0;\n\n  void catchesAndLoops() {\n    try {\n      throw 1;\n    } catch (value) {\n      print(this.value + value.hashCode);\n    }\n    for (final value in [1]) {\n      print(this.value + value);\n    }\n    if (Object() case final value) {\n      print(this.value + value.hashCode);\n    }\n  }\n\n  void closures() {\n    ((value) => print(this.value + value))(1);\n  }\n}"
     },
@@ -10477,14 +10639,14 @@
         "message": "Use 'AppScaffold' from the design system instead of 'Scaffold'."
       }
     ],
-    "docs": "Flags construction of a widget or type that should be replaced by its design-system equivalent.\n\nTeams building on a Flutter design system often want to steer away from raw\nframework widgets (a bare `Container`, `Text`, or `ElevatedButton`) toward\ntheir own wrappers, which enforce spacing, theming, and accessibility. This\nrule flags a construction whose class name matches a configured entry, in\neither constructor form — implicit `Foo(...)`, explicit `new`/`const`, and\ngeneric `Foo<T>(...)`. It deliberately ignores named-constructor access like\n`Foo.named(...)` so static getters and factory helpers are not mistaken for\nplain construction. The rule is entirely config-driven: with no configured\nitems it is a no-op, so it flags nothing until a design system is described.\n\n## Options\n\n`items` (list of objects, default: `[]`) — each entry maps a `class_name`\n(required) to steer away from, with an optional `use_instead` naming the\ndesign-system replacement to suggest in the message.",
+    "docs": "Flags construction of a widget or type that should be replaced by its design-system equivalent.\n\nTeams building on a Flutter design system often want to steer away from raw\nframework widgets (a bare `Container`, `Text`, or `ElevatedButton`) toward\ntheir own wrappers, which enforce spacing, theming, and accessibility. This\nrule flags a construction whose class name matches a configured entry, in\neither constructor form — implicit `Foo(...)`, explicit `new`/`const`, and\ngeneric `Foo<T>(...)`. It deliberately ignores named-constructor access like\n`Foo.named(...)` so static getters and factory helpers are not mistaken for\nplain construction. The rule is entirely config-driven: with no configured\nitems it is a no-op, so it flags nothing until a design system is described.\n\n## Options\n\n`items` (list of objects, default: `[]`) — each entry maps a `class_name`\n(required) to steer away from, with an optional `use_instead` naming the\ndesign-system replacement to suggest in the message.\n\nChecks constructions throughout the program, including initializers and annotations.",
     "domains": [
       "flutter"
     ],
     "examples": {
       "bad": "import 'package:flutter/material.dart';\n\n// Direct construction of banned widgets must be flagged when the rule is\n// configured (see config.json in this directory).\n\nWidget buildPage(BuildContext context) {\n  return Container(\n    child: Text('hello'),\n  );\n}\n\nWidget buildButton() {\n  return ElevatedButton(\n    onPressed: null,\n    child: null,\n  );\n}\n\nclass HomePage {\n  Widget make() {\n    return new Container();\n  }\n\n  Widget scaffold() {\n    return Scaffold();\n  }\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/material.dart';\n\nWidget build(BuildContext context) {\n  return AppContainer(\n    child: AppText('hello'),\n  );\n}\n\nclass MyWidget {\n  Widget make() => AppButton(label: 'ok');\n}"
+      "good": "import 'package:flutter/material.dart';\n\nWidget build(BuildContext context) {\n  return AppContainer(\n    child: AppText('hello'),\n  );\n}\n\nclass MyWidget {\n  Widget make() => AppButton(label: 'ok');\n}\n\nfinal namedConstructor = Container.named();\nfinal prefixedCall = framework.Container();\n\nclass Initializers {\n  final named = Container.named();\n  final replacement = AppContainer();\n}"
     },
     "group": "style",
     "name": "use-design-system-item",
@@ -10673,14 +10835,14 @@
         "message": "Use Spacer() instead of an Expanded with an empty Container or SizedBox child."
       }
     ],
-    "docs": "Flags an `Expanded` wrapping an empty `SizedBox` or `Container` that should be a `Spacer`.\n\nFlutter's `Spacer` is exactly an `Expanded` whose child is an empty box, so\n`Expanded(child: SizedBox())` or `Expanded(child: Container())` is a verbose\nspelling of `Spacer()`. Using `Spacer` states the intent — reserve flexible\nempty space in a `Row`, `Column`, or `Flex` — and drops a layer of nesting.\nThe rule matches an `Expanded` whose `child:` constructs a `Container` or\n`SizedBox` with no `child:` argument of its own; other arguments such as\n`color` do not disqualify the match, only a nested `child` does. Replace it\nwith `Spacer()`, moving any `flex:` across.\nChecks functions and members of classes, mixins, enums, extensions, and extension types.",
+    "docs": "Flags an `Expanded` wrapping an empty `SizedBox` or `Container` that should be a `Spacer`.\n\nFlutter's `Spacer` is exactly an `Expanded` whose child is an empty box, so\n`Expanded(child: SizedBox())` or `Expanded(child: Container())` is a verbose\nspelling of `Spacer()`. Using `Spacer` states the intent — reserve flexible\nempty space in a `Row`, `Column`, or `Flex` — and drops a layer of nesting.\nThe rule matches an `Expanded` whose `child:` constructs a `Container` or\n`SizedBox` with no `child:` argument of its own; other arguments such as\n`color` do not disqualify the match, only a nested `child` does. Replace it\nwith `Spacer()`, moving any `flex:` across.\nChecks constructions throughout the program, including initializers and closures.",
     "domains": [
       "flutter"
     ],
     "examples": {
       "bad": "import 'package:flutter/material.dart';\n\n// Bad: Expanded with empty Container or SizedBox\n\nclass BadLayout1 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Column(\n      children: [\n        Text('Top'),\n        Expanded(\n          child: Container(),\n        ),\n        Text('Bottom'),\n      ],\n    );\n  }\n}\n\nclass BadLayout2 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        Text('Left'),\n        Expanded(\n          child: SizedBox(),\n        ),\n        Text('Right'),\n      ],\n    );\n  }\n}\n\nclass BadLayout3 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        Text('A'),\n        Expanded(\n          child: Container(color: Colors.transparent),\n        ),\n        Text('B'),\n      ],\n    );\n  }\n}\n\nclass BadLayout4 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Column(\n      children: [\n        Text('Header'),\n        Expanded(\n          child: SizedBox(width: double.infinity),\n        ),\n        Text('Footer'),\n      ],\n    );\n  }\n}\n\nclass BadLayout5 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        Icon(Icons.arrow_left),\n        Expanded(\n          child: Container(decoration: BoxDecoration()),\n        ),\n        Icon(Icons.arrow_right),\n      ],\n    );\n  }\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/material.dart';\n\n// Good: use Spacer() instead of Expanded with empty container\n\nclass GoodLayout1 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Column(\n      children: [\n        const Text('Top'),\n        const Spacer(),\n        const Text('Bottom'),\n      ],\n    );\n  }\n}\n\nclass GoodLayout2 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        const Text('Left'),\n        const Spacer(),\n        const Text('Right'),\n      ],\n    );\n  }\n}\n\n// Good: Expanded with actual content\n\nclass GoodLayout3 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        const Text('A'),\n        Expanded(\n          child: Container(\n            color: Colors.blue,\n            child: const Center(\n              child: Text('Content'),\n            ),\n          ),\n        ),\n        const Text('B'),\n      ],\n    );\n  }\n}\n\nclass GoodLayout4 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Column(\n      children: [\n        const Text('Header'),\n        Expanded(\n          child: ListView(\n            children: const [\n              ListTile(title: Text('Item 1')),\n              ListTile(title: Text('Item 2')),\n            ],\n          ),\n        ),\n        const Text('Footer'),\n      ],\n    );\n  }\n}\n\n// Good: use Spacer for spacing in column\nclass GoodLayout5 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Column(\n      children: [\n        const Text('Start'),\n        const Spacer(),\n        const Text('Middle'),\n        const Spacer(),\n        const Text('End'),\n      ],\n    );\n  }\n}\n\n// Good: Expanded with actual widget content\nclass GoodLayout6 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        const Icon(Icons.arrow_left),\n        Expanded(\n          child: Container(\n            padding: const EdgeInsets.all(8),\n            child: const Text('Expanded content area'),\n          ),\n        ),\n        const Icon(Icons.arrow_right),\n      ],\n    );\n  }\n}\n\n// Good: use Spacer in row for spacing\nclass GoodLayout7 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        const Text('Left'),\n        const Spacer(),\n        const Text('Right'),\n        const Spacer(),\n        const Text('Far Right'),\n      ],\n    );\n  }\n}"
+      "good": "import 'package:flutter/material.dart';\n\n// Good: use Spacer() instead of Expanded with empty container\n\nclass GoodLayout1 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Column(\n      children: [\n        const Text('Top'),\n        const Spacer(),\n        const Text('Bottom'),\n      ],\n    );\n  }\n}\n\nclass GoodLayout2 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        const Text('Left'),\n        const Spacer(),\n        const Text('Right'),\n      ],\n    );\n  }\n}\n\n// Good: Expanded with actual content\n\nclass GoodLayout3 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        const Text('A'),\n        Expanded(\n          child: Container(\n            color: Colors.blue,\n            child: const Center(\n              child: Text('Content'),\n            ),\n          ),\n        ),\n        const Text('B'),\n      ],\n    );\n  }\n}\n\nclass GoodLayout4 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Column(\n      children: [\n        const Text('Header'),\n        Expanded(\n          child: ListView(\n            children: const [\n              ListTile(title: Text('Item 1')),\n              ListTile(title: Text('Item 2')),\n            ],\n          ),\n        ),\n        const Text('Footer'),\n      ],\n    );\n  }\n}\n\n// Good: use Spacer for spacing in column\nclass GoodLayout5 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Column(\n      children: [\n        const Text('Start'),\n        const Spacer(),\n        const Text('Middle'),\n        const Spacer(),\n        const Text('End'),\n      ],\n    );\n  }\n}\n\n// Good: Expanded with actual widget content\nclass GoodLayout6 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        const Icon(Icons.arrow_left),\n        Expanded(\n          child: Container(\n            padding: const EdgeInsets.all(8),\n            child: const Text('Expanded content area'),\n          ),\n        ),\n        const Icon(Icons.arrow_right),\n      ],\n    );\n  }\n}\n\n// Good: use Spacer in row for spacing\nclass GoodLayout7 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    return Row(\n      children: [\n        const Text('Left'),\n        const Spacer(),\n        const Text('Right'),\n        const Spacer(),\n        const Text('Far Right'),\n      ],\n    );\n  }\n}\n\nfinal prefixedExpanded = new framework.Expanded(child: Container());\nfinal prefixedChild = Expanded(child: new framework.Container());\nfinal namedExpanded = Expanded.named(child: Container());\nfinal namedChild = Expanded(child: SizedBox.named());\nfinal populated = Expanded(child: Container(child: Text('content')));"
     },
     "group": "style",
     "name": "use-spacer-as-expanded-child",
@@ -10865,12 +11027,96 @@
         "file": null,
         "line": 38,
         "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 40,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 2,
+        "file": null,
+        "line": 42,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 42,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 45,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 48,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 52,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 56,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 64,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 56,
+        "file": null,
+        "line": 68,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 71,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 75,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 79,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 81,
+        "message": "Avoid using the 'dynamic' type"
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 85,
+        "message": "Avoid using the 'dynamic' type"
       }
     ],
-    "docs": "Flags explicit `dynamic` type annotations.\n\n`dynamic` opts an expression out of static type checking, so member accesses\nand calls on it are resolved at runtime and any mistake surfaces as a crash\nrather than a compile error. Reaching for it is usually a shortcut where a\nconcrete type, a generic, or `Object?` plus explicit checks would be safer.\nPrefer a precise type. `dynamic` used directly as a `Map` type argument — the\ndocumented JSON escape hatch, `Map<String, dynamic>` — is exempt, but a\n`dynamic` nested more deeply (such as `Map<String, List<dynamic>>`) is still\nflagged.",
+    "docs": "Flags explicit `dynamic` type annotations.\n\n`dynamic` opts an expression out of static type checking, so member accesses\nand calls on it are resolved at runtime and any mistake surfaces as a crash\nrather than a compile error. Reaching for it is usually a shortcut where a\nconcrete type, a generic, or `Object?` plus explicit checks would be safer.\nPrefer a precise type. `dynamic` used directly as a `Map` type argument — the\ndocumented JSON escape hatch, `Map<String, dynamic>` — is exempt, but a\n`dynamic` nested more deeply (such as `Map<String, List<dynamic>>`) is still\nflagged.\nAll explicit type positions are checked, including record fields, type\naliases, generic bounds, patterns, and types inside initializers.",
     "domains": [],
     "examples": {
-      "bad": "// Test cases for avoid-dynamic rule\n// All violations are annotated inline\n\nvoid testDynamicVariable() {\n  dynamic x = 5;\n  dynamic name = \"test\";\n  dynamic list = [1, 2, 3];\n}\n\nvoid testDynamicParameters(dynamic arg, dynamic other) {\n  print(arg);\n  print(other);\n}\n\nFuture<dynamic> asyncMethod() {\n  return Future.value(42);\n}\n\ndynamic returnDynamic() {\n  return \"anything\";\n}\n\nclass TestClass {\n  dynamic field;\n\n  void method(dynamic param) {\n    final dynamic local = param;\n  }\n}\n\n// `dynamic` as a type argument of a non-Map generic is still flagged, and a\n// `dynamic` nested one level below `Map` (inside `List`) is NOT exempt: only a\n// direct `Map<_, dynamic>` argument is.\nList<dynamic> listOfDynamic = [];\n\nRoute<dynamic>? routeField;\n\nMap<String, List<dynamic>> nested = {};",
+      "bad": "// Test cases for avoid-dynamic rule\n// All violations are annotated inline\n\nvoid testDynamicVariable() {\n  dynamic x = 5;\n  dynamic name = \"test\";\n  dynamic list = [1, 2, 3];\n}\n\nvoid testDynamicParameters(dynamic arg, dynamic other) {\n  print(arg);\n  print(other);\n}\n\nFuture<dynamic> asyncMethod() {\n  return Future.value(42);\n}\n\ndynamic returnDynamic() {\n  return \"anything\";\n}\n\nclass TestClass {\n  dynamic field;\n\n  void method(dynamic param) {\n    final dynamic local = param;\n  }\n}\n\n// `dynamic` as a type argument of a non-Map generic is still flagged, and a\n// `dynamic` nested one level below `Map` (inside `List`) is NOT exempt: only a\n// direct `Map<_, dynamic>` argument is.\nList<dynamic> listOfDynamic = [];\n\nRoute<dynamic>? routeField;\n\nMap<String, List<dynamic>> nested = {};\n\ntypedef DynamicAlias = List<dynamic>;\n\n(dynamic, {dynamic value}) recordTypes;\n\nclass DynamicInitializers {\n  final values = <dynamic>[];\n\n  DynamicInitializers() {\n    final local = <dynamic>[];\n  }\n\n  set value(Object value) {\n    dynamic local = value;\n  }\n\n  Object operator +(Object other) {\n    dynamic local = other;\n    return local;\n  }\n}\n\nvoid dynamicSwitch(Object input) {\n  switch (input) {\n    default:\n      dynamic local = input;\n  }\n}\n\ntypedef BoundedFunction = void Function<T extends List<dynamic>>();\n\nvoid dynamicPatterns(Object input) {\n  if (input case List<dynamic> values) {\n    print(values);\n  }\n  final values = [\n    for (List<dynamic> value in <List<Object>>[]) value,\n  ];\n}\n\nclass DynamicBase extends Base<List<dynamic>> {}\n\n@Annotation<List<dynamic>>()\nvoid annotatedDynamic() {}\n\nObject dynamicSwitchExpression(Object input) => switch (input) {\n  List<dynamic> values => values,\n  _ => input,\n};",
       "crossFile": null,
       "good": "// Good cases for avoid-dynamic rule\n// No violations expected\n\nvoid testTypedVariable() {\n  int x = 5;\n  String name = \"test\";\n  List<int> list = [1, 2, 3];\n}\n\nvoid testTypedParameters(int arg, String other) {\n  print(arg);\n  print(other);\n}\n\nFuture<int> asyncMethod() {\n  return Future.value(42);\n}\n\nString returnString() {\n  return \"anything\";\n}\n\nclass TestClass {\n  Object field = Object();\n\n  void method(Object param) {\n    final Object local = param;\n  }\n}\n\nMap<String, int> mapWithType = {};\n\nList<String> listOfString = [];\n\nvoid testWithGenerics<T>(T value) {\n  print(value);\n}\n\nvoid testWithUnion(Object? nullable) {\n  if (nullable != null) {\n    print(nullable);\n  }\n}\n\n// dcl exempts `dynamic` used directly as a `Map` type argument (the JSON escape\n// hatch) — both in a `Map<...>` annotation and in a `<...>{}` map literal.\nMap<String, dynamic> jsonField = {};\n\nMap<String, dynamic> parseJson(Map<String, dynamic> json) {\n  final literal = <String, dynamic>{'k': 1};\n  return literal;\n}\n\nclass Serializable {\n  Map<String, dynamic> toJson() => <String, dynamic>{};\n}"
     },
@@ -11111,7 +11357,7 @@
         "message": "Avoid using print in production code; use a logging framework instead."
       }
     ],
-    "docs": "Flags calls that resolve to `dart:core`'s top-level `print` function.",
+    "docs": "Flags calls that resolve to `dart:core`'s top-level `print` function.\nLexical bindings and members declared in the enclosing body shadow it.",
     "domains": [
       "flutter"
     ],
@@ -11621,7 +11867,7 @@
         "message": "Empty catch block — handle the exception, add a comment, or name it `_`"
       }
     ],
-    "docs": "Flags empty `catch` blocks.\n\nA catch clause with no body silently swallows the exception, hiding failures\nthat should be handled, logged, or rethrown and making bugs far harder to\ndiagnose. Handle the error, or at minimum log it, rather than discarding it.\nTwo escape hatches match the official lint: a catch whose body contains a\ncomment (the emptiness is deliberate and documented), and a catch that binds\nits exception to `_`, an explicit \"I am ignoring this\" marker.",
+    "docs": "Flags empty `catch` blocks.\n\nA catch clause with no body silently swallows the exception, hiding failures\nthat should be handled, logged, or rethrown and making bugs far harder to\ndiagnose. Handle the error, or at minimum log it, rather than discarding it.\nTwo escape hatches match the official lint: a catch whose body contains a\ncomment (the emptiness is deliberate and documented), and a catch that binds\nits exception to `_`, an explicit \"I am ignoring this\" marker.\n\nThis includes catch clauses inside anonymous functions.",
     "domains": [],
     "examples": {
       "bad": "void f1() {\n  try {\n    doThing();\n  } catch (e) {}\n}\n\nvoid f2() {\n  try {\n    doThing();\n  } on Exception catch (e) {}\n}\n\nvoid f3() {\n  try {\n    doThing();\n  } catch (e, st) {}\n}\n\nvoid f4() {\n  try {\n    doThing();\n  } on StateError {}\n}\n\nvoid f5() {\n  try {\n    doThing();\n  } catch (error) {}\n}\n\nvoid f6() {\n  try {\n    doThing();\n  } catch (e) {\n  }\n}",
@@ -11679,7 +11925,7 @@
         "message": "Unnecessary empty statement — remove the `;` or replace it with a block"
       }
     ],
-    "docs": "Flags stray empty statements (a lone `;`).\n\nA solitary semicolon does nothing, and where it slips in it usually changes\nmeaning: `while (cond);` turns the following block into an unconditional body,\nand a stray `;` after an `if` header detaches the intended branch. It is\nalmost always an accidental extra semicolon or a loop body that should have\nbeen a block. Remove it, or replace it with the block that was intended. The\nsemicolons in a `for (;;)` header are loop syntax, not statements, and are\nnever reported. A real `null;` expression statement is not an empty statement.",
+    "docs": "Flags stray empty statements (a lone `;`).\n\nA solitary semicolon does nothing, and where it slips in it usually changes\nmeaning: `while (cond);` turns the following block into an unconditional body,\nand a stray `;` after an `if` header detaches the intended branch. It is\nalmost always an accidental extra semicolon or a loop body that should have\nbeen a block. Remove it, or replace it with the block that was intended. The\nsemicolons in a `for (;;)` header are loop syntax, not statements, and are\nnever reported. A real `null;` expression statement is not an empty statement.\n\nThis includes empty statements inside anonymous functions.",
     "domains": [],
     "examples": {
       "bad": "void f1() {\n  ;\n}\n\nvoid f2() {\n  print('x');\n  ;\n}\n\nvoid f3(bool x) {\n  while (x) ;\n}\n\nvoid f4() {\n  for (var i = 0; i < 1; i++) ;\n}\n\nvoid f5(bool x) {\n  if (x) ;\n}\n\nvoid f6() {\n  print('a');\n  ;\n  print('b');\n}",

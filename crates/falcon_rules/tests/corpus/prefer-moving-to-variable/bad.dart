@@ -1,9 +1,9 @@
 // Test cases for prefer-moving-to-variable rule
-// violations: same non-trivial expression used to initialize two different variables
+// Repeated property/getter chains can share a local binding.
 
-void duplicateComputation() {
-  final a = calculateExpensive(10);
-  final b = calculateExpensive(10); /* expect: prefer-moving-to-variable */
+void duplicateGetterChain() {
+  final a = service.configuration.value;
+  final b = service.configuration.value; /* expect: prefer-moving-to-variable */
 }
 
 void duplicateFieldAccess() {
@@ -13,18 +13,25 @@ void duplicateFieldAccess() {
 
 class Processor {
   void process() {
-    final first = getResult(data);
-    final second = getResult(data); /* expect: prefer-moving-to-variable */
+    final first = this.data.value;
+    final second = this.data.value; /* expect: prefer-moving-to-variable */
     combine(first, second);
   }
 }
 
-void duplicateBinaryExpression() {
-  final x = a + b;
-  final y = a + b; /* expect: prefer-moving-to-variable */
+void duplicateNullAwareChain() {
+  final x = obj?.property?.value;
+  final y = obj?.property?.value; /* expect: prefer-moving-to-variable */
 }
 
-void duplicateMethodCall() {
-  final v1 = list.where((e) => e > 5).toList();
-  final v2 = list.where((e) => e > 5).toList(); /* expect: prefer-moving-to-variable */
+void duplicateAcrossReadOnlyDeclaration() {
+  final v1 = obj.property.value;
+  final unrelated = 42;
+  final v2 = obj.property.value; /* expect: prefer-moving-to-variable */
+}
+
+void duplicateAcrossPlainString() {
+  final before = obj.property.value;
+  final separator = ', ';
+  final after = obj.property.value; /* expect: prefer-moving-to-variable */
 }

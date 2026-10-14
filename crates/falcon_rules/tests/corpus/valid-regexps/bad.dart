@@ -10,5 +10,7 @@ void examples() {
   final h = RegExp('[z-a]'); /* expect: valid-regexps */
   final i = RegExp(r'\xG0'); /* expect: valid-regexps */
   final j = RegExp('a{3,2}'); /* expect: valid-regexps */
-  print([a, b, c, d, e, f, g, h, i, j]);
+  final k = RegExp(r'[z-a]'); /* expect: valid-regexps */
+  final l = RegExp(r'\d{3,2}'); /* expect: valid-regexps */
+  print([a, b, c, d, e, f, g, h, i, j, k, l]);
 }

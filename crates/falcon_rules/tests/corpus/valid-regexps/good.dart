@@ -12,5 +12,9 @@ void examples(String dynamicPattern) {
   final j = RegExp(r'(?:foo)*?'); // non-capturing group and lazy quantifier
   final k = RegExp('[]'); // ECMAScript empty character class
   final l = RegExp('[a-]'); // trailing hyphen is a literal, not a range
-  print([a, b, c, d, e, f, g, h, i, j, k, l]);
+  final m = RegExp(r'[a-' r'z]');
+  final n = RegExp(r'\d{1,' r'3}');
+  final o = RegExp('[a-' 'z]');
+  final p = RegExp(r'''[a-z]+''');
+  print([a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]);
 }

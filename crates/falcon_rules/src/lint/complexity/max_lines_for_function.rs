@@ -3,14 +3,15 @@
 //! Long functions are hard to reason about and test; extracting helpers keeps
 //! each unit focused. The rule measures a function's span from its declaration
 //! through the end of its body (in source lines) and reports at the declaration
-//! when the length exceeds the threshold. Only functions with a body are
-//! measured — abstract and external declarations are skipped.
+//! when the length exceeds the threshold. Operator bodies are included, while
+//! abstract/external declarations and nested functions or closures are not measured.
 //!
 //! ## Options
 //!
 //! `max_lines` (integer, default: 100) — flag functions/methods spanning more
 //! than this many lines.
 
+use super::traversal::for_each_declared_body;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
@@ -21,9 +22,9 @@ pub struct MaxLinesForFunction;
 impl Rule for MaxLinesForFunction {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
+        for_each_declared_body(program, ctx.source, &mut |_, _, span| {
+            check_function_lines(span, &mut diags, ctx);
+        });
         diags
     }
 }
@@ -39,16 +40,7 @@ fn max_lines_option(ctx: &AnalyzeContext) -> usize {
     .unwrap_or(100)
 }
 
-fn check_function_lines(
-    span: &Span,
-    has_body: bool,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
-    if !has_body {
-        return;
-    }
-
+fn check_function_lines(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     let start_line = line_of(ctx.source, span.start);
     let end_line = line_of(ctx.source, span.end);
     let lines = end_line - start_line + 1;
@@ -63,36 +55,5 @@ fn check_function_lines(
                 end: span.start,
             },
         ));
-    }
-}
-
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            check_function_lines(&f.span, f.body.is_some(), diags, ctx);
-        }
-        _ => {
-            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
-                scan_member(member, diags, ctx);
-            }
-        }
-    }
-}
-
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match member {
-        ClassMember::Method(m) => {
-            check_function_lines(&m.span, m.body.is_some(), diags, ctx);
-        }
-        ClassMember::Constructor(c) => {
-            check_function_lines(&c.span, c.body.is_some(), diags, ctx);
-        }
-        ClassMember::Getter(g) => {
-            check_function_lines(&g.span, g.body.is_some(), diags, ctx);
-        }
-        ClassMember::Setter(s) => {
-            check_function_lines(&s.span, s.body.is_some(), diags, ctx);
-        }
-        _ => {}
     }
 }

@@ -1,11 +1,12 @@
-//! Flags a non-trivial expression duplicated across local variable initializers
-//! in the same block.
+//! Flags repeated property/getter chains in local variable initializers.
 //!
-//! Repeating the same complex expression risks the copies drifting apart and
-//! recomputes the work; binding it to one variable names the value and evaluates
-//! it once. Within a block, the rule compares local-variable initializer source
-//! text (trivial literals and bare identifiers are ignored) and flags a repeat
-//! once its occurrence count reaches the threshold.
+//! Only chains rooted in an identifier, `this`, or `super` are candidates;
+//! calls, constructors, operators, awaits, and fresh collections must retain
+//! their separate evaluations. Getters are assumed to be observational reads.
+//! Initializer source text is compared within each statement list, with counts
+//! reset across non-declaration statements or potentially effectful initializers
+//! to avoid suggesting stale values after mutation. Late declarations are also
+//! barriers: their reads are deferred. Statement lists are checked independently.
 //!
 //! ## Options
 //!
@@ -13,6 +14,7 @@
 //! which a repeat is flagged; `2` flags the 2nd and later occurrences, `3` the
 //! 3rd and later. Values below `2` are clamped to `2`.
 
+use super::traversal::for_each_stmt_list;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -24,18 +26,13 @@ impl Rule for PreferMovingToVariable {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let threshold = allowed_duplicated_chains(ctx);
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx, threshold);
-        }
+        for_each_stmt_list(program, &mut |stmts| {
+            check_stmts(stmts, &mut diags, ctx, threshold);
+        });
         diags
     }
 }
 
-/// Read the `allowed_duplicated_chains` option (default 2). A duplicate is
-/// flagged once its 1-based occurrence index reaches this value, so the default
-/// flags the 2nd (and later) occurrences; `3` flags the 3rd and later.
-/// Malformed/missing → default. A value below 2 is clamped to 2 (the first
-/// occurrence can never be a duplicate).
 fn allowed_duplicated_chains(ctx: &AnalyzeContext) -> usize {
     crate::lint::options::usize(
         crate::lint::options::for_rule(ctx, "prefer-moving-to-variable"),
@@ -56,128 +53,53 @@ fn check_stmts(
     let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
 
     for stmt in stmts {
-        if let Stmt::LocalVar(lv) = stmt {
-            for decl in &lv.declarators {
-                if let Some(init) = &decl.initializer {
-                    // Skip trivial literals — only flag expressions worth extracting
-                    if is_trivial(init) {
-                        continue;
-                    }
-                    let src = expr_src(init, ctx.source);
-                    let occurrence = *counts.entry(src).and_modify(|c| *c += 1).or_insert(1);
-                    if occurrence >= threshold {
-                        let span = init.span();
-                        diags.push(ctx.diagnostic(
-                            "prefer-moving-to-variable",
-                            "Duplicate expression — extract to a shared variable",
-                            *span,
-                        ));
-                    }
+        let Stmt::LocalVar(lv) = stmt else {
+            counts.clear();
+            continue;
+        };
+        if lv.is_late {
+            counts.clear();
+            continue;
+        }
+        for decl in &lv.declarators {
+            let Some(init) = &decl.initializer else {
+                continue;
+            };
+            if let Expr::Field { object, .. } = init
+                && is_chain(object)
+            {
+                let src = expr_src(init, ctx.source);
+                let occurrence = *counts.entry(src).and_modify(|c| *c += 1).or_insert(1);
+                if occurrence >= threshold {
+                    diags.push(ctx.diagnostic(
+                        "prefer-moving-to-variable",
+                        "Duplicate expression — extract to a shared variable",
+                        *init.span(),
+                    ));
                 }
+            } else if !matches!(
+                init,
+                Expr::IntLit { .. }
+                    | Expr::DoubleLit { .. }
+                    | Expr::BoolLit { .. }
+                    | Expr::NullLit { .. }
+                    | Expr::Ident(_)
+                    | Expr::This { .. }
+                    | Expr::Super { .. }
+            ) && !matches!(init, Expr::StringLit(literal) if literal.interpolations.is_empty())
+            {
+                counts.clear();
             }
         }
     }
 }
 
-fn is_trivial(expr: &Expr) -> bool {
+fn is_chain(mut expr: &Expr) -> bool {
+    while let Expr::Field { object, .. } = expr {
+        expr = object;
+    }
     matches!(
         expr,
-        Expr::IntLit { .. }
-            | Expr::DoubleLit { .. }
-            | Expr::StringLit { .. }
-            | Expr::BoolLit { .. }
-            | Expr::NullLit { .. }
-            | Expr::Ident(_)
+        Expr::Ident(_) | Expr::This { .. } | Expr::Super { .. }
     )
-}
-
-fn scan_top(
-    decl: &TopLevelDecl,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    threshold: usize,
-) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            if let Some(body) = &f.body {
-                scan_body(body, diags, ctx, threshold);
-            }
-        }
-        _ => {
-            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
-                scan_member(member, diags, ctx, threshold);
-            }
-        }
-    }
-}
-
-fn scan_member(
-    member: &ClassMember,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    threshold: usize,
-) {
-    let body = match member {
-        ClassMember::Method(m) => m.body.as_ref(),
-        ClassMember::Constructor(c) => c.body.as_ref(),
-        ClassMember::Getter(g) => g.body.as_ref(),
-        ClassMember::Setter(s) => s.body.as_ref(),
-        _ => None,
-    };
-    if let Some(b) = body {
-        scan_body(b, diags, ctx, threshold);
-    }
-}
-
-fn scan_body(
-    body: &FunctionBody,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    threshold: usize,
-) {
-    match body {
-        FunctionBody::Block(b) => {
-            check_stmts(&b.stmts, diags, ctx, threshold);
-            scan_stmts(&b.stmts, diags, ctx, threshold);
-        }
-        FunctionBody::Arrow(_, _) | FunctionBody::Native(_, _) => {}
-    }
-}
-
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, threshold: usize) {
-    for s in stmts {
-        scan_stmt(s, diags, ctx, threshold);
-    }
-}
-
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, threshold: usize) {
-    match stmt {
-        Stmt::Block(b) => {
-            check_stmts(&b.stmts, diags, ctx, threshold);
-            scan_stmts(&b.stmts, diags, ctx, threshold);
-        }
-        Stmt::If(i) => {
-            scan_stmt(&i.then_branch, diags, ctx, threshold);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx, threshold);
-            }
-        }
-        Stmt::While(w) => scan_stmt(&w.body, diags, ctx, threshold),
-        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx, threshold),
-        Stmt::For(f) => scan_stmt(&f.body, diags, ctx, threshold),
-        Stmt::TryCatch(tc) => {
-            check_stmts(&tc.body.stmts, diags, ctx, threshold);
-            scan_stmts(&tc.body.stmts, diags, ctx, threshold);
-            for catch in &tc.catches {
-                check_stmts(&catch.body.stmts, diags, ctx, threshold);
-                scan_stmts(&catch.body.stmts, diags, ctx, threshold);
-            }
-            if let Some(fin) = &tc.finally {
-                check_stmts(&fin.stmts, diags, ctx, threshold);
-                scan_stmts(&fin.stmts, diags, ctx, threshold);
-            }
-        }
-        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx, threshold),
-        _ => {}
-    }
 }

@@ -9,6 +9,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 
 #[derive(Default)]
 pub struct AvoidRedundantAsync;
@@ -17,26 +18,42 @@ impl Rule for AvoidRedundantAsync {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Function(func_decl) => {
-                    if let Some(diag) = check_function_async(func_decl, ctx) {
-                        diags.push(diag);
-                    }
-                }
-                _ => {
-                    for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
-                        if let ClassMember::Method(method_decl) = member
-                            && let Some(diag) = check_method_async(method_decl, ctx)
-                        {
-                            diags.push(diag);
-                        }
-                    }
-                }
-            }
+        AsyncDeclarations {
+            diags: &mut diags,
+            ctx,
         }
+        .visit_program(program);
 
         diags
+    }
+}
+
+struct AsyncDeclarations<'a, 'ctx> {
+    diags: &'a mut Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
+}
+
+impl Visitor for AsyncDeclarations<'_, '_> {
+    fn visit_expr(&mut self, _node: &Expr) {}
+
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        if !matches!(node, TopLevelDecl::Variable(_)) {
+            walk_top_level_decl(self, node);
+        }
+    }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        if let Some(diag) = check_function_async(node, self.ctx) {
+            self.diags.push(diag);
+        }
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) {
+        if let ClassMember::Method(method) = node
+            && let Some(diag) = check_method_async(method, self.ctx)
+        {
+            self.diags.push(diag);
+        }
     }
 }
 

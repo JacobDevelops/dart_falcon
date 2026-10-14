@@ -1,4 +1,4 @@
-//! Disallow statically known invalid `dart:core` regular expressions.
+//! Disallow statically known invalid `dart:core` regular expressions in single literals.
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel};
 use falcon_diagnostics::Diagnostic;
@@ -34,7 +34,7 @@ impl Collector<'_> {
         let Some(argument) = args.positional.first() else {
             return;
         };
-        if extractable_pattern(argument).is_some_and(|pattern| !valid_pattern(&pattern)) {
+        if extractable_pattern(argument).is_some_and(|pattern| !valid_pattern(pattern)) {
             let span = argument.span();
             self.diagnostics.push(self.ctx.diagnostic(
                 "valid-regexps",
@@ -65,34 +65,22 @@ impl Visitor for Collector<'_> {
     }
 }
 
-fn extractable_pattern(expr: &Expr) -> Option<String> {
+fn extractable_pattern(expr: &Expr) -> Option<&str> {
     let Expr::StringLit(node) = expr else {
         return None;
     };
     if !node.interpolations.is_empty() {
         return None;
     }
-    let raw = &node.raw;
-    let is_raw = raw.starts_with('r');
-    let prefix = usize::from(is_raw);
-    let rest = &raw[prefix..];
-    let quote = if rest.starts_with("'''") {
-        "'''"
-    } else if rest.starts_with("\"\"\"") {
-        "\"\"\""
-    } else if rest.starts_with('\'') {
-        "'"
-    } else if rest.starts_with('"') {
-        "\""
-    } else {
-        return None;
-    };
-    // Unterminated literals (parser error recovery) have no closing delimiter.
-    let content = rest.strip_prefix(quote)?.strip_suffix(quote)?;
-    if !is_raw && content.contains('\\') {
+    let literal = StringLitNode::delimiter(&node.raw)?;
+    // Adjacent literals retain inner delimiters in raw, but not in value.
+    if !literal.terminated || literal.content != node.value {
         return None;
     }
-    Some(content.to_string())
+    if !literal.is_raw && literal.content.contains('\\') {
+        return None;
+    }
+    Some(literal.content)
 }
 
 fn valid_pattern(pattern: &str) -> bool {

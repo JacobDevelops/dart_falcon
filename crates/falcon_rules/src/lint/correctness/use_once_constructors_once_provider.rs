@@ -6,255 +6,116 @@
 //! value a single time rather than rebuilding it on each read, which is the
 //! intended lifecycle for these providers; calling the constructor directly
 //! opts out of it. Calls already written as `Provider.once(...)` are accepted,
-//! and explicit `new`/`const` constructions are left alone.
+//! and explicit `new` constructions and explicit or implicit const contexts
+//! are left alone.
+//! Checks calls throughout declarations, including initializers, callbacks,
+//! collection literals, conditions, and nested call receivers.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_annotation, walk_class_member, walk_enum_decl, walk_expr, walk_field_decl,
+    walk_local_var, walk_pattern, walk_top_level_decl,
+};
 
 #[derive(Default)]
 pub struct UseOnceConstructorsOnceProvider;
 
 impl Rule for UseOnceConstructorsOnceProvider {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
-        diags
+        let mut collector = Collector {
+            diags: Vec::new(),
+            ctx,
+            in_const: false,
+        };
+        collector.visit_program(program);
+        collector.diags
     }
 }
 
 const ONCE_PROVIDERS: &[&str] = &["OnceProvider", "FutureProvider", "StateProvider"];
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Variable(v) => {
-            for d in &v.declarators {
-                if let Some(init) = &d.initializer {
-                    scan_expr(init, diags, ctx);
-                }
-            }
-        }
-        TopLevelDecl::Function(f) => {
-            if let Some(body) = &f.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        _ => {
-            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
-                scan_member(member, diags, ctx);
-            }
-        }
-    }
+struct Collector<'a> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'a>,
+    in_const: bool,
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match member {
-        ClassMember::Method(m) => {
-            if let Some(body) = &m.body {
-                scan_body(body, diags, ctx);
-            }
+impl Visitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr) {
+        if !self.in_const
+            && let Expr::Call { callee, .. } = node
+            && let Expr::Ident(id) = callee.as_ref()
+            && ONCE_PROVIDERS.contains(&id.name.as_str())
+        {
+            self.diags.push(self.ctx.diagnostic(
+                "use-once-constructors-once-provider",
+                "OnceProvider and similar Riverpod providers should use .once() factory method",
+                *node.span(),
+            ));
         }
-        ClassMember::Constructor(c) => {
-            if let Some(body) = &c.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        ClassMember::Getter(g) => {
-            if let Some(body) = &g.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        ClassMember::Setter(s) => {
-            if let Some(body) = &s.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        _ => {}
+        let previous = self.in_const;
+        self.in_const |= matches!(
+            node,
+            Expr::New { is_const: true, .. }
+                | Expr::List { is_const: true, .. }
+                | Expr::Set { is_const: true, .. }
+                | Expr::Map { is_const: true, .. }
+                | Expr::Record { is_const: true, .. }
+        );
+        walk_expr(self, node);
+        self.in_const = previous;
     }
-}
 
-fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match body {
-        FunctionBody::Block(b) => scan_stmts(&b.stmts, diags, ctx),
-        FunctionBody::Arrow(e, _) => scan_expr(e, diags, ctx),
-        FunctionBody::Native(_, _) => {}
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        let previous = self.in_const;
+        self.in_const |= node.keyword == VarKeyword::Const;
+        walk_local_var(self, node);
+        self.in_const = previous;
     }
-}
 
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for s in stmts {
-        scan_stmt(s, diags, ctx);
+    fn visit_field_decl(&mut self, node: &FieldDecl) {
+        let previous = self.in_const;
+        self.in_const |= node.keyword == VarKeyword::Const;
+        walk_field_decl(self, node);
+        self.in_const = previous;
     }
-}
 
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::Expr(e) => scan_expr(&e.expr, diags, ctx),
-        Stmt::LocalVar(lv) => {
-            for d in &lv.declarators {
-                if let Some(init) = &d.initializer {
-                    scan_expr(init, diags, ctx);
-                }
-            }
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        let previous = self.in_const;
+        if let TopLevelDecl::Variable(variable) = node {
+            self.in_const |= variable.keyword == VarKeyword::Const;
         }
-        Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx),
-        Stmt::If(i) => {
-            scan_stmt(&i.then_branch, diags, ctx);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx);
-            }
-        }
-        Stmt::While(w) => scan_stmt(&w.body, diags, ctx),
-        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx),
-        Stmt::For(f) => scan_stmt(&f.body, diags, ctx),
-        Stmt::Switch(sw) => {
-            for case in &sw.cases {
-                scan_stmts(&case.body, diags, ctx);
-            }
-        }
-        Stmt::TryCatch(tc) => {
-            scan_stmts(&tc.body.stmts, diags, ctx);
-            for catch in &tc.catches {
-                scan_stmts(&catch.body.stmts, diags, ctx);
-            }
-            if let Some(fin) = &tc.finally {
-                scan_stmts(&fin.stmts, diags, ctx);
-            }
-        }
-        Stmt::Return(r) => {
-            if let Some(v) = &r.value {
-                scan_expr(v, diags, ctx);
-            }
-        }
-        _ => {}
+        walk_top_level_decl(self, node);
+        self.in_const = previous;
     }
-}
 
-fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match expr {
-        // `new`/`const` constructions are never provider calls themselves, but
-        // their arguments can contain one.
-        Expr::New { args, .. } => {
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx);
-            }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx);
-            }
-        }
-        Expr::Call { callee, args, .. } => {
-            check_once_provider_call(callee, expr, args, diags, ctx);
-            // Don't scan the callee recursively to avoid false positives on .once() calls
-            for arg in &args.positional {
-                scan_expr(arg, diags, ctx);
-            }
-            for named in &args.named {
-                scan_expr(&named.value, diags, ctx);
-            }
-        }
-        Expr::Field { object, .. } => {
-            scan_expr(object, diags, ctx);
-        }
-        Expr::Binary { left, right, .. } => {
-            scan_expr(left, diags, ctx);
-            scan_expr(right, diags, ctx);
-        }
-        Expr::Unary { operand, .. } => scan_expr(operand, diags, ctx),
-        Expr::PostfixIncDec { operand, .. } => scan_expr(operand, diags, ctx),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            scan_expr(condition, diags, ctx);
-            scan_expr(then_expr, diags, ctx);
-            scan_expr(else_expr, diags, ctx);
-        }
-        Expr::Assign { value, .. } => scan_expr(value, diags, ctx),
-        Expr::Is { expr: e, .. } => scan_expr(e, diags, ctx),
-        Expr::As { expr: e, .. } => scan_expr(e, diags, ctx),
-        Expr::Cascade {
-            object, sections, ..
-        } => {
-            scan_expr(object, diags, ctx);
-            for section in sections {
-                scan_cascade_section(section, diags, ctx);
-            }
-        }
-        Expr::Index { object, index, .. } => {
-            scan_expr(object, diags, ctx);
-            scan_expr(index, diags, ctx);
-        }
-        Expr::Await { expr: e, .. } => scan_expr(e, diags, ctx),
-        Expr::Throw { expr: e, .. } => scan_expr(e, diags, ctx),
-        Expr::NullAssert { operand, .. } => scan_expr(operand, diags, ctx),
-        Expr::Switch { subject, arms, .. } => {
-            scan_expr(subject, diags, ctx);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    scan_expr(guard, diags, ctx);
-                }
-                scan_expr(&arm.body, diags, ctx);
-            }
-        }
-        _ => {}
+    fn visit_annotation(&mut self, node: &Annotation) {
+        let previous = self.in_const;
+        self.in_const = true;
+        walk_annotation(self, node);
+        self.in_const = previous;
     }
-}
 
-fn scan_cascade_section(
-    section: &CascadeSection,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
-    for op in &section.ops {
-        match op {
-            CascadeOp::Field { .. } => {}
-            CascadeOp::Index { index, .. } => {
-                scan_expr(index, diags, ctx);
-            }
-            CascadeOp::Call(_, _, args) => {
-                for arg in &args.positional {
-                    scan_expr(arg, diags, ctx);
-                }
-                for named in &args.named {
-                    scan_expr(&named.value, diags, ctx);
-                }
-            }
-            CascadeOp::Assign(_, _, value) => {
-                scan_expr(value, diags, ctx);
-            }
-        }
+    fn visit_pattern(&mut self, node: &Pattern) {
+        let previous = self.in_const;
+        self.in_const |= matches!(node, Pattern::Const(_));
+        walk_pattern(self, node);
+        self.in_const = previous;
     }
-}
 
-/// Check if a method call (e.g., `OnceProvider.once(...)` or `OnceProvider(...)`) is properly using `.once()`
-fn check_once_provider_call(
-    callee: &Expr,
-    expr: &Expr,
-    _args: &ArgList,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
-    match callee {
-        // Direct call: OnceProvider(...)
-        Expr::Ident(id) => {
-            if is_once_provider_name(&id.name) {
-                diags.push(ctx.diagnostic(
-                    "use-once-constructors-once-provider",
-                    "OnceProvider and similar Riverpod providers should use .once() factory method",
-                    *expr.span(),
-                ));
-            }
-        }
-        // Method call: OnceProvider.once(...) or OnceProvider<T>.once(...)
-        Expr::Field { field, .. } if field.name != "once" => {}
-        _ => {}
+    fn visit_enum_decl(&mut self, node: &EnumDecl) {
+        let previous = self.in_const;
+        self.in_const = true;
+        walk_enum_decl(self, node);
+        self.in_const = previous;
     }
-}
 
-fn is_once_provider_name(name: &str) -> bool {
-    ONCE_PROVIDERS.contains(&name)
+    fn visit_class_member(&mut self, node: &ClassMember) {
+        let previous = self.in_const;
+        self.in_const = false;
+        walk_class_member(self, node);
+        self.in_const = previous;
+    }
 }
