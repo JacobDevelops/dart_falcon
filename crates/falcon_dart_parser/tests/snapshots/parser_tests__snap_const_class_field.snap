@@ -70,7 +70,7 @@ Class(
                                 },
                             ),
                             span: Span {
-                                start: 15,
+                                start: 32,
                                 end: 46,
                             },
                         },
@@ -134,7 +134,7 @@ Class(
                                 ),
                             ),
                             span: Span {
-                                start: 48,
+                                start: 68,
                                 end: 103,
                             },
                         },

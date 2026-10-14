@@ -241,7 +241,8 @@ setterDeclaration
 ```
 operatorDeclaration
   : annotation* ( 'external' )?
-    returnType? 'operator' overridableOperator formalParameterList functionBody
+    returnType? 'operator' overridableOperator formalParameterList
+    ( 'async' | 'async*' | 'sync*' )? functionBody
   ;
 
 overridableOperator
@@ -608,6 +609,9 @@ variableDeclaratorList : variableDeclarator ( ',' variableDeclarator )* ;
 variableDeclarator : identifier ( '=' expression )? ;
 returnType : type | 'void' ;
 ```
+
+Variable-declarator spans start at their own identifier and end after their initializer,
+independent of the enclosing field, top-level variable, or local declaration.
 
 ---
 

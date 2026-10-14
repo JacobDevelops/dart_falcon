@@ -62,7 +62,7 @@ Class(
                             },
                             initializer: None,
                             span: Span {
-                                start: 13,
+                                start: 26,
                                 end: 27,
                             },
                         },
@@ -114,7 +114,7 @@ Class(
                             },
                             initializer: None,
                             span: Span {
-                                start: 29,
+                                start: 42,
                                 end: 43,
                             },
                         },

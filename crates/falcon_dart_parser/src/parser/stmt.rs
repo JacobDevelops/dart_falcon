@@ -1,7 +1,7 @@
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
 
-use super::{DeclaratorSpan, Parser, expr::Brackets};
+use super::{Parser, expr::Brackets};
 
 impl<'src> Parser<'src> {
     pub(super) fn parse_block(&mut self) -> Block {
@@ -354,7 +354,7 @@ impl<'src> Parser<'src> {
         first_name: Identifier,
     ) -> (LocalVarDecl, Option<Expr>, Vec<Expr>) {
         let decl_start = first_name.span.start;
-        let declarators = self.parse_declarators(first_name, DeclaratorSpan::Own);
+        let declarators = self.parse_declarators(first_name);
         let span = self.span_from(decl_start);
         self.expect(TokenKind::Semicolon);
         let cond = self.parse_optional_expr_before(TokenKind::Semicolon);
@@ -697,7 +697,7 @@ impl<'src> Parser<'src> {
                         span: p.span_from(start),
                     }))
                 } else if p.at_any(&[TokenKind::Eq, TokenKind::Semicolon, TokenKind::Comma]) {
-                    let declarators = p.parse_declarators(name, DeclaratorSpan::Own);
+                    let declarators = p.parse_declarators(name);
                     // A colon exposes a ternary misread as a nullable type.
                     if !p.at_any(&[TokenKind::Semicolon, TokenKind::RBrace, TokenKind::Eof]) {
                         return None;
@@ -788,7 +788,7 @@ impl<'src> Parser<'src> {
         let var_type = self.try_parse_type_followed_by(TokenKind::is_identifier_like);
 
         let name = self.expect_ident();
-        let declarators = self.parse_declarators(name, DeclaratorSpan::Own);
+        let declarators = self.parse_declarators(name);
         self.eat(TokenKind::Semicolon);
         Stmt::LocalVar(LocalVarDecl {
             keyword: Self::var_keyword(is_const, is_final),

@@ -1,7 +1,7 @@
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
 
-use super::{DeclaratorSpan, ParseError, Parser};
+use super::{ParseError, Parser};
 use crate::lexer::{Lexer, filter_trivia, scan::interp_close};
 
 #[derive(Clone, Copy, Default)]
@@ -719,7 +719,8 @@ impl<'src> Parser<'src> {
             op
         };
         let params = self.parse_formal_param_list();
-        let body = self.parse_function_body(AsyncMarker::Sync);
+        let marker = self.parse_async_marker();
+        let body = self.parse_function_body(marker);
         OperatorDecl {
             annotations,
             is_external,
@@ -1027,7 +1028,7 @@ impl<'src> Parser<'src> {
             is_late,
             ..
         } = modifiers;
-        let declarators = self.parse_declarators(name, DeclaratorSpan::Member(start));
+        let declarators = self.parse_declarators(name);
         self.expect(TokenKind::Semicolon);
         FieldDecl {
             annotations,
@@ -1495,7 +1496,7 @@ impl<'src> Parser<'src> {
             }));
         }
 
-        let declarators = self.parse_declarators(name, DeclaratorSpan::Member(start));
+        let declarators = self.parse_declarators(name);
         self.eat(TokenKind::Semicolon);
         Some(TopLevelDecl::Variable(TopLevelVarDecl {
             annotations,

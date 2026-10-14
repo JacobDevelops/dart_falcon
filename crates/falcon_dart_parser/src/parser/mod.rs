@@ -77,11 +77,7 @@ impl Default for Ctx<'_> {
 pub(super) struct Checkpoint {
     pos: usize,
     errors: usize,
-}
-
-pub(super) enum DeclaratorSpan {
-    Member(usize),
-    Own,
+    depth_limit_hit: bool,
 }
 
 pub(super) struct Parser<'src> {
@@ -175,6 +171,7 @@ impl<'src> Parser<'src> {
         Checkpoint {
             pos: self.pos,
             errors: self.errors.len(),
+            depth_limit_hit: self.depth_limit_hit,
         }
     }
 
@@ -182,6 +179,7 @@ impl<'src> Parser<'src> {
     pub(super) fn restore(&mut self, checkpoint: Checkpoint) {
         self.rewind_to(checkpoint.pos);
         self.errors.truncate(checkpoint.errors);
+        self.depth_limit_hit = checkpoint.depth_limit_hit;
     }
 
     #[inline]
@@ -382,18 +380,11 @@ impl<'src> Parser<'src> {
         }
     }
 
-    pub(super) fn parse_declarators(
-        &mut self,
-        first: Identifier,
-        span_policy: DeclaratorSpan,
-    ) -> Vec<VarDeclarator> {
+    pub(super) fn parse_declarators(&mut self, first: Identifier) -> Vec<VarDeclarator> {
         let mut vars = Vec::new();
         let mut name = first;
         loop {
-            let start = match span_policy {
-                DeclaratorSpan::Member(start) => start,
-                DeclaratorSpan::Own => name.span.start,
-            };
+            let start = name.span.start;
             let initializer = self.eat(TokenKind::Eq).map(|_| self.parse_expr());
             vars.push(VarDeclarator {
                 name,
@@ -703,5 +694,44 @@ impl<'src> Parser<'src> {
             declarations,
             span: self.span_from(start),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speculative_depth_limit_does_not_suppress_real_error() {
+        let mut parser = Parser::new(Lexer::new("x").tokenize(), "x");
+        parser.depth = Parser::MAX_PARSE_DEPTH;
+        let result: Option<()> = parser.speculate(|parser| {
+            parser.parse_expr();
+            None
+        });
+        assert!(result.is_none());
+        assert!(parser.errors.is_empty());
+        assert!(!parser.depth_limit_hit);
+        parser.parse_expr();
+        assert_eq!(
+            parser
+                .errors
+                .iter()
+                .filter(|error| error.message == "nesting too deep")
+                .count(),
+            1
+        );
+        let checkpoint = parser.checkpoint();
+        parser.depth_limit_hit = false;
+        parser.restore(checkpoint);
+        parser.parse_expr();
+        assert_eq!(
+            parser
+                .errors
+                .iter()
+                .filter(|error| error.message == "nesting too deep")
+                .count(),
+            1
+        );
     }
 }

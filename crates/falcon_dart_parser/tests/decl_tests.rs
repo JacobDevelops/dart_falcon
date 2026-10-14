@@ -643,3 +643,70 @@ fn test_metadata_on_record_type_field_in_param() {
     let (_prog, errors) = parse("const meta = 0;\nvoid f((int, @meta String) r) {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
+
+#[test]
+fn test_operator_consumes_body_markers() {
+    for marker in ["async", "async*", "sync*"] {
+        let statement = if marker.ends_with('*') {
+            "yield o;"
+        } else {
+            "await o;"
+        };
+        let source = format!("class C {{ operator +(o) {marker} {{ {statement} }} }}");
+        let (program, errors) = parse(&source);
+        assert!(errors.is_empty(), "{marker}: {errors:?}");
+        let ClassMember::Operator(operator) = &only_class(&program).members[0] else {
+            panic!("expected operator");
+        };
+        let Some(FunctionBody::Block(block)) = &operator.body else {
+            panic!("expected operator block");
+        };
+        assert_eq!(block.stmts.len(), 1);
+        if marker.ends_with('*') {
+            assert!(matches!(block.stmts[0], Stmt::Yield(_)));
+        } else {
+            assert!(matches!(
+                &block.stmts[0],
+                Stmt::Expr(ExprStmt {
+                    expr: Expr::Await { .. },
+                    ..
+                })
+            ));
+        }
+        assert_eq!(
+            &source[operator.span.start..operator.span.end],
+            &source[10..source.len() - 1]
+        );
+    }
+}
+
+#[test]
+fn test_declarator_spans_start_at_each_name() {
+    for source in [
+        "int first = 1, second = 2;",
+        "final first = 1, second = 2;",
+        "class C { int first = 1, second = 2; }",
+        "class C { final first = 1, second = 2; }",
+    ] {
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+        let declarators = match &program.declarations[0] {
+            TopLevelDecl::Variable(variable) => &variable.declarators,
+            TopLevelDecl::Class(class) => {
+                let ClassMember::Field(field) = &class.members[0] else {
+                    panic!("expected field");
+                };
+                &field.declarators
+            }
+            other => panic!("expected variable or class, got {other:?}"),
+        };
+        assert_eq!(declarators.len(), 2);
+        for (declarator, expected) in declarators.iter().zip(["first = 1", "second = 2"]) {
+            assert_eq!(declarator.span.start, declarator.name.span.start);
+            assert_eq!(
+                &source[declarator.span.start..declarator.span.end],
+                expected
+            );
+        }
+    }
+}
