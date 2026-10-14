@@ -1610,14 +1610,92 @@
         "file": null,
         "line": 36,
         "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 41,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 46,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 51,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 56,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 63,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 70,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 18,
+        "file": null,
+        "line": 79,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 87,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 98,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 107,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 122,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 136,
+        "message": "Duplicate expression — extract to a shared variable"
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 141,
+        "message": "Duplicate expression — extract to a shared variable"
       }
     ],
-    "docs": "Flags repeated property/getter chains in local variable initializers.\n\nOnly chains rooted in an identifier, `this`, or `super` are candidates;\ncalls, constructors, operators, awaits, and fresh collections must retain\ntheir separate evaluations. Getters are assumed to be observational reads.\nInitializer source text is compared within each statement list, with counts\nreset across non-declaration statements or potentially effectful initializers\nto avoid suggesting stale values after mutation. Late declarations are also\nbarriers: their reads are deferred. Statement lists are checked independently.\n\n## Options\n\n`allowed_duplicated_chains` (integer, default: 2) — the occurrence index at\nwhich a repeat is flagged; `2` flags the 2nd and later occurrences, `3` the\n3rd and later. Values below `2` are clamped to `2`.",
+    "docs": "Flags repeated property/getter chains in local variable initializers.\n\nChains rooted in an identifier, `this`, or `super`, including receiver-based\nmethod calls, are candidates. Receiverless calls, constructors and fresh\ncollections retain their separate evaluations. Initializer source text is\ncompared within each statement list. Mutation and deferred late reads reset\ncounts so a shared variable does not retain a stale value.\nUnresolved `Type.member` calls remain candidates because constructors and static methods are ambiguous.\n\n## Options\n\n`allowed_duplicated_chains` (integer, default: 2) — the occurrence index at\nwhich a repeat is flagged; `2` flags the 2nd and later occurrences, `3` the\n3rd and later. Values below `2` are clamped to `2`.",
     "domains": [],
     "examples": {
-      "bad": "// Test cases for prefer-moving-to-variable rule\n// Repeated property/getter chains can share a local binding.\n\nvoid duplicateGetterChain() {\n  final a = service.configuration.value;\n  final b = service.configuration.value;\n}\n\nvoid duplicateFieldAccess() {\n  final x = obj.property.value;\n  final y = obj.property.value;\n}\n\nclass Processor {\n  void process() {\n    final first = this.data.value;\n    final second = this.data.value;\n    combine(first, second);\n  }\n}\n\nvoid duplicateNullAwareChain() {\n  final x = obj?.property?.value;\n  final y = obj?.property?.value;\n}\n\nvoid duplicateAcrossReadOnlyDeclaration() {\n  final v1 = obj.property.value;\n  final unrelated = 42;\n  final v2 = obj.property.value;\n}\n\nvoid duplicateAcrossPlainString() {\n  final before = obj.property.value;\n  final separator = ', ';\n  final after = obj.property.value;\n}",
+      "bad": "// Test cases for prefer-moving-to-variable rule\n// Repeated property/getter chains can share a local binding.\n\nvoid duplicateGetterChain() {\n  final a = service.configuration.value;\n  final b = service.configuration.value;\n}\n\nvoid duplicateFieldAccess() {\n  final x = obj.property.value;\n  final y = obj.property.value;\n}\n\nclass Processor {\n  void process() {\n    final first = this.data.value;\n    final second = this.data.value;\n    combine(first, second);\n  }\n}\n\nvoid duplicateNullAwareChain() {\n  final x = obj?.property?.value;\n  final y = obj?.property?.value;\n}\n\nvoid duplicateAcrossReadOnlyDeclaration() {\n  final v1 = obj.property.value;\n  final unrelated = 42;\n  final v2 = obj.property.value;\n}\n\nvoid duplicateAcrossPlainString() {\n  final before = obj.property.value;\n  final separator = ', ';\n  final after = obj.property.value;\n}\n\nvoid duplicateMethodChain() {\n  final chain1 = obj.method().chain().result;\n  final chain2 = obj.method().chain().result;\n}\n\nvoid duplicateReceiverInvocation() {\n  final filtered1 = list.where((e) => e > 5).toList();\n  final filtered2 = list.where((e) => e > 5).toList();\n}\n\nvoid duplicateThemeLookup() {\n  final first = Theme.of(context).textTheme;\n  final second = Theme.of(context).textTheme;\n}\n\nvoid duplicateReceiverCall() {\n  final first = service.nextValue();\n  final second = service.nextValue();\n}\n\nvoid unrelatedNonLateName() {\n  final shared = 1;\n  final first = o.s;\n  final unrelated = shared;\n  final second = o.s;\n}\n\nvoid pureLateRead() {\n  late final m = 1;\n  final first = o.s;\n  final unrelated = m;\n  final second = o.s;\n}\n\nclass StaticLookup {\n  static Object of(Object context) => context;\n}\n\nvoid duplicateKnownStaticMethod(Object context) {\n  final first = StaticLookup.of(context);\n  final second = StaticLookup.of(context);\n}\n\nvoid capturedLateShadowedByParameter() {\n  late final m = mutate();\n  void inner(int m) {\n    final a = o.s;\n    final b = m;\n    final c = o.s;\n  }\n  inner(1);\n}\n\nvoid capturedLateShadowedByLocal() {\n  late final m = mutate();\n  final inner = () {\n    final m = 1;\n    final a = o.s;\n    final b = m;\n    final c = o.s;\n  };\n  inner();\n}\n\nvoid creatingClosureDoesNotReadLate() {\n  late final m = mutate();\n  final a = o.s;\n  final inner = () => m;\n  final c = o.s;\n}\n\nvoid lateSwitchCaseScopes(int value) {\n  switch (value) {\n    case 0:\n      late final m = mutate();\n      final a = o.s;\n      final b = m;\n      final c = o.s;\n      break;\n    default:\n      final m = 1;\n      final a = o.s;\n      final b = m;\n      final c = o.s;\n  }\n}\n\nvoid lateTryCatchFinallyScopes() {\n  try {\n    late final m = mutate();\n    final a = o.s;\n    final b = m;\n    final c = o.s;\n  } catch (error) {\n    final m = 1;\n    final a = o.s;\n    final b = m;\n    final c = o.s;\n  } finally {\n    final m = 1;\n    final a = o.s;\n    final b = m;\n    final c = o.s;\n  }\n}",
       "crossFile": null,
-      "good": "// Test cases for prefer-moving-to-variable rule\n// No violations: unsupported initializers or chains separated by mutation barriers.\n\nvoid distinctComputations() {\n  final a = calculateExpensive(10);\n  final b = calculateExpensive(20);\n}\n\nvoid singleUse() {\n  final result = getResult(data);\n  print(result);\n}\n\n// Trivial literals are not flagged\nvoid trivialLiterals() {\n  final x = 42;\n  final y = 42;\n  final s1 = \"hello\";\n  final s2 = \"hello\";\n}\n\nclass Processor {\n  void process() {\n    final first = getResult(dataA);\n    final second = getResult(dataB);\n    combine(first, second);\n  }\n}\n\n// Only one assignment of complex expression\nvoid singleComplexAssignment() {\n  final x = obj.method().chain().result;\n  print(x);\n}\n\n// Identifiers (trivial) don't trigger violation\nvoid identifierDuplicates() {\n  final a = variable1;\n  final b = variable1;\n}\n\n// Different chained calls\nvoid differentChains() {\n  final c1 = obj.method1().result;\n  final c2 = obj.method2().result;\n}\n\nvoid separateConstructors() {\n  final first = Completer();\n  final second = Completer();\n  final namedFirst = Completer.sync();\n  final namedSecond = Completer.sync();\n}\n\nvoid separateCalls() {\n  final first = calculateExpensive(10);\n  final second = calculateExpensive(10);\n  final value1 = service.nextValue();\n  final value2 = service.nextValue();\n  final chain1 = obj.method().chain().result;\n  final chain2 = obj.method().chain().result;\n  final filtered1 = list.where((e) => e > 5).toList();\n  final filtered2 = list.where((e) => e > 5).toList();\n}\n\nFuture<void> separateAwaits() async {\n  final first = await service.load();\n  final second = await service.load();\n}\n\nvoid freshCollections() {\n  final list1 = <int>[];\n  final list2 = <int>[];\n  final map1 = <String, int>{};\n  final map2 = <String, int>{};\n  final set1 = <int>{};\n  final set2 = <int>{};\n  final completers1 = [Completer()];\n  final completers2 = [Completer()];\n}\n\nvoid separateOperators() {\n  final first = a + b;\n  final second = a + b;\n}\n\nvoid changingState() {\n  final before = notifier.state;\n  notifier.state = nextState;\n  final after = notifier.state;\n}\n\nvoid changingThroughCall() {\n  final before = LoggerService.instance;\n  configureLogger();\n  final after = LoggerService.instance;\n}\n\nvoid effectfulInitializer() {\n  final before = notifier.state;\n  final mutation = notifier.refresh();\n  final after = notifier.state;\n}\n\nFuture<void> stateAcrossAwait() async {\n  final before = notifier.state;\n  await refresh();\n  final after = notifier.state;\n}\n\nvoid nestedMutation() {\n  final before = notifier.state;\n  if (condition) {\n    notifier.state = nextState;\n  }\n  final after = notifier.state;\n}\n\nvoid mutatedInSameDeclaration() {\n  final before = notifier.state,\n      mutation = notifier.refresh(),\n      after = notifier.state;\n}\n\nvoid reboundRoot() {\n  final before = notifier.state;\n  notifier = nextNotifier;\n  final after = notifier.state;\n}\n\nfinal repeatedConstructorsInCallback = () {\n  final first = Completer();\n  final second = Completer();\n};\n\nFuture<void> stateAcrossAwaitInitializer() async {\n  final before = notifier.state;\n  final loaded = await refresh();\n  final after = notifier.state;\n}\n\nvoid deferredReads() {\n  final before = notifier.state;\n  late final after = notifier.state;\n  notifier.state = nextState;\n  use(before, after);\n}\n\nvoid separateDeferredReads() {\n  late final before = notifier.state;\n  late final after = notifier.state;\n  use(before);\n  notifier.state = nextState;\n  use(after);\n}\n\nvoid deferredDeclarationBarrier() {\n  final before = notifier.state;\n  late final deferred = notifier.state;\n  final after = notifier.state;\n}\n\nvoid interpolatedInitializerBarrier() {\n  final before = notifier.state;\n  final text = '${notifier.refresh()}';\n  final after = notifier.state;\n}"
+      "good": "import 'dart:async';\nimport 'dart:core';\nimport 'dart:core' as core;\n\n// Test cases for prefer-moving-to-variable rule\n// No violations: unsupported initializers or chains separated by mutation barriers.\n\nvoid distinctComputations() {\n  final a = calculateExpensive(10);\n  final b = calculateExpensive(20);\n}\n\nvoid singleUse() {\n  final result = getResult(data);\n  print(result);\n}\n\n// Trivial literals are not flagged\nvoid trivialLiterals() {\n  final x = 42;\n  final y = 42;\n  final s1 = \"hello\";\n  final s2 = \"hello\";\n}\n\nclass Processor {\n  void process() {\n    final first = getResult(dataA);\n    final second = getResult(dataB);\n    combine(first, second);\n  }\n}\n\n// Only one assignment of complex expression\nvoid singleComplexAssignment() {\n  final x = obj.method().chain().result;\n  print(x);\n}\n\n// Identifiers (trivial) don't trigger violation\nvoid identifierDuplicates() {\n  final a = variable1;\n  final b = variable1;\n}\n\n// Different chained calls\nvoid differentChains() {\n  final c1 = obj.method1().result;\n  final c2 = obj.method2().result;\n}\n\nvoid separateConstructors() {\n  final first = Completer();\n  final second = Completer();\n  final namedFirst = Completer.sync();\n  final namedSecond = Completer.sync();\n}\n\nvoid separateCalls() {\n  final first = calculateExpensive(10);\n  final second = calculateExpensive(10);\n}\n\nFuture<void> separateAwaits() async {\n  final first = await service.load();\n  final second = await service.load();\n}\n\nvoid freshCollections() {\n  final list1 = <int>[];\n  final list2 = <int>[];\n  final map1 = <String, int>{};\n  final map2 = <String, int>{};\n  final set1 = <int>{};\n  final set2 = <int>{};\n  final completers1 = [Completer()];\n  final completers2 = [Completer()];\n}\n\nvoid separateOperators() {\n  final first = a + b;\n  final second = a + b;\n}\n\nvoid changingState() {\n  final before = notifier.state;\n  notifier.state = nextState;\n  final after = notifier.state;\n}\n\nvoid changingThroughCall() {\n  final before = LoggerService.instance;\n  configureLogger();\n  final after = LoggerService.instance;\n}\n\nvoid effectfulInitializer() {\n  final before = notifier.state;\n  final mutation = notifier.refresh();\n  final after = notifier.state;\n}\n\nFuture<void> stateAcrossAwait() async {\n  final before = notifier.state;\n  await refresh();\n  final after = notifier.state;\n}\n\nvoid nestedMutation() {\n  final before = notifier.state;\n  if (condition) {\n    notifier.state = nextState;\n  }\n  final after = notifier.state;\n}\n\nvoid mutatedInSameDeclaration() {\n  final before = notifier.state,\n      mutation = notifier.refresh(),\n      after = notifier.state;\n}\n\nvoid reboundRoot() {\n  final before = notifier.state;\n  notifier = nextNotifier;\n  final after = notifier.state;\n}\n\nfinal repeatedConstructorsInCallback = () {\n  final first = Completer();\n  final second = Completer();\n};\n\nFuture<void> stateAcrossAwaitInitializer() async {\n  final before = notifier.state;\n  final loaded = await refresh();\n  final after = notifier.state;\n}\n\nvoid deferredReads() {\n  final before = notifier.state;\n  late final after = notifier.state;\n  notifier.state = nextState;\n  use(before, after);\n}\n\nvoid separateDeferredReads() {\n  late final before = notifier.state;\n  late final after = notifier.state;\n  use(before);\n  notifier.state = nextState;\n  use(after);\n}\n\nvoid deferredDeclarationBarrier() {\n  final before = notifier.state;\n  late final deferred = notifier.state;\n  final after = notifier.state;\n}\n\nvoid interpolatedInitializerBarrier() {\n  final before = notifier.state;\n  final text = '${notifier.refresh()}';\n  final after = notifier.state;\n}\n\nvoid lateReadAfterFirstChain() {\n  late final m = mutate();\n  final a = o.s;\n  final b = m;\n  final c = o.s;\n}\n\nvoid lateReadInsideExpression() {\n  late final m = mutate();\n  final a = o.s;\n  final b = m.value;\n  final c = o.s;\n}\n\nvoid outerDeferredRead() {\n  late final m = mutate();\n  if (condition) {\n    final a = o.s;\n    final b = m;\n    final c = o.s;\n  }\n}\n\nvoid freshControllerReceivers() {\n  final first = TextEditingController().value;\n  final second = TextEditingController().value;\n  final explicitFirst = new TextEditingController().value;\n  final explicitSecond = new TextEditingController().value;\n}\n\nclass Fresh {\n  Fresh.named();\n  int get value => 0;\n}\n\nvoid resolvedFreshReceivers() {\n  final a = Fresh.named().value;\n  final b = Fresh.named().value;\n  final c = DateTime.now().year;\n  final d = DateTime.now().year;\n  final e = core.DateTime(2025).year;\n  final f = core.DateTime(2025).year;\n  final g = StreamController.broadcast().stream;\n  final h = StreamController.broadcast().stream;\n  final i = List.filled(3, 0).length;\n  final j = List.filled(3, 0).length;\n}\n\nvoid unrelatedLateName() {\n  late final shared = mutate();\n  print(shared);\n}\n\nvoid capturedLateInLocalFunction() {\n  late final m = mutate();\n  void inner() {\n    final a = o.s;\n    final b = m;\n    final c = o.s;\n  }\n  inner();\n}\n\nvoid capturedLateInClosure() {\n  late final m = mutate();\n  final inner = () {\n    final a = o.s;\n    final b = m;\n    final c = o.s;\n  };\n  inner();\n}\n\nvoid siblingTryBindingDoesNotShadowCapturedLate() {\n  late final m = mutate();\n  try {\n    final m = 1;\n    use(m);\n  } catch (_) {\n    final a = o.s;\n    final b = m;\n    final c = o.s;\n  }\n}\n\nvoid siblingCaseBindingDoesNotShadowCapturedLate(int value) {\n  late final m = mutate();\n  switch (value) {\n    case 0:\n      final m = 1;\n      use(m);\n      break;\n    default:\n      final a = o.s;\n      final b = m;\n      final c = o.s;\n  }\n}"
     },
     "group": "complexity",
     "name": "prefer-moving-to-variable",
@@ -4396,7 +4474,7 @@
   },
   {
     "crossFile": false,
-    "description": "Disallow statically known invalid `dart:core` regular expressions in single literals.",
+    "description": "Disallow statically known invalid `dart:core` regular expressions.",
     "diagnostics": [
       {
         "column": 20,
@@ -4469,14 +4547,20 @@
         "file": null,
         "line": 14,
         "message": "Invalid regular expression."
+      },
+      {
+        "column": 27,
+        "file": null,
+        "line": 15,
+        "message": "Invalid regular expression."
       }
     ],
-    "docs": "Disallow statically known invalid `dart:core` regular expressions in single literals.",
+    "docs": "Disallow statically known invalid `dart:core` regular expressions.",
     "domains": [],
     "examples": {
-      "bad": "// Bad: literal patterns that are structurally invalid regular expressions.\nvoid examples() {\n  final a = RegExp('(');\n  final b = RegExp(')');\n  final c = RegExp('[a-z');\n  final d = RegExp('(abc');\n  final e = RegExp('a(b(c)');\n  final f = new RegExp('foo)');\n  final g = RegExp('*abc');\n  final h = RegExp('[z-a]');\n  final i = RegExp(r'\\xG0');\n  final j = RegExp('a{3,2}');\n  final k = RegExp(r'[z-a]');\n  final l = RegExp(r'\\d{3,2}');\n  print([a, b, c, d, e, f, g, h, i, j, k, l]);\n}",
+      "bad": "// Bad: literal patterns that are structurally invalid regular expressions.\nvoid examples() {\n  final a = RegExp('(');\n  final b = RegExp(')');\n  final c = RegExp('[a-z');\n  final d = RegExp('(abc');\n  final e = RegExp('a(b(c)');\n  final f = new RegExp('foo)');\n  final g = RegExp('*abc');\n  final h = RegExp('[z-a]');\n  final i = RegExp(r'\\xG0');\n  final j = RegExp('a{3,2}');\n  final k = RegExp(r'[z-a]');\n  final l = RegExp(r'\\d{3,2}');\n  final adjacent = RegExp('(' r'\\d');\n  print([a, b, c, d, e, f, g, h, i, j, k, l]);\n}",
       "crossFile": null,
-      "good": "// Good: valid patterns, or patterns that are not statically checkable literals.\nvoid examples(String dynamicPattern) {\n  final a = RegExp('abc');\n  final b = RegExp('[a-z]+');\n  final c = RegExp('(foo|bar)');\n  final d = RegExp('a(b(c)d)e'); // balanced nested groups\n  final e = RegExp(r'\\d{3}-\\d{4}'); // raw string, balanced\n  final f = RegExp('\\\\d+'); // non-raw with escapes — pattern not resolved, skipped\n  final g = RegExp(dynamicPattern); // not a literal, skipped\n  final h = RegExp('prefix-${dynamicPattern}'); // interpolated, skipped\n  final i = RegExp(r'(?=foo)foo'); // lookahead\n  final j = RegExp(r'(?:foo)*?'); // non-capturing group and lazy quantifier\n  final k = RegExp('[]'); // ECMAScript empty character class\n  final l = RegExp('[a-]'); // trailing hyphen is a literal, not a range\n  final m = RegExp(r'[a-' r'z]');\n  final n = RegExp(r'\\d{1,' r'3}');\n  final o = RegExp('[a-' 'z]');\n  final p = RegExp(r'''[a-z]+''');\n  print([a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]);\n}"
+      "good": "// Good: valid patterns, or patterns that are not statically checkable literals.\nvoid examples(String dynamicPattern) {\n  final a = RegExp('abc');\n  final b = RegExp('[a-z]+');\n  final c = RegExp('(foo|bar)');\n  final d = RegExp('a(b(c)d)e'); // balanced nested groups\n  final e = RegExp(r'\\d{3}-\\d{4}'); // raw string, balanced\n  final f = RegExp('\\\\d+'); // non-raw with escapes — pattern not resolved, skipped\n  final g = RegExp(dynamicPattern); // not a literal, skipped\n  final h = RegExp('prefix-${dynamicPattern}'); // interpolated, skipped\n  final i = RegExp(r'(?=foo)foo'); // lookahead\n  final j = RegExp(r'(?:foo)*?'); // non-capturing group and lazy quantifier\n  final k = RegExp('[]'); // ECMAScript empty character class\n  final l = RegExp('[a-]'); // trailing hyphen is a literal, not a range\n  final m = RegExp(r'[a-' r'z]');\n  final n = RegExp(r'\\d{1,' r'3}');\n  final o = RegExp('[a-' 'z]');\n  final p = RegExp(r'''[a-z]+''');\n  final adjacent = RegExp('(' r'\\d' ')');\n  print([a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]);\n}"
     },
     "group": "correctness",
     "name": "valid-regexps",
@@ -7450,12 +7534,6 @@
         "message": "Add a blank line before return statement"
       },
       {
-        "column": 7,
-        "file": null,
-        "line": 45,
-        "message": "Add a blank line before return statement"
-      },
-      {
         "column": 5,
         "file": null,
         "line": 54,
@@ -7468,7 +7546,7 @@
         "message": "Add a blank line before return statement"
       }
     ],
-    "docs": "Flags `return` statements that are not preceded by a blank line.\n\nSeparating a `return` from the statements above it with a blank line makes\nthe exit point of a block visually distinct, so readers can spot where\ncontrol leaves the function without parsing the surrounding code. The rule\nonly checks returns that follow another statement in the same statement\nlist — the first statement of a block or switch case is never flagged,\nsince there is nothing to separate it from. A blank line is any run of\nwhitespace containing two or more newlines; spaces and tabs do not matter.",
+    "docs": "Flags `return` statements that are not preceded by a blank line.\n\nSeparating a `return` from the statements above it with a blank line makes\nthe exit point of a block visually distinct, so readers can spot where\ncontrol leaves the function without parsing the surrounding code. The rule\nonly checks returns that follow another statement in the same block.\nSwitch-case statement lists are not blocks. A blank line is any run of\nwhitespace containing two or more newlines; spaces and tabs do not matter.",
     "domains": [],
     "examples": {
       "bad": "// Test cases for newline-before-return rule\n// violations: return statement not preceded by a blank line\n\nint badFunction(int x) {\n  final result = x * 2;\n  return result;\n}\n\nString processName(String name) {\n  final trimmed = name.trim();\n  final upper = trimmed.toUpperCase();\n  return upper;\n}\n\nclass Calculator {\n  int add(int a, int b) {\n    final sum = a + b;\n    return sum;\n  }\n\n  int multiply(int a, int b) {\n    final product = a * b;\n    return product;\n  }\n}\n\nvoid nestedReturns() {\n  if (true) {\n    final value = 42;\n    return value;\n  }\n  print('done');\n  return;\n}\n\nfinal callback = () {\n  print('callback');\n  return 1;\n};\n\nint switchReturns(int value) {\n  switch (value) {\n    case 0:\n      print(value);\n      return value;\n    default:\n      return 1;\n  }\n}\n\nvoid labeledReturn() {\n  label: {\n    print('label');\n    return;\n  }\n}\n\nclass Operand {\n  Operand operator +(Operand other) {\n    print(other);\n    return other;\n  }\n}",
@@ -8113,7 +8191,7 @@
         "message": "Use a collection literal instead of a constructor invocation."
       }
     ],
-    "docs": "Flags no-argument collection constructor calls that a literal would express.\n\nThe empty `List()`, `Map()`, `Set()`, `LinkedHashMap()`, and `LinkedHashSet()`\nconstructors are more verbose than the equivalent `[]` or `{}` literals, which\nare the idiomatic way to build a fresh collection and read more clearly. The\nrule matches the unnamed and `.new` constructors written as a plain call\n(`List()`, `Set.new()`), an explicit `new` expression (`new Map()`), or with\ntype arguments (`Map<K, V>()`). It deliberately spares named constructors such\nas `List.filled` or `Map.of` and any invocation carrying arguments, since\nthose have no literal form.\n\nTwo further facts withhold a diagnostic that would otherwise change semantics:\n\n* **Concrete context** — a `LinkedHashMap()` / `LinkedHashSet()` whose declared\n  context type (a variable/field/top-level/return annotation) *is* that concrete\n  type. A `{}` literal has static type `Map`/`Set`, which is not assignable back\n  to `LinkedHashMap`/`LinkedHashSet`, so the constructor is required. This check\n  is purely syntactic — a pre-pass over declared types — so it applies with or\n  without a type index.\n* **User-declared shadow** — a `List()`/`Map()`/`Set()`/… whose name is a\n  *user-declared* type in the [`TypeIndex`] (not `dart:core`). The literal would\n  construct the core collection, not the user's type. This one is type-index\n  driven: with no index attached, such a constructor keeps firing.\n\nEverything else — including any `var`/unannotated context, and a concrete\nconstructor reached only through a nested argument position — keeps firing.",
+    "docs": "Flags no-argument collection constructor calls that a literal would express.\n\nThe empty `List()`, `Map()`, `Set()`, `LinkedHashMap()`, and `LinkedHashSet()`\nconstructors are more verbose than the equivalent `[]` or `{}` literals, which\nare the idiomatic way to build a fresh collection and read more clearly. The\nrule matches the unnamed and `.new` constructors written as a plain call\n(`List()`, `Set.new()`), an explicit `new` expression (`new Map()`), or with\ntype arguments (`Map<K, V>()`). It deliberately spares named constructors such\nas `List.filled` or `Map.of` and any invocation carrying arguments, since\nthose have no literal form.\n\nTwo further facts withhold a diagnostic that would otherwise change semantics:\n\n* **Concrete context** — a `LinkedHashMap()` / `LinkedHashSet()` whose declared\n  context type (a variable/field/top-level/return annotation) *is* that concrete\n  type. A `{}` literal has static type `Map`/`Set`, which is not assignable back\n  to `LinkedHashMap`/`LinkedHashSet`, so the constructor is required. This check\n  is purely syntactic and applies without a type index. Local functions and\n  operators use their own return annotations, never their enclosing function's.\n* **User-declared shadow** — a `List()`/`Map()`/`Set()`/… whose name is a\n  *user-declared* type in the [`TypeIndex`] (not `dart:core`). The literal would\n  construct the core collection, not the user's type. This one is type-index\n  driven: with no index attached, such a constructor keeps firing.\n\nEverything else — including any `var`/unannotated context, and a concrete\nconstructor reached only through a nested argument position — keeps firing.",
     "domains": [],
     "examples": {
       "bad": "import 'dart:collection';\n\nvoid bad() {\n  var a = List();\n  var b = Map();\n  var c = Set();\n  var d = LinkedHashMap();\n  var e = LinkedHashSet();\n  var f = List<int>();\n  var g = new Set();\n  var h = new Map<String, int>();\n}\n\n// A `{}` literal has static type `Map`, which IS assignable to a declared `Map`\n// context — the concrete-type exception does not apply, so the diagnostic keeps\n// firing. Only `LinkedHashMap`/`LinkedHashSet` contexts suppress.\nvoid nonConcreteContext() {\n  Map<int, int> m = LinkedHashMap();\n  var n = LinkedHashMap();\n}",
@@ -10475,7 +10553,7 @@
         "message": "Unnecessary string interpolation; use the expression directly."
       }
     ],
-    "docs": "Flags a string literal whose entire content is a single interpolation of a\nprovably non-nullable `String`.\n\nWhen a string is nothing but `'$x'` or `'${x}'` and `x` is already a string,\nwrapping the value in quotes and interpolation markers is redundant — the\nliteral is equivalent to writing the expression directly. The quotes only add\nnoise and obscure that no formatting or concatenation is happening. The rule\nrequires the interpolation to span the whole content, whether a bare\n`$identifier` or a full `${...}` expression; a string with any surrounding\ntext, or two adjacent interpolations like `'$a$b'`, is left alone. Raw strings\nare never flagged. Use the interpolated expression on its own.\n\nCanonical receiver and signature facts must prove a non-nullable `String`.\nNullable or unknown values and null-aware accesses are left alone.",
+    "docs": "Flags a string literal whose entire content is a single interpolation of a\nprovably non-nullable `String`.\n\nWhen a string is nothing but `'$x'` or `'${x}'` and `x` is already a string,\nwrapping the value in quotes and interpolation markers is redundant — the\nliteral is equivalent to writing the expression directly. The quotes only add\nnoise and obscure that no formatting or concatenation is happening. The rule\nrequires the interpolation to span the whole content, whether a bare\n`$identifier` or a full `${...}` expression; a string with any surrounding\ntext, or two adjacent interpolations like `'$a$b'`, is left alone. Adjacent\nliteral segments are checked independently; raw segments are never flagged.\nUse the interpolated expression on its own.\n\nCanonical receiver and signature facts must prove a non-nullable `String`.\nNullable or unknown values and null-aware accesses are left alone.",
     "domains": [],
     "examples": {
       "bad": "// Bad: the whole string is a single interpolation of a provably non-nullable String.\nString examples(String name) {\n  final a = '$name';\n  final b = '${name}';\n  final c = \"$name\";\n  final s = 'x';\n  final d = '$s';\n  final e = '${'lit'}';\n  final f = 'a' + 'b';\n  final g = '$f';\n  final h = '${name.toUpperCase()}';\n  return '$a$b$c$d$e$g$h';\n}",
@@ -11118,7 +11196,7 @@
     "examples": {
       "bad": "// Test cases for avoid-dynamic rule\n// All violations are annotated inline\n\nvoid testDynamicVariable() {\n  dynamic x = 5;\n  dynamic name = \"test\";\n  dynamic list = [1, 2, 3];\n}\n\nvoid testDynamicParameters(dynamic arg, dynamic other) {\n  print(arg);\n  print(other);\n}\n\nFuture<dynamic> asyncMethod() {\n  return Future.value(42);\n}\n\ndynamic returnDynamic() {\n  return \"anything\";\n}\n\nclass TestClass {\n  dynamic field;\n\n  void method(dynamic param) {\n    final dynamic local = param;\n  }\n}\n\n// `dynamic` as a type argument of a non-Map generic is still flagged, and a\n// `dynamic` nested one level below `Map` (inside `List`) is NOT exempt: only a\n// direct `Map<_, dynamic>` argument is.\nList<dynamic> listOfDynamic = [];\n\nRoute<dynamic>? routeField;\n\nMap<String, List<dynamic>> nested = {};\n\ntypedef DynamicAlias = List<dynamic>;\n\n(dynamic, {dynamic value}) recordTypes;\n\nclass DynamicInitializers {\n  final values = <dynamic>[];\n\n  DynamicInitializers() {\n    final local = <dynamic>[];\n  }\n\n  set value(Object value) {\n    dynamic local = value;\n  }\n\n  Object operator +(Object other) {\n    dynamic local = other;\n    return local;\n  }\n}\n\nvoid dynamicSwitch(Object input) {\n  switch (input) {\n    default:\n      dynamic local = input;\n  }\n}\n\ntypedef BoundedFunction = void Function<T extends List<dynamic>>();\n\nvoid dynamicPatterns(Object input) {\n  if (input case List<dynamic> values) {\n    print(values);\n  }\n  final values = [\n    for (List<dynamic> value in <List<Object>>[]) value,\n  ];\n}\n\nclass DynamicBase extends Base<List<dynamic>> {}\n\n@Annotation<List<dynamic>>()\nvoid annotatedDynamic() {}\n\nObject dynamicSwitchExpression(Object input) => switch (input) {\n  List<dynamic> values => values,\n  _ => input,\n};",
       "crossFile": null,
-      "good": "// Good cases for avoid-dynamic rule\n// No violations expected\n\nvoid testTypedVariable() {\n  int x = 5;\n  String name = \"test\";\n  List<int> list = [1, 2, 3];\n}\n\nvoid testTypedParameters(int arg, String other) {\n  print(arg);\n  print(other);\n}\n\nFuture<int> asyncMethod() {\n  return Future.value(42);\n}\n\nString returnString() {\n  return \"anything\";\n}\n\nclass TestClass {\n  Object field = Object();\n\n  void method(Object param) {\n    final Object local = param;\n  }\n}\n\nMap<String, int> mapWithType = {};\n\nList<String> listOfString = [];\n\nvoid testWithGenerics<T>(T value) {\n  print(value);\n}\n\nvoid testWithUnion(Object? nullable) {\n  if (nullable != null) {\n    print(nullable);\n  }\n}\n\n// dcl exempts `dynamic` used directly as a `Map` type argument (the JSON escape\n// hatch) — both in a `Map<...>` annotation and in a `<...>{}` map literal.\nMap<String, dynamic> jsonField = {};\n\nMap<String, dynamic> parseJson(Map<String, dynamic> json) {\n  final literal = <String, dynamic>{'k': 1};\n  return literal;\n}\n\nclass Serializable {\n  Map<String, dynamic> toJson() => <String, dynamic>{};\n}"
+      "good": "import 'dart:core' as core;\n\n// Good cases for avoid-dynamic rule\n// No violations expected\n\nvoid testTypedVariable() {\n  int x = 5;\n  String name = \"test\";\n  List<int> list = [1, 2, 3];\n}\n\nvoid testTypedParameters(int arg, String other) {\n  print(arg);\n  print(other);\n}\n\nFuture<int> asyncMethod() {\n  return Future.value(42);\n}\n\nString returnString() {\n  return \"anything\";\n}\n\nclass TestClass {\n  Object field = Object();\n\n  void method(Object param) {\n    final Object local = param;\n  }\n}\n\nMap<String, int> mapWithType = {};\n\nList<String> listOfString = [];\n\nvoid testWithGenerics<T>(T value) {\n  print(value);\n}\n\nvoid testWithUnion(Object? nullable) {\n  if (nullable != null) {\n    print(nullable);\n  }\n}\n\n// dcl exempts `dynamic` used directly as a `Map` type argument (the JSON escape\n// hatch) — both in a `Map<...>` annotation and in a `<...>{}` map literal.\nMap<String, dynamic> jsonField = {};\n\nMap<String, dynamic> parseJson(Map<String, dynamic> json) {\n  final literal = <String, dynamic>{'k': 1};\n  return literal;\n}\n\nclass Serializable {\n  Map<String, dynamic> toJson() => <String, dynamic>{};\n}\n\nvoid mapConstructorArguments(Object value) {\n  final empty = Map<String, dynamic>();\n  final copied = Map<String, dynamic>.from({});\n  if (value case <String, dynamic>{'key': var item}) {\n    print(item);\n  }\n}\n\nvoid prefixedMapConstructorArguments() {\n  final empty = core.Map<String, dynamic>();\n  final copied = core.Map<String, dynamic>.from({});\n}"
     },
     "group": "suspicious",
     "name": "avoid-dynamic",

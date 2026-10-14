@@ -14,10 +14,10 @@
 //! `max_nesting` (integer, default: 5) — flag when the nesting depth exceeds
 //! this.
 
-use super::traversal::for_each_declared_body;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::for_each_declared_body;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_stmt};
 
 #[derive(Default)]

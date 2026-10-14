@@ -328,7 +328,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::DartCodeLinter("prefer-immediate-return"),
     ),
-    RuleMeta::file::<lint::complexity::prefer_moving_to_variable::PreferMovingToVariable>(
+    RuleMeta::resolved::<lint::complexity::prefer_moving_to_variable::PreferMovingToVariable>(
         "prefer-moving-to-variable",
         RuleGroup::Complexity,
         NONE,

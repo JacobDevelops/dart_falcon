@@ -9,7 +9,7 @@
 //! and triple-quoted strings are skipped to avoid the edge cases around escaping
 //! runs of quotes. Remove the redundant backslash.
 
-use crate::lint::string_lit::interpolated_literal;
+use crate::lint::string_lit::interpolated_literals;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
@@ -46,32 +46,31 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     fn visit_string_lit(&mut self, node: &StringLitNode) {
-        let Some(lit) = interpolated_literal(node) else {
-            return;
-        };
-        if lit.triple {
-            return;
-        }
-        let bytes = lit.content.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'\\' if i + 1 < bytes.len() => {
-                    let c = bytes[i + 1];
-                    if !is_meaningful_escape(c, lit.quote) {
-                        let start = node.span.start + lit.content_offset + i;
-                        self.diags.push(self.ctx.diagnostic(
-                            "unnecessary-string-escapes",
-                            "Unnecessary escape; the backslash can be removed.",
-                            DiagSpan {
-                                start,
-                                end: start + 2,
-                            },
-                        ));
+        for (lit, span) in interpolated_literals(node) {
+            if lit.triple {
+                continue;
+            }
+            let bytes = lit.content.as_bytes();
+            let mut i = 0;
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'\\' if i + 1 < bytes.len() => {
+                        let c = bytes[i + 1];
+                        if !is_meaningful_escape(c, lit.quote) {
+                            let start = span.start + lit.content_offset + i;
+                            self.diags.push(self.ctx.diagnostic(
+                                "unnecessary-string-escapes",
+                                "Unnecessary escape; the backslash can be removed.",
+                                DiagSpan {
+                                    start,
+                                    end: start + 2,
+                                },
+                            ));
+                        }
+                        i += 2;
                     }
-                    i += 2;
+                    _ => i += 1,
                 }
-                _ => i += 1,
             }
         }
     }

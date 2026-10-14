@@ -10,7 +10,8 @@ pub use identity::{
     PackageIdentity, QualifiedName, import_path,
 };
 pub use library::{
-    LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, library_unit,
+    LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, lexical_normalize,
+    library_unit,
 };
 pub use semantic::{
     DeclarationFacts, MemberFacts, ParameterOwner, ResolvedSignature, ResolvedType, SemanticModel,

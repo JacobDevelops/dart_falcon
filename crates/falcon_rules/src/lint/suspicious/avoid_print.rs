@@ -6,12 +6,21 @@ use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_prog
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct AvoidPrint;
 
 impl Rule for AvoidPrint {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        if !ctx.source.contains("print") {
+            return Vec::new();
+        }
+        let mut presence = PrintPresence(false);
+        presence.visit_program(program);
+        if !presence.0 {
+            return Vec::new();
+        }
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
         };
@@ -29,6 +38,20 @@ impl Rule for AvoidPrint {
         };
         visit_program(&mut collector, program, state);
         collector.diagnostics
+    }
+}
+
+struct PrintPresence(bool);
+
+impl Visitor for PrintPresence {
+    fn visit_identifier(&mut self, node: &Identifier) {
+        self.0 |= node.name == "print";
+    }
+
+    fn visit_expr(&mut self, node: &Expr) {
+        if !self.0 {
+            walk_expr(self, node);
+        }
     }
 }
 

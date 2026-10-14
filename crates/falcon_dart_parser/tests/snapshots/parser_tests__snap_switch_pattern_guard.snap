@@ -121,6 +121,7 @@ Function(
                                 StringLitNode {
                                     raw: "'neg'",
                                     is_adjacent: false,
+                                    segment_spans: [],
                                     has_raw_segment: false,
                                     value: "neg",
                                     span: Span {
@@ -152,6 +153,7 @@ Function(
                                 StringLitNode {
                                     raw: "'zero'",
                                     is_adjacent: false,
+                                    segment_spans: [],
                                     has_raw_segment: false,
                                     value: "zero",
                                     span: Span {
@@ -179,6 +181,7 @@ Function(
                                 StringLitNode {
                                     raw: "'pos'",
                                     is_adjacent: false,
+                                    segment_spans: [],
                                     has_raw_segment: false,
                                     value: "pos",
                                     span: Span {

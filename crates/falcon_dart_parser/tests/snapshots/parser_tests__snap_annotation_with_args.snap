@@ -24,6 +24,7 @@ Function(
                                 StringLitNode {
                                     raw: "'Use newFn instead'",
                                     is_adjacent: false,
+                                    segment_spans: [],
                                     has_raw_segment: false,
                                     value: "Use newFn instead",
                                     span: Span {

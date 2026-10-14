@@ -87,8 +87,7 @@ impl<'a> From<&'a String> for QualifiedName<'a> {
 
 #[derive(Debug, Clone)]
 struct Library {
-    declarations: HashMap<String, NameIdentity>,
-    declaration_files: HashMap<String, FileId>,
+    declarations: HashMap<String, (NameIdentity, FileId)>,
     imports: Vec<Import>,
     exports: Vec<Export>,
     incomplete: bool,
@@ -188,7 +187,6 @@ impl IdentityIndex {
                 *root_to_library.entry(root).or_insert_with(|| {
                     libraries.push(Library {
                         declarations: HashMap::new(),
-                        declaration_files: HashMap::new(),
                         imports: Vec::new(),
                         exports: Vec::new(),
                         incomplete: grouping.is_unresolved(i),
@@ -206,10 +204,7 @@ impl IdentityIndex {
             library.incomplete |= file.has_parse_errors;
             for declaration in &file.program.declarations {
                 for (name, identity) in declaration_identities(declaration) {
-                    merge(&mut library.declarations, name, identity);
-                    library
-                        .declaration_files
-                        .insert(name.to_string(), FileId(index));
+                    merge(&mut library.declarations, name, identity, FileId(index));
                 }
             }
         }
@@ -263,7 +258,17 @@ impl IdentityIndex {
     }
 
     pub(crate) fn declaration_file(&self, library: LibraryId, name: &str) -> Option<FileId> {
-        self.get(library).declaration_files.get(name).copied()
+        self.get(library)
+            .declarations
+            .get(name)
+            .filter(|(identity, _)| *identity != NameIdentity::Unknown)
+            .map(|(_, file)| *file)
+    }
+
+    pub(crate) fn source_path(&self, file: FileId) -> Option<&Path> {
+        self.by_path
+            .iter()
+            .find_map(|(path, &id)| (id == file).then_some(path.as_path()))
     }
 
     fn get(&self, library: LibraryId) -> &Library {
@@ -342,7 +347,7 @@ impl IdentityIndex {
         let unit = self.complete(library)?;
         if prefix.is_none() {
             match unit.declarations.get(name) {
-                Some(NameIdentity::Value) => {
+                Some((NameIdentity::Value, _)) => {
                     return Some(DeclarationIdentity::Project {
                         library,
                         name: name.to_string(),
@@ -433,7 +438,7 @@ impl IdentityIndex {
         name: &str,
     ) -> Option<DeclarationIdentity> {
         let unit = self.get(library);
-        if let Some(identity) = unit.declarations.get(name) {
+        if let Some((identity, _)) = unit.declarations.get(name) {
             return (*identity == NameIdentity::Type).then(|| DeclarationIdentity::Project {
                 library,
                 name: name.to_string(),
@@ -485,7 +490,7 @@ impl IdentityIndex {
 
     fn resolve_unprefixed(&self, library: LibraryId, name: &str) -> NameIdentity {
         let unit = self.get(library);
-        if let Some(identity) = unit.declarations.get(name) {
+        if let Some((identity, _)) = unit.declarations.get(name) {
             return *identity;
         }
         if self.resolve_unprefixed_declaration(library, name).is_some() {
@@ -530,7 +535,11 @@ impl IdentityIndex {
         if name.starts_with('_') || unit.incomplete || !visiting.insert(library) {
             return None;
         }
-        if unit.declarations.get(name) == Some(&namespace) {
+        if unit
+            .declarations
+            .get(name)
+            .is_some_and(|(identity, _)| *identity == namespace)
+        {
             visiting.remove(&library);
             return Some(DeclarationIdentity::Project {
                 library,
@@ -566,7 +575,7 @@ impl IdentityIndex {
         if name.starts_with('_') || unit.incomplete || !visiting.insert(library) {
             return NameIdentity::Unknown;
         }
-        if let Some(identity) = unit.declarations.get(name) {
+        if let Some((identity, _)) = unit.declarations.get(name) {
             visiting.remove(&library);
             return *identity;
         }
@@ -621,10 +630,15 @@ fn declaration_identities(declaration: &TopLevelDecl) -> Vec<(&str, NameIdentity
     }
 }
 
-fn merge(map: &mut HashMap<String, NameIdentity>, name: &str, identity: NameIdentity) {
+fn merge(
+    map: &mut HashMap<String, (NameIdentity, FileId)>,
+    name: &str,
+    identity: NameIdentity,
+    file: FileId,
+) {
     map.entry(name.to_string())
-        .and_modify(|existing| *existing = NameIdentity::Unknown)
-        .or_insert(identity);
+        .and_modify(|(existing, _)| *existing = NameIdentity::Unknown)
+        .or_insert((identity, file));
 }
 
 fn unique_declaration(candidates: Vec<DeclarationIdentity>) -> Option<DeclarationIdentity> {
@@ -737,7 +751,16 @@ const SDK_TYPES: Allowlist = &[
             "dynamic",
         ],
     ),
-    ("dart:async", &["Future", "FutureOr", "Timer", "Completer"]),
+    (
+        "dart:async",
+        &[
+            "Future",
+            "FutureOr",
+            "Timer",
+            "Completer",
+            "StreamController",
+        ],
+    ),
     ("dart:ui", &["Color"]),
     (
         "dart:collection",
@@ -1179,6 +1202,35 @@ mod tests {
         );
         for file in ["/project/lib/root.dart", "/project/lib/part.dart"] {
             assert_eq!(resolve(&index, file, "PartType"), NameIdentity::Type);
+            assert_eq!(
+                index.declaration_file(library(&index, file), "PartType"),
+                Some(FileId(1))
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_part_declarations_have_no_source_owner() {
+        let index = index(
+            &[
+                (
+                    "/project/lib/root.dart",
+                    "library example; part 'part.dart'; class Duplicate {}",
+                ),
+                (
+                    "/project/lib/part.dart",
+                    "part of example; class Duplicate {}",
+                ),
+            ],
+            &[],
+        );
+        for file in ["/project/lib/root.dart", "/project/lib/part.dart"] {
+            assert_eq!(resolve(&index, file, "Duplicate"), NameIdentity::Unknown);
+            assert_eq!(declaration(&index, file, "Duplicate"), None);
+            assert_eq!(
+                index.declaration_file(library(&index, file), "Duplicate"),
+                None
+            );
         }
     }
 }

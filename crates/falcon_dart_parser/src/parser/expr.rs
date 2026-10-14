@@ -79,6 +79,10 @@ impl<'src> Parser<'src> {
         let mut node = self.parse_string_lit();
         while self.at(TokenKind::StringLit) {
             let next = self.parse_string_lit();
+            if node.segment_spans.is_empty() {
+                node.segment_spans.push(node.span);
+            }
+            node.segment_spans.push(next.span);
             node.is_adjacent = true;
             node.has_raw_segment |= next.has_raw_segment;
             node.raw.push_str(&next.raw);

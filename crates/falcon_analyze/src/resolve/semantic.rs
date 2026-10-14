@@ -225,6 +225,10 @@ impl<'a> SemanticModel<'a> {
         }
     }
 
+    pub(crate) fn source_path(&self) -> Option<&Path> {
+        self.identities.source_path(self.file?)
+    }
+
     pub(crate) fn for_declaration(
         &self,
         identity: &DeclarationIdentity,

@@ -182,8 +182,9 @@ impl LspState {
     }
 
     /// `textDocument/didChange` (full sync): replace text and re-parse the
-    /// changed document only. Analysis is the caller's responsibility — the
-    /// server loop defers it behind the debounce window.
+    /// changed document only. Unresolved paths refresh during analysis, while
+    /// resolved identities survive deletion. The server loop defers analysis
+    /// behind the debounce window.
     ///
     /// Returns false if the document is not open.
     pub fn change(&mut self, uri: &str, text: String, version: Option<i32>) -> bool {
@@ -207,7 +208,6 @@ impl LspState {
         }
 
         let doc = self.documents.get_mut(uri).expect("document checked above");
-        (doc.path, doc.unresolved_path) = document_path(uri);
         let (program, parse_errors) = parse(&text);
         doc.syntax_diagnostics = syntax_error_diagnostics(&doc.path, &parse_errors);
         doc.text = text;
@@ -219,12 +219,12 @@ impl LspState {
         true
     }
 
-    /// `textDocument/didSave`: refresh filesystem identity and any supplied text
-    /// (re-parsing only when it actually differs), then analyze.
+    /// `textDocument/didSave`: refresh filesystem identity when resolvable and
+    /// any supplied text (re-parsing only when it actually differs), then analyze.
     pub fn save(&mut self, uri: &str, text: Option<String>) -> Vec<Diagnostic> {
         if let Some(doc) = self.documents.get(uri) {
             let (path, unresolved_path) = document_path(uri);
-            if path != doc.path {
+            if !unresolved_path && path != doc.path {
                 if self.resolve_semantics {
                     let affected = self.affected_open_uris(uri);
                     self.pending_semantic_affected
@@ -244,7 +244,7 @@ impl LspState {
             self.documents
                 .get_mut(uri)
                 .expect("document checked above")
-                .unresolved_path = unresolved_path;
+                .unresolved_path &= unresolved_path;
         }
         if let Some(text) = text {
             let differs = self.documents.get(uri).is_some_and(|doc| doc.text != text);
@@ -460,6 +460,9 @@ impl LspState {
                             && cached.has_parse_errors == file.has_parse_errors
                     })
                 });
+            if !same_files {
+                return None;
+            }
             let packages = package_identities(files.iter().map(|file| file.path.as_path()));
             let same_packages = packages.len() == snapshot.packages.len()
                 && packages
@@ -468,7 +471,7 @@ impl LspState {
                     .all(|(current, cached)| {
                         current.name == cached.name && current.lib_root == cached.lib_root
                     });
-            (same_files && same_packages).then_some(&snapshot.indexes)
+            same_packages.then_some(&snapshot.indexes)
         });
         let diags = run_cross_file(&self.cross_file_rules, &files, &self.config, indexes);
         let mut grouped: HashMap<String, Vec<Diagnostic>> = HashMap::new();
@@ -775,7 +778,7 @@ fn document_path(uri: &str) -> (PathBuf, bool) {
     let path = uri_to_path(uri);
     match std::fs::canonicalize(&path) {
         Ok(path) => (path, false),
-        Err(_) => (canonical_or_lexical(&path), true),
+        Err(_) => (falcon_analyze::resolve::lexical_normalize(&path), true),
     }
 }
 

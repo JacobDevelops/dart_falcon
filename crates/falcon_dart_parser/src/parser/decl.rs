@@ -1517,6 +1517,7 @@ impl<'src> Parser<'src> {
         let mut node = StringLitNode {
             raw: raw.to_owned(),
             is_adjacent: false,
+            segment_spans: Vec::new(),
             has_raw_segment: raw.starts_with('r'),
             value: String::new(),
             span,

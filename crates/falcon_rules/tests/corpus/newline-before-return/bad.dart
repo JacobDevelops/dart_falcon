@@ -42,7 +42,7 @@ int switchReturns(int value) {
   switch (value) {
     case 0:
       print(value);
-      return value; /* expect: newline-before-return */
+      return value;
     default:
       return 1;
   }

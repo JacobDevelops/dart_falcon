@@ -1,3 +1,5 @@
+import 'dart:core' as core;
+
 // Good cases for avoid-dynamic rule
 // No violations expected
 
@@ -53,4 +55,17 @@ Map<String, dynamic> parseJson(Map<String, dynamic> json) {
 
 class Serializable {
   Map<String, dynamic> toJson() => <String, dynamic>{};
+}
+
+void mapConstructorArguments(Object value) {
+  final empty = Map<String, dynamic>();
+  final copied = Map<String, dynamic>.from({});
+  if (value case <String, dynamic>{'key': var item}) {
+    print(item);
+  }
+}
+
+void prefixedMapConstructorArguments() {
+  final empty = core.Map<String, dynamic>();
+  final copied = core.Map<String, dynamic>.from({});
 }

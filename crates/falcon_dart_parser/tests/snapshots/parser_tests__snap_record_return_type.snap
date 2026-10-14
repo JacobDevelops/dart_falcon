@@ -87,6 +87,7 @@ Function(
                                 StringLitNode {
                                     raw: "'hello'",
                                     is_adjacent: false,
+                                    segment_spans: [],
                                     has_raw_segment: false,
                                     value: "hello",
                                     span: Span {

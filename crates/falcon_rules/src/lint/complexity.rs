@@ -25,7 +25,6 @@ pub mod prefer_iterable_any;
 pub mod prefer_iterable_every;
 pub mod prefer_moving_to_variable;
 pub mod prefer_null_aware_operators;
-mod traversal;
 pub mod unnecessary_const;
 pub mod unnecessary_getters_setters;
 pub mod unnecessary_overrides;

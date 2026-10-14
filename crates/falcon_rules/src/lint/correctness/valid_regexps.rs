@@ -1,4 +1,4 @@
-//! Disallow statically known invalid `dart:core` regular expressions in single literals.
+//! Disallow statically known invalid `dart:core` regular expressions.
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel};
 use falcon_diagnostics::Diagnostic;
@@ -72,14 +72,12 @@ fn extractable_pattern(expr: &Expr) -> Option<&str> {
     if !node.interpolations.is_empty() {
         return None;
     }
-    let literal = node.delimiter()?;
-    if !literal.terminated {
-        return None;
+    for (literal, _) in node.segments() {
+        if !literal.terminated || (!literal.is_raw && literal.content.contains('\\')) {
+            return None;
+        }
     }
-    if !literal.is_raw && literal.content.contains('\\') {
-        return None;
-    }
-    Some(literal.content)
+    Some(&node.value)
 }
 
 fn valid_pattern(pattern: &str) -> bool {

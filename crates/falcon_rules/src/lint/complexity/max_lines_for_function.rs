@@ -11,10 +11,10 @@
 //! `max_lines` (integer, default: 100) — flag functions/methods spanning more
 //! than this many lines.
 
-use super::traversal::for_each_declared_body;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::for_each_declared_body;
 
 #[derive(Default)]
 pub struct MaxLinesForFunction;

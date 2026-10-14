@@ -9,7 +9,7 @@
 //! treated as extending the name so the braces are kept.
 
 use crate::lint::string_lit::{
-    interpolated_literal, is_ident_body, is_simple_identifier, matching_brace,
+    interpolated_literals, is_ident_body, is_simple_identifier, matching_brace,
 };
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
@@ -43,36 +43,35 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     fn visit_string_lit(&mut self, node: &StringLitNode) {
-        let Some(lit) = interpolated_literal(node) else {
-            return;
-        };
-        let bytes = lit.content.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'\\' => i += 2, // skip escaped char (e.g. `\$`)
-                b'$' if i + 1 < bytes.len() && bytes[i + 1] == b'{' => {
-                    let Some(close) = matching_brace(bytes, i + 1) else {
-                        break;
-                    };
-                    let inner = &lit.content[i + 2..close];
-                    let extends = bytes
-                        .get(close + 1)
-                        .is_some_and(|&next| extends_identifier(next));
-                    if is_simple_identifier(inner) && !extends {
-                        let start = node.span.start + lit.content_offset + i;
-                        self.diags.push(self.ctx.diagnostic(
-                            "unnecessary-brace-in-string-interps",
-                            "Unnecessary braces in string interpolation; use `$name` instead.",
-                            DiagSpan {
-                                start,
-                                end: node.span.start + lit.content_offset + close + 1,
-                            },
-                        ));
+        for (lit, span) in interpolated_literals(node) {
+            let bytes = lit.content.as_bytes();
+            let mut i = 0;
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'\\' => i += 2, // skip escaped char (e.g. `\$`)
+                    b'$' if i + 1 < bytes.len() && bytes[i + 1] == b'{' => {
+                        let Some(close) = matching_brace(bytes, i + 1) else {
+                            break;
+                        };
+                        let inner = &lit.content[i + 2..close];
+                        let extends = bytes
+                            .get(close + 1)
+                            .is_some_and(|&next| extends_identifier(next));
+                        if is_simple_identifier(inner) && !extends {
+                            let start = span.start + lit.content_offset + i;
+                            self.diags.push(self.ctx.diagnostic(
+                                "unnecessary-brace-in-string-interps",
+                                "Unnecessary braces in string interpolation; use `$name` instead.",
+                                DiagSpan {
+                                    start,
+                                    end: span.start + lit.content_offset + close + 1,
+                                },
+                            ));
+                        }
+                        i = close + 1;
                     }
-                    i = close + 1;
+                    _ => i += 1,
                 }
-                _ => i += 1,
             }
         }
     }

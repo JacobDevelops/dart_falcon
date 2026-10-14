@@ -180,7 +180,8 @@ pub fn canonical_or_lexical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| lexical_normalize(path))
 }
 
-fn lexical_normalize(path: &Path) -> PathBuf {
+/// Normalize `.` and `..` components without accessing the filesystem.
+pub fn lexical_normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {
         match comp {

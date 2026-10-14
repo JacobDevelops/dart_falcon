@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:core';
+import 'dart:core' as core;
+
 // Test cases for prefer-moving-to-variable rule
 // No violations: unsupported initializers or chains separated by mutation barriers.
 
@@ -55,12 +59,6 @@ void separateConstructors() {
 void separateCalls() {
   final first = calculateExpensive(10);
   final second = calculateExpensive(10);
-  final value1 = service.nextValue();
-  final value2 = service.nextValue();
-  final chain1 = obj.method().chain().result;
-  final chain2 = obj.method().chain().result;
-  final filtered1 = list.where((e) => e > 5).toList();
-  final filtered2 = list.where((e) => e > 5).toList();
 }
 
 Future<void> separateAwaits() async {
@@ -164,4 +162,103 @@ void interpolatedInitializerBarrier() {
   final before = notifier.state;
   final text = '${notifier.refresh()}';
   final after = notifier.state;
+}
+
+void lateReadAfterFirstChain() {
+  late final m = mutate();
+  final a = o.s;
+  final b = m;
+  final c = o.s;
+}
+
+void lateReadInsideExpression() {
+  late final m = mutate();
+  final a = o.s;
+  final b = m.value;
+  final c = o.s;
+}
+
+void outerDeferredRead() {
+  late final m = mutate();
+  if (condition) {
+    final a = o.s;
+    final b = m;
+    final c = o.s;
+  }
+}
+
+void freshControllerReceivers() {
+  final first = TextEditingController().value;
+  final second = TextEditingController().value;
+  final explicitFirst = new TextEditingController().value;
+  final explicitSecond = new TextEditingController().value;
+}
+
+class Fresh {
+  Fresh.named();
+  int get value => 0;
+}
+
+void resolvedFreshReceivers() {
+  final a = Fresh.named().value;
+  final b = Fresh.named().value;
+  final c = DateTime.now().year;
+  final d = DateTime.now().year;
+  final e = core.DateTime(2025).year;
+  final f = core.DateTime(2025).year;
+  final g = StreamController.broadcast().stream;
+  final h = StreamController.broadcast().stream;
+  final i = List.filled(3, 0).length;
+  final j = List.filled(3, 0).length;
+}
+
+void unrelatedLateName() {
+  late final shared = mutate();
+  print(shared);
+}
+
+void capturedLateInLocalFunction() {
+  late final m = mutate();
+  void inner() {
+    final a = o.s;
+    final b = m;
+    final c = o.s;
+  }
+  inner();
+}
+
+void capturedLateInClosure() {
+  late final m = mutate();
+  final inner = () {
+    final a = o.s;
+    final b = m;
+    final c = o.s;
+  };
+  inner();
+}
+
+void siblingTryBindingDoesNotShadowCapturedLate() {
+  late final m = mutate();
+  try {
+    final m = 1;
+    use(m);
+  } catch (_) {
+    final a = o.s;
+    final b = m;
+    final c = o.s;
+  }
+}
+
+void siblingCaseBindingDoesNotShadowCapturedLate(int value) {
+  late final m = mutate();
+  switch (value) {
+    case 0:
+      final m = 1;
+      use(m);
+      break;
+    default:
+      final a = o.s;
+      final b = m;
+      final c = o.s;
+  }
 }

@@ -22,7 +22,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_stmt};
 
-use super::traversal::for_each_declared_body;
+use falcon_syntax::visitor::for_each_declared_body;
 
 #[derive(Default)]
 pub struct CyclomaticComplexity;

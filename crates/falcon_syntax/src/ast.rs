@@ -62,6 +62,8 @@ pub struct StringLitNode {
     pub raw: String,
     /// Whether multiple source literals contributed to this node.
     pub is_adjacent: bool,
+    /// Source spans of adjacent segments; empty for a single literal.
+    pub segment_spans: Vec<Span>,
     /// Whether any contributing source literal uses a raw prefix.
     pub has_raw_segment: bool,
     /// The content without delimiters; escape sequences remain unresolved.
@@ -86,38 +88,56 @@ pub struct StringDelimiter<'a> {
 }
 
 impl StringLitNode {
+    pub fn segments(&self) -> impl Iterator<Item = (StringDelimiter<'_>, Span)> {
+        let spans = if self.segment_spans.is_empty() {
+            std::slice::from_ref(&self.span)
+        } else {
+            &self.segment_spans
+        };
+        let mut offset = 0;
+        spans.iter().filter_map(move |&span| {
+            let end = offset + span.end - span.start;
+            let raw = self.raw.get(offset..end)?;
+            offset = end;
+            parse_string_delimiter(raw).map(|delimiter| (delimiter, span))
+        })
+    }
+
     /// Returns no delimiter for concatenated segments, which may use different quoting.
     pub fn delimiter(&self) -> Option<StringDelimiter<'_>> {
         if self.is_adjacent {
             return None;
         }
-        let raw = self.raw.as_str();
-        let is_raw = raw.starts_with('r');
-        let prefix = usize::from(is_raw);
-        let rest = &raw[prefix..];
-        let quote = *rest.as_bytes().first()?;
-        if !matches!(quote, b'\'' | b'"') {
-            return None;
-        }
-        let triple = rest.as_bytes().get(..3) == Some(&[quote; 3]);
-        let len = if triple { 3 } else { 1 };
-        let closing = &rest[..len];
-        let terminated = rest.len() >= 2 * len && rest[len..].ends_with(closing);
-        let content_offset = prefix + len;
-        let content_end = if rest.ends_with(closing) {
-            (raw.len() - len).max(content_offset)
-        } else {
-            raw.len()
-        };
-        Some(StringDelimiter {
-            is_raw,
-            quote,
-            triple,
-            content: &raw[content_offset..content_end],
-            content_offset,
-            terminated,
-        })
+        parse_string_delimiter(&self.raw)
     }
+}
+
+fn parse_string_delimiter(raw: &str) -> Option<StringDelimiter<'_>> {
+    let is_raw = raw.starts_with('r');
+    let prefix = usize::from(is_raw);
+    let rest = &raw[prefix..];
+    let quote = *rest.as_bytes().first()?;
+    if !matches!(quote, b'\'' | b'"') {
+        return None;
+    }
+    let triple = rest.as_bytes().get(..3) == Some(&[quote; 3]);
+    let len = if triple { 3 } else { 1 };
+    let closing = &rest[..len];
+    let terminated = rest.len() >= 2 * len && rest[len..].ends_with(closing);
+    let content_offset = prefix + len;
+    let content_end = if rest.ends_with(closing) {
+        (raw.len() - len).max(content_offset)
+    } else {
+        raw.len()
+    };
+    Some(StringDelimiter {
+        is_raw,
+        quote,
+        triple,
+        content: &raw[content_offset..content_end],
+        content_offset,
+        terminated,
+    })
 }
 
 /// A single interpolation embedded in a [`StringLitNode`].

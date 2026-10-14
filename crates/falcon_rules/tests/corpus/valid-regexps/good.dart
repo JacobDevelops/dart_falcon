@@ -16,5 +16,6 @@ void examples(String dynamicPattern) {
   final n = RegExp(r'\d{1,' r'3}');
   final o = RegExp('[a-' 'z]');
   final p = RegExp(r'''[a-z]+''');
+  final adjacent = RegExp('(' r'\d' ')');
   print([a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]);
 }

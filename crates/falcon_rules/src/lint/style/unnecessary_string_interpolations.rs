@@ -8,14 +8,15 @@
 //! noise and obscure that no formatting or concatenation is happening. The rule
 //! requires the interpolation to span the whole content, whether a bare
 //! `$identifier` or a full `${...}` expression; a string with any surrounding
-//! text, or two adjacent interpolations like `'$a$b'`, is left alone. Raw strings
-//! are never flagged. Use the interpolated expression on its own.
+//! text, or two adjacent interpolations like `'$a$b'`, is left alone. Adjacent
+//! literal segments are checked independently; raw segments are never flagged.
+//! Use the interpolated expression on its own.
 //!
 //! Canonical receiver and signature facts must prove a non-nullable `String`.
 //! Nullable or unknown values and null-aware accesses are left alone.
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
-use crate::lint::string_lit::{interpolated_literal, is_simple_identifier, matching_brace};
+use crate::lint::string_lit::{interpolated_literals, is_simple_identifier, matching_brace};
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -44,19 +45,27 @@ impl SemanticRuleVisitor for Collector<'_> {
         let Expr::StringLit(node) = node else {
             return;
         };
-        let Some(lit) = interpolated_literal(node) else {
-            return;
-        };
-        if !is_whole_interpolation(lit.content) || node.interpolations.len() != 1 {
-            return;
-        }
-        let ty = state.infer(&node.interpolations[0].expr);
-        if ty.interface("dart:core", "String") && !ty.nullable() {
-            self.diags.push(self.ctx.diagnostic(
-                "unnecessary-string-interpolations",
-                "Unnecessary string interpolation; use the expression directly.",
-                node.span,
-            ));
+        for (lit, span) in interpolated_literals(node) {
+            if !is_whole_interpolation(lit.content) {
+                continue;
+            }
+            let mut interpolations = node.interpolations.iter().filter(|interpolation| {
+                interpolation.span.start >= span.start && interpolation.span.end <= span.end
+            });
+            let Some(interpolation) = interpolations.next() else {
+                continue;
+            };
+            if interpolations.next().is_some() {
+                continue;
+            }
+            let ty = state.infer(&interpolation.expr);
+            if ty.interface("dart:core", "String") && !ty.nullable() {
+                self.diags.push(self.ctx.diagnostic(
+                    "unnecessary-string-interpolations",
+                    "Unnecessary string interpolation; use the expression directly.",
+                    span,
+                ));
+            }
         }
     }
 }

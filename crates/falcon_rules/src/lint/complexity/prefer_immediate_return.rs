@@ -6,10 +6,10 @@
 //! is immediately followed by a `return` of that same variable. Every statement
 //! list is checked, including closures, operators, switch cases, and finally blocks.
 
-use super::traversal::for_each_stmt_list;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::for_each_stmt_list;
 
 #[derive(Default)]
 pub struct PreferImmediateReturn;
@@ -17,7 +17,7 @@ pub struct PreferImmediateReturn;
 impl Rule for PreferImmediateReturn {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for_each_stmt_list(program, &mut |stmts| check_stmts(stmts, &mut diags, ctx));
+        for_each_stmt_list(program, &mut |stmts, _| check_stmts(stmts, &mut diags, ctx));
         diags
     }
 }

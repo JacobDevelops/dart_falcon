@@ -118,6 +118,7 @@ Function(
                                 StringLitNode {
                                     raw: "'one'",
                                     is_adjacent: false,
+                                    segment_spans: [],
                                     has_raw_segment: false,
                                     value: "one",
                                     span: Span {
@@ -145,6 +146,7 @@ Function(
                                 StringLitNode {
                                     raw: "'other'",
                                     is_adjacent: false,
+                                    segment_spans: [],
                                     has_raw_segment: false,
                                     value: "other",
                                     span: Span {

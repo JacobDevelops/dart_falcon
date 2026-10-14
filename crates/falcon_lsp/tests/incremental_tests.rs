@@ -30,7 +30,7 @@ fn counts(state: &LspState, uri: &str) -> (u64, u64) {
 }
 #[cfg(unix)]
 #[test]
-fn change_refreshes_path_when_file_materializes_under_symlink() {
+fn analyze_refreshes_path_when_file_materializes_under_symlink() {
     let (mut state, dir) = state_with_config("{}");
     let real = dir.path().join("real");
     fs::create_dir(&real).unwrap();
@@ -53,6 +53,32 @@ fn change_refreshes_path_when_file_materializes_under_symlink() {
             .all(|diagnostic| diagnostic.file_path == canonical)
     );
     assert_eq!(counts(&state, &uri), (2, 2));
+}
+
+#[cfg(unix)]
+#[test]
+fn deleted_file_keeps_resolved_path_across_change_and_save() {
+    let (mut state, dir) = state_with_config("{}");
+    let real = dir.path().join("real");
+    fs::create_dir(&real).unwrap();
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let path = link.join("existing.dart");
+    fs::write(&path, VIOLATING_SRC).unwrap();
+    let canonical = fs::canonicalize(&path).unwrap();
+    let uri = format!("file://{}", path.display());
+    state.open(&uri, VIOLATING_SRC.to_string(), Some(1));
+    fs::remove_file(&path).unwrap();
+
+    assert!(state.change(&uri, VIOLATING_SRC.to_string(), Some(2)));
+    for diagnostics in [state.analyze(&uri), state.save(&uri, None)] {
+        assert!(!diagnostics.is_empty());
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.file_path == canonical.to_string_lossy())
+        );
+    }
 }
 
 /// Changing one file re-parses and re-analyzes only that file; other open

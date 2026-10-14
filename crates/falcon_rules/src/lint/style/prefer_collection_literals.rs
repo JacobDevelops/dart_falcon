@@ -16,8 +16,8 @@
 //!   context type (a variable/field/top-level/return annotation) *is* that concrete
 //!   type. A `{}` literal has static type `Map`/`Set`, which is not assignable back
 //!   to `LinkedHashMap`/`LinkedHashSet`, so the constructor is required. This check
-//!   is purely syntactic — a pre-pass over declared types — so it applies with or
-//!   without a type index.
+//!   is purely syntactic and applies without a type index. Local functions and
+//!   operators use their own return annotations, never their enclosing function's.
 //! * **User-declared shadow** — a `List()`/`Map()`/`Set()`/… whose name is a
 //!   *user-declared* type in the [`TypeIndex`] (not `dart:core`). The literal would
 //!   construct the core collection, not the user's type. This one is type-index
@@ -148,6 +148,25 @@ impl Visitor for ReturnScan<'_, '_> {
 }
 
 impl Visitor for ContextScan {
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::LocalFunc(function) = node
+            && let Some(expected) = function.return_type.as_ref().and_then(concrete_context)
+        {
+            self.collect_returns(&function.body, expected);
+        }
+        walk_stmt(self, node);
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) {
+        if let ClassMember::Operator(operator) = node
+            && let Some(expected) = operator.return_type.as_ref().and_then(concrete_context)
+            && let Some(body) = &operator.body
+        {
+            self.collect_returns(body, expected);
+        }
+        falcon_syntax::visitor::walk_class_member(self, node);
+    }
+
     fn visit_field_decl(&mut self, node: &FieldDecl) {
         self.record_decls(&node.field_type, &node.declarators);
         walk_field_decl(self, node);
@@ -328,6 +347,16 @@ mod tests {
     }
 
     #[test]
+    fn concrete_operator_return_suppresses() {
+        let source = "import 'dart:collection';
+            class C {
+                LinkedHashMap operator +(C other) { return LinkedHashMap(); }
+            }";
+        assert_eq!(count_no_types(source), 0);
+        assert_eq!(count_with_types(source), 0);
+    }
+
+    #[test]
     fn concrete_returns_follow_control_flow_without_crossing_function_boundaries() {
         for body in [
             "{ return LinkedHashMap(); }",
@@ -352,8 +381,8 @@ mod tests {
                 var closure = () { return LinkedHashMap(); };
                 return LinkedHashMap();
             }";
-        assert_eq!(count_no_types(source), 3);
-        assert_eq!(count_with_types(source), 3);
+        assert_eq!(count_no_types(source), 2);
+        assert_eq!(count_with_types(source), 2);
     }
 
     #[test]

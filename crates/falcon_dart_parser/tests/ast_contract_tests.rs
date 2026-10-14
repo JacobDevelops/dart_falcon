@@ -610,6 +610,7 @@ fn delimiter_test_node(raw: &str) -> StringLitNode {
     StringLitNode {
         raw: raw.to_owned(),
         is_adjacent: false,
+        segment_spans: Vec::new(),
         has_raw_segment: raw.starts_with('r'),
         value: String::new(),
         span: Span::default(),
@@ -626,7 +627,8 @@ fn adjacent_delimiters_never_mix_raw_and_interpolated_segments() {
         ("'''a'''r'''\\d'''", true),
         ("'${\"x\"}' r'\\d'", true),
     ] {
-        let (program, errors) = parse(&format!("var s = {raw};"));
+        let source = format!("var s = {raw};");
+        let (program, errors) = parse(&source);
         assert!(errors.is_empty(), "{raw}: {errors:?}");
         let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
             panic!("variable");
@@ -637,6 +639,17 @@ fn adjacent_delimiters_never_mix_raw_and_interpolated_segments() {
         assert!(literal.is_adjacent);
         assert_eq!(literal.has_raw_segment, has_raw_segment, "{raw}");
         assert!(literal.delimiter().is_none(), "{raw}");
+        let segments: Vec<_> = literal.segments().collect();
+        assert_eq!(segments.len(), 2, "{raw}");
+        assert_eq!(segments.iter().any(|(lit, _)| lit.is_raw), has_raw_segment);
+        for (delimiter, span) in segments {
+            assert!(delimiter.terminated);
+            assert_eq!(
+                &source[span.start + delimiter.content_offset
+                    ..span.end - if delimiter.triple { 3 } else { 1 }],
+                delimiter.content
+            );
+        }
     }
 }
 

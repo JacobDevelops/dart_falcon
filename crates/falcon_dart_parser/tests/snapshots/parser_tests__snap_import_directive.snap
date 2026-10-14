@@ -1,6 +1,5 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
-assertion_line: 1634
 expression: "prog.imports[0]"
 ---
 ImportDirective {
@@ -8,6 +7,7 @@ ImportDirective {
     uri: StringLitNode {
         raw: "'dart:core'",
         is_adjacent: false,
+        segment_spans: [],
         has_raw_segment: false,
         value: "dart:core",
         span: Span {

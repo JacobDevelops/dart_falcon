@@ -516,6 +516,7 @@ mod tests {
             let node = StringLitNode {
                 raw: raw.to_string(),
                 is_adjacent: raw == "'a'\"b\"",
+                segment_spans: Vec::new(),
                 has_raw_segment: raw.starts_with('r'),
                 value: String::new(),
                 span: Span::default(),

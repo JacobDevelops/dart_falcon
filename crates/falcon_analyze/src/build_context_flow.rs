@@ -199,6 +199,12 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         }
         self.function_body(body, State::default());
         if self.switch_flow_bailed {
+            tracing::warn!(
+                file = ?self.model.source_path(),
+                function_start = body.span().start,
+                function_end = body.span().end,
+                "BuildContext flow analysis exhausted the switch jump budget"
+            );
             Vec::new()
         } else {
             self.diagnostics
@@ -1524,6 +1530,11 @@ void f(int value) async {
             function.body.as_ref().unwrap(),
         );
         assert_eq!(diagnostics.len(), 1);
+        let mut exhausted = BuildContextFlowAnalyzer::new(&model, &signatures, true);
+        exhausted.remaining_switch_jumps = 0;
+        exhausted.function_body(function.body.as_ref().unwrap(), State::default());
+        assert!(exhausted.switch_flow_bailed);
+        assert_eq!(exhausted.model.source_path(), Some(path));
         assert_eq!(
             diagnostics[0].start,
             source.find("context.toString").unwrap()
