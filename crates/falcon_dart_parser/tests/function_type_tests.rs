@@ -11,6 +11,11 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 
+mod common;
+#[path = "common/only_class.rs"]
+mod common_class;
+use common_class::only_class;
+
 /// Parse a single top-level `typedef` and return its aliased type.
 fn typedef_aliased(src: &str) -> DartType {
     let (prog, errors) = parse(src);
@@ -42,8 +47,6 @@ fn sole_param_type(param: &str) -> DartType {
         .clone()
         .expect("param should carry a type")
 }
-
-// ── (a) special type as function-type return ──────────────────────────────────
 
 #[test]
 fn dynamic_function_return_in_typedef() {
@@ -90,8 +93,6 @@ fn never_function_return_in_typedef() {
     }
 }
 
-// ── (b) generic inline function types ─────────────────────────────────────────
-
 #[test]
 fn generic_function_type_in_typedef() {
     let aliased = typedef_aliased("typedef F = void Function<T>(T x);");
@@ -129,23 +130,11 @@ fn bare_generic_function_type_in_typedef() {
     assert_eq!(f.type_params[0].name.name, "T");
 }
 
-// ── (c) function-typed fields in object patterns ──────────────────────────────
-
 /// Extract the pattern of the first `case` label of a `switch` in a function body.
 fn first_case_pattern(src: &str) -> Pattern {
-    let wrapped = format!("void f() {{ switch (x) {{ {src} }} }}");
-    let (prog, errors) = parse(&wrapped);
-    assert!(errors.is_empty(), "errors: {errors:?}");
-    let func = match &prog.declarations[0] {
-        TopLevelDecl::Function(f) => f,
-        other => panic!("expected function, got {other:?}"),
-    };
-    let block = match func.body.as_ref().unwrap() {
-        FunctionBody::Block(b) => b,
-        other => panic!("expected block, got {other:?}"),
-    };
-    let sw = block
-        .stmts
+    let (stmts, errors) = common::parse_body(&format!("switch (x) {{ {src} }}"), "");
+    assert_eq!(errors, 0, "expected no parse errors");
+    let sw = stmts
         .iter()
         .find_map(|s| match s {
             Stmt::Switch(sw) => Some(sw),
@@ -203,16 +192,11 @@ fn object_pattern_generic_function_field() {
     }
 }
 
-// ── Corpus-found function-type gaps: record return types ──────────────────
-
 /// The declared type of the sole field of a top-level `class C { <field> }`.
 fn sole_field_type(field: &str) -> DartType {
     let (prog, errors) = parse(&format!("class C {{ {field} }}"));
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let class = match &prog.declarations[0] {
-        TopLevelDecl::Class(c) => c,
-        other => panic!("expected class, got {other:?}"),
-    };
+    let class = only_class(&prog);
     match &class.members[0] {
         ClassMember::Field(f) => f.field_type.clone().expect("field should carry a type"),
         other => panic!("expected field, got {other:?}"),
@@ -240,8 +224,6 @@ fn record_return_function_type_as_field_type() {
         other => panic!("expected record return type, got {other:?}"),
     }
 }
-
-// ── Generic old-style (inline) function-typed formal parameters ────────────────
 
 fn only_function(prog: &Program) -> &FunctionDecl {
     match &prog.declarations[0] {

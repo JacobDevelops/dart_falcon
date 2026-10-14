@@ -4,14 +4,9 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 
-fn only_class(prog: &Program) -> &ClassDecl {
-    match &prog.declarations[0] {
-        TopLevelDecl::Class(c) => c,
-        other => panic!("expected class, got {other:?}"),
-    }
-}
-
-// ── Item 1: untyped method with async/generator modifier ──────────────────────
+#[path = "common/only_class.rs"]
+mod common_class;
+use common_class::only_class;
 
 #[test]
 fn test_untyped_async_method() {
@@ -65,8 +60,6 @@ fn test_untyped_generic_async_method() {
     }
 }
 
-// ── Item 1 disambiguation: async/sync are not reserved ────────────────────────
-
 #[test]
 fn test_field_named_async_still_parses() {
     let (prog, errors) = parse("class C { var async = 1; }");
@@ -99,8 +92,6 @@ fn test_getter_named_sync_still_parses() {
     }
 }
 
-// ── Item 2: operator [] and []= ───────────────────────────────────────────────
-
 #[test]
 fn test_index_operator() {
     let (prog, errors) = parse("class C { int operator [](int i) => 0; }");
@@ -120,8 +111,6 @@ fn test_index_assign_operator() {
         other => panic!("expected operator, got {other:?}"),
     }
 }
-
-// ── Item 3: extension type named/const constructor ────────────────────────────
 
 #[test]
 fn test_extension_type_const_named_ctor() {
@@ -143,8 +132,6 @@ fn test_extension_type_const_named_ctor() {
         other => panic!("expected extension type, got {other:?}"),
     }
 }
-
-// ── Item 4: redirecting factory ───────────────────────────────────────────────
 
 #[test]
 fn test_redirecting_factory() {
@@ -183,8 +170,6 @@ fn test_redirecting_factory_generic() {
     }
 }
 
-// ── Item 5: typed super-parameter ─────────────────────────────────────────────
-
 #[test]
 fn test_typed_super_parameter() {
     let (prog, errors) = parse("class C extends B { C(int super.x); }");
@@ -200,8 +185,6 @@ fn test_typed_super_parameter() {
         other => panic!("expected constructor, got {other:?}"),
     }
 }
-
-// ── Item 6: conditional import ────────────────────────────────────────────────
 
 #[test]
 fn test_conditional_import() {
@@ -226,8 +209,6 @@ fn test_conditional_export_with_equality() {
     assert_eq!(cu.value.as_ref().map(|s| s.value.as_str()), Some("true"));
 }
 
-// ── Item 7: annotation with type arguments ────────────────────────────────────
-
 #[test]
 fn test_annotation_with_type_args() {
     let (prog, errors) = parse("@Native<int Function()>() external void f();");
@@ -241,8 +222,6 @@ fn test_annotation_with_type_args() {
         other => panic!("expected function, got {other:?}"),
     }
 }
-
-// ── Item 8: typed field formal ────────────────────────────────────────────────
 
 #[test]
 fn test_typed_field_formal() {
@@ -259,8 +238,6 @@ fn test_typed_field_formal() {
         other => panic!("expected constructor, got {other:?}"),
     }
 }
-
-// ── Item 9: mixin-application class ───────────────────────────────────────────
 
 #[test]
 fn test_mixin_application_class() {
@@ -292,8 +269,6 @@ fn test_mixin_application_class_abstract_implements() {
         other => panic!("expected class type alias, got {other:?}"),
     }
 }
-
-// ── Item 10: old-form typedef ─────────────────────────────────────────────────
 
 #[test]
 fn test_legacy_typedef() {
@@ -330,8 +305,6 @@ fn test_legacy_typedef_no_return_type() {
     }
 }
 
-// ── Item 11: nullable old-style function-typed formal ─────────────────────────
-
 #[test]
 fn test_nullable_function_typed_formal() {
     let (prog, errors) = parse("void f({int orElse()?}) {}");
@@ -346,8 +319,6 @@ fn test_nullable_function_typed_formal() {
         other => panic!("expected function, got {other:?}"),
     }
 }
-
-// ── Item 12a: mixin class real abstract modifier ──────────────────────────────
 
 #[test]
 fn test_abstract_mixin_class() {
@@ -369,8 +340,6 @@ fn test_non_abstract_mixin_class() {
     }
 }
 
-// ── Item 12b: type-parameter annotation ───────────────────────────────────────
-
 #[test]
 fn test_type_param_annotation() {
     let (prog, errors) = parse("class C<@foo T> {}");
@@ -380,8 +349,6 @@ fn test_type_param_annotation() {
     assert_eq!(c.type_params[0].annotations.len(), 1);
     assert_eq!(c.type_params[0].annotations[0].name[0].name, "foo");
 }
-
-// ── Item: `.new` named-constructor references in annotations ───────────────────
 
 #[test]
 fn test_annotation_dot_new_reference() {
@@ -416,8 +383,6 @@ fn test_annotation_arg_const_dot_new() {
         other => panic!("expected const `C.new()`, got {other:?}"),
     }
 }
-
-// ── Item: curried function types (return type is itself a function type) ───────
 
 #[test]
 fn test_curried_function_type_param() {
@@ -466,8 +431,6 @@ fn test_curried_function_type_in_type_args() {
     assert!(matches!(ann.type_args[1], DartType::Named(_)));
 }
 
-// ── Item: top-level untyped getters (`get foo => 1;`, `get foo {}`) ────────────
-
 #[test]
 fn test_top_level_untyped_getter_arrow() {
     let (prog, errors) = parse("get foo => 1;");
@@ -515,8 +478,6 @@ fn test_top_level_typed_getter_still_parses() {
     }
 }
 
-// ── `static` is only legal on class members, not at top level ──────────────────
-
 #[test]
 fn test_static_modifier_at_top_level_rejected() {
     // `static` on a top-level declaration is an extraneous modifier the SDK
@@ -539,8 +500,6 @@ fn test_top_level_function_named_static_ok() {
     }
 }
 
-// ── Missing `;` after an `=> switch(...) {...}` body is a syntax error ──────────
-
 #[test]
 fn test_missing_semicolon_after_arrow_switch_body_rejected() {
     // An `=> switch (a) {...}` function body with no trailing `;` must ERROR;
@@ -556,8 +515,6 @@ fn test_arrow_switch_body_with_semicolon_ok() {
     let (_prog, errors) = parse("int f(Object a) => switch (a) { int x => 0, _ => 1 };");
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
-
-// ── `const` / `final` modifiers on a C-style `for` initializer ────────────────
 
 fn for_init_decl(src: &str) -> LocalVarDecl {
     let (prog, errors) = parse(src);

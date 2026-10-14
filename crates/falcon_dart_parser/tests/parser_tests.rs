@@ -1,8 +1,9 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_expr};
 use insta::assert_debug_snapshot;
-
-// ── Empty and basic ───────────────────────────────────────────────────────────
+#[path = "common/first_stmt_expr.rs"]
+mod common_expr;
 
 #[test]
 fn test_empty_program() {
@@ -77,8 +78,6 @@ fn test_part_directive() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.part_directives.len(), 1);
 }
-
-// ── Class declarations ────────────────────────────────────────────────────────
 
 #[test]
 fn test_class_empty() {
@@ -259,8 +258,6 @@ fn test_class_generic() {
     assert_eq!(cls.type_params.len(), 1);
 }
 
-// ── Mixin ─────────────────────────────────────────────────────────────────────
-
 #[test]
 fn test_mixin_simple() {
     let src = "mixin M {}";
@@ -291,8 +288,6 @@ fn test_mixin_class() {
     assert!(matches!(prog.declarations[0], TopLevelDecl::MixinClass(_)));
 }
 
-// ── Enum ──────────────────────────────────────────────────────────────────────
-
 #[test]
 fn test_enum_simple() {
     let src = "enum Color { red, green, blue }";
@@ -315,8 +310,6 @@ fn test_enum_enhanced_with_members() {
     };
     assert!(!en.members.is_empty());
 }
-
-// ── Extension ─────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_extension_simple() {
@@ -344,8 +337,6 @@ fn test_extension_type() {
         TopLevelDecl::ExtensionType(_)
     ));
 }
-
-// ── Functions ─────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_function_void_no_params() {
@@ -401,8 +392,6 @@ fn test_function_arrow() {
     };
     assert!(fun.body.is_some());
 }
-
-// ── Variables ─────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_top_level_var() {
@@ -487,8 +476,6 @@ fn test_static_late_final_field() {
     assert_eq!(f.keyword, VarKeyword::Final);
 }
 
-// ── Typedef ───────────────────────────────────────────────────────────────────
-
 #[test]
 fn test_typedef_function_type() {
     let src = "typedef Callback = void Function(int);";
@@ -496,8 +483,6 @@ fn test_typedef_function_type() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert!(matches!(prog.declarations[0], TopLevelDecl::TypeAlias(_)));
 }
-
-// ── Statements ────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_stmt_if() {
@@ -843,8 +828,6 @@ fn test_stmt_local_var() {
         _ => panic!("expected block body"),
     }
 }
-
-// ── Expressions ───────────────────────────────────────────────────────────────
 
 #[test]
 fn test_expr_integer_literal() {
@@ -1349,23 +1332,12 @@ fn test_expr_switch_expression() {
     }
 }
 
-// ── Dot shorthands (Dart 3.9) ─────────────────────────────────────────────────
-
 /// Parses `main() { <src>; }` and returns the first statement's expression.
 fn first_stmt_expr(src: &str) -> Expr {
     let wrapped = format!("main() {{ {src}; }}");
     let (prog, errors) = parse(&wrapped);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
-        panic!("expected function")
-    };
-    let Some(FunctionBody::Block(b)) = &fun.body else {
-        panic!("expected block body")
-    };
-    let Stmt::Expr(es) = &b.stmts[0] else {
-        panic!("expected expr stmt")
-    };
-    es.expr.clone()
+    common_expr::first_stmt_expr(&prog)
 }
 
 #[test]
@@ -1445,8 +1417,6 @@ fn test_dot_shorthand_postfix_chain() {
     assert!(matches!(object.as_ref(), Expr::DotShorthand { name, .. } if name.name == "red"));
 }
 
-// ── Digit separators (Dart 3.6) ───────────────────────────────────────────────
-
 #[test]
 fn test_int_digit_separator_literal() {
     let expr = first_stmt_expr("1_000_000");
@@ -1464,8 +1434,6 @@ fn test_double_digit_separator_literal() {
     let expr = first_stmt_expr("1_2.3_4e1_2");
     assert!(matches!(&expr, Expr::DoubleLit { value, .. } if value == "1_2.3_4e1_2"));
 }
-
-// ── Patterns ──────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_pattern_wildcard() {
@@ -1521,8 +1489,6 @@ fn test_pattern_record() {
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
 
-// ── Error recovery ────────────────────────────────────────────────────────────
-
 #[test]
 fn test_error_recovery_partial_class() {
     let src = "class Foo { int x }";
@@ -1539,8 +1505,6 @@ fn test_error_recovery_malformed_function() {
     assert!(!prog.declarations.is_empty() || !errors.is_empty());
 }
 
-// ── Annotations ───────────────────────────────────────────────────────────────
-
 #[test]
 fn test_annotation_override() {
     let src = "class Foo { @override void bar() {} }";
@@ -1554,8 +1518,6 @@ fn test_annotation_override() {
     };
     assert!(!meth.annotations.is_empty());
 }
-
-// ── Named and optional parameters ─────────────────────────────────────────────
 
 #[test]
 fn test_named_parameter() {
@@ -1591,8 +1553,6 @@ fn test_optional_positional_parameter() {
     );
 }
 
-// ── Null-safety ───────────────────────────────────────────────────────────────
-
 #[test]
 fn test_nullable_type() {
     let src = "int? x;";
@@ -1603,8 +1563,6 @@ fn test_nullable_type() {
     };
     assert!(v.var_type.is_some());
 }
-
-// ── Generic types ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_generic_single_param() {
@@ -1634,8 +1592,6 @@ fn test_nested_generic_type() {
     let (_prog, errors) = parse(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
-
-// ── Snapshot tests ────────────────────────────────────────────────────────────
 
 #[test]
 fn snap_class_simple() {
@@ -1706,8 +1662,6 @@ fn snap_extension() {
     assert!(errors.is_empty());
     assert_debug_snapshot!(prog.declarations[0]);
 }
-
-// ── Additional corpus-representative snapshots ────────────────────────────────
 
 #[test]
 fn snap_mixin_declaration() {
@@ -1999,7 +1953,7 @@ fn test_closure_final_param() {
     // Drill to the closure argument and confirm it is a function expression.
     let arg = first_call_first_arg(&prog);
     assert!(
-        matches!(arg, Expr::FuncExpr { params, .. } if params.params.len() == 1
+        matches!(&arg, Expr::FuncExpr { params, .. } if params.params.len() == 1
             && params.params[0].kind == ParamKind::Positional),
         "expected FuncExpr with one positional param, got {arg:#?}"
     );
@@ -2015,7 +1969,7 @@ fn test_closure_var_param() {
     let arg = {
         let (prog, errors) = parse(src);
         assert!(errors.is_empty(), "errors: {errors:?}");
-        first_call_first_arg(&prog).clone()
+        first_call_first_arg(&prog)
     };
     assert!(
         matches!(&arg, Expr::FuncExpr { params, .. } if params.params.len() == 1
@@ -2031,7 +1985,7 @@ fn test_closure_final_typed_param() {
     let arg = {
         let (prog, errors) = parse(src);
         assert!(errors.is_empty(), "errors: {errors:?}");
-        first_call_first_arg(&prog).clone()
+        first_call_first_arg(&prog)
     };
     assert!(
         matches!(&arg, Expr::FuncExpr { params, .. } if params.params[0].kind == ParamKind::Positional
@@ -2203,105 +2157,41 @@ fn first_fn_body_stmts(prog: &Program) -> &[Stmt] {
     &[]
 }
 
-/// Depth-first search for the first expression matching `pred`.
-fn find_expr(prog: &Program, pred: impl Fn(&Expr) -> bool + Copy) -> Option<&Expr> {
-    let mut out = None;
-    for s in first_fn_body_stmts(prog) {
-        walk_stmt(s, &pred, &mut out);
-        if out.is_some() {
+fn find_expr(prog: &Program, select: impl Fn(&Expr) -> Option<Expr>) -> Option<Expr> {
+    struct Finder<F> {
+        select: F,
+        found: Option<Expr>,
+    }
+    impl<F: Fn(&Expr) -> Option<Expr>> Visitor for Finder<F> {
+        fn visit_expr(&mut self, node: &Expr) {
+            if self.found.is_some() {
+                return;
+            }
+            self.found = (self.select)(node);
+            if self.found.is_none() {
+                walk_expr(self, node);
+            }
+        }
+    }
+    let mut finder = Finder {
+        select,
+        found: None,
+    };
+    for stmt in first_fn_body_stmts(prog) {
+        finder.visit_stmt(stmt);
+        if finder.found.is_some() {
             break;
         }
     }
-    out
+    finder.found
 }
 
-fn walk_stmt<'a>(s: &'a Stmt, pred: &impl Fn(&Expr) -> bool, out: &mut Option<&'a Expr>) {
-    fn walk<'a>(e: &'a Expr, pred: &impl Fn(&Expr) -> bool, out: &mut Option<&'a Expr>) {
-        if out.is_some() {
-            return;
-        }
-        if pred(e) {
-            *out = Some(e);
-            return;
-        }
-        for child in child_exprs(e) {
-            walk(child, pred, out);
-        }
-    }
-    match s {
-        Stmt::Expr(es) => walk(&es.expr, pred, out),
-        Stmt::LocalVar(v) => {
-            for d in &v.declarators {
-                if let Some(i) = &d.initializer {
-                    walk(i, pred, out);
-                }
-            }
-        }
-        Stmt::Return(r) => {
-            if let Some(v) = &r.value {
-                walk(v, pred, out);
-            }
-        }
-        Stmt::Block(b) => {
-            for st in &b.stmts {
-                walk_stmt(st, pred, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Immediate child expressions of `e`, covering the shapes the gap-fix tests
-/// exercise (calls, member/index access, binary/conditional, closures).
-fn child_exprs(e: &Expr) -> Vec<&Expr> {
-    let mut v = Vec::new();
-    match e {
-        Expr::Call { callee, args, .. } => {
-            v.push(callee.as_ref());
-            v.extend(args.positional.iter());
-            v.extend(args.named.iter().map(|n| &n.value));
-        }
-        Expr::Index { object, index, .. } => {
-            v.push(object);
-            v.push(index);
-        }
-        Expr::Field { object, .. } => v.push(object),
-        Expr::Binary { left, right, .. } => {
-            v.push(left);
-            v.push(right);
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            v.push(condition);
-            v.push(then_expr);
-            v.push(else_expr);
-        }
-        Expr::Is { expr, .. } | Expr::As { expr, .. } => v.push(expr),
-        Expr::Await { expr, .. } => v.push(expr),
-        Expr::FuncExpr { body, .. } => {
-            if let FunctionBody::Arrow(inner, _) = body.as_ref() {
-                v.push(inner);
-            }
-        }
-        _ => {}
-    }
-    v
-}
-
-fn first_call_first_arg(prog: &Program) -> &Expr {
-    let call = find_expr(
-        prog,
-        |e| matches!(e, Expr::Call { args, .. } if !args.positional.is_empty()),
-    )
-    .expect("no call with positional args");
-    match call {
-        Expr::Call { args, .. } => &args.positional[0],
-        _ => unreachable!(),
-    }
+fn first_call_first_arg(prog: &Program) -> Expr {
+    find_expr(prog, |expr| match expr {
+        Expr::Call { args, .. } => args.positional.first().cloned(),
+        _ => None,
+    })
+    .expect("no call with positional args")
 }
 
 fn first_local_var_init(prog: &Program) -> Option<&Expr> {

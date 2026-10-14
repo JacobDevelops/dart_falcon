@@ -4,26 +4,13 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 
-/// Parse `src` as the body of an async function and return its statements plus
-/// the parse-error count. The wrapper is `async` so `await`/`yield` statements
-/// parse in their natural context.
-fn body_stmts(src: &str) -> (Vec<Stmt>, usize) {
-    let (prog, errors) = parse(&format!("void f() async {{ {src} }}"));
-    let func = match prog.declarations.first() {
-        Some(TopLevelDecl::Function(f)) => f,
-        other => panic!("expected function, got {other:?}\nerrors: {errors:?}"),
-    };
-    let block = match func.body.as_ref() {
-        Some(FunctionBody::Block(b)) => b,
-        other => panic!("expected block body, got {other:?}"),
-    };
-    (block.stmts.clone(), errors.len())
-}
+mod common;
+use common::parse_body as body_stmts;
 
 /// Parse `src` as a function body and return its single statement, asserting
 /// zero parse errors and exactly one statement.
 fn only_stmt(src: &str) -> Stmt {
-    let (stmts, errors) = body_stmts(src);
+    let (stmts, errors) = body_stmts(src, "async");
     assert_eq!(errors, 0, "expected zero errors for {src:?}");
     assert_eq!(
         stmts.len(),
@@ -38,7 +25,7 @@ fn test_empty_and_rethrow_have_no_expression_children() {
     use falcon_syntax::visitor::{Visitor, walk_stmt};
 
     let source = "; null; try {} catch (e) { rethrow; throw e; }";
-    let (stmts, errors) = body_stmts(source);
+    let (stmts, errors) = body_stmts(source, "async");
     assert_eq!(errors, 0);
     let Stmt::Empty(span) = &stmts[0] else {
         panic!("expected empty statement, got {:?}", stmts[0]);
@@ -82,8 +69,6 @@ fn test_empty_and_rethrow_have_no_expression_children() {
     }
     assert_eq!(expressions.0, 2);
 }
-
-// ── Item (a): labeled statements ──────────────────────────────────────────────
 
 #[test]
 fn test_labeled_for_loop() {
@@ -148,7 +133,7 @@ fn test_label_does_not_break_ternary() {
 #[test]
 fn test_label_does_not_break_map_literal_in_decl() {
     // A map literal in a var initializer keeps its `key: value` colons.
-    let (stmts, errors) = body_stmts("var m = {'a': 1, 'b': 2};");
+    let (stmts, errors) = body_stmts("var m = {'a': 1, 'b': 2};", "async");
     assert_eq!(errors, 0);
     match &stmts[0] {
         Stmt::LocalVar(v) => {
@@ -158,8 +143,6 @@ fn test_label_does_not_break_map_literal_in_decl() {
         other => panic!("expected local var, got {other:?}"),
     }
 }
-
-// ── Item (b): `await for` ─────────────────────────────────────────────────────
 
 #[test]
 fn test_await_for_in() {
@@ -198,11 +181,9 @@ fn test_labeled_await_for() {
     }
 }
 
-// ── Item (c): untyped local functions ─────────────────────────────────────────
-
 #[test]
 fn test_untyped_local_func_block_and_arrow() {
-    let (stmts, errors) = body_stmts("foo() {} bar() => 1;");
+    let (stmts, errors) = body_stmts("foo() {} bar() => 1;", "async");
     assert_eq!(errors, 0);
     assert_eq!(stmts.len(), 2, "stmts: {stmts:?}");
     match &stmts[0] {
@@ -290,8 +271,6 @@ fn test_call_with_args_stays_call() {
         other => panic!("expected expression statement, got {other:?}"),
     }
 }
-
-// ── Item (d): pattern assignment ──────────────────────────────────────────────
 
 #[test]
 fn test_record_pattern_assignment() {
@@ -387,8 +366,6 @@ fn test_paren_field_assign_not_pattern_assign() {
     }
 }
 
-// ── Item (e): if-case guards ──────────────────────────────────────────────────
-
 #[test]
 fn test_if_case_guard_bare_pattern() {
     let stmt = only_stmt("if (x case p when g) {}");
@@ -464,15 +441,14 @@ fn test_if_case_typed_variable_guard() {
     }
 }
 
-// ── Corpus-found statement gaps ──────────────────────────────────────────
-
 #[test]
 fn label_between_switch_cases() {
-    let (_stmts, e) = body_stmts("switch (x) { case 1: continue lbl; lbl: case 2: break; }");
+    let (_stmts, e) = body_stmts(
+        "switch (x) { case 1: continue lbl; lbl: case 2: break; }",
+        "async",
+    );
     assert_eq!(e, 0);
 }
-
-// ── Item: `{ literal; ... }` at statement start is a block, not a set literal ──
 
 #[test]
 fn test_brace_with_literal_then_semicolon_is_block() {
@@ -497,8 +473,6 @@ fn test_brace_set_literal_statement_still_expr() {
         other => panic!("expected expression statement, got {other:?}"),
     }
 }
-
-// ── Item: assignment / complex expressions in statement-leading parens ─────────
 
 #[test]
 fn test_paren_assignment_statement() {
@@ -543,27 +517,11 @@ fn test_parenthesised_collection_with_complex_element() {
     }
 }
 
-// ── Contextual keywords: yield/await as identifiers in non-generator/non-async ─
-
-/// Parse `src` as the body of a plain (non-async, non-generator) function and
-/// return its statements plus the parse-error count. In this context `await`
-/// and `yield` are ordinary identifiers, not reserved words.
-fn sync_body_stmts(src: &str) -> (Vec<Stmt>, usize) {
-    let (prog, errors) = parse(&format!("void f() {{ {src} }}"));
-    let func = match prog.declarations.first() {
-        Some(TopLevelDecl::Function(f)) => f,
-        other => panic!("expected function, got {other:?}\nerrors: {errors:?}"),
-    };
-    let block = match func.body.as_ref() {
-        Some(FunctionBody::Block(b)) => b,
-        other => panic!("expected block body, got {other:?}"),
-    };
-    (block.stmts.clone(), errors.len())
-}
+use common::parse_body as sync_body_stmts;
 
 #[test]
 fn test_yield_as_identifier_in_plain_function() {
-    let (stmts, errors) = sync_body_stmts("var yield = 0; yield = 1;");
+    let (stmts, errors) = sync_body_stmts("var yield = 0; yield = 1;", "");
     assert_eq!(errors, 0, "yield is a valid identifier here: {stmts:?}");
     // Second statement is an assignment to the local `yield`, not a yield stmt.
     match &stmts[1] {
@@ -580,7 +538,7 @@ fn test_yield_as_identifier_in_plain_function() {
 fn test_yield_method_call_is_member_access_not_yield_stmt() {
     // `yield.toString()` on a local `yield` must parse as a member call, not a
     // YieldStmt of a dot-shorthand (the silent wrong-AST regression).
-    let (stmts, errors) = sync_body_stmts("var yield = 0; yield.toString();");
+    let (stmts, errors) = sync_body_stmts("var yield = 0; yield.toString();", "");
     assert_eq!(errors, 0, "{stmts:?}");
     let expr = match &stmts[1] {
         Stmt::Expr(e) => &e.expr,
@@ -624,7 +582,7 @@ fn test_yield_still_reserved_in_generator() {
 
 #[test]
 fn test_await_as_identifier_in_plain_function() {
-    let (stmts, errors) = sync_body_stmts("var await = 0; await = 1; print(await + 1);");
+    let (stmts, errors) = sync_body_stmts("var await = 0; await = 1; print(await + 1);", "");
     assert_eq!(errors, 0, "await is a valid identifier here: {stmts:?}");
     match &stmts[1] {
         Stmt::Expr(e) => assert!(
@@ -659,33 +617,32 @@ fn test_await_still_reserved_in_async_function() {
     }
 }
 
-// ── Metadata on for-loop variables (all three forms) ──────────────────────────
-
 #[test]
 fn test_metadata_on_for_each_var() {
-    let (_, errors) = sync_body_stmts("for (@meta var x in [1, 2]) { print(x); }");
+    let (_, errors) = sync_body_stmts("for (@meta var x in [1, 2]) { print(x); }", "");
     assert_eq!(errors, 0, "annotation on for-each var must parse");
 }
 
 #[test]
 fn test_metadata_on_for_each_final() {
-    let (_, errors) = sync_body_stmts("for (@meta final x in [1]) { print(x); }");
+    let (_, errors) = sync_body_stmts("for (@meta final x in [1]) { print(x); }", "");
     assert_eq!(errors, 0, "annotation on for-each final must parse");
 }
 
 #[test]
 fn test_metadata_on_c_style_for_var() {
-    let (_, errors) = sync_body_stmts("for (@meta var i = 0; i < 3; i++) { print(i); }");
+    let (_, errors) = sync_body_stmts("for (@meta var i = 0; i < 3; i++) { print(i); }", "");
     assert_eq!(errors, 0, "annotation on C-style for var must parse");
 }
 
 #[test]
 fn test_metadata_on_pattern_for_each() {
-    let (_, errors) = sync_body_stmts("for (@meta var (a, b) in <(int, int)>[]) { print(a + b); }");
+    let (_, errors) = sync_body_stmts(
+        "for (@meta var (a, b) in <(int, int)>[]) { print(a + b); }",
+        "",
+    );
     assert_eq!(errors, 0, "annotation on pattern for-each must parse");
 }
-
-// ── Recursion-depth guard on statement nesting ────────────────────────────────
 
 #[test]
 fn test_deep_block_nesting_does_not_overflow() {
@@ -713,7 +670,7 @@ fn test_deep_block_nesting_does_not_overflow() {
 fn test_await_for_rejected_in_plain_function() {
     // `await for` is only legal in an async body; in a sync body `await` is an
     // identifier and this must NOT silently parse as an await-for loop.
-    let (stmts, errors) = sync_body_stmts("await for (var x in xs) { print(x); }");
+    let (stmts, errors) = sync_body_stmts("await for (var x in xs) { print(x); }", "");
     assert!(errors > 0, "sync-body await-for must error: {stmts:?}");
     assert!(
         !stmts

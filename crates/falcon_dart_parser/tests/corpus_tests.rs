@@ -5,7 +5,10 @@
 /// silently skipped when the corpus is not accessible (e.g. in CI without the
 /// jfit repo checked out).
 use falcon_dart_parser::parser::parse;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[path = "common/collect_dart_files.rs"]
+mod common_files;
+use common_files::collect_dart_files;
 
 fn corpus_root() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("JFIT_PATH") {
@@ -31,29 +34,6 @@ const SKIP_DIRS: &[&str] = &[
     ".flutter-plugins-dependencies",
 ];
 
-fn is_skip_dir(name: &str) -> bool {
-    SKIP_DIRS.contains(&name)
-}
-
-fn collect_dart_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return files;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !is_skip_dir(dir_name) {
-                files.extend(collect_dart_files(&path));
-            }
-        } else if path.extension().is_some_and(|e| e == "dart") {
-            files.push(path);
-        }
-    }
-    files
-}
-
 #[test]
 fn corpus_parses_without_panic() {
     let Some(root) = corpus_root() else {
@@ -69,7 +49,7 @@ fn corpus_parses_without_panic() {
         root.clone()
     };
 
-    let files = collect_dart_files(&search_root);
+    let files = collect_dart_files(&search_root, SKIP_DIRS);
     assert!(
         !files.is_empty(),
         "corpus root exists but contains no .dart files: {}",
@@ -134,7 +114,7 @@ fn corpus_no_panics_on_generated_files() {
         root
     };
 
-    let files = collect_dart_files(&search_root);
+    let files = collect_dart_files(&search_root, SKIP_DIRS);
     let total = files.len();
 
     if total == 0 {
@@ -155,90 +135,4 @@ fn corpus_no_panics_on_generated_files() {
         "no-panic check: parsed {total} files under {}",
         search_root.display()
     );
-}
-
-#[test]
-fn diag_show_errors() {
-    let path = "/home/jacob/Documents/Developer/jfit/apps/mobile/lib/firebase_options.dart";
-    let source = std::fs::read_to_string(path).unwrap_or_default();
-    if source.is_empty() {
-        return;
-    }
-    let lines: Vec<&str> = source.lines().collect();
-    let (_, errors) = parse(&source);
-    for e in errors.iter().take(15) {
-        let before = &source[..e.offset.min(source.len())];
-        let line_no = before.lines().count();
-        let line_text = lines.get(line_no.saturating_sub(1)).unwrap_or(&"");
-        eprintln!(
-            "L{line_no}: {} | snippet: {}",
-            e.message,
-            &line_text.trim()[..line_text.trim().len().min(60)]
-        );
-    }
-}
-
-#[test]
-fn diag_error_distribution() {
-    let Some(root) = corpus_root() else {
-        return;
-    };
-    let mobile_lib = root.join("apps/mobile/lib");
-    let search_root = if mobile_lib.exists() {
-        mobile_lib
-    } else {
-        root
-    };
-    let files = collect_dart_files(&search_root);
-    let mut msg_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for path in &files {
-        let Ok(source) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let (_, errors) = parse(&source);
-        for e in &errors {
-            let key = e.message.chars().take(60).collect::<String>();
-            *msg_counts.entry(key).or_insert(0) += 1;
-        }
-    }
-    let mut sorted: Vec<_> = msg_counts.iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(a.1));
-    eprintln!("\nTop 15 parse error messages:");
-    for (msg, count) in sorted.iter().take(15) {
-        eprintln!("  {count:4}x  {msg}");
-    }
-}
-
-#[test]
-fn diag_onboarding_errors() {
-    let path = "/home/jacob/Documents/Developer/jfit/apps/mobile/lib/features/onboarding/data/onboarding_repository.dart";
-    let source = std::fs::read_to_string(path).unwrap_or_default();
-    if source.is_empty() {
-        return;
-    }
-    let lines: Vec<&str> = source.lines().collect();
-    let (_, errors) = parse(&source);
-    for e in &errors {
-        let before = &source[..e.offset.min(source.len())];
-        let line_no = before.lines().count();
-        let line_text = lines.get(line_no.saturating_sub(1)).unwrap_or(&"");
-        eprintln!("L{line_no}: {} | {}", e.message, line_text.trim());
-    }
-}
-
-#[test]
-fn diag_app_providers_errors() {
-    let path = "/home/jacob/Documents/Developer/jfit/apps/mobile/lib/core/app_providers.dart";
-    let source = std::fs::read_to_string(path).unwrap_or_default();
-    if source.is_empty() {
-        return;
-    }
-    let lines: Vec<&str> = source.lines().collect();
-    let (_, errors) = parse(&source);
-    for e in &errors {
-        let before = &source[..e.offset.min(source.len())];
-        let line_no = before.lines().count();
-        let line_text = lines.get(line_no.saturating_sub(1)).unwrap_or(&"");
-        eprintln!("L{line_no}: {} | {}", e.message, line_text.trim());
-    }
 }

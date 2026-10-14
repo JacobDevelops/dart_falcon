@@ -8,17 +8,12 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 
-/// Parse whole-program `src` and return its parse-error count.
-fn errs(src: &str) -> usize {
-    parse(src).1.len()
-}
-
-fn only_class(prog: &Program) -> &ClassDecl {
-    match &prog.declarations[0] {
-        TopLevelDecl::Class(c) => c,
-        other => panic!("expected class, got {other:?}"),
-    }
-}
+#[path = "common/only_class.rs"]
+mod common_class;
+#[path = "common/errs.rs"]
+mod common_errs;
+use common_class::only_class;
+use common_errs::errs;
 
 fn assert_clean(errors: &[falcon_dart_parser::parser::ParseError]) {
     assert!(
@@ -26,8 +21,6 @@ fn assert_clean(errors: &[falcon_dart_parser::parser::ParseError]) {
         "expected no parse errors, got: {errors:?}"
     );
 }
-
-// ── Untyped members whose name != enclosing type are methods ───────────────────
 
 #[test]
 fn test_untyped_member_is_method_not_constructor() {
@@ -94,8 +87,6 @@ fn test_untyped_abstract_member_is_method() {
         other => panic!("expected method, got {other:?}"),
     }
 }
-
-// ── Real constructors still classify as constructors ───────────────────────────
 
 #[test]
 fn test_unnamed_constructor_still_constructor() {
@@ -166,8 +157,6 @@ fn test_factory_constructor_still_constructor() {
     }
 }
 
-// ── Generic / async untyped members named like the type stay methods ───────────
-
 #[test]
 fn test_generic_untyped_member_named_like_type_is_method() {
     // A constructor cannot declare type parameters, so `C<T>()` is a method.
@@ -197,8 +186,6 @@ fn test_async_untyped_member_named_like_type_is_method() {
         other => panic!("expected async method, got {other:?}"),
     }
 }
-
-// ── Enums admit constructors ───────────────────────────────────────────────────
 
 #[test]
 fn test_enum_untyped_member_is_method() {
@@ -237,8 +224,6 @@ fn test_enum_constructor_is_constructor() {
     }
 }
 
-// ── Mixins and extensions cannot declare constructors ──────────────────────────
-
 #[test]
 fn test_mixin_untyped_member_is_method() {
     // Even a member named after the mixin is a method — mixins have no ctors.
@@ -272,8 +257,6 @@ fn test_extension_untyped_member_is_method() {
         other => panic!("expected extension, got {other:?}"),
     }
 }
-
-// ── Extension types admit constructors ─────────────────────────────────────────
 
 #[test]
 fn test_extension_type_untyped_member_is_method() {
@@ -309,8 +292,6 @@ fn test_extension_type_named_constructor_is_constructor() {
         other => panic!("expected extension type, got {other:?}"),
     }
 }
-
-// ── Corpus-found class-member gaps ───────────────────────────────────────
 
 #[test]
 fn annotation_then_named_field_record_return() {
@@ -375,8 +356,6 @@ fn operator_overload_still_parses() {
 fn modifier_keyword_static_used_as_field_name() {
     assert_eq!(errs("class C { static const static = 1; }"), 0);
 }
-
-// ── Residual parse gaps: record types after a modifier/annotation, built-ins ───
 
 #[test]
 fn static_record_return_type_with_generic_args() {
@@ -469,7 +448,7 @@ fn builtin_override_identifier_as_field_name() {
     }
 }
 
-// ── Regression: member named after a modifier keyword with an async/generator ──
+// A member named after a modifier keyword can have an async/generator
 // body. `external`/`late`/`covariant` before `()` followed by an `async`/`sync`
 // body modifier is the member's OWN name (a method), not a leading modifier —
 // the `record_type_prefixes_member` scan must treat `async`/`sync` after `)` as
@@ -532,7 +511,7 @@ fn test_static_record_return_type_still_modifier() {
     }
 }
 
-// ── Regression: a member literally named `async`/`sync` prefixed by a record ───
+// A member named `async`/`sync` can be prefixed by a record
 // return type. Here the modifier keyword (static/external/covariant/late) IS a
 // modifier, the `(...)` IS the record return type, and `async`/`sync` is the
 // member's own name — distinguished from a body modifier by the token that
@@ -585,8 +564,6 @@ fn test_late_record_typed_field_named_async() {
     }
 }
 
-// ── `factory` is a built-in identifier, legal as a member name ─────────────────
-
 #[test]
 fn test_factory_is_field_name() {
     // `factory` followed by `=`/`;`/`,` is the field's own name, not the factory
@@ -613,8 +590,6 @@ fn test_factory_constructor_still_parses() {
         ClassMember::Constructor(c) if c.is_factory
     ));
 }
-
-// ── Private-named initializing/super formals need the off-by-default feature ───
 
 #[test]
 fn test_private_named_initializing_formal_rejected() {
@@ -647,8 +622,6 @@ fn test_public_named_initializing_formal_ok() {
     assert_clean(&errors);
 }
 
-// ── Missing `;` after an `=>` member body is a syntax error, not recovered ─────
-
 #[test]
 fn test_missing_semicolon_after_getter_arrow_body() {
     // `num get a => 42` with no `;` before the next member must ERROR — falcon
@@ -664,8 +637,6 @@ fn test_getter_arrow_body_with_semicolon_ok() {
     let (_prog, errors) = parse("class A { int get b => 42; }");
     assert_clean(&errors);
 }
-
-// ── `const` on a redirecting factory constructor is preserved ──────────────────
 
 #[test]
 fn test_const_factory_preserves_is_const() {
@@ -693,4 +664,135 @@ fn test_non_const_factory_is_not_const() {
         }
         other => panic!("expected constructor, got {other:?}"),
     }
+}
+
+#[test]
+fn test_constructor_call_block_is_initializer_lambda() {
+    // Keep this odd recovery outcome pinned until a deliberate parser-behavior change.
+    let (prog, errors) = parse("class C { var g; C(): g = (e) { f(); } }");
+    assert_clean(&errors);
+    let ClassMember::Constructor(ctor) = &only_class(&prog).members[1] else {
+        panic!("expected constructor: {prog:?}");
+    };
+    assert!(
+        ctor.body.is_none(),
+        "body belongs to the initializer lambda"
+    );
+    assert_eq!(ctor.initializers.len(), 1);
+    let ConstructorInitializer::FieldInit { field, value, .. } = &ctor.initializers[0] else {
+        panic!("expected field initializer: {:?}", ctor.initializers);
+    };
+    assert_eq!(field.name, "g");
+    let Expr::FuncExpr {
+        params,
+        async_marker,
+        body,
+        ..
+    } = value
+    else {
+        panic!("expected initializer lambda: {value:?}");
+    };
+    assert_eq!(*async_marker, AsyncMarker::Sync);
+    assert_eq!(params.params.len(), 1);
+    assert_eq!(params.params[0].name.name, "e");
+    let FunctionBody::Block(body) = body.as_ref() else {
+        panic!("expected lambda block: {body:?}");
+    };
+    assert_eq!(body.stmts.len(), 1);
+    let Stmt::Expr(stmt) = &body.stmts[0] else {
+        panic!("expected lambda call statement: {body:?}");
+    };
+    let Expr::Call { callee, args, .. } = &stmt.expr else {
+        panic!("expected lambda call: {stmt:?}");
+    };
+    assert!(matches!(callee.as_ref(), Expr::Ident(id) if id.name == "f"));
+    assert!(args.positional.is_empty());
+    assert!(args.named.is_empty());
+}
+
+#[test]
+fn test_leading_async_method_splits_await_and_operand_statements() {
+    // The AST marker does not reserve body keywords without a trailing marker.
+    let (prog, errors) = parse("class Foo { async void bar() { await x; } }");
+    assert_clean(&errors);
+    let ClassMember::Method(method) = &only_class(&prog).members[0] else {
+        panic!("expected method: {prog:?}");
+    };
+    assert_eq!(method.async_marker, AsyncMarker::Async);
+    let Some(FunctionBody::Block(body)) = &method.body else {
+        panic!("expected block body: {:?}", method.body);
+    };
+    assert_eq!(body.stmts.len(), 2, "{body:?}");
+    for (stmt, name, expr_span, stmt_span) in [
+        (&body.stmts[0], "await", (31, 36), (31, 37)),
+        (&body.stmts[1], "x", (37, 38), (37, 40)),
+    ] {
+        let Stmt::Expr(stmt) = stmt else {
+            panic!("expected identifier expression statement: {stmt:?}");
+        };
+        let Expr::Ident(id) = &stmt.expr else {
+            panic!("expected identifier: {stmt:?}");
+        };
+        assert_eq!(id.name, name);
+        assert_eq!((id.span.start, id.span.end), expr_span);
+        assert_eq!((stmt.span.start, stmt.span.end), stmt_span);
+    }
+}
+
+#[test]
+fn test_async_sync_star_method_has_async_star_ast_marker() {
+    // The combined AST marker differs from the trailing marker used in the body.
+    let (prog, errors) = parse("class C { async m() sync* { yield 1; } }");
+    assert_clean(&errors);
+    let ClassMember::Method(method) = &only_class(&prog).members[0] else {
+        panic!("expected method: {prog:?}");
+    };
+    assert_eq!(method.async_marker, AsyncMarker::AsyncStar);
+    let Some(FunctionBody::Block(body)) = &method.body else {
+        panic!("expected block body: {:?}", method.body);
+    };
+    assert_eq!(body.stmts.len(), 1);
+    let Stmt::Yield(stmt) = &body.stmts[0] else {
+        panic!("expected generator yield: {:?}", body.stmts);
+    };
+    assert!(!stmt.is_star);
+    assert!(
+        matches!(&stmt.value, Expr::IntLit { value, .. } if value == "1"),
+        "{stmt:?}"
+    );
+}
+
+#[test]
+fn test_async_constructor_initializer_enables_await_expression() {
+    // The parser treats this initializer's trailing `async` as a body marker.
+    let src = "class C { var f; C(bool async) : f = async { await 1; } }";
+    let (prog, errors) = parse(src);
+    assert_clean(&errors);
+    let ClassMember::Constructor(ctor) = &only_class(&prog).members[1] else {
+        panic!("expected constructor: {prog:?}");
+    };
+    assert_eq!(ctor.initializers.len(), 1);
+    let ConstructorInitializer::FieldInit { field, value, .. } = &ctor.initializers[0] else {
+        panic!("expected field initializer: {:?}", ctor.initializers);
+    };
+    assert_eq!(field.name, "f");
+    assert!(
+        matches!(value, Expr::Ident(id) if id.name == "async"),
+        "{value:?}"
+    );
+    let Some(FunctionBody::Block(body)) = &ctor.body else {
+        panic!("expected constructor body: {:?}", ctor.body);
+    };
+    assert_eq!(body.stmts.len(), 1, "{body:?}");
+    let Stmt::Expr(stmt) = &body.stmts[0] else {
+        panic!("expected await expression statement: {:?}", body.stmts);
+    };
+    let Expr::Await { expr, span } = &stmt.expr else {
+        panic!("expected await expression: {stmt:?}");
+    };
+    assert_eq!((span.start, span.end), (45, 52));
+    assert!(
+        matches!(expr.as_ref(), Expr::IntLit { value, .. } if value == "1"),
+        "{expr:?}"
+    );
 }

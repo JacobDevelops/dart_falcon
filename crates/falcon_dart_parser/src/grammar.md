@@ -1,8 +1,7 @@
 # Dart 3.x Grammar Reference
 
-This document is the grammar reference for the `falcon_dart_parser` hand-rolled recursive-descent
-parser. Productions marked **[Phase 1]** are fully implemented. Others are noted as partial or
-deferred.
+This document is the grammar reference for the `falcon_dart_parser` recursive-descent
+parser. Productions summarize the supported syntax; recovery can also accept malformed input.
 
 ---
 
@@ -31,18 +30,22 @@ partDirective
   : annotation* 'part' stringLiteral ';'
   ;
 
-importDirective                          // [Phase 1]
+importDirective
   : annotation* 'import' stringLiteral
+    configurableUri*
     ( 'deferred' )? ( 'as' identifier )?
     ( showCombinator | hideCombinator )*
     ';'
   ;
 
-exportDirective                          // [Phase 1]
+exportDirective
   : annotation* 'export' stringLiteral
+    configurableUri*
     ( showCombinator | hideCombinator )*
     ';'
   ;
+
+configurableUri : 'if' '(' dottedIdentifier ( '==' stringLiteral )? ')' stringLiteral ;
 
 showCombinator : 'show' identifierList ;
 hideCombinator : 'hide' identifierList ;
@@ -69,7 +72,7 @@ topLevelDeclaration
 ### 2.1 Class Declaration
 
 ```
-classDeclaration                         // [Phase 1]
+classDeclaration
   : annotation*
     ( 'abstract' )? ( 'interface' )? ( 'base' )? ( 'final' )? ( 'sealed' )?
     'class' typeIdentifier typeParameters?
@@ -85,13 +88,13 @@ implementsClause : 'implements' typeList ;
 ### 2.2 Mixin Declaration
 
 ```
-mixinDeclaration                         // [Phase 1]
+mixinDeclaration
   : annotation* ( 'base' )? 'mixin' typeIdentifier typeParameters?
     onClause? implementsClause?
     '{' classMember* '}'
   ;
 
-mixinClassDeclaration                    // [Phase 1]
+mixinClassDeclaration
   : annotation* ( 'abstract' )? ( 'base' )? 'mixin' 'class' typeIdentifier typeParameters?
     superclass? withClause? implementsClause?
     '{' classMember* '}'
@@ -103,7 +106,7 @@ onClause : 'on' typeList ;
 ### 2.3 Enum Declaration
 
 ```
-enumDeclaration                          // [Phase 1]
+enumDeclaration
   : annotation* 'enum' typeIdentifier typeParameters?
     withClause? implementsClause?
     '{' enumValue ( ',' enumValue )* ( ',' )? ( ';' classMember* )? '}'
@@ -117,14 +120,14 @@ enumValue
 ### 2.4 Extension Declaration
 
 ```
-extensionDeclaration                     // [Phase 1]
+extensionDeclaration
   : annotation* 'extension' identifier? typeParameters? 'on' type
     '{' classMember* '}'
   ;
 
-extensionTypeDeclaration                 // [Phase 1]
+extensionTypeDeclaration
   : annotation* 'extension' 'type' 'const'? identifier typeParameters?
-    '(' formalParameterList ')' implementsClause?
+    ( '.' ( identifier | 'new' ) )? '(' type identifier ')' implementsClause?
     '{' classMember* '}'
   ;
 ```
@@ -132,7 +135,7 @@ extensionTypeDeclaration                 // [Phase 1]
 ### 2.5 Type Alias
 
 ```
-typeAliasDeclaration                     // [Phase 1]
+typeAliasDeclaration
   : annotation* 'typedef' typeIdentifier typeParameters? '=' type ';'
   | annotation* 'typedef' type identifier formalParameterList ';'  // legacy
   ;
@@ -141,7 +144,7 @@ typeAliasDeclaration                     // [Phase 1]
 ### 2.6 Top-Level Variables
 
 ```
-topLevelVariableDeclaration              // [Phase 1]
+topLevelVariableDeclaration
   : annotation* ( 'external' )? ( 'late' )? ( 'final' | 'const' )? ( 'var' )?
     type? variableDeclaratorList ';'
   ;
@@ -150,7 +153,7 @@ topLevelVariableDeclaration              // [Phase 1]
 ### 2.7 Top-Level Functions
 
 ```
-functionDeclaration                      // [Phase 1]
+functionDeclaration
   : annotation* ( 'external' )? returnType? identifier typeParameters?
     formalParameterList ( 'async' | 'async*' | 'sync*' )? functionBody
   ;
@@ -174,7 +177,7 @@ classMember
 ### 3.1 Field
 
 ```
-fieldDeclaration                         // [Phase 1]
+fieldDeclaration
   : annotation*
     ( 'static' )? ( 'abstract' )? ( 'external' )? ( 'covariant' )?
     ( 'late' )? ( 'final' | 'const' )?
@@ -185,7 +188,7 @@ fieldDeclaration                         // [Phase 1]
 ### 3.2 Constructor
 
 ```
-constructorDeclaration                   // [Phase 1]
+constructorDeclaration
   : annotation*
     ( 'const' )? ( 'factory' )? ( 'external' )?
     identifier ( '.' identifier )?
@@ -209,7 +212,7 @@ constructorInitializer
 ### 3.3 Method
 
 ```
-methodDeclaration                        // [Phase 1]
+methodDeclaration
   : annotation*
     ( 'static' )? ( 'abstract' )? ( 'external' )? ( 'async' )?
     returnType? identifier typeParameters? formalParameterList
@@ -220,13 +223,13 @@ methodDeclaration                        // [Phase 1]
 ### 3.4 Getter / Setter
 
 ```
-getterDeclaration                        // [Phase 1]
+getterDeclaration
   : annotation*
     ( 'static' )? ( 'abstract' )? ( 'external' )?
     returnType? 'get' identifier functionBody
   ;
 
-setterDeclaration                        // [Phase 1]
+setterDeclaration
   : annotation*
     ( 'static' )? ( 'abstract' )? ( 'external' )?
     returnType? 'set' identifier formalParameterList functionBody
@@ -236,7 +239,7 @@ setterDeclaration                        // [Phase 1]
 ### 3.5 Operator
 
 ```
-operatorDeclaration                      // [Phase 1]
+operatorDeclaration
   : annotation* ( 'external' )?
     returnType? 'operator' overridableOperator formalParameterList functionBody
   ;
@@ -253,7 +256,7 @@ overridableOperator
 ## 4. Types
 
 ```
-type                                     // [Phase 1]
+type
   : functionType '?'?
   | typeNotFunction
   ;
@@ -274,7 +277,7 @@ typeName : typeIdentifier ( '.' typeIdentifier )* ;
 typeArguments : '<' typeList '>' ;
 typeList : type ( ',' type )* ;
 
-functionType                             // [Phase 1]
+functionType
   : functionTypeTails
   | typeNotFunction functionTypeTails
   ;
@@ -294,13 +297,13 @@ parameterTypeList
   | '(' optionalParameterTypes ')'
   ;
 
-recordType                               // [Phase 1]
+recordType
   : '(' recordTypeFields ',' recordTypeNamedFields ')'
   | '(' recordTypeFields ','? ')'
   | '(' recordTypeNamedFields ')'
   ;
 
-typeParameters                           // [Phase 1]
+typeParameters
   : '<' typeParameter ( ',' typeParameter )* '>'
   ;
 
@@ -314,7 +317,7 @@ typeParameter
 ## 5. Formal Parameters
 
 ```
-formalParameterList                      // [Phase 1]
+formalParameterList
   : '(' ')'
   | '(' normalFormalParameters ','? ')'
   | '(' normalFormalParameters ',' optionalOrNamedFormalParameters ')'
@@ -348,7 +351,7 @@ normalFormalParameter
 ## 6. Statements
 
 ```
-statement                                // [Phase 1]
+statement
   : block
   | localVariableDeclaration
   | localFunctionDeclaration
@@ -397,12 +400,12 @@ continueStatement: 'continue' identifier? ';' ;
 yieldStatement   : 'yield' expression ';' ;
 throwStatement   : 'throw' expression ;
 
-switchStatement                          // [Phase 1]
+switchStatement
   : 'switch' '(' expression ')' '{' switchStatementCase* switchDefault? '}'
   ;
 
 switchStatementCase
-  : label* 'case' expression ':' statement*
+  : label* 'case' guardedPattern ':' statement*
   ;
 
 tryStatement
@@ -422,35 +425,37 @@ finallyPart : 'finally' block ;
 
 ## 7. Expressions
 
-Expressions use precedence climbing. The levels from lowest to highest:
+Expressions use recursive-descent precedence levels, from lowest to highest:
 
 ```
-expression                               // [Phase 1]
+expression
   : assignableExpression assignmentOperator expression
-  | conditionalExpression
+  | cascadeExpression
   | throwExpression
   ;
 
 conditionalExpression
-  : logicalOrExpression ( '?' expression ':' expression )?
+  : nullCoalesceExpression ( '?' expression ':' expression )?
   ;
 
 // Precedence levels (lowest → highest):
-//  1. Assignment     : = += -= *= /= %= ~/= &= |= ^= <<= >>= >>>=
-//  2. Conditional    : ?:
-//  3. Null-coalesce  : ??
-//  4. Logical OR     : ||
-//  5. Logical AND    : &&
-//  6. Bitwise OR     : |
-//  7. Bitwise XOR    : ^
-//  8. Bitwise AND    : &
-//  9. Equality       : == !=
-// 10. Relational     : < > <= >= as is is!
-// 11. Shift          : << >> >>>
-// 12. Additive       : + -
-// 13. Multiplicative : * / ~/ %
-// 14. Unary prefix   : -e !e ~e ++e --e await
-// 15. Postfix        : e++ e-- e() e[] e.id e?.id e!
+//  1. Assignment     : = += -= *= /= %= ~/= &= |= ^= <<= >>= >>>= ??=
+//  2. Cascade        : .. ?..
+//  3. Conditional    : ?:
+//  4. Null-coalesce  : ??
+//  5. Logical OR     : ||
+//  6. Logical AND    : &&
+//  7. Equality       : == !=
+//  8. Relational     : < > <= >=
+//  9. Cast/type test : as is is!
+// 10. Bitwise OR     : |
+// 11. Bitwise XOR    : ^
+// 12. Bitwise AND    : &
+// 13. Shift          : << >> >>>
+// 14. Additive       : + -
+// 15. Multiplicative : * / ~/ %
+// 16. Unary prefix   : -e !e ~e ++e --e await
+// 17. Postfix        : e++ e-- e() e[] e.id e?.id e!
 
 primaryExpression
   : identifier
@@ -462,7 +467,7 @@ primaryExpression
   | functionExpression
   | '(' expression ')'
   | switchExpression
-  | dotShorthand                         // [Phase 1] Dart 3.9
+  | dotShorthand                         // Dart 3.9
   ;
 
 // Static access shorthand (Dart 3.9). A primary that begins with `.` resolves
@@ -471,11 +476,11 @@ primaryExpression
 // `<T>(args)`, `.field`, `!`, `[i]`) is layered on by the postfix parser, so
 // `.parse<int>('42')` becomes `Call(DotShorthand(parse), <int>, ('42'))` and
 // `.red.value` becomes `Field(DotShorthand(red), value)`.
-dotShorthand                             // [Phase 1]
+dotShorthand
   : 'const'? '.' ( identifier | 'new' )
   ;
 
-switchExpression                         // [Phase 1]
+switchExpression
   : 'switch' '(' expression ')' '{'
     ( switchExpressionCase ( ',' switchExpressionCase )* ','? )?
     '}'
@@ -484,8 +489,8 @@ switchExpression                         // [Phase 1]
 switchExpressionCase : guardedPattern '=>' expression ;
 guardedPattern : pattern ( 'when' expression )? ;
 
-cascadeExpression                        // [Phase 1]
-  : primaryExpression ( '.' | '?..' ) cascadeSection+
+cascadeExpression
+  : conditionalExpression ( ( '..' | '?..' ) cascadeSection )*
   ;
 ```
 
@@ -494,7 +499,7 @@ cascadeExpression                        // [Phase 1]
 ## 8. Patterns (Dart 3.x)
 
 ```
-pattern                                  // [Phase 1]
+pattern
   : logicalOrPattern
   ;
 
@@ -518,8 +523,9 @@ nullAssertPattern  : primaryPattern '!' ;
 nullCheckPattern   : primaryPattern '?' ;
 
 primaryPattern
-  : '_' ( ':' type )?                    // wildcard
-  | identifier ( ':' type )?            // variable
+  : type? '_'                            // wildcard
+  | 'var' identifier                    // inferred variable
+  | 'final'? type? identifier           // variable
   | literal                              // constant
   | 'const' expression                  // const
   | '(' pattern ')'                     // parenthesised
@@ -529,9 +535,9 @@ primaryPattern
   | objectPattern
   ;
 
-listPattern  : '<' type '>'? '[' listPatternElements? ']' ;
+listPattern  : ( '<' type '>' )? '[' listPatternElements? ']' ;
 recordPattern: '(' patternFields? ')' ;
-mapPattern   : '<' type ',' type '>'? '{' mapPatternEntry ( ',' mapPatternEntry )* ','? '}' ;
+mapPattern   : ( '<' type ',' type '>' )? '{' mapPatternEntry ( ',' mapPatternEntry )* ','? '}' ;
 objectPattern: typeName typeArguments? '(' patternFields? ')' ;
 ```
 
@@ -557,7 +563,7 @@ literal
 // separator (`1_` lexes as a single numeric token); a leading `_` is an
 // identifier, not a number (`_1`).
 
-stringLiteral                            // [Phase 1]
+stringLiteral
   : ( singleLineString | multiLineString )+
   ;
 
@@ -573,7 +579,7 @@ multiLineString
   | "'''" stringContent* "'''"
   ;
 
-stringInterpolation                      // [Phase 1]
+stringInterpolation
   : '$' identifier
   | '${' expression '}'
   ;
@@ -607,9 +613,9 @@ returnType : type | 'void' ;
 
 ## Implementation Notes
 
-- The parser uses **error recovery**: on a syntax error it emits an `ErrorNode` and resumes
-  at the next `;` or `}` boundary. No panics on malformed input.
-- String interpolation is lexed as a token sequence and re-assembled during parsing.
-- Pattern matching (section 8) requires Dart 3.x; Dart 2.x `switch` is handled separately.
-- The `grammar.md` grammar scope for Phase 1 corresponds to the
-  [`PARSER_GRAMMAR.md`](../../.omc/docs/PARSER_GRAMMAR.md) design document.
+- Syntax errors produce `ParseError` values; recovery synchronizes at boundaries appropriate
+  to the enclosing production and can retain `ErrorNode` or `Expr::Error` nodes.
+- The lexer emits one `StringLit` token per literal. Parsing scans interpolation regions
+  within that token, builds identifiers for `$name`, and parses `${...}` expressions;
+  interpolation expressions that fail parsing report errors without adding a region.
+- Pattern matching (section 8) requires Dart 3.x.

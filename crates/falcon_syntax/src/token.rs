@@ -191,6 +191,74 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+    pub fn is_identifier_like(self) -> bool {
+        use TokenKind::*;
+        matches!(
+            self,
+            Ident
+                | Abstract
+                | As
+                | Base
+                | Covariant
+                | Deferred
+                | Dynamic
+                | Export
+                | Extension
+                | External
+                | Factory
+                | Function
+                | Get
+                | Hide
+                | Implements
+                | Import
+                | Interface
+                | Late
+                | Library
+                | Mixin
+                | Operator
+                | Part
+                | Required
+                | Sealed
+                | Set
+                | Show
+                | Static
+                | Type
+                | Typedef
+                | Async
+                | Await
+                | Sync
+                | Yield
+                | When
+                | On
+                | Override
+        )
+    }
+
+    /// Single-token operators; `[]` and `[]=` require parsing multiple tokens.
+    pub fn is_user_definable_operator(self) -> bool {
+        use TokenKind::*;
+        matches!(
+            self,
+            Lt | Gt
+                | LtEq
+                | GtEq
+                | EqEq
+                | Minus
+                | Plus
+                | Slash
+                | TildeSlash
+                | Star
+                | Percent
+                | Pipe
+                | Caret
+                | Amp
+                | LtLt
+                | GtGt
+                | GtGtGt
+                | Tilde
+        )
+    }
+
     /// Returns the keyword kind for the given identifier text, if it is a keyword.
     pub fn from_keyword(text: &str) -> Option<TokenKind> {
         let kind = match text {

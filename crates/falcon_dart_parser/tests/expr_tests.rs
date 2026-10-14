@@ -4,6 +4,9 @@
 
 use falcon_dart_parser::parser::{ParseError, parse};
 use falcon_syntax::ast::*;
+#[path = "common/only_class.rs"]
+mod common_class;
+use common_class::only_class;
 
 /// Parse `var x = <expr>;` and return the initializer expression plus any parse
 /// errors. Wrapping in a top-level variable is the simplest way to drive the
@@ -30,27 +33,13 @@ fn parse_ok(expr_src: &str) -> Expr {
     expr
 }
 
-/// Parse whole-program `src` and return its parse-error count.
-fn errs(src: &str) -> usize {
-    parse(src).1.len()
-}
-
-/// Parse `src` as the body of an async function and return `(statements, error_count)`.
-fn parse_body(src: &str) -> (Vec<Stmt>, usize) {
-    let wrapped = format!("void f() async {{ {src} }}");
-    let (prog, errors) = parse(&wrapped);
-    let func = match &prog.declarations[0] {
-        TopLevelDecl::Function(f) => f,
-        other => panic!("expected function, got {other:?}\nerrors: {errors:?}"),
-    };
-    let block = match func.body.as_ref().unwrap() {
-        FunctionBody::Block(b) => b,
-        other => panic!("expected block, got {other:?}"),
-    };
-    (block.stmts.clone(), errors.len())
-}
-
-// ── Item (a): leading-spread map/set disambiguation ───────────────────────────
+mod common;
+#[path = "common/errs.rs"]
+mod common_errs;
+#[path = "common/first_stmt_expr.rs"]
+mod common_expr;
+use common::parse_body;
+use common_errs::errs;
 
 #[test]
 fn test_leading_spread_then_entry_is_map() {
@@ -167,8 +156,6 @@ fn collection_for_headers_preserve_declarations_and_clauses() {
     assert_eq!(updates.len(), 1);
 }
 
-// ── Item (b): `<T>{}` empty-brace arity ───────────────────────────────────────
-
 #[test]
 fn test_single_type_arg_empty_braces_is_set() {
     let expr = parse_ok("<int>{}");
@@ -194,8 +181,6 @@ fn test_no_type_args_empty_braces_is_map() {
     let expr = parse_ok("{}");
     assert!(matches!(expr, Expr::Map { .. }), "got {expr:?}");
 }
-
-// ── Item (c): generic-instantiation tear-off ──────────────────────────────────
 
 #[test]
 fn test_generic_instantiation_tearoff() {
@@ -296,8 +281,6 @@ fn test_generic_call_still_parses() {
     );
 }
 
-// ── Item (d): cascade null-awareness ──────────────────────────────────────────
-
 #[test]
 fn test_leading_null_aware_cascade() {
     let expr = parse_ok("a?..b()");
@@ -385,8 +368,6 @@ fn test_null_aware_index_selector_cascade_section() {
     }
 }
 
-// ── Item (e): `const <T>` without `[`/`{` records a diagnostic ────────────────
-
 #[test]
 fn test_const_type_args_without_collection_records_error() {
     let (_expr, errors) = parse_expr("const <int>");
@@ -395,8 +376,6 @@ fn test_const_type_args_without_collection_records_error() {
         "expected a diagnostic for `const <int>` with no collection literal"
     );
 }
-
-// ── Item (f): collection if-case guard retained ───────────────────────────────
 
 #[test]
 fn test_collection_if_case_guard_retained() {
@@ -433,8 +412,6 @@ fn test_collection_if_case_without_guard() {
         other => panic!("expected if-case element, got {other:?}"),
     }
 }
-
-// ── Item (g): symbol literals ─────────────────────────────────────────────────
 
 #[test]
 fn test_symbol_literal_identifier() {
@@ -481,11 +458,9 @@ fn test_symbol_literal_index_assign_operator() {
     }
 }
 
-// ── Corpus-found expression gaps ─────────────────────────────────────────
-
 #[test]
 fn cast_binds_tighter_than_less_than() {
-    let (stmts, e) = parse_body("var r = a < b as int;");
+    let (stmts, e) = parse_body("var r = a < b as int;", "async");
     assert_eq!(e, 0, "stmts: {stmts:?}");
     // Expect `a < (b as int)`.
     let init = match &stmts[0] {
@@ -507,19 +482,19 @@ fn cast_binds_tighter_than_less_than() {
 #[test]
 fn cast_then_comparison() {
     // `(x as int) <= y`.
-    let (_stmts, e) = parse_body("var r = x as int <= y;");
+    let (_stmts, e) = parse_body("var r = x as int <= y;", "async");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn is_test_then_typed_collection_ternary() {
-    let (_stmts, e) = parse_body("var y = a is Foo ? <int>[] : b;");
+    let (_stmts, e) = parse_body("var y = a is Foo ? <int>[] : b;", "async");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn await_for_collection_element() {
-    let (stmts, e) = parse_body("var b = [await for (var c in s) ...c];");
+    let (stmts, e) = parse_body("var b = [await for (var c in s) ...c];", "async");
     assert_eq!(e, 0, "stmts: {stmts:?}");
     let init = match &stmts[0] {
         Stmt::LocalVar(v) => v.declarators[0].initializer.as_ref().unwrap(),
@@ -536,13 +511,13 @@ fn await_for_collection_element() {
 
 #[test]
 fn is_not_nullable_function_type() {
-    let (_stmts, e) = parse_body("if (a is! Object? Function()) return;");
+    let (_stmts, e) = parse_body("if (a is! Object? Function()) return;", "async");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn const_record_literal() {
-    let (stmts, e) = parse_body("var x = const (\"\", Y.Z);");
+    let (stmts, e) = parse_body("var x = const (\"\", Y.Z);", "async");
     assert_eq!(e, 0, "stmts: {stmts:?}");
     let init = match &stmts[0] {
         Stmt::LocalVar(v) => v.declarators[0].initializer.as_ref().unwrap(),
@@ -569,8 +544,10 @@ fn method_type_args_nested_generic_in_function_type_param() {
     // `Pointer<Uint32> count` is a generic-typed named parameter inside the
     // function type, and the list closes with a `>>>` shift token — both of which
     // used to make the type-arg scan fall back to a `<` comparison.
-    let (_stmts, e) =
-        parse_body("p.cast<Pointer<NativeFunction<Int32 Function(Pointer<Uint32> count)>>>();");
+    let (_stmts, e) = parse_body(
+        "p.cast<Pointer<NativeFunction<Int32 Function(Pointer<Uint32> count)>>>();",
+        "async",
+    );
     assert_eq!(e, 0);
 }
 
@@ -587,25 +564,28 @@ fn method_type_args_survive_speculative_typed_decl_rollback() {
 
 #[test]
 fn multi_arg_method_type_args() {
-    let (_stmts, e) = parse_body("x.cast<A, B>();");
+    let (_stmts, e) = parse_body("x.cast<A, B>();", "async");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn record_type_with_generic_field_as_type_arg() {
-    let (_stmts, e) = parse_body("var q = Queue<(Uri sourceDoc, Ref<Parseable> ref)>();");
+    let (_stmts, e) = parse_body(
+        "var q = Queue<(Uri sourceDoc, Ref<Parseable> ref)>();",
+        "async",
+    );
     assert_eq!(e, 0);
 }
 
 #[test]
 fn record_type_type_arg_with_nested_generic() {
-    let (_stmts, e) = parse_body("isA<(String, List<String>)>();");
+    let (_stmts, e) = parse_body("isA<(String, List<String>)>();", "async");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn cascade_on_as_cast() {
-    let (stmts, e) = parse_body("y = x as web.HTMLMetaElement ..name = 'n';");
+    let (stmts, e) = parse_body("y = x as web.HTMLMetaElement ..name = 'n';", "async");
     assert_eq!(e, 0, "stmts: {stmts:?}");
     // The cascade wraps the whole `(x as T)`.
     let value = match &stmts[0] {
@@ -628,13 +608,13 @@ fn cascade_on_as_cast() {
 
 #[test]
 fn plain_cascade_still_parses() {
-    let (_stmts, e) = parse_body("y..a()..b = 1;");
+    let (_stmts, e) = parse_body("y..a()..b = 1;", "async");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn const_generic_constructor_statement() {
-    let (stmts, e) = parse_body("const Optional<int>.absent();");
+    let (stmts, e) = parse_body("const Optional<int>.absent();", "async");
     assert_eq!(e, 0, "stmts: {stmts:?}");
     let expr = match &stmts[0] {
         Stmt::Expr(s) => &s.expr,
@@ -649,12 +629,10 @@ fn const_generic_constructor_statement() {
 #[test]
 fn const_generic_typed_local_decl_still_parses() {
     // Regression guard: `const List<int> xs = []` stays a const var declaration.
-    let (stmts, e) = parse_body("const List<int> xs = [];");
+    let (stmts, e) = parse_body("const List<int> xs = [];", "async");
     assert_eq!(e, 0);
     assert!(matches!(&stmts[0], Stmt::LocalVar(v) if v.keyword == VarKeyword::Const));
 }
-
-// ── Residual parse gaps: cascade selector chains and paren-vs-lambda ───────────
 
 #[test]
 fn cascade_section_parses_full_selector_chain() {
@@ -719,10 +697,7 @@ fn paren_expr_initializer_before_block_body_is_not_a_lambda() {
     // `(...) {` shape used to be mis-detected as a function literal.
     let (prog, errors) = parse("class C { var g; C(): g = (() => b) {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let class = match &prog.declarations[0] {
-        TopLevelDecl::Class(c) => c,
-        other => panic!("expected class, got {other:?}"),
-    };
+    let class = only_class(&prog);
     let ctor = class
         .members
         .iter()
@@ -755,10 +730,7 @@ fn valid_param_list_initializer_before_block_body_is_not_a_lambda() {
     // `(e)`, not a lambda `(e) {}`.
     let (prog, errors) = parse("class C { var g; C(): g = (e) {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let class = match &prog.declarations[0] {
-        TopLevelDecl::Class(c) => c,
-        other => panic!("expected class, got {other:?}"),
-    };
+    let class = only_class(&prog);
     let ctor = class
         .members
         .iter()
@@ -834,8 +806,6 @@ fn bare_block_lambda_outermost_in_ctor_init_is_ctor_body_then_stray_semicolon() 
     );
 }
 
-// ── Item: assignment expressions in parenthesised / conditional-branch positions ─
-
 #[test]
 fn test_assignment_inside_parens() {
     // `(v = 0)` is an assignment expression, valid as a parenthesised subject.
@@ -876,23 +846,10 @@ fn test_assignment_in_both_conditional_branches() {
     }
 }
 
-// ── Cascade-section assignment RHS is expressionWithoutCascade ─────────────────
-
 /// Parse `void f(o) { <src> }` and return the first statement's expression.
 fn first_stmt_expr(src: &str) -> (Expr, usize) {
     let (prog, errors) = parse(&format!("void f(o) {{ {src} }}"));
-    let func = match &prog.declarations[0] {
-        TopLevelDecl::Function(f) => f,
-        other => panic!("expected function, got {other:?}\nerrors: {errors:?}"),
-    };
-    let block = match func.body.as_ref().unwrap() {
-        FunctionBody::Block(b) => b,
-        other => panic!("expected block, got {other:?}"),
-    };
-    let expr = match &block.stmts[0] {
-        Stmt::Expr(e) => e.expr.clone(),
-        other => panic!("expected expr stmt, got {other:?}"),
-    };
+    let expr = common_expr::first_stmt_expr(&prog);
     (expr, errors.len())
 }
 
@@ -936,8 +893,6 @@ fn test_cascade_index_assign_rhs_excludes_following_section() {
         other => panic!("expected cascade, got {other:?}"),
     }
 }
-
-// ── Recursion-depth guard: deep nesting errors instead of overflowing ──────────
 
 #[test]
 fn test_deep_unary_chain_does_not_overflow() {

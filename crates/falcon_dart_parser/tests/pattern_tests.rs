@@ -7,28 +7,15 @@
 //!
 //! Each test asserts ZERO parse errors and the exact AST shape.
 
-use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 
-/// Parse `src` as the body of a function and return `(statements, error_count)`.
-fn parse_body(src: &str) -> (Vec<Stmt>, usize) {
-    let wrapped = format!("void f() {{ {src} }}");
-    let (prog, errors) = parse(&wrapped);
-    let func = match &prog.declarations[0] {
-        TopLevelDecl::Function(f) => f,
-        other => panic!("expected function, got {other:?}\nerrors: {errors:?}"),
-    };
-    let block = match func.body.as_ref().unwrap() {
-        FunctionBody::Block(b) => b,
-        other => panic!("expected block, got {other:?}"),
-    };
-    (block.stmts.clone(), errors.len())
-}
+mod common;
+use common::parse_body;
 
 /// Parse a single `switch (x) { <cases> }` statement and return it with the
 /// error count.
 fn parse_switch(cases: &str) -> (SwitchStmt, usize) {
-    let (stmts, errs) = parse_body(&format!("switch (x) {{ {cases} }}"));
+    let (stmts, errs) = parse_body(&format!("switch (x) {{ {cases} }}"), "");
     let sw = stmts
         .into_iter()
         .find_map(|s| match s {
@@ -46,8 +33,6 @@ fn first_case(sw: &SwitchStmt) -> (&Pattern, &Option<Box<Expr>>) {
         other => panic!("expected a pattern case, got {other:?}"),
     }
 }
-
-// ── (a) `when` guard after constant / dotted patterns ─────────────────────────
 
 #[test]
 fn guard_after_dotted_constant_pattern() {
@@ -93,8 +78,6 @@ fn typed_variable_pattern_still_takes_its_name() {
     );
     assert!(guard.is_some());
 }
-
-// ── (b) const patterns beyond dotted idents ───────────────────────────────────
 
 #[test]
 fn const_constructor_pattern() {
@@ -205,8 +188,6 @@ fn dotted_constant_reference_stays_name_form() {
     }
 }
 
-// ── (c) typed collection patterns + map rest ──────────────────────────────────
-
 #[test]
 fn typed_list_pattern() {
     let (sw, errs) = parse_switch("case <int>[a, b]: break;");
@@ -272,8 +253,6 @@ fn relational_lt_pattern_still_works() {
     );
 }
 
-// ── (d) object-pattern getter shorthand binding ───────────────────────────────
-
 #[test]
 fn object_pattern_getter_shorthand_binds_variable() {
     let (sw, errs) = parse_switch("case Foo(:field): break;");
@@ -316,7 +295,6 @@ fn object_pattern_multiple_shorthands() {
     }
 }
 
-// ── (e) relational operand over-consume ───────────────────────────────────────
 //
 // `case > 3 && < 5:` parses as LogicalAnd(Relational(> 3), Relational(< 5)): the
 // operand is parsed at the bitwise-or tier so `&&`/`||` stay pattern-level.
@@ -352,18 +330,9 @@ fn relational_operand_stops_before_logical_and() {
     }
 }
 
-// ── (f) object pattern in for-in — BLOCKED on a cross-file change ──────────────
-//
-// `for (final MapEntry(:key, :value) in m.entries) {}`. The pattern layer (the
-// object pattern with `:key`/`:value` bindings) is fixed by item (d) and is
-// exercised by `object_pattern_multiple_shorthands` above. What remains is the
-// pattern-for-in detector in stmt.rs `parse_for_clauses`, which only fires when
-// `final`/`var` is directly followed by `(`/`[`/`{` and so never recognises an
-// object pattern that starts with a type name. That gate lives in a file this
-// group does not own. Un-ignore once the stmt.rs detector is broadened.
 #[test]
 fn object_pattern_for_in() {
-    let (stmts, errs) = parse_body("for (final MapEntry(:key, :value) in m.entries) {}");
+    let (stmts, errs) = parse_body("for (final MapEntry(:key, :value) in m.entries) {}", "");
     assert_eq!(errs, 0, "stmts: {stmts:?}");
     let for_stmt = stmts
         .iter()
@@ -383,11 +352,10 @@ fn object_pattern_for_in() {
         other => panic!("expected PatternForIn, got {other:?}"),
     }
 }
-// ── map-pattern assignment ────────────────────────────────────────────────────
 
 #[test]
 fn map_pattern_assignment_binds_variable() {
-    let (stmts, errs) = parse_body("{'a': a} = e;");
+    let (stmts, errs) = parse_body("{'a': a} = e;", "");
     assert_eq!(errs, 0, "stmts: {stmts:?}");
     assert_eq!(stmts.len(), 1, "one statement expected: {stmts:?}");
     match &stmts[0] {
@@ -417,7 +385,7 @@ fn map_pattern_assignment_binds_variable() {
 
 #[test]
 fn map_pattern_assignment_multiple_entries() {
-    let (stmts, errs) = parse_body("{'a': a, 'b': b} = e;");
+    let (stmts, errs) = parse_body("{'a': a, 'b': b} = e;", "");
     assert_eq!(errs, 0, "stmts: {stmts:?}");
     match &stmts[0] {
         Stmt::PatternAssign(pa) => match &pa.pattern {
@@ -439,11 +407,9 @@ fn map_pattern_assignment_multiple_entries() {
     }
 }
 
-// ── regression guards: LBrace disambiguation is untouched ──────────────────────
-
 #[test]
 fn bare_block_still_a_block() {
-    let (stmts, errs) = parse_body("{ f(); }");
+    let (stmts, errs) = parse_body("{ f(); }", "");
     assert_eq!(errs, 0, "stmts: {stmts:?}");
     assert_eq!(stmts.len(), 1, "stmts: {stmts:?}");
     match &stmts[0] {
@@ -454,7 +420,7 @@ fn bare_block_still_a_block() {
 
 #[test]
 fn map_literal_expression_statement_unchanged() {
-    let (stmts, errs) = parse_body("{'k': 1};");
+    let (stmts, errs) = parse_body("{'k': 1};", "");
     assert_eq!(errs, 0, "stmts: {stmts:?}");
     match &stmts[0] {
         Stmt::Expr(es) => assert!(
@@ -466,58 +432,57 @@ fn map_literal_expression_statement_unchanged() {
     }
 }
 
-// ── Corpus-found pattern gaps ───────────────────────────────────────────
-
 #[test]
 fn dot_shorthand_switch_pattern() {
-    let (_stmts, e) = parse_body("var r = switch (x) { .build => 1, _ => 0 };");
+    let (_stmts, e) = parse_body("var r = switch (x) { .build => 1, _ => 0 };", "");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn record_pattern_field_with_record_type() {
-    let (_stmts, e) = parse_body("final (bool a, (int, int)? b) = x;");
+    let (_stmts, e) = parse_body("final (bool a, (int, int)? b) = x;", "");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn cast_pattern_in_switch_expression_arm() {
-    let (stmts, e) = parse_body("var r = switch (o) { value as int => 1, _ => 0 };");
+    let (stmts, e) = parse_body("var r = switch (o) { value as int => 1, _ => 0 };", "");
     assert_eq!(e, 0, "stmts: {stmts:?}");
 }
 
 #[test]
 fn cast_pattern_in_switch_case() {
-    let (_stmts, e) = parse_body("switch (o) { case value as int: break; }");
+    let (_stmts, e) = parse_body("switch (o) { case value as int: break; }", "");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn cast_pattern_on_parenthesized_pattern() {
-    let (_stmts, e) = parse_body("switch (o) { case (B() || C()) as B: break; }");
+    let (_stmts, e) = parse_body("switch (o) { case (B() || C()) as B: break; }", "");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn cast_pattern_in_map_pattern_field() {
-    let (_stmts, e) = parse_body("switch (o) { case {usesKey: final usage as String}: break; }");
+    let (_stmts, e) = parse_body(
+        "switch (o) { case {usesKey: final usage as String}: break; }",
+        "",
+    );
     assert_eq!(e, 0);
 }
 
 #[test]
 fn record_pattern_with_when_guard() {
     // The `when` after a record pattern is a guard, not a typed-variable name.
-    let (_stmts, e) = parse_body("switch (o) { case (a, b) when a: break; }");
+    let (_stmts, e) = parse_body("switch (o) { case (a, b) when a: break; }", "");
     assert_eq!(e, 0);
 }
 
 #[test]
 fn dot_shorthand_in_record_pattern_with_when() {
-    let (_stmts, e) = parse_body("switch (o) { case (.linux, _) when h: break; }");
+    let (_stmts, e) = parse_body("switch (o) { case (.linux, _) when h: break; }", "");
     assert_eq!(e, 0);
 }
-
-// ── Item: const record pattern `case const (1, 2)` ────────────────────────────
 
 #[test]
 fn const_record_pattern() {
@@ -582,8 +547,6 @@ fn const_parenthesised_expr_pattern_still_single() {
     }
 }
 
-// ── Adjacent string literals fold into one constant string pattern ────────────
-
 /// The string value of the first case's literal string pattern.
 fn first_case_string(sw: &SwitchStmt) -> String {
     match first_case(sw).0 {
@@ -604,7 +567,7 @@ fn adjacent_string_case_label_folds() {
 
 #[test]
 fn adjacent_string_switch_expr_arm_folds() {
-    let (stmts, errs) = parse_body("var r = switch (x) { 'a' 'b' => 1, _ => 0 };");
+    let (stmts, errs) = parse_body("var r = switch (x) { 'a' 'b' => 1, _ => 0 };", "");
     assert_eq!(errs, 0, "stmts: {stmts:?}");
 }
 
@@ -642,7 +605,7 @@ fn adjacent_string_in_record_field_folds() {
 
 #[test]
 fn adjacent_string_if_case_folds() {
-    let (stmts, errs) = parse_body("if (x case 'a' 'b') print('yes');");
+    let (stmts, errs) = parse_body("if (x case 'a' 'b') print('yes');", "");
     assert_eq!(errs, 0, "stmts: {stmts:?}");
 }
 

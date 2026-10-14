@@ -3,8 +3,6 @@ use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::{Token, TokenKind};
 
-// ── Literals ──────────────────────────────────────────────────────────────────
-
 #[test]
 fn test_integer_decimal() {
     let tokens = Lexer::new("42").tokenize();
@@ -50,7 +48,47 @@ fn test_double_exponent_negative() {
     assert_eq!(tokens[0].kind, TokenKind::DoubleLit);
 }
 
-// ── Digit separators (Dart 3.6) ────────────────────────────────────────────────
+#[test]
+fn test_leading_dot_exponent_separator_boundary() {
+    let src = ".5e1_0";
+    let tokens = Lexer::new(src).tokenize();
+    assert_eq!(tokens.len(), 3);
+    assert_eq!(tokens[0].kind, TokenKind::DoubleLit);
+    assert_eq!(tokens[0].text(src), ".5e1");
+    assert_eq!(tokens[1].kind, TokenKind::Ident);
+    assert_eq!(tokens[1].text(src), "_0");
+    assert_eq!(tokens[2].kind, TokenKind::Eof);
+
+    let src = "0.5e1_0";
+    let tokens = Lexer::new(src).tokenize();
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].kind, TokenKind::DoubleLit);
+    assert_eq!(tokens[0].text(src), src);
+    assert_eq!(tokens[1].kind, TokenKind::Eof);
+}
+
+#[test]
+fn test_interpolation_comments_ignore_closing_braces() {
+    for src in ["'${a // }\n}'", "'${a /* } */}'"] {
+        let tokens = Lexer::new(src).tokenize();
+        assert_eq!(tokens.len(), 2, "{src:?}: {tokens:?}");
+        assert_eq!(tokens[0].kind, TokenKind::StringLit, "{src:?}");
+        assert_eq!(tokens[0].text(src), src);
+        assert_eq!(tokens[1].kind, TokenKind::Eof);
+    }
+}
+
+#[test]
+fn test_unterminated_interpolation_and_comment_consume_source() {
+    for src in ["'${ /* x", "'${ 'x", "/* x"] {
+        let tokens = Lexer::new(src).tokenize();
+        assert_eq!(tokens.len(), 2, "{src:?}: {tokens:?}");
+        assert_eq!(tokens[0].kind, TokenKind::Error, "{src:?}");
+        assert_eq!(tokens[0].offset, 0);
+        assert_eq!(tokens[0].len, src.len());
+        assert_eq!(tokens[1].kind, TokenKind::Eof);
+    }
+}
 
 #[test]
 fn test_int_digit_separators() {
@@ -90,8 +128,6 @@ fn test_leading_underscore_is_identifier() {
     assert_eq!(tokens[0].kind, TokenKind::Ident);
     assert_eq!(tokens[0].text("_1"), "_1");
 }
-
-// ── String literals ──────────────────────────────────────────────────────────
 
 #[test]
 fn test_string_single_quote() {
@@ -154,8 +190,6 @@ fn test_string_unterminated() {
     assert_eq!(tokens[0].kind, TokenKind::Error);
 }
 
-// ── Comments ──────────────────────────────────────────────────────────────────
-
 #[test]
 fn test_line_comment() {
     let tokens = Lexer::new("// comment").tokenize();
@@ -187,351 +221,133 @@ fn test_unterminated_block_comment() {
     assert_eq!(tokens[0].kind, TokenKind::Error);
 }
 
-// ── Keywords ──────────────────────────────────────────────────────────────────
-
 #[test]
-fn test_keyword_assert() {
-    let tokens = Lexer::new("assert").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Assert);
+fn test_keyword_operator_punctuation_table() {
+    let cases = [
+        ("test_keyword_assert", "assert", TokenKind::Assert),
+        ("test_keyword_break", "break", TokenKind::Break),
+        ("test_keyword_case", "case", TokenKind::Case),
+        ("keyword_catch", "catch", TokenKind::Catch),
+        ("test_keyword_class", "class", TokenKind::Class),
+        ("test_keyword_const", "const", TokenKind::Const),
+        ("keyword_continue", "continue", TokenKind::Continue),
+        ("keyword_default", "default", TokenKind::Default),
+        ("keyword_do", "do", TokenKind::Do),
+        ("keyword_else", "else", TokenKind::Else),
+        ("keyword_enum", "enum", TokenKind::Enum),
+        ("keyword_extends", "extends", TokenKind::Extends),
+        ("test_keyword_false", "false", TokenKind::False),
+        ("keyword_final", "final", TokenKind::Final),
+        ("keyword_finally", "finally", TokenKind::Finally),
+        ("keyword_for", "for", TokenKind::For),
+        ("keyword_if", "if", TokenKind::If),
+        ("keyword_in", "in", TokenKind::In),
+        ("keyword_is", "is", TokenKind::Is),
+        ("keyword_new", "new", TokenKind::New),
+        ("test_keyword_null", "null", TokenKind::Null),
+        ("keyword_rethrow", "rethrow", TokenKind::Rethrow),
+        ("test_keyword_return", "return", TokenKind::Return),
+        ("keyword_super", "super", TokenKind::Super),
+        ("keyword_switch", "switch", TokenKind::Switch),
+        ("keyword_this", "this", TokenKind::This),
+        ("keyword_throw", "throw", TokenKind::Throw),
+        ("test_keyword_true", "true", TokenKind::True),
+        ("keyword_try", "try", TokenKind::Try),
+        ("test_keyword_var", "var", TokenKind::Var),
+        ("keyword_void", "void", TokenKind::Void),
+        ("keyword_while", "while", TokenKind::While),
+        ("keyword_with", "with", TokenKind::With),
+        ("test_builtin_abstract", "abstract", TokenKind::Abstract),
+        ("keyword_as", "as", TokenKind::As),
+        ("keyword_base", "base", TokenKind::Base),
+        ("keyword_covariant", "covariant", TokenKind::Covariant),
+        ("keyword_deferred", "deferred", TokenKind::Deferred),
+        ("keyword_dynamic", "dynamic", TokenKind::Dynamic),
+        ("keyword_export", "export", TokenKind::Export),
+        ("keyword_extension", "extension", TokenKind::Extension),
+        ("keyword_external", "external", TokenKind::External),
+        ("keyword_factory", "factory", TokenKind::Factory),
+        ("keyword_Function", "Function", TokenKind::Function),
+        ("test_builtin_get", "get", TokenKind::Get),
+        ("keyword_hide", "hide", TokenKind::Hide),
+        ("keyword_implements", "implements", TokenKind::Implements),
+        ("keyword_import", "import", TokenKind::Import),
+        ("keyword_interface", "interface", TokenKind::Interface),
+        ("keyword_late", "late", TokenKind::Late),
+        ("keyword_library", "library", TokenKind::Library),
+        ("keyword_mixin", "mixin", TokenKind::Mixin),
+        ("keyword_operator", "operator", TokenKind::Operator),
+        ("keyword_part", "part", TokenKind::Part),
+        ("keyword_required", "required", TokenKind::Required),
+        ("keyword_sealed", "sealed", TokenKind::Sealed),
+        ("test_builtin_set", "set", TokenKind::Set),
+        ("keyword_show", "show", TokenKind::Show),
+        ("test_builtin_static", "static", TokenKind::Static),
+        ("keyword_type", "type", TokenKind::Type),
+        ("keyword_typedef", "typedef", TokenKind::Typedef),
+        ("test_builtin_async", "async", TokenKind::Async),
+        ("test_builtin_await", "await", TokenKind::Await),
+        ("keyword_sync", "sync", TokenKind::Sync),
+        ("keyword_yield", "yield", TokenKind::Yield),
+        ("keyword_when", "when", TokenKind::When),
+        ("keyword_on", "on", TokenKind::On),
+        ("test_builtin_override", "override", TokenKind::Override),
+        ("test_operator_plus", "+", TokenKind::Plus),
+        ("test_operator_minus", "-", TokenKind::Minus),
+        ("test_operator_star", "*", TokenKind::Star),
+        ("test_operator_slash", "/", TokenKind::Slash),
+        ("test_operator_percent", "%", TokenKind::Percent),
+        ("test_operator_tilde_slash", "~/", TokenKind::TildeSlash),
+        ("test_operator_eq_eq", "==", TokenKind::EqEq),
+        ("test_operator_bang_eq", "!=", TokenKind::BangEq),
+        ("test_operator_lt", "<", TokenKind::Lt),
+        ("test_operator_gt", ">", TokenKind::Gt),
+        ("test_operator_lt_eq", "<=", TokenKind::LtEq),
+        ("test_operator_gt_eq", ">=", TokenKind::GtEq),
+        ("test_operator_amp_amp", "&&", TokenKind::AmpAmp),
+        ("test_operator_pipe_pipe", "||", TokenKind::PipePipe),
+        ("test_operator_bang", "!", TokenKind::Bang),
+        ("test_operator_qmark_qmark", "??", TokenKind::QmarkQmark),
+        ("test_operator_qmark_dot", "?.", TokenKind::QmarkDot),
+        (
+            "test_operator_qmark_bracket",
+            "?[",
+            TokenKind::QmarkLBracket,
+        ),
+        ("test_operator_dot_dot", "..", TokenKind::DotDot),
+        ("test_operator_dot_dot_qmark", "?..", TokenKind::DotDotQmark),
+        ("test_operator_spread", "...", TokenKind::DotDotDot),
+        (
+            "test_operator_spread_qmark",
+            "...?",
+            TokenKind::DotDotDotQmark,
+        ),
+        ("test_operator_plus_plus", "++", TokenKind::PlusPlus),
+        ("test_operator_minus_minus", "--", TokenKind::MinusMinus),
+        ("test_operator_left_shift", "<<", TokenKind::LtLt),
+        ("test_operator_right_shift", ">>", TokenKind::GtGt),
+        (
+            "test_operator_unsigned_right_shift",
+            ">>>",
+            TokenKind::GtGtGt,
+        ),
+        ("test_operator_arrow", "=>", TokenKind::Arrow),
+        ("test_punct_lparen", "(", TokenKind::LParen),
+        ("test_punct_rparen", ")", TokenKind::RParen),
+        ("test_punct_lbrace", "{", TokenKind::LBrace),
+        ("test_punct_rbrace", "}", TokenKind::RBrace),
+        ("test_punct_lbracket", "[", TokenKind::LBracket),
+        ("test_punct_rbracket", "]", TokenKind::RBracket),
+        ("test_punct_comma", ",", TokenKind::Comma),
+        ("test_punct_semicolon", ";", TokenKind::Semicolon),
+        ("test_punct_colon", ":", TokenKind::Colon),
+        ("test_punct_at", "@", TokenKind::At),
+        ("test_punct_dot", ".", TokenKind::Dot),
+    ];
+    for (witness, src, expected) in cases {
+        assert_eq!(only_kind(src), expected, "{witness}: {src:?}");
+    }
 }
-
-#[test]
-fn test_keyword_break() {
-    let tokens = Lexer::new("break").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Break);
-}
-
-#[test]
-fn test_keyword_case() {
-    let tokens = Lexer::new("case").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Case);
-}
-
-#[test]
-fn test_keyword_class() {
-    let tokens = Lexer::new("class").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Class);
-}
-
-#[test]
-fn test_keyword_const() {
-    let tokens = Lexer::new("const").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Const);
-}
-
-#[test]
-fn test_keyword_return() {
-    let tokens = Lexer::new("return").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Return);
-}
-
-#[test]
-fn test_keyword_true() {
-    let tokens = Lexer::new("true").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::True);
-}
-
-#[test]
-fn test_keyword_false() {
-    let tokens = Lexer::new("false").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::False);
-}
-
-#[test]
-fn test_keyword_null() {
-    let tokens = Lexer::new("null").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Null);
-}
-
-#[test]
-fn test_keyword_var() {
-    let tokens = Lexer::new("var").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Var);
-}
-
-// ── Built-in identifiers ──────────────────────────────────────────────────────
-
-#[test]
-fn test_builtin_abstract() {
-    let tokens = Lexer::new("abstract").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Abstract);
-}
-
-#[test]
-fn test_builtin_async() {
-    let tokens = Lexer::new("async").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Async);
-}
-
-#[test]
-fn test_builtin_await() {
-    let tokens = Lexer::new("await").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Await);
-}
-
-#[test]
-fn test_builtin_get() {
-    let tokens = Lexer::new("get").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Get);
-}
-
-#[test]
-fn test_builtin_set() {
-    let tokens = Lexer::new("set").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Set);
-}
-
-#[test]
-fn test_builtin_static() {
-    let tokens = Lexer::new("static").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Static);
-}
-
-#[test]
-fn test_builtin_override() {
-    let tokens = Lexer::new("override").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Override);
-}
-
-// ── Operators ─────────────────────────────────────────────────────────────────
-
-#[test]
-fn test_operator_plus() {
-    let tokens = Lexer::new("+").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Plus);
-}
-
-#[test]
-fn test_operator_minus() {
-    let tokens = Lexer::new("-").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Minus);
-}
-
-#[test]
-fn test_operator_star() {
-    let tokens = Lexer::new("*").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Star);
-}
-
-#[test]
-fn test_operator_slash() {
-    let tokens = Lexer::new("/").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Slash);
-}
-
-#[test]
-fn test_operator_percent() {
-    let tokens = Lexer::new("%").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Percent);
-}
-
-#[test]
-fn test_operator_tilde_slash() {
-    let tokens = Lexer::new("~/").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::TildeSlash);
-}
-
-#[test]
-fn test_operator_eq_eq() {
-    let tokens = Lexer::new("==").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::EqEq);
-}
-
-#[test]
-fn test_operator_bang_eq() {
-    let tokens = Lexer::new("!=").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::BangEq);
-}
-
-#[test]
-fn test_operator_lt() {
-    let tokens = Lexer::new("<").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Lt);
-}
-
-#[test]
-fn test_operator_gt() {
-    let tokens = Lexer::new(">").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Gt);
-}
-
-#[test]
-fn test_operator_lt_eq() {
-    let tokens = Lexer::new("<=").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::LtEq);
-}
-
-#[test]
-fn test_operator_gt_eq() {
-    let tokens = Lexer::new(">=").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::GtEq);
-}
-
-#[test]
-fn test_operator_amp_amp() {
-    let tokens = Lexer::new("&&").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::AmpAmp);
-}
-
-#[test]
-fn test_operator_pipe_pipe() {
-    let tokens = Lexer::new("||").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::PipePipe);
-}
-
-#[test]
-fn test_operator_bang() {
-    let tokens = Lexer::new("!").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Bang);
-}
-
-#[test]
-fn test_operator_qmark_qmark() {
-    let tokens = Lexer::new("??").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::QmarkQmark);
-}
-
-#[test]
-fn test_operator_qmark_dot() {
-    let tokens = Lexer::new("?.").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::QmarkDot);
-}
-
-#[test]
-fn test_operator_qmark_bracket() {
-    let tokens = Lexer::new("?[").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::QmarkLBracket);
-}
-
-#[test]
-fn test_operator_dot_dot() {
-    let tokens = Lexer::new("..").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::DotDot);
-}
-
-#[test]
-fn test_operator_dot_dot_qmark() {
-    let tokens = Lexer::new("?..").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::DotDotQmark);
-}
-
-#[test]
-fn test_operator_spread() {
-    let tokens = Lexer::new("...").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::DotDotDot);
-}
-
-#[test]
-fn test_operator_spread_qmark() {
-    let tokens = Lexer::new("...?").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::DotDotDotQmark);
-}
-
-#[test]
-fn test_operator_plus_plus() {
-    let tokens = Lexer::new("++").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::PlusPlus);
-}
-
-#[test]
-fn test_operator_minus_minus() {
-    let tokens = Lexer::new("--").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::MinusMinus);
-}
-
-#[test]
-fn test_operator_left_shift() {
-    let tokens = Lexer::new("<<").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::LtLt);
-}
-
-#[test]
-fn test_operator_right_shift() {
-    let tokens = Lexer::new(">>").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::GtGt);
-}
-
-#[test]
-fn test_operator_unsigned_right_shift() {
-    let tokens = Lexer::new(">>>").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::GtGtGt);
-}
-
-#[test]
-fn test_operator_arrow() {
-    let tokens = Lexer::new("=>").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Arrow);
-}
-
-// ── Punctuation ───────────────────────────────────────────────────────────────
-
-#[test]
-fn test_punct_lparen() {
-    let tokens = Lexer::new("(").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::LParen);
-}
-
-#[test]
-fn test_punct_rparen() {
-    let tokens = Lexer::new(")").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::RParen);
-}
-
-#[test]
-fn test_punct_lbrace() {
-    let tokens = Lexer::new("{").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::LBrace);
-}
-
-#[test]
-fn test_punct_rbrace() {
-    let tokens = Lexer::new("}").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::RBrace);
-}
-
-#[test]
-fn test_punct_lbracket() {
-    let tokens = Lexer::new("[").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::LBracket);
-}
-
-#[test]
-fn test_punct_rbracket() {
-    let tokens = Lexer::new("]").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::RBracket);
-}
-
-#[test]
-fn test_punct_comma() {
-    let tokens = Lexer::new(",").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Comma);
-}
-
-#[test]
-fn test_punct_semicolon() {
-    let tokens = Lexer::new(";").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Semicolon);
-}
-
-#[test]
-fn test_punct_colon() {
-    let tokens = Lexer::new(":").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Colon);
-}
-
-#[test]
-fn test_punct_at() {
-    let tokens = Lexer::new("@").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::At);
-}
-
-#[test]
-fn test_punct_dot() {
-    let tokens = Lexer::new(".").tokenize();
-    assert_eq!(tokens[0].kind, TokenKind::Dot);
-}
-
-// ── Identifiers ───────────────────────────────────────────────────────────────
 
 #[test]
 fn test_identifier_simple() {
@@ -551,8 +367,6 @@ fn test_identifier_with_digit() {
     assert_eq!(tokens[0].kind, TokenKind::Ident);
 }
 
-// ── Whitespace and newlines ───────────────────────────────────────────────────
-
 #[test]
 fn test_whitespace_space() {
     let tokens = Lexer::new("   ").tokenize();
@@ -570,8 +384,6 @@ fn test_newline() {
     let tokens = Lexer::new("\n").tokenize();
     assert_eq!(tokens[0].kind, TokenKind::Newline);
 }
-
-// ── Filter trivia ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_filter_trivia_removes_whitespace() {
@@ -596,8 +408,6 @@ fn test_filter_trivia_keeps_eof() {
     let filtered = filter_trivia(raw_tokens);
     assert_eq!(filtered.last().unwrap().kind, TokenKind::Eof);
 }
-
-// ── Complex sequences ─────────────────────────────────────────────────────────
 
 #[test]
 fn test_sequence_class_decl() {
@@ -641,8 +451,6 @@ fn test_sequence_cascade() {
     assert_eq!(filtered[1].kind, TokenKind::DotDot);
     assert_eq!(filtered[2].kind, TokenKind::Ident);
 }
-
-// ── Malformed input / panic resilience ───────────────────────────────────────
 
 #[test]
 fn test_malformed_double_quote_unterminated() {
@@ -711,10 +519,8 @@ fn test_malformed_valid_tokens_after_error_recover() {
     // Must never panic — reaching this line is the assertion
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Lexer-gap regressions: doc comments (/** */), symbol-literal `#`, escapes in
 // triple-quoted strings, and `${ ... }` interpolation depth across nested strings.
-// ═══════════════════════════════════════════════════════════════════════════
 
 /// Lex `src` and return every token kind (trivia included).
 fn kinds(src: &str) -> Vec<TokenKind> {
@@ -752,8 +558,6 @@ fn only_kind(src: &str) -> TokenKind {
     );
     toks[0].kind
 }
-
-// ── (a) Doc comments: /** ... */ vs /* ... */ vs /**/ ──────────────────────────
 
 #[test]
 fn doc_block_comment_is_doc_comment() {
@@ -805,8 +609,6 @@ fn unterminated_doc_comment_is_error() {
     assert_eq!(toks[0].kind, TokenKind::Error);
 }
 
-// ── (b) Symbol literals: `#` lexes as Hash ─────────────────────────────────────
-
 #[test]
 fn hash_symbol_lexes_as_hash_plus_ident() {
     let src = "#foo";
@@ -822,8 +624,6 @@ fn bare_hash_is_hash_not_error() {
     assert_eq!(only_kind("#"), TokenKind::Hash);
     assert_no_errors("#");
 }
-
-// ── (c) Escapes in non-raw triple-quoted strings ───────────────────────────────
 
 #[test]
 fn triple_string_honors_escaped_quote() {
@@ -853,8 +653,6 @@ fn raw_triple_string_ignores_backslash() {
     assert_eq!(only_kind(src), TokenKind::StringLit);
     assert_no_errors(src);
 }
-
-// ── (d) `${ ... }` depth across nested strings ─────────────────────────────────
 
 #[test]
 fn interpolation_brace_inside_nested_single_string() {
@@ -889,8 +687,6 @@ fn plain_interpolation_still_lexes() {
     assert_no_errors(src);
 }
 
-// ── (e) Suppression pinning: block-doc directive is a single DocComment token ───
-
 #[test]
 fn block_doc_ignore_lexes_as_single_doc_comment() {
     // A `/** falcon-ignore ... */` directive is now a DocComment token. This
@@ -903,12 +699,8 @@ fn block_doc_ignore_lexes_as_single_doc_comment() {
     assert_no_errors(src);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Lexer tail-end regressions: shebang lines, adjacent `$ident` + `${...}`
 // interpolations, and nested triple-quoted strings inside interpolations.
-// ═══════════════════════════════════════════════════════════════════════════
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Every token (trivia included) produced for `src`.
 fn all_tokens(src: &str) -> Vec<Token> {
@@ -936,30 +728,9 @@ fn significant_texts(src: &str) -> Vec<String> {
         .collect()
 }
 
-/// Parse `void f() { var x = <expr>; }` and return the initializer string
-/// literal together with the wrapped source (so interpolation spans can be
-/// sliced). Asserts the whole program parses without error.
-fn string_lit(expr_src: &str) -> (StringLitNode, String) {
-    let src = format!("void f() {{ var x = {expr_src}; }}");
-    let (program, errors) = parse(&src);
-    assert!(
-        errors.is_empty(),
-        "parse errors for `{expr_src}`: {errors:?}"
-    );
-    let TopLevelDecl::Function(f) = &program.declarations[0] else {
-        panic!("expected a top-level function");
-    };
-    let Some(FunctionBody::Block(block)) = &f.body else {
-        panic!("expected a block body");
-    };
-    let Stmt::LocalVar(lv) = &block.stmts[0] else {
-        panic!("expected a local var");
-    };
-    let Some(Expr::StringLit(node)) = &lv.declarators[0].initializer else {
-        panic!("expected a string literal initializer");
-    };
-    (node.clone(), src)
-}
+#[path = "common/string_lit.rs"]
+mod common_string;
+use common_string::string_lit;
 
 /// The source text under each interpolation's span.
 fn interp_texts(node: &StringLitNode, src: &str) -> Vec<String> {
@@ -968,8 +739,6 @@ fn interp_texts(node: &StringLitNode, src: &str) -> Vec<String> {
         .map(|i| src[i.span.start..i.span.end].to_string())
         .collect()
 }
-
-// ── (a) Shebang ─────────────────────────────────────────────────────────────
 
 #[test]
 fn shebang_line_lexes_without_errors() {

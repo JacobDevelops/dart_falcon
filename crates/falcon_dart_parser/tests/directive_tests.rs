@@ -6,19 +6,12 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 
-/// Parse whole-program `src` and return its parse-error count.
-fn errs(src: &str) -> usize {
-    parse(src).1.len()
-}
-
-fn only_class(prog: &Program) -> &ClassDecl {
-    match &prog.declarations[0] {
-        TopLevelDecl::Class(c) => c,
-        other => panic!("expected class, got {other:?}"),
-    }
-}
-
-// ── Item (a): metadata before directives ──────────────────────────────────────
+#[path = "common/only_class.rs"]
+mod common_class;
+#[path = "common/errs.rs"]
+mod common_errs;
+use common_class::only_class;
+use common_errs::errs;
 
 #[test]
 fn test_metadata_before_export() {
@@ -94,8 +87,6 @@ fn test_metadata_with_args_before_part_of() {
     assert_eq!(dotted, vec!["foo", "bar"]);
 }
 
-// ── Item (b): contextual keywords as identifiers in name positions ────────────
-
 #[test]
 fn test_getter_named_on() {
     let (prog, errors) = parse("class C { Reference? get on; }");
@@ -164,8 +155,6 @@ fn test_getter_named_override() {
     }
 }
 
-// ── Item (b): keyword roles must keep working ─────────────────────────────────
-
 #[test]
 fn test_mixin_on_clause_still_parses() {
     let (prog, errors) = parse("mixin M on A {}");
@@ -208,8 +197,6 @@ fn test_async_body_marker_still_parses() {
         other => panic!("expected method, got {other:?}"),
     }
 }
-
-// ── Corpus-found directive gaps: adjacent-string URIs ────────────────────
 
 #[test]
 fn import_adjacent_string_uri() {

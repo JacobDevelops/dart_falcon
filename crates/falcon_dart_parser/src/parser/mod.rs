@@ -12,22 +12,8 @@ use tracing::debug;
 
 use crate::lexer::{Lexer, filter_trivia};
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
-/// Parse Dart 3.x source into a [`Program`] AST.
-///
-/// Returns the AST and any non-fatal parse errors encountered. The parser
-/// always produces an AST (possibly with [`TopLevelDecl::Error`] nodes) and
-/// never panics.
-///
-/// The recursive descent runs on a scoped worker thread with a large explicit
-/// stack. The [`MAX_PARSE_DEPTH`](Parser::MAX_PARSE_DEPTH) guard bounds nesting
-/// to a value the guard reports as a parse error, but a legitimately deep file
-/// (up to that bound) still descends far enough to exhaust the default 8 MB
-/// main-thread stack under the `check` pipeline — so parsing gets its own stack
-/// sized to clear the guard ceiling with wide margin. Callers therefore never
-/// abort on hostile/generated input regardless of how much stack the enclosing
-/// pipeline has already consumed.
+/// Parse Dart 3.x into an AST and recoverable errors on a depth-bounded worker
+/// stack, so deeply nested input cannot exhaust the caller's stack.
 pub fn parse(source: &str) -> (Program, Vec<ParseError>) {
     std::thread::scope(|scope| {
         match std::thread::Builder::new()
@@ -65,46 +51,51 @@ pub struct ParseError {
     pub offset: usize,
 }
 
-// ── Parser struct ─────────────────────────────────────────────────────────────
+#[derive(Clone, Copy)]
+pub(super) struct Ctx<'src> {
+    pub(super) suppress_conditional_qmark: bool,
+    pub(super) pattern_binding: bool,
+    /// Bracketed sub-parses clear this latch; body-marker scopes must not restore it.
+    pub(super) in_ctor_init_value: bool,
+    pub(super) body: AsyncMarker,
+    pub(super) ctor_name: Option<&'src str>,
+}
+
+impl Default for Ctx<'_> {
+    fn default() -> Self {
+        Self {
+            suppress_conditional_qmark: false,
+            pattern_binding: false,
+            in_ctor_init_value: false,
+            body: AsyncMarker::Sync,
+            ctor_name: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Checkpoint {
+    pos: usize,
+    errors: usize,
+}
+
+pub(super) enum DeclaratorSpan {
+    Member(usize),
+    Own,
+}
 
 pub(super) struct Parser<'src> {
     pub(super) tokens: Vec<Token>,
     pub(super) pos: usize,
     pub(super) src: &'src str,
     pub(super) errors: Vec<ParseError>,
-    /// When set, a trailing `?` on a type is not consumed as a nullable suffix
-    /// if it actually begins a conditional expression (`x is T ? a : b`).
-    pub(super) suppress_conditional_qmark: bool,
-    /// When set, we are parsing the irrefutable pattern of a pattern-variable
-    /// declaration or pattern for-in header, so a bare identifier is a binding
-    /// ([`Pattern::Variable`]) rather than a constant reference.
-    pub(super) pattern_binding: bool,
-    /// Name of the enclosing type whose body is currently being parsed, when that
-    /// type may declare constructors (classes, mixin classes, enums, extension
-    /// types). `None` outside a member body, or inside a mixin/extension body
-    /// where untyped members are always methods (no constructors permitted). An
-    /// untyped `name(...)` member is a constructor only when `name` equals this.
-    pub(super) enclosing_ctor_name: Option<String>,
-    /// Set while parsing the value of a constructor field initializer, where a
-    /// trailing `(...) {}` is a parenthesized expression followed by the enclosing
-    /// constructor body — not a lambda. Cleared inside bracketed sub-parses
-    /// (argument lists, parens, collection literals, index selectors) where a
-    /// following `{` can never be the constructor body.
-    pub(super) in_ctor_init_value: bool,
+    pub(super) ctx: Ctx<'src>,
     /// Undo log for the in-place `>>`/`>>>` → `>` splits that [`parse_type_args`]
     /// performs while closing nested generics. Each entry is `(token index,
     /// original kind)`. A speculative rollback must restore these — see
     /// [`rewind_to`] — otherwise a discarded type parse over a shift-token close
     /// leaves the token permanently narrowed and corrupts the re-parse.
     pub(super) gt_undo: Vec<(usize, TokenKind)>,
-    /// `await`/`yield` are contextual keywords, reserved only inside the body of
-    /// an async / generator function respectively. These track the enclosing
-    /// body's kind so the parser can fall back to identifier parsing outside it
-    /// (`var yield = 0; yield = 1;` in a plain function is valid Dart). Set per
-    /// function body in [`parse_function_body`] and the closure body parser, and
-    /// restored on exit so nested sync closures reset the context.
-    pub(super) in_async: bool,
-    pub(super) in_generator: bool,
     /// Current recursive-descent nesting depth and a latch marking that the
     /// [`MAX_PARSE_DEPTH`](Self::MAX_PARSE_DEPTH) guard has fired. Bounds the
     /// hand-rolled recursion so pathological/generated source (deeply nested
@@ -121,13 +112,8 @@ impl<'src> Parser<'src> {
             pos: 0,
             src,
             errors: Vec::new(),
-            suppress_conditional_qmark: false,
-            pattern_binding: false,
-            enclosing_ctor_name: None,
-            in_ctor_init_value: false,
+            ctx: Ctx::default(),
             gt_undo: Vec::new(),
-            in_async: false,
-            in_generator: false,
             depth: 0,
             depth_limit_hit: false,
         }
@@ -139,25 +125,73 @@ impl<'src> Parser<'src> {
     /// points per grammatical nesting level).
     pub(super) const MAX_PARSE_DEPTH: usize = 150;
 
-    /// Enter a recursion level, returning `false` when the depth limit is
-    /// exceeded. On the first overflow it records a single parse error; callers
-    /// must then unwind without recursing further. Always pair a `true` result
-    /// with [`exit_depth`](Self::exit_depth).
-    pub(super) fn enter_depth(&mut self) -> bool {
-        self.depth += 1;
-        if self.depth > Self::MAX_PARSE_DEPTH {
-            self.depth -= 1;
+    #[inline]
+    pub(super) fn guarded<T>(
+        &mut self,
+        on_overflow: impl FnOnce(&mut Self) -> T,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        if self.depth >= Self::MAX_PARSE_DEPTH {
             if !self.depth_limit_hit {
                 self.depth_limit_hit = true;
                 self.error("nesting too deep");
             }
-            return false;
+            return on_overflow(self);
         }
-        true
+        self.depth += 1;
+        let result = f(self);
+        self.depth -= 1;
+        result
     }
 
-    pub(super) fn exit_depth(&mut self) {
-        self.depth -= 1;
+    #[inline]
+    pub(super) fn with_ctx<T>(
+        &mut self,
+        edit: impl FnOnce(&mut Ctx<'src>),
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let saved = self.ctx;
+        edit(&mut self.ctx);
+        let result = f(self);
+        self.ctx = saved;
+        result
+    }
+
+    #[inline]
+    pub(super) fn with_body<T>(
+        &mut self,
+        marker: AsyncMarker,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let saved = self.ctx.body;
+        self.ctx.body = marker;
+        let result = f(self);
+        self.ctx.body = saved;
+        result
+    }
+
+    #[inline]
+    pub(super) fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            pos: self.pos,
+            errors: self.errors.len(),
+        }
+    }
+
+    #[inline]
+    pub(super) fn restore(&mut self, checkpoint: Checkpoint) {
+        self.rewind_to(checkpoint.pos);
+        self.errors.truncate(checkpoint.errors);
+    }
+
+    #[inline]
+    pub(super) fn speculate<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+        let checkpoint = self.checkpoint();
+        let result = f(self);
+        if result.is_none() {
+            self.restore(checkpoint);
+        }
+        result
     }
 
     /// Roll the cursor back to `saved`, restoring any `>>`/`>>>` tokens that were
@@ -182,7 +216,7 @@ impl<'src> Parser<'src> {
         if !self.at(TokenKind::Qmark) {
             return false;
         }
-        if self.suppress_conditional_qmark && self.token_starts_expr(&self.peek(1).kind) {
+        if self.ctx.suppress_conditional_qmark && self.token_starts_expr(&self.peek(1).kind) {
             // `T? Function(...)` / `T? Function<...>` is an unambiguous nullable
             // function type after an `is`/`as` type, not a conditional `?` — so the
             // `?` is still a nullable suffix here despite `Function` starting an expr.
@@ -205,7 +239,6 @@ impl<'src> Parser<'src> {
             IntLit
                 | DoubleLit
                 | StringLit
-                | Ident
                 | This
                 | Super
                 | New
@@ -229,10 +262,8 @@ impl<'src> Parser<'src> {
                 // in the then-branch of a conditional (`x is T ? <int>[] : y`), so
                 // it starts an expression rather than continuing the type.
                 | Lt
-        ) || self.is_ident_like_kind(kind)
+        ) || kind.is_identifier_like()
     }
-
-    // ── Cursor ────────────────────────────────────────────────────────────────
 
     pub(super) fn cur(&self) -> &Token {
         self.tokens
@@ -306,7 +337,7 @@ impl<'src> Parser<'src> {
         Span::new(tok.offset, tok.offset + tok.len)
     }
 
-    pub(super) fn tok_text<'a>(&'a self, tok: &Token) -> &'a str {
+    pub(super) fn tok_text(&self, tok: &Token) -> &'src str {
         &self.src[tok.offset..tok.offset + tok.len]
     }
 
@@ -314,71 +345,73 @@ impl<'src> Parser<'src> {
         self.tok_text(self.cur())
     }
 
-    // ── Identifier helpers ────────────────────────────────────────────────────
-
-    /// Accept a keyword token as an identifier (built-in identifiers, contextual).
-    pub(super) fn is_ident_like(&self) -> bool {
-        Self::kind_is_ident_like(&self.cur().kind)
+    pub(super) fn tok_ident(&self, tok: &Token) -> Identifier {
+        Identifier::new(self.tok_text(tok), Self::tok_span(tok))
     }
 
-    /// Whether a token kind can stand in for an identifier (built-in/contextual
-    /// keywords). Kind-based twin of [`is_ident_like`] for lookahead over `peek`.
-    pub(super) fn kind_is_ident_like(kind: &TokenKind) -> bool {
-        use TokenKind::*;
-        matches!(
-            kind,
-            Ident
-                | Abstract
-                | As
-                | Base
-                | Covariant
-                | Deferred
-                | Dynamic
-                | Export
-                | Extension
-                | External
-                | Factory
-                | Function
-                | Get
-                | Hide
-                | Implements
-                | Import
-                | Interface
-                | Late
-                | Library
-                | Mixin
-                | Operator
-                | Part
-                | Required
-                | Sealed
-                | Set
-                | Show
-                | Static
-                | Type
-                | Typedef
-                | Async
-                | Await
-                | Sync
-                | Yield
-                | When
-                | On
-                | Override
-        )
+    pub(super) fn kind_at(&self, index: usize) -> TokenKind {
+        self.tokens
+            .get(index)
+            .map_or(TokenKind::Eof, |token| token.kind)
     }
 
-    /// True when `kind` can appear as a dotted-name segment in an annotation head:
-    /// an identifier or the `new` keyword (`@X.new`). Keeps the directive lookahead
-    /// (`index_after_annotations`) consistent with the metadata parser, whose
-    /// `expect_ctor_name` accepts the same segments.
-    fn kind_is_annotation_segment(kind: &TokenKind) -> bool {
-        Self::kind_is_ident_like(kind) || matches!(kind, TokenKind::New)
+    pub(super) fn try_parse_type_followed_by(
+        &mut self,
+        follows: fn(TokenKind) -> bool,
+    ) -> Option<DartType> {
+        if !self.is_type_start() {
+            return None;
+        }
+        let saved = self.pos;
+        let ty = self.parse_type();
+        if follows(self.cur().kind) {
+            Some(ty)
+        } else {
+            self.rewind_to(saved);
+            None
+        }
+    }
+
+    pub(super) fn var_keyword(is_const: bool, is_final: bool) -> VarKeyword {
+        if is_const {
+            VarKeyword::Const
+        } else if is_final {
+            VarKeyword::Final
+        } else {
+            VarKeyword::Var
+        }
+    }
+
+    pub(super) fn parse_declarators(
+        &mut self,
+        first: Identifier,
+        span_policy: DeclaratorSpan,
+    ) -> Vec<VarDeclarator> {
+        let mut vars = Vec::new();
+        let mut name = first;
+        loop {
+            let start = match span_policy {
+                DeclaratorSpan::Member(start) => start,
+                DeclaratorSpan::Own => name.span.start,
+            };
+            let initializer = self.eat(TokenKind::Eq).map(|_| self.parse_expr());
+            vars.push(VarDeclarator {
+                name,
+                initializer,
+                span: self.span_from(start),
+            });
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
+            name = self.expect_ident();
+        }
+        vars
     }
 
     pub(super) fn parse_ident(&mut self) -> Option<Identifier> {
-        if self.is_ident_like() {
+        if self.cur().kind.is_identifier_like() {
             let tok = self.advance();
-            let name = self.tok_text(&tok).to_string();
-            Some(Identifier::new(name, Self::tok_span(&tok)))
+            Some(self.tok_ident(&tok))
         } else {
             None
         }
@@ -393,8 +426,6 @@ impl<'src> Parser<'src> {
         }
     }
 
-    // ── Annotation ────────────────────────────────────────────────────────────
-
     pub(super) fn parse_annotations(&mut self) -> Vec<Annotation> {
         let mut anns = Vec::new();
         while self.at(TokenKind::At) {
@@ -408,16 +439,8 @@ impl<'src> Parser<'src> {
                 name.push(self.expect_ctor_name());
             }
             // Type arguments: `@Native<int Function()>(...)`, `@Foo<int>.named()`.
-            let type_args = if self.at(TokenKind::Lt) {
-                self.parse_type_args()
-            } else {
-                Vec::new()
-            };
-            let constructor_name = if self.eat(TokenKind::Dot).is_some() {
-                Some(self.expect_ctor_name())
-            } else {
-                None
-            };
+            let type_args = self.parse_type_args();
+            let constructor_name = self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
             // A `(` here is the annotation's argument list — but only if it parses
             // cleanly as one. Bare metadata directly followed by a record-type
             // member return (`@override ({int a, int b})? m()`, `@override ()? m()`)
@@ -427,16 +450,11 @@ impl<'src> Parser<'src> {
             // were a nullable record type, since an argument list is never followed
             // by `?`.
             let args = if self.at(TokenKind::LParen) {
-                let saved = self.pos;
-                let saved_errors = self.errors.len();
-                let arg_list = self.parse_arg_list();
-                if self.errors.len() > saved_errors || self.at(TokenKind::Qmark) {
-                    self.errors.truncate(saved_errors);
-                    self.rewind_to(saved);
-                    None
-                } else {
-                    Some(arg_list)
-                }
+                self.speculate(|parser| {
+                    let errors = parser.errors.len();
+                    let args = parser.parse_arg_list();
+                    (parser.errors.len() == errors && !parser.at(TokenKind::Qmark)).then_some(args)
+                })
             } else {
                 None
             };
@@ -452,74 +470,44 @@ impl<'src> Parser<'src> {
         anns
     }
 
-    // ── Function body ─────────────────────────────────────────────────────────
-
-    pub(super) fn parse_function_body(&mut self) -> Option<FunctionBody> {
-        let (is_async, is_generator) = self.body_marker_context();
-        let saved = (self.in_async, self.in_generator);
-        (self.in_async, self.in_generator) = (is_async, is_generator);
-        let body = match self.cur().kind {
+    pub(super) fn parse_function_body(&mut self, marker: AsyncMarker) -> Option<FunctionBody> {
+        self.with_body(marker, |parser| match parser.cur().kind {
             TokenKind::Arrow => {
-                let start = self.cur().offset;
-                self.advance();
-                let expr = self.parse_expr();
+                let start = parser.cur().offset;
+                parser.advance();
+                let expr = parser.parse_expr();
                 // An `=> expr` declaration body is terminated by `;`; a missing one
                 // is a syntax error the SDK reports (EXPECTED_TOKEN), not silent
                 // recovery. Function *expressions* (closures) use a separate arrow
                 // path in `expr.rs` that carries no terminator.
-                self.expect(TokenKind::Semicolon);
-                Some(FunctionBody::Arrow(Box::new(expr), self.span_from(start)))
+                parser.expect(TokenKind::Semicolon);
+                Some(FunctionBody::Arrow(Box::new(expr), parser.span_from(start)))
             }
-            TokenKind::LBrace => Some(FunctionBody::Block(self.parse_block())),
+            TokenKind::LBrace => Some(FunctionBody::Block(parser.parse_block())),
             TokenKind::Semicolon => {
-                // abstract body
-                self.advance();
+                parser.advance();
                 None
             }
             _ => None,
-        };
-        (self.in_async, self.in_generator) = saved;
-        body
+        })
     }
-
-    /// Recover the async / generator kind of the body about to be parsed from the
-    /// `async` / `sync*` / `async*` marker consumed just before it, by inspecting
-    /// the tokens immediately preceding the body opener (`{`/`=>`/`;`). `await` is
-    /// reserved iff the body is async; `yield` iff it is a generator.
-    fn body_marker_context(&self) -> (bool, bool) {
-        let kind_at = |i: usize| self.tokens.get(i).map(|t| &t.kind);
-        match self.pos.checked_sub(1).and_then(kind_at) {
-            Some(TokenKind::Star) => match self.pos.checked_sub(2).and_then(kind_at) {
-                Some(TokenKind::Async) => (true, true), // async*
-                Some(TokenKind::Sync) => (false, true), // sync*
-                _ => (false, false),
-            },
-            Some(TokenKind::Async) => (true, false), // async
-            _ => (false, false),
-        }
-    }
-
-    // ── Argument list ─────────────────────────────────────────────────────────
 
     pub(super) fn parse_arg_list(&mut self) -> ArgList {
         let start = self.cur().offset;
         self.expect(TokenKind::LParen);
         // Inside an argument list a trailing `{` never opens the constructor body.
-        self.in_ctor_init_value = false;
+        self.ctx.in_ctor_init_value = false;
         let mut positional = Vec::new();
         let mut named = Vec::new();
 
         while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
-            // Check for trailing comma
             if self.at(TokenKind::Comma) {
                 self.advance();
                 continue;
             }
 
             // Named arg: name: expr
-            if (self.is_ident_like() || self.at(TokenKind::Ident))
-                && self.peek(1).kind == TokenKind::Colon
-            {
+            if self.cur().kind.is_identifier_like() && self.peek(1).kind == TokenKind::Colon {
                 let arg_start = self.cur().offset;
                 let name = self.expect_ident();
                 self.advance(); // :
@@ -544,8 +532,6 @@ impl<'src> Parser<'src> {
             span: self.span_from(start),
         }
     }
-
-    // ── Type argument list <T, U> ──────────────────────────────────────────────
 
     pub(super) fn parse_type_args(&mut self) -> Vec<DartType> {
         if !self.at(TokenKind::Lt) {
@@ -577,8 +563,6 @@ impl<'src> Parser<'src> {
         args
     }
 
-    // ── Directive routing lookahead ────────────────────────────────────────────
-
     /// Kind of the first token past any leading annotations, without moving the
     /// cursor. Used to route `@meta import/export/part/library …` directives,
     /// whose keyword is hidden behind metadata the directive parser re-consumes.
@@ -594,14 +578,15 @@ impl<'src> Parser<'src> {
         let n = self.tokens.len();
         while i < n && self.tokens[i].kind == TokenKind::At {
             i += 1; // @
-            if i < n && Self::kind_is_ident_like(&self.tokens[i].kind) {
+            if i < n && self.tokens[i].kind.is_identifier_like() {
                 i += 1; // first name segment
             }
             // dotted name: `.seg` while the next token names a segment (an
             // identifier or `new`, as in `@X.new`)
             while i + 1 < n
                 && self.tokens[i].kind == TokenKind::Dot
-                && Self::kind_is_annotation_segment(&self.tokens[i + 1].kind)
+                && (self.tokens[i + 1].kind.is_identifier_like()
+                    || self.tokens[i + 1].kind == TokenKind::New)
             {
                 i += 2;
             }
@@ -612,7 +597,8 @@ impl<'src> Parser<'src> {
             // constructor name after type args: `@Foo<int>.named(…)`, `@Foo<int>.new(…)`
             if i + 1 < n
                 && self.tokens[i].kind == TokenKind::Dot
-                && Self::kind_is_annotation_segment(&self.tokens[i + 1].kind)
+                && (self.tokens[i + 1].kind.is_identifier_like()
+                    || self.tokens[i + 1].kind == TokenKind::New)
             {
                 i += 2;
             }
@@ -670,8 +656,6 @@ impl<'src> Parser<'src> {
         }
         i
     }
-
-    // ── Entry point ───────────────────────────────────────────────────────────
 
     pub(super) fn parse_program(&mut self) -> Program {
         let start = 0usize;

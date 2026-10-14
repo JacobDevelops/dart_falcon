@@ -1,5 +1,8 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use falcon_dart_parser::parser::parse;
+#[path = "../tests/common/collect_dart_files.rs"]
+mod common_files;
+use common_files::collect_dart_files;
 
 // 10 representative Dart 3.x snippets covering the major grammar productions.
 // Cycled to reach the 50-file target required by the M1.5 performance gate.
@@ -209,11 +212,14 @@ fn bench_parse_corpus(c: &mut Criterion) {
         return;
     }
 
-    let files: Vec<String> = collect_dart_files(&search_root)
-        .into_iter()
-        .take(50)
-        .filter_map(|p| std::fs::read_to_string(p).ok())
-        .collect();
+    let files: Vec<String> = collect_dart_files(
+        &search_root,
+        &[".direnv", ".dart_tool", "build", ".pub-cache"],
+    )
+    .into_iter()
+    .take(50)
+    .filter_map(|p| std::fs::read_to_string(p).ok())
+    .collect();
 
     if files.is_empty() {
         return;
@@ -226,25 +232,6 @@ fn bench_parse_corpus(c: &mut Criterion) {
             }
         });
     });
-}
-
-fn collect_dart_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return out;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !matches!(name, ".direnv" | ".dart_tool" | "build" | ".pub-cache") {
-                out.extend(collect_dart_files(&path));
-            }
-        } else if path.extension().is_some_and(|e| e == "dart") {
-            out.push(path);
-        }
-    }
-    out
 }
 
 criterion_group!(
