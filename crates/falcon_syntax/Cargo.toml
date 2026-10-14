@@ -1,8 +1,8 @@
 [package]
-name = "falcon_syntax"
+name              = "falcon_syntax"
 version.workspace = true
 edition.workspace = true
-description = "Dart AST node types and syntax tree definitions for falcon"
+description       = "Dart AST node types and syntax tree definitions for falcon"
 
 [dev-dependencies]
 falcon_dart_parser = { path = "../falcon_dart_parser" }

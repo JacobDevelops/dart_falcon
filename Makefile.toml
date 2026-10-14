@@ -1,0 +1,166 @@
+[config]
+default_to_workspace = false
+skip_core_tasks      = true
+
+[env]
+ROOT = "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}"
+
+[tasks.build]
+command = "cargo"
+args    = [ "build", "--locked", "--workspace", "${@}" ]
+
+[tasks.build_release]
+command = "cargo"
+args    = [ "build", "--locked", "--workspace", "--release", "${@}" ]
+
+[tasks.check]
+command = "cargo"
+args    = [ "check", "--locked", "--workspace", "--all-targets", "${@}" ]
+
+[tasks.format]
+command = "cargo"
+args    = [ "fmt", "--all" ]
+
+[tasks.format_check]
+command = "cargo"
+args    = [ "fmt", "--all", "--check" ]
+
+[tasks.toml_format]
+command = "taplo"
+args    = [ "format" ]
+
+[tasks.toml_check]
+command = "taplo"
+args    = [ "format", "--check" ]
+
+[tasks.clippy]
+command = "cargo"
+args    = [ "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings" ]
+
+[tasks.lint]
+run_task = { name = [ "format_check", "toml_check", "clippy" ], parallel = false }
+
+[tasks.test]
+run_task = { name = [ "test_targets", "test_doctests" ], parallel = false }
+
+[tasks.test_targets]
+private = true
+command = "cargo"
+args    = [ "nextest", "run", "--locked", "--workspace", "--all-targets", "${@}" ]
+
+[tasks.test_doctests]
+private = true
+command = "cargo"
+args    = [ "test", "--locked", "--workspace", "--doc" ]
+
+[tasks.test_no_capture]
+command = "cargo"
+args    = [ "nextest", "run", "--locked", "--workspace", "--all-targets", "--no-capture", "${@}" ]
+
+[tasks.validate_rules]
+dependencies = [ "build" ]
+command      = "cargo"
+args         = [ "xtask", "validate-rules", "${@}" ]
+
+[tasks.docgen]
+command = "cargo"
+args    = [ "xtask", "docgen" ]
+
+[tasks.bench]
+command = "cargo"
+args    = [ "bench", "--locked", "--workspace", "${@}" ]
+
+[tasks.bench_check]
+command = "cargo"
+args    = [ "bench", "--locked", "--workspace", "--no-run" ]
+
+[tasks.run]
+command = "cargo"
+args    = [ "run", "--locked", "-p", "dart_falcon", "--", "${@}" ]
+
+[tasks.run_release]
+command = "cargo"
+args    = [ "run", "--locked", "--release", "-p", "dart_falcon", "--", "${@}" ]
+
+[tasks.watch]
+command = "cargo"
+args    = [ "watch", "-x", "check --workspace --all-targets" ]
+
+[tasks.clean]
+command = "cargo"
+args    = [ "clean" ]
+
+[tasks.web_install]
+cwd     = "website"
+command = "bun"
+args    = [ "install", "--frozen-lockfile" ]
+
+[tasks.web_dev]
+cwd     = "website"
+command = "bun"
+args    = [ "run", "dev" ]
+
+[tasks.web_typecheck]
+cwd     = "website"
+command = "bunx"
+args    = [ "tsc", "--noEmit" ]
+
+[tasks.web_build]
+cwd     = "website"
+command = "bun"
+args    = [ "run", "build" ]
+
+[tasks.A]
+run_task = { name = [ "lint", "check", "test", "validate_rules", "bench_check", "build_release" ], parallel = false }
+
+[tasks.a]
+run_task = { name = [ "build", "test", "validate_rules" ], parallel = false }
+
+[tasks.ba]
+run_task = { name = [ "build", "build_release" ], parallel = false }
+
+[tasks.reset]
+run_task = { name = [ "clean", "a" ], parallel = false }
+
+[tasks.b]
+alias = "build"
+
+[tasks.br]
+alias = "build_release"
+
+[tasks.c]
+alias = "check"
+
+[tasks.cp]
+alias = "clippy"
+
+[tasks.cl]
+alias = "clean"
+
+[tasks.f]
+alias = "format"
+
+[tasks.L]
+alias = "lint"
+
+[tasks.r]
+alias = "run"
+
+[tasks.rr]
+alias = "run_release"
+
+[tasks.t]
+alias = "test"
+
+[tasks.tnc]
+alias = "test_no_capture"
+
+[tasks.v]
+alias = "validate_rules"
+
+[tasks.w]
+alias = "watch"
+
+[tasks.ci_rustup_show]
+command = "rustup"
+args    = [ "show" ]

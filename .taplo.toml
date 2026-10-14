@@ -1,0 +1,20 @@
+include = [ "**/*.toml" ]
+exclude = [
+  "**/target/**",
+  "**/node_modules/**",
+  "**/.direnv/**",
+  "**/.devenv/**",
+  ".fallow/**",
+  ".numen-refine/**",
+  ".git/**",
+  ".jj/**",
+]
+
+[formatting]
+crlf                 = false
+align_entries        = true
+align_comments       = true
+array_trailing_comma = true
+column_width         = 100
+inline_table_expand  = false
+compact_arrays       = false

@@ -1,7 +1,11 @@
-[tools]
-bun = "1.4.3"
-"cargo:cargo-nextest" = "0.9.148"
-"cargo:cargo-watch" = "8.5.3"
+# Rust is managed by rustup through rust-toolchain.toml.
+[tool_alias]
+cargo-nextest = "github:nextest-rs/nextest"
+cargo-watch   = "github:watchexec/cargo-watch"
 
-[env]
-_.path = ["{{ env.CARGO_HOME | default(value=env.HOME ~ '/.cargo') }}/bin"]
+[tools]
+"aqua:sagiegurari/cargo-make" = "0.37.24"
+cargo-nextest                 = { version = "cargo-nextest-0.9.148", matching = "cargo-nextest" }
+cargo-watch                   = "8.5.3"
+"aqua:tamasfe/taplo"          = "0.10.0"
+bun                           = "1.4.3"

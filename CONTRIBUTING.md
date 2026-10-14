@@ -21,10 +21,10 @@ Install [mise](https://mise.jdx.dev/getting-started.html) and [rustup](https://r
 
 ```sh
 mise install
-cargo build
+makers build
 ```
 
-`mise.toml` pins Bun, `cargo-nextest`, and `cargo-watch`. Activate mise in your shell to put them on `PATH`, or prefix commands with `mise exec --`. Rust stays under rustup: `rust-toolchain.toml` selects stable Rust, `rust-src`, `rust-analyzer`, Clippy, rustfmt, and the `wasm32-wasip2` target. Cargo installs the declared toolchain on first use.
+`mise.toml` pins cargo-make (`makers`), `cargo-nextest`, `cargo-watch`, taplo, and Bun. Activate mise in your shell to put them on `PATH`, or prefix commands with `mise exec --`. Rust stays under rustup: `rust-toolchain.toml` tracks the latest nightly with `rust-src`, `rust-analyzer`, Clippy, rustfmt, and the `wasm32-wasip2` target. Cargo installs the declared toolchain on first use. `makers --list-all-steps` lists every task.
 
 The repo is a colocated jj + git repo. **jj (Jujutsu) users are welcome**, but
 plain git works fine — use whichever you prefer.
@@ -35,10 +35,10 @@ Your change must pass all of these before it's ready for review. CI
 (`.github/workflows/ci.yml`) runs the same set:
 
 ```sh
-cargo fmt --all                                     # formatting
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace                              # unit + integration + contract tests
-cargo xtask validate-rules                          # golden corpus: every rule vs. its fixtures
+makers lint            # rustfmt, taplo, clippy -D warnings
+makers test            # nextest + doctests
+makers validate_rules  # golden corpus: every rule vs. its fixtures
+makers A               # everything above plus check, bench compile and a release build
 ```
 
 If you add, remove, or rename a rule, regenerate the config schema and commit it:

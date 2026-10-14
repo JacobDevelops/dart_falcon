@@ -19,7 +19,7 @@ jobs:
       INPUT_TAG: ${{ github.event.inputs.tag }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
       # zig is the cross-linker: aarch64 musl links cleanly on the x86_64 runner.
@@ -59,7 +59,7 @@ jobs:
       INPUT_TAG: ${{ github.event.inputs.tag }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - name: Build and package

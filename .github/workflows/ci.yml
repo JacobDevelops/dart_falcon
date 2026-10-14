@@ -7,51 +7,40 @@ on:
     branches: [main]
 
 jobs:
-  check:
-    name: Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace
-
   lint:
-    name: Lint
+    name: Lint (fmt, taplo, clippy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
-          components: clippy, rustfmt
+          install_args: aqua:sagiegurari/cargo-make aqua:tamasfe/taplo
+          cache: true
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: makers ci_rustup_show
+      - run: makers lint
 
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          install_args: aqua:sagiegurari/cargo-make cargo-nextest
+          cache: true
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+      - run: makers test
 
-  bench:
-    name: Bench (compile check)
+  validate:
+    name: Validate rules, bench compile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          install_args: aqua:sagiegurari/cargo-make
+          cache: true
       - uses: Swatinem/rust-cache@v2
-      - run: cargo bench --workspace --no-run
-
-  validate-rules:
-    name: Validate rules (golden corpus)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build
-      - run: cargo xtask validate-rules
+      - run: makers validate_rules
+      - run: makers bench_check

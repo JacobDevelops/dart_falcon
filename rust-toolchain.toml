@@ -1,5 +1,5 @@
 [toolchain]
-channel = "stable"
-profile = "minimal"
-components = ["clippy", "rustfmt", "rust-src", "rust-analyzer"]
-targets = ["wasm32-wasip2"]
+channel    = "nightly"
+profile    = "minimal"
+components = [ "cargo", "clippy", "rust-analyzer", "rust-src", "rustfmt" ]
+targets    = [ "wasm32-wasip2" ]

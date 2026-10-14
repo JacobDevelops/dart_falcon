@@ -1,11 +1,11 @@
 [package]
-name = "falcon_config"
+name              = "falcon_config"
 version.workspace = true
 edition.workspace = true
-description = "falcon.json configuration schema and loader"
+description       = "falcon.json configuration schema and loader"
 
 [dependencies]
-glob.workspace = true
-serde.workspace = true
+glob.workspace       = true
+serde.workspace      = true
 serde_json.workspace = true
-tracing.workspace = true
+tracing.workspace    = true

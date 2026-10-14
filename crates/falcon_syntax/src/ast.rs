@@ -18,27 +18,6 @@ impl Span {
     }
 }
 
-#[cfg(test)]
-mod span_tests {
-    use super::Span;
-
-    #[test]
-    fn merge_disjoint() {
-        assert_eq!(Span::new(0, 10).merge(&Span::new(15, 25)), Span::new(0, 25));
-    }
-
-    #[test]
-    fn merge_overlapping() {
-        assert_eq!(Span::new(0, 15).merge(&Span::new(10, 20)), Span::new(0, 20));
-    }
-
-    #[test]
-    fn merge_same() {
-        let span = Span::new(5, 10);
-        assert_eq!(span.merge(&span), span);
-    }
-}
-
 /// An identifier (name) with its source location.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Identifier {
@@ -1608,4 +1587,25 @@ pub enum RelationalPatternOp {
 pub struct ErrorNode {
     pub message: String,
     pub span: Span,
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::Span;
+
+    #[test]
+    fn merge_disjoint() {
+        assert_eq!(Span::new(0, 10).merge(&Span::new(15, 25)), Span::new(0, 25));
+    }
+
+    #[test]
+    fn merge_overlapping() {
+        assert_eq!(Span::new(0, 15).merge(&Span::new(10, 20)), Span::new(0, 20));
+    }
+
+    #[test]
+    fn merge_same() {
+        let span = Span::new(5, 10);
+        assert_eq!(span.merge(&span), span);
+    }
 }
