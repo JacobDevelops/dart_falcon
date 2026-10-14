@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, Rule, SemanticModel,
-    SignatureIndex, TypeEnvironment, TypeParameterId, TypeParameterScope, TypeTruth,
+    SignatureIndex, Truth, TypeEnvironment, TypeParameterId, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
@@ -46,10 +46,7 @@ impl Collector<'_> {
         if class.name.name.starts_with('_') {
             return;
         }
-        let Some(identity) = self
-            .model
-            .resolve_name(std::slice::from_ref(&class.name.name))
-        else {
+        let Some(identity) = self.model.resolve_name(&class.name.name) else {
             return;
         };
         let class_type = ResolvedType::Interface {
@@ -63,7 +60,7 @@ impl Collector<'_> {
             || self
                 .signatures
                 .is_subtype_of(&class_type, &widget, &self.model)
-                != TypeTruth::Yes
+                != Truth::Yes
         {
             return;
         }
@@ -268,19 +265,13 @@ fn target_defines_key(
 }
 
 fn is_flutter_key(ty: &ResolvedType) -> bool {
-    matches!(
-        ty,
-        ResolvedType::Interface {
-            identity: DeclarationIdentity::Package { package, name },
-            ..
-        } if package == "flutter" && name == "Key"
-    )
+    matches!(ty, ResolvedType::Interface { identity, .. } if identity.is_package("flutter", "Key"))
 }
 
-fn flutter_identity(name: &str) -> DeclarationIdentity {
+fn flutter_identity(name: &'static str) -> DeclarationIdentity {
     DeclarationIdentity::Package {
-        package: "flutter".to_string(),
-        name: name.to_string(),
+        package: "flutter",
+        name,
     }
 }
 

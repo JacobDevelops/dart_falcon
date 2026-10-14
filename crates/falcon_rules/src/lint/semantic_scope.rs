@@ -2,8 +2,8 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, SemanticModel, SignatureIndex, TypeEnvironment, TypeParameterId,
-    TypeParameterScope,
+    AnalyzeContext, ParameterOwner, QualifiedName, ResolvedSignature, ResolvedType, SemanticModel,
+    SignatureIndex, TypeEnvironment, TypeParameterId, TypeParameterScope,
 };
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -11,6 +11,8 @@ use falcon_syntax::visitor::{Visitor, walk_expr, walk_pattern, walk_top_level_de
 
 pub(crate) trait SemanticRuleVisitor {
     fn visit_expr(&mut self, _node: &Expr, _state: &SemanticState<'_>) {}
+
+    fn visit_stmt(&mut self, _node: &Stmt, _state: &SemanticState<'_>) {}
 
     fn visit_pattern(
         &mut self,
@@ -23,16 +25,16 @@ pub(crate) trait SemanticRuleVisitor {
 
 pub(crate) struct SemanticState<'a> {
     pub(crate) model: SemanticModel<'a>,
-    /// Borrowed from the driver's project-wide index; owned only for the
-    /// single-file fallback built when the driver has none.
+    // Only the single-file fallback owns signatures.
     pub(crate) signatures: Cow<'a, SignatureIndex>,
     pub(crate) environment: TypeEnvironment,
     pub(crate) type_parameters: TypeParameterScope,
     expected: Vec<ResolvedType>,
     return_type: Vec<ResolvedType>,
     matched: Vec<ResolvedType>,
-    enclosing_type: Option<ResolvedType>,
+    pub(crate) enclosing_type: Option<ResolvedType>,
     superclass: Option<ResolvedType>,
+    globals: HashMap<String, ResolvedType>,
 }
 
 impl<'a> SemanticState<'a> {
@@ -43,6 +45,32 @@ impl<'a> SemanticState<'a> {
             .signatures
             .map(Cow::Borrowed)
             .unwrap_or_else(|| Cow::Owned(SignatureIndex::from_program(program, &model)));
+        let mut globals = HashMap::new();
+        for declaration in &program.declarations {
+            match declaration {
+                TopLevelDecl::Variable(variable) => {
+                    let ty = variable.var_type.as_ref().map(|ty| model.resolve_type(ty));
+                    for declarator in &variable.declarators {
+                        globals.insert(
+                            declarator.name.name.clone(),
+                            ty.clone().unwrap_or(ResolvedType::Unknown),
+                        );
+                    }
+                }
+                TopLevelDecl::Function(function)
+                    if matches!(function.kind, FunctionKind::Setter(_)) =>
+                {
+                    if let Some(param) = function.params().and_then(|params| params.params.first())
+                    {
+                        globals.insert(
+                            function.name.name.clone(),
+                            resolved_param_type(param, &model, &TypeParameterScope::default()),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
         Some(Self {
             model,
             signatures,
@@ -52,11 +80,15 @@ impl<'a> SemanticState<'a> {
             return_type: Vec::new(),
             matched: Vec::new(),
             enclosing_type: None,
+            globals,
             superclass: None,
         })
     }
 
     pub(crate) fn infer(&self, expression: &Expr) -> ResolvedType {
+        if matches!(expression, Expr::This { .. }) {
+            return self.enclosing_type.clone().unwrap_or(ResolvedType::Unknown);
+        }
         self.environment.infer_with_signatures(
             expression,
             &self.model,
@@ -68,15 +100,146 @@ impl<'a> SemanticState<'a> {
     pub(crate) fn expected(&self) -> Option<&ResolvedType> {
         self.expected.last()
     }
+
+    fn writable_type(&self, target: &Expr) -> ResolvedType {
+        let member = match target {
+            Expr::Ident(identifier) if !self.environment.is_bound(&identifier.name) => {
+                if let Some(ty) = self.globals.get(&identifier.name) {
+                    return ty.clone();
+                }
+                self.enclosing_type
+                    .as_ref()
+                    .map(|receiver| (receiver.clone(), identifier.name.as_str()))
+            }
+            Expr::Field { object, field, .. } => {
+                if let Expr::Ident(identifier) = object.as_ref()
+                    && !self.environment.is_bound(&identifier.name)
+                    && let Some(identity) = self.model.resolve_name(&identifier.name)
+                    && let Some((_, ty)) = self.signatures.field(&identity, &field.name)
+                {
+                    return ty.clone();
+                }
+                Some((self.infer(object), field.name.as_str()))
+            }
+            _ => None,
+        };
+        member
+            .and_then(|(receiver, name)| {
+                self.signatures
+                    .resolved_writable_field(&receiver, name, &self.model)
+                    .map(|(ty, substitutions)| self.model.substitute(&ty, &substitutions))
+            })
+            .unwrap_or_else(|| self.infer(target))
+    }
+
+    pub(crate) fn call_signature(
+        &self,
+        callee: &Expr,
+        type_args: &[DartType],
+    ) -> Option<ResolvedSignature> {
+        let (target, explicit_type_args) = match callee {
+            Expr::GenericInstantiation {
+                target, type_args, ..
+            } => (target.as_ref(), type_args.as_slice()),
+            target => (target, type_args),
+        };
+        let resolved = match target {
+            Expr::Ident(identifier) if !self.environment.is_bound(&identifier.name) => self
+                .enclosing_type
+                .as_ref()
+                .and_then(|receiver| {
+                    self.signatures
+                        .resolved_member(receiver, &identifier.name, &self.model)
+                })
+                .or_else(|| {
+                    self.model
+                        .resolve_value(&identifier.name)
+                        .and_then(|identity| self.signatures.function(&identity).cloned())
+                        .map(|signature| (signature, HashMap::new()))
+                })
+                .or_else(|| {
+                    self.model
+                        .resolve_name(&identifier.name)
+                        .and_then(|identity| self.signatures.constructor(&identity, "new").cloned())
+                        .map(|signature| (signature, HashMap::new()))
+                }),
+            Expr::Field { object, field, .. } => {
+                if let Expr::Ident(prefix) = object.as_ref()
+                    && !self.environment.is_bound(&prefix.name)
+                    && let Some(identity) = self
+                        .model
+                        .resolve_value(QualifiedName::prefixed(&prefix.name, &field.name))
+                    && let Some(signature) = self.signatures.function(&identity)
+                {
+                    Some((signature.clone(), HashMap::new()))
+                } else if let Expr::Ident(prefix) = object.as_ref()
+                    && !self.environment.is_bound(&prefix.name)
+                    && let Some(identity) = self.model.resolve_name(&prefix.name)
+                {
+                    self.signatures
+                        .constructor(&identity, &field.name)
+                        .or_else(|| self.signatures.member(&identity, &field.name))
+                        .cloned()
+                        .map(|signature| (signature, HashMap::new()))
+                } else {
+                    self.signatures
+                        .resolved_member(&self.infer(object), &field.name, &self.model)
+                }
+            }
+            _ => None,
+        };
+        let resolved = resolved.or_else(|| match self.infer(target) {
+            ResolvedType::Function {
+                return_type,
+                positional,
+                named,
+                ..
+            } => Some((
+                ResolvedSignature {
+                    owner_parameters: Vec::new(),
+                    call_parameters: Vec::new(),
+                    positional,
+                    named: named.into_iter().collect(),
+                    return_type: *return_type,
+                },
+                HashMap::new(),
+            )),
+            _ => None,
+        });
+        let (mut signature, mut substitutions) = resolved?;
+        substitutions.extend(
+            signature
+                .call_parameters
+                .iter()
+                .zip(explicit_type_args)
+                .map(|(parameter, argument)| {
+                    (
+                        parameter.clone(),
+                        self.model.resolve_type_in(argument, &self.type_parameters),
+                    )
+                }),
+        );
+        signature.return_type = self
+            .model
+            .substitute(&signature.return_type, &substitutions);
+        for ty in &mut signature.positional {
+            *ty = self.model.substitute(ty, &substitutions);
+        }
+        for ty in signature.named.values_mut() {
+            *ty = self.model.substitute(ty, &substitutions);
+        }
+        Some(signature)
+    }
 }
 
-pub(crate) fn visit_program<V: SemanticRuleVisitor>(
+pub(crate) fn visit_program<'a, V: SemanticRuleVisitor>(
     visitor: &mut V,
     program: &Program,
-    state: SemanticState<'_>,
-) {
+    state: SemanticState<'a>,
+) -> SemanticState<'a> {
     let mut walker = ScopedWalker { visitor, state };
     walker.visit_program(program);
+    walker.state
 }
 
 pub(crate) fn resolved_super_param_type(
@@ -260,7 +423,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
         if type_parameters.is_empty() {
             return Some(return_type.as_ref().clone());
         }
-        let mut by_owner: HashMap<usize, Vec<TypeParameterId>> = HashMap::new();
+        let mut by_owner: HashMap<ParameterOwner, Vec<TypeParameterId>> = HashMap::new();
         collect_type_parameter_ids(return_type, &mut by_owner);
         for parameter in positional {
             collect_type_parameter_ids(parameter, &mut by_owner);
@@ -772,9 +935,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                     .collect();
                 let previous_enclosing = walker.state.enclosing_type.replace(
                     enclosing_name
-                        .and_then(|name| {
-                            walker.state.model.resolve_name(std::slice::from_ref(name))
-                        })
+                        .and_then(|name| walker.state.model.resolve_name(name))
                         .map(|identity| ResolvedType::Interface {
                             identity,
                             arguments,
@@ -800,6 +961,18 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
             });
         } else if matches!(node, TopLevelDecl::Function(_)) {
             self.with_fresh_environment(|walker| walk_top_level_decl(walker, node));
+        } else if let TopLevelDecl::Variable(variable) = node {
+            for declarator in &variable.declarators {
+                if let Some(initializer) = &declarator.initializer {
+                    let expected = self
+                        .state
+                        .globals
+                        .get(&declarator.name.name)
+                        .cloned()
+                        .unwrap_or(ResolvedType::Unknown);
+                    self.with_expected(expected, |walker| walker.visit_expr(initializer));
+                }
+            }
         } else {
             walk_top_level_decl(self, node);
         }
@@ -953,6 +1126,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {
+        self.visitor.visit_stmt(node, &self.state);
         match node {
             Stmt::Block(block) => self.with_scope(|walker| {
                 for statement in &block.stmts {
@@ -1076,9 +1250,48 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
             Stmt::Throw(statement) => self.visit_expr(&statement.value),
             Stmt::Labeled(statement) => self.visit_stmt(&statement.stmt),
             Stmt::LocalFunc(function) => {
+                let ty = ResolvedType::Function {
+                    return_type: Box::new(
+                        function
+                            .return_type
+                            .as_ref()
+                            .map(|ty| {
+                                self.state
+                                    .model
+                                    .resolve_type_in(ty, &self.state.type_parameters)
+                            })
+                            .unwrap_or(ResolvedType::Dynamic),
+                    ),
+                    positional: function
+                        .params
+                        .positional()
+                        .map(|param| {
+                            resolved_param_type(
+                                param,
+                                &self.state.model,
+                                &self.state.type_parameters,
+                            )
+                        })
+                        .collect(),
+                    named: function
+                        .params
+                        .named()
+                        .map(|param| {
+                            (
+                                param.name.name.clone(),
+                                resolved_param_type(
+                                    param,
+                                    &self.state.model,
+                                    &self.state.type_parameters,
+                                ),
+                            )
+                        })
+                        .collect(),
+                    nullable: false,
+                };
                 self.state
                     .environment
-                    .declare(function.name.name.clone(), ResolvedType::Unknown);
+                    .declare(function.name.name.clone(), ty);
                 self.visit_function(
                     &function.type_params,
                     Some(&function.params),
@@ -1113,92 +1326,8 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                 ..
             } => {
                 self.with_expected(ResolvedType::Unknown, |walker| walker.visit_expr(callee));
-                let (target, explicit_type_args) = match callee.as_ref() {
-                    Expr::GenericInstantiation {
-                        target, type_args, ..
-                    } => (target.as_ref(), type_args.as_slice()),
-                    target => (target, type_args.as_slice()),
-                };
-                let resolved = match target {
-                    Expr::Ident(identifier)
-                        if !self.state.environment.is_bound(&identifier.name) =>
-                    {
-                        self.state
-                            .enclosing_type
-                            .as_ref()
-                            .and_then(|receiver| {
-                                self.state.signatures.resolved_member(
-                                    receiver,
-                                    &identifier.name,
-                                    &self.state.model,
-                                )
-                            })
-                            .or_else(|| {
-                                self.state
-                                    .model
-                                    .resolve_value(std::slice::from_ref(&identifier.name))
-                                    .and_then(|identity| {
-                                        self.state
-                                            .signatures
-                                            .function(&identity)
-                                            .cloned()
-                                            .map(|signature| (signature, HashMap::new()))
-                                    })
-                            })
-                            .or_else(|| {
-                                self.state
-                                    .model
-                                    .resolve_name(std::slice::from_ref(&identifier.name))
-                                    .and_then(|identity| {
-                                        self.state
-                                            .signatures
-                                            .constructor(&identity, "new")
-                                            .cloned()
-                                            .map(|signature| (signature, HashMap::new()))
-                                    })
-                            })
-                    }
-                    Expr::Field { object, field, .. } => {
-                        let receiver = self.state.infer(object);
-                        self.state.signatures.resolved_member(
-                            &receiver,
-                            &field.name,
-                            &self.state.model,
-                        )
-                    }
-                    _ => None,
-                };
-                if let Some((signature, mut substitutions)) = resolved {
-                    substitutions.extend(
-                        signature
-                            .call_parameters
-                            .iter()
-                            .zip(explicit_type_args)
-                            .map(|(parameter, argument)| {
-                                (
-                                    parameter.clone(),
-                                    self.state
-                                        .model
-                                        .resolve_type_in(argument, &self.state.type_parameters),
-                                )
-                            }),
-                    );
-                    let positional = signature
-                        .positional
-                        .iter()
-                        .map(|ty| self.state.model.substitute(ty, &substitutions))
-                        .collect::<Vec<_>>();
-                    let named = signature
-                        .named
-                        .iter()
-                        .map(|(name, ty)| {
-                            (
-                                name.clone(),
-                                self.state.model.substitute(ty, &substitutions),
-                            )
-                        })
-                        .collect();
-                    self.visit_call_arguments(args, &positional, &named);
+                if let Some(signature) = self.state.call_signature(callee, type_args) {
+                    self.visit_call_arguments(args, &signature.positional, &signature.named);
                 } else {
                     for argument in &args.positional {
                         self.visit_expr(argument);
@@ -1283,7 +1412,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                 ..
             } => {
                 self.visit_expr(target);
-                let expected = self.state.infer(target);
+                let expected = self.state.writable_type(target);
                 self.with_expected(expected, |walker| walker.visit_expr(value));
             }
             Expr::List { elements, .. } | Expr::Set { elements, .. } => {
@@ -1362,7 +1491,7 @@ pub(crate) fn returned_expressions(body: &FunctionBody) -> Vec<Expr> {
 
 fn collect_type_parameter_ids(
     ty: &ResolvedType,
-    by_owner: &mut HashMap<usize, Vec<TypeParameterId>>,
+    by_owner: &mut HashMap<ParameterOwner, Vec<TypeParameterId>>,
 ) {
     match ty {
         ResolvedType::TypeParameter { id, bound, .. } => {

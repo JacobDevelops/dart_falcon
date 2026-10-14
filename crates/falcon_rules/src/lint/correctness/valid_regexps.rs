@@ -49,7 +49,7 @@ impl Collector<'_> {
 
     fn sdk_regexp_name(&self, expression: &Expr) -> bool {
         let segments = expression_segments(expression);
-        matches!(segments.as_deref().and_then(|segments| self.model.resolve_name(segments)), Some(DeclarationIdentity::Sdk { library, name }) if library == "dart:core" && name == "RegExp")
+        matches!(segments.as_deref().and_then(|segments| self.model.resolve_dotted(segments)), Some(DeclarationIdentity::Sdk { library, name }) if library == "dart:core" && name == "RegExp")
     }
 }
 

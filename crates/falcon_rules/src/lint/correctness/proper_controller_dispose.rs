@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
-    TypeTruth,
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, SemanticModel,
+    SignatureIndex, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -39,7 +39,7 @@ impl Rule for ProperControllerDispose {
 }
 
 fn is_flutter_state(name: &str, signatures: &SignatureIndex, model: &SemanticModel<'_>) -> bool {
-    let Some(identity) = model.resolve_name(&[name.to_string()]) else {
+    let Some(identity) = model.resolve_name(name) else {
         return false;
     };
     let ty = ResolvedType::Interface {
@@ -49,10 +49,10 @@ fn is_flutter_state(name: &str, signatures: &SignatureIndex, model: &SemanticMod
         extension_type: false,
     };
     let state = DeclarationIdentity::Package {
-        package: "flutter".to_string(),
-        name: "State".to_string(),
+        package: "flutter",
+        name: "State",
     };
-    signatures.is_subtype_of(&ty, &state, model) == TypeTruth::Yes
+    signatures.is_subtype_of(&ty, &state, model) == Truth::Yes
 }
 
 fn check_class(
@@ -390,18 +390,18 @@ impl Visitor for Scan<'_, '_> {
 
 fn constructor_identity(callee: &Expr, model: &SemanticModel<'_>) -> Option<DeclarationIdentity> {
     match callee {
-        Expr::Ident(identifier) => model.resolve_name(std::slice::from_ref(&identifier.name)),
+        Expr::Ident(identifier) => model.resolve_name(&identifier.name),
         Expr::Field { object, field, .. } => match object.as_ref() {
             Expr::Ident(identifier) => model
-                .resolve_name(&[identifier.name.clone(), field.name.clone()])
-                .or_else(|| model.resolve_name(std::slice::from_ref(&identifier.name))),
+                .resolve_name(QualifiedName::prefixed(&identifier.name, &field.name))
+                .or_else(|| model.resolve_name(&identifier.name)),
             Expr::Field {
                 object: prefix,
                 field: type_name,
                 ..
             } => match prefix.as_ref() {
                 Expr::Ident(prefix) => {
-                    model.resolve_name(&[prefix.name.clone(), type_name.name.clone()])
+                    model.resolve_name(QualifiedName::prefixed(&prefix.name, &type_name.name))
                 }
                 _ => None,
             },
@@ -420,8 +420,15 @@ fn constructs_controller(expression: &Expr, model: &SemanticModel<'_>) -> bool {
         Expr::Call { callee, .. } => constructor_identity(callee, model),
         _ => None,
     };
-    matches!(identity, Some(DeclarationIdentity::Package { package, name })
-        if package == "flutter" && matches!(name.as_str(),
-            "TextEditingController" | "ScrollController" | "PageController" |
-            "TabController" | "AnimationController"))
+    matches!(
+        identity,
+        Some(DeclarationIdentity::Package {
+            package: "flutter",
+            name: "TextEditingController"
+                | "ScrollController"
+                | "PageController"
+                | "TabController"
+                | "AnimationController"
+        })
+    )
 }

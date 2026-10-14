@@ -1,6 +1,6 @@
 //! Await only values proven to be future-like.
 
-use falcon_analyze::{AnalyzeContext, Rule, TypeTruth};
+use falcon_analyze::{AnalyzeContext, Rule, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -41,7 +41,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             return;
         }
         let ty = state.infer(expr);
-        if state.model.is_future_like(&ty) == TypeTruth::No {
+        if state.model.is_future_like(&ty) == Truth::No {
             self.diagnostics.push(self.ctx.diagnostic(
                 "await-only-futures",
                 "Await only futures or other future-like values.",

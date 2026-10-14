@@ -20,8 +20,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{
-    AnalyzeContext, IdentityIndex, IdentitySource, ProjectFile, ProjectIndex, Rule, SignatureIndex,
-    TypeIndex,
+    AnalyzeContext, IdentityIndex, IdentitySource, ProjectFile, Rule, SignatureIndex, TypeIndex,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
@@ -89,7 +88,6 @@ fn run_rule(
 ) -> Vec<(String, usize)> {
     let (program, errors) = parse(source);
     let resolver_dependent = rule_requires_resolution(rule.name());
-    let index = resolver_dependent.then(|| ProjectIndex::from_program(&program));
     let types = resolver_dependent.then(|| TypeIndex::from_program(&program));
     let identity_sources = [IdentitySource {
         path: file,
@@ -106,9 +104,6 @@ fn run_rule(
             SignatureIndex::from_program(&program, &model)
         });
     let mut ctx = AnalyzeContext::new(file, source, config);
-    if let Some(index) = index.as_ref() {
-        ctx = ctx.with_project(index);
-    }
     if let Some(types) = types.as_ref() {
         ctx = ctx.with_types(types);
     }
@@ -567,7 +562,6 @@ Widget build(BuildContext context) {
         file_path: Path::new("t.dart"),
         source: src,
         config: &default_cfg,
-        project: None,
         types: None,
         identities: None,
         signatures: None,
@@ -600,7 +594,6 @@ Widget build(BuildContext context) {
         file_path: Path::new("t.dart"),
         source: src,
         config: &configured,
-        project: None,
         types: None,
         identities: None,
         signatures: None,
@@ -626,7 +619,6 @@ Widget build(BuildContext context) {
         file_path: Path::new("t.dart"),
         source: static_src,
         config: &configured,
-        project: None,
         types: None,
         identities: None,
         signatures: None,
@@ -665,7 +657,6 @@ class Bar {
         file_path: Path::new("t.dart"),
         source: src,
         config: &default_cfg,
-        project: None,
         types: None,
         identities: None,
         signatures: None,
@@ -704,7 +695,6 @@ class Bar {
         file_path: Path::new("t.dart"),
         source: src,
         config: &configured,
-        project: None,
         types: None,
         identities: None,
         signatures: None,

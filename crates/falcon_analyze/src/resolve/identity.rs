@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use falcon_syntax::ast::{ImportCombinator, Program, TopLevelDecl};
+use falcon_syntax::ast::{Identifier, ImportCombinator, Program, TopLevelDecl};
 
 use super::group_libraries;
 use super::library::canonical_or_lexical;
@@ -32,13 +32,65 @@ pub struct PackageIdentity {
     pub lib_root: PathBuf,
 }
 
+/// A library (a defining file plus its parts) of an [`IdentityIndex`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LibraryId(usize);
+
+/// A source file of an [`IdentityIndex`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileId(usize);
+
+/// A simple name or an import-prefixed name. Longer dotted names are member
+/// accesses and have no declaration identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QualifiedName<'a> {
+    pub prefix: Option<&'a str>,
+    pub name: &'a str,
+}
+
+impl<'a> QualifiedName<'a> {
+    pub fn prefixed(prefix: &'a str, name: &'a str) -> Self {
+        Self {
+            prefix: Some(prefix),
+            name,
+        }
+    }
+
+    pub fn from_segments<S: AsRef<str>>(segments: &'a [S]) -> Option<Self> {
+        match segments {
+            [name] => Some(name.as_ref().into()),
+            [prefix, name] => Some(Self::prefixed(prefix.as_ref(), name.as_ref())),
+            _ => None,
+        }
+    }
+
+    pub fn from_identifiers(segments: &'a [Identifier]) -> Option<Self> {
+        match segments {
+            [name] => Some((&name.name).into()),
+            [prefix, name] => Some(Self::prefixed(&prefix.name, &name.name)),
+            _ => None,
+        }
+    }
+}
+
+impl<'a> From<&'a str> for QualifiedName<'a> {
+    fn from(name: &'a str) -> Self {
+        Self { prefix: None, name }
+    }
+}
+
+impl<'a> From<&'a String> for QualifiedName<'a> {
+    fn from(name: &'a String) -> Self {
+        name.as_str().into()
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Library {
     declarations: HashMap<String, NameIdentity>,
     imports: Vec<Import>,
     exports: Vec<Export>,
     incomplete: bool,
-    file: PathBuf,
     implicit_core: bool,
 }
 
@@ -55,16 +107,51 @@ struct Export {
     combinators: Vec<ImportCombinator>,
 }
 
+/// SDK and package identities come from closed allowlists, so their names are
+/// the allowlists' own `'static` strings.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DeclarationIdentity {
-    Project { library: usize, name: String },
-    Sdk { library: String, name: String },
-    Package { package: String, name: String },
+    Project {
+        library: LibraryId,
+        name: String,
+    },
+    Sdk {
+        library: &'static str,
+        name: &'static str,
+    },
+    Package {
+        package: &'static str,
+        name: &'static str,
+    },
+}
+
+impl DeclarationIdentity {
+    pub const OBJECT: Self = Self::Sdk {
+        library: "dart:core",
+        name: "Object",
+    };
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Project { name, .. } => name,
+            Self::Sdk { name, .. } | Self::Package { name, .. } => name,
+        }
+    }
+
+    pub fn is_sdk(&self, library: &str, name: &str) -> bool {
+        matches!(self, Self::Sdk { library: found_library, name: found_name }
+            if *found_library == library && *found_name == name)
+    }
+
+    pub fn is_package(&self, package: &str, name: &str) -> bool {
+        matches!(self, Self::Package { package: found_package, name: found_name }
+            if *found_package == package && *found_name == name)
+    }
 }
 
 #[derive(Debug, Clone)]
 enum ImportTarget {
-    Library(usize),
+    Library(LibraryId),
     Sdk(String),
     Package(String),
     Unknown,
@@ -74,7 +161,8 @@ enum ImportTarget {
 #[derive(Debug, Clone, Default)]
 pub struct IdentityIndex {
     libraries: Vec<Library>,
-    by_path: HashMap<PathBuf, usize>,
+    file_library: Vec<LibraryId>,
+    by_path: HashMap<PathBuf, FileId>,
 }
 
 impl IdentityIndex {
@@ -86,125 +174,122 @@ impl IdentityIndex {
         let grouping = group_libraries(&grouped_input);
 
         let mut root_to_library = HashMap::new();
-        let mut file_library = vec![0; files.len()];
         let mut libraries = Vec::<Library>::new();
-        for (i, file_library_slot) in file_library.iter_mut().enumerate() {
-            let root = grouping
-                .siblings(i)
-                .iter()
-                .copied()
-                .chain(std::iter::once(i))
-                .min()
-                .unwrap_or(i);
-            let library = *root_to_library.entry(root).or_insert_with(|| {
-                let index = libraries.len();
-                libraries.push(Library {
-                    declarations: HashMap::new(),
-                    imports: Vec::new(),
-                    exports: Vec::new(),
-                    incomplete: grouping.is_unresolved(i),
-                    file: files[i].path.to_path_buf(),
-                    implicit_core: true,
-                });
-                index
-            });
-            *file_library_slot = library;
-        }
+        let file_library: Vec<LibraryId> = (0..files.len())
+            .map(|i| {
+                let root = grouping.siblings(i).iter().copied().fold(i, usize::min);
+                *root_to_library.entry(root).or_insert_with(|| {
+                    libraries.push(Library {
+                        declarations: HashMap::new(),
+                        imports: Vec::new(),
+                        exports: Vec::new(),
+                        incomplete: grouping.is_unresolved(i),
+                        implicit_core: true,
+                    });
+                    LibraryId(libraries.len() - 1)
+                })
+            })
+            .collect();
 
         let mut by_path = HashMap::new();
-        for (i, file) in files.iter().enumerate() {
-            let library = file_library[i];
-            by_path.insert(canonical_or_lexical(file.path), library);
-            libraries[library].incomplete |= file.has_parse_errors;
+        for (index, (file, &library)) in files.iter().zip(&file_library).enumerate() {
+            by_path.insert(canonical_or_lexical(file.path), FileId(index));
+            let library = &mut libraries[library.0];
+            library.incomplete |= file.has_parse_errors;
             for declaration in &file.program.declarations {
                 for (name, identity) in declaration_identities(declaration) {
-                    merge(&mut libraries[library].declarations, name, identity);
+                    merge(&mut library.declarations, name, identity);
                 }
             }
         }
 
-        for (i, file) in files.iter().enumerate() {
-            let library = file_library[i];
+        for (file, &library) in files.iter().zip(&file_library) {
+            let library = &mut libraries[library.0];
             for import in &file.program.imports {
                 if import.uri.value == "dart:core" {
-                    libraries[library].implicit_core = false;
+                    library.implicit_core = false;
                 }
-                libraries[library].imports.push(Import {
-                    target: resolve_uri(file.path, &import.uri.value, &by_path, packages),
+                library.imports.push(Import {
+                    target: resolve_uri(
+                        file.path,
+                        &import.uri.value,
+                        &by_path,
+                        &file_library,
+                        packages,
+                    ),
                     prefix: import.as_name.as_ref().map(|id| id.name.clone()),
                     combinators: import.combinators.clone(),
                 });
             }
             for export in &file.program.exports {
-                libraries[library].exports.push(Export {
-                    target: resolve_uri(file.path, &export.uri.value, &by_path, packages),
+                library.exports.push(Export {
+                    target: resolve_uri(
+                        file.path,
+                        &export.uri.value,
+                        &by_path,
+                        &file_library,
+                        packages,
+                    ),
                     combinators: export.combinators.clone(),
                 });
             }
         }
 
-        Self { libraries, by_path }
-    }
-
-    /// Resolve a one-segment name or a two-segment import-prefixed name as it is
-    /// visible from `file`. Longer dotted names denote member access, not a type
-    /// literal identity.
-    pub fn resolve(&self, file: &Path, segments: &[String]) -> NameIdentity {
-        let Some(&library) = self.by_path.get(&canonical_or_lexical(file)) else {
-            return NameIdentity::Unknown;
-        };
-        if self.libraries[library].incomplete {
-            return NameIdentity::Unknown;
-        }
-        match segments {
-            [name] => self.resolve_unprefixed(library, name),
-            [prefix, name] => self.resolve_prefixed(library, prefix, name),
-            _ => NameIdentity::Unknown,
+        Self {
+            libraries,
+            file_library,
+            by_path,
         }
     }
 
-    pub(super) fn library_identity(&self, file: &Path) -> Option<usize> {
-        self.by_path.get(&canonical_or_lexical(file)).copied()
+    /// The indexed file at `path`, normalizing its spelling.
+    pub fn file(&self, path: &Path) -> Option<FileId> {
+        self.by_path.get(&canonical_or_lexical(path)).copied()
     }
 
-    pub(crate) fn declaration_file(&self, identity: &DeclarationIdentity) -> Option<&Path> {
-        match identity {
-            DeclarationIdentity::Project { library, .. } => self
-                .libraries
-                .get(*library)
-                .map(|library| library.file.as_path()),
-            DeclarationIdentity::Sdk { .. } | DeclarationIdentity::Package { .. } => None,
+    pub fn library(&self, file: FileId) -> LibraryId {
+        self.file_library[file.0]
+    }
+
+    fn get(&self, library: LibraryId) -> &Library {
+        &self.libraries[library.0]
+    }
+
+    fn complete(&self, library: LibraryId) -> Option<&Library> {
+        Some(self.get(library)).filter(|library| !library.incomplete)
+    }
+
+    /// Classify `name` as it is visible from `library`.
+    pub fn resolve(&self, library: LibraryId, name: QualifiedName<'_>) -> NameIdentity {
+        if self.complete(library).is_none() {
+            return NameIdentity::Unknown;
+        }
+        match name.prefix {
+            None => self.resolve_unprefixed(library, name.name),
+            Some(prefix) => self.resolve_prefixed(library, prefix, name.name),
         }
     }
 
     pub fn extension_visible(
         &self,
-        file: &Path,
-        declaring_file: &Path,
+        from: LibraryId,
+        declaring: LibraryId,
         extension_name: Option<&str>,
     ) -> bool {
-        let Some(&from) = self.by_path.get(&canonical_or_lexical(file)) else {
-            return false;
-        };
-        let Some(&target) = self.by_path.get(&canonical_or_lexical(declaring_file)) else {
-            return false;
-        };
-        if from == target {
-            return true;
-        }
-        self.libraries[from].imports.iter().any(|import| {
-            import.prefix.is_none()
-                && extension_name.is_none_or(|name| allows(&import.combinators, name))
-                && matches!(import.target, ImportTarget::Library(library) if self.library_exports(library, target, extension_name, &mut HashSet::new()))
-        })
+        from == declaring
+            || self.get(from).imports.iter().any(|import| {
+                import.prefix.is_none()
+                    && extension_name.is_none_or(|name| allows(&import.combinators, name))
+                    && matches!(import.target, ImportTarget::Library(library) if self.library_exports(library, declaring, extension_name, &mut HashSet::new()))
+            })
     }
 
     fn library_exports(
         &self,
-        library: usize,
-        target: usize,
+        library: LibraryId,
+        target: LibraryId,
         extension_name: Option<&str>,
-        visited: &mut HashSet<usize>,
+        visited: &mut HashSet<LibraryId>,
     ) -> bool {
         if library == target {
             return true;
@@ -212,7 +297,7 @@ impl IdentityIndex {
         if !visited.insert(library) {
             return false;
         }
-        self.libraries[library].exports.iter().any(|export| {
+        self.get(library).exports.iter().any(|export| {
             extension_name.is_none_or(|name| allows(&export.combinators, name))
                 && matches!(export.target, ImportTarget::Library(next) if self.library_exports(next, target, extension_name, visited))
         })
@@ -223,55 +308,40 @@ impl IdentityIndex {
     /// `None` rather than guessing from the final name segment.
     pub fn resolve_declaration(
         &self,
-        file: &Path,
-        segments: &[String],
+        library: LibraryId,
+        name: QualifiedName<'_>,
     ) -> Option<DeclarationIdentity> {
-        let &library = self.by_path.get(&canonical_or_lexical(file))?;
-        if self.libraries[library].incomplete {
-            return None;
-        }
-        match segments {
-            [name] => self.resolve_unprefixed_declaration(library, name),
-            [prefix, name] => self.resolve_prefixed_declaration(library, prefix, name),
-            _ => None,
+        self.complete(library)?;
+        match name.prefix {
+            None => self.resolve_unprefixed_declaration(library, name.name),
+            Some(prefix) => self.resolve_prefixed_declaration(library, prefix, name.name),
         }
     }
 
     /// Resolve a visible top-level value to its canonical declaring library.
     pub fn resolve_value_declaration(
         &self,
-        file: &Path,
-        segments: &[String],
+        library: LibraryId,
+        QualifiedName { prefix, name }: QualifiedName<'_>,
     ) -> Option<DeclarationIdentity> {
-        let &library = self.by_path.get(&canonical_or_lexical(file))?;
-        if self.libraries[library].incomplete {
-            return None;
-        }
-        let (prefix, name) = match segments {
-            [name] => (None, name.as_str()),
-            [prefix, name] => (Some(prefix.as_str()), name.as_str()),
-            _ => return None,
-        };
+        let unit = self.complete(library)?;
         if prefix.is_none() {
-            if self.libraries[library].declarations.get(name) == Some(&NameIdentity::Value) {
-                return Some(DeclarationIdentity::Project {
-                    library,
-                    name: name.to_string(),
-                });
-            }
-            if self.libraries[library].declarations.contains_key(name) {
-                return None;
+            match unit.declarations.get(name) {
+                Some(NameIdentity::Value) => {
+                    return Some(DeclarationIdentity::Project {
+                        library,
+                        name: name.to_string(),
+                    });
+                }
+                Some(_) => return None,
+                None => {}
             }
         }
-        let candidates = self.libraries[library]
-            .imports
-            .iter()
-            .filter(|import| {
-                import.prefix.as_deref() == prefix && allows(&import.combinators, name)
-            })
-            .filter_map(|import| match &import.target {
+        let candidates = self
+            .visible_imports(unit, prefix, name)
+            .filter_map(|import| match import.target {
                 ImportTarget::Library(target) => self.exported_declaration(
-                    *target,
+                    target,
                     name,
                     NameIdentity::Value,
                     &mut HashSet::new(),
@@ -290,44 +360,19 @@ impl IdentityIndex {
     /// separately.
     pub fn resolve_imported_member(
         &self,
-        file: &Path,
-        segments: &[String],
+        library: LibraryId,
+        QualifiedName { prefix, name }: QualifiedName<'_>,
     ) -> Option<DeclarationIdentity> {
-        let &library = self.by_path.get(&canonical_or_lexical(file))?;
-        if self.libraries[library].incomplete {
+        let unit = self.complete(library)?;
+        if prefix.is_none() && unit.declarations.contains_key(name) {
             return None;
         }
-        let (prefix, name) = match segments {
-            [name] => (None, name.as_str()),
-            [prefix, name] => (Some(prefix.as_str()), name.as_str()),
-            _ => return None,
-        };
-        if prefix.is_none() && self.libraries[library].declarations.contains_key(name) {
-            return None;
-        }
-        let candidates = self.libraries[library]
-            .imports
-            .iter()
-            .filter(|import| {
-                import.prefix.as_deref() == prefix && allows(&import.combinators, name)
-            })
+        let candidates = self
+            .visible_imports(unit, prefix, name)
             .filter_map(|import| match &import.target {
-                ImportTarget::Sdk(uri) if is_sdk_type(uri, name) || is_sdk_member(uri, name) => {
-                    Some(DeclarationIdentity::Sdk {
-                        library: uri.clone(),
-                        name: name.to_string(),
-                    })
-                }
-                ImportTarget::Package(package) if is_known_package_member(package, name) => {
-                    Some(DeclarationIdentity::Package {
-                        package: package.clone(),
-                        name: name.to_string(),
-                    })
-                }
-                ImportTarget::Library(_)
-                | ImportTarget::Sdk(_)
-                | ImportTarget::Package(_)
-                | ImportTarget::Unknown => None,
+                ImportTarget::Sdk(uri) => sdk_type(uri, name).or_else(|| sdk_member(uri, name)),
+                ImportTarget::Package(package) => package_member(package, name),
+                ImportTarget::Library(_) | ImportTarget::Unknown => None,
             })
             .collect();
         unique_declaration(candidates)
@@ -336,102 +381,78 @@ impl IdentityIndex {
     /// Resolve an imported SDK top-level member without guessing from its name.
     pub fn resolve_sdk_member(
         &self,
-        file: &Path,
-        segments: &[String],
+        library: LibraryId,
+        QualifiedName { prefix, name }: QualifiedName<'_>,
     ) -> Option<DeclarationIdentity> {
-        let &library = self.by_path.get(&canonical_or_lexical(file))?;
-        if self.libraries[library].incomplete {
+        let unit = self.complete(library)?;
+        if prefix.is_none() && unit.declarations.contains_key(name) {
             return None;
         }
-        let (prefix, name) = match segments {
-            [name] => (None, name.as_str()),
-            [prefix, name] => (Some(prefix.as_str()), name.as_str()),
-            _ => return None,
-        };
-        if prefix.is_none() && self.libraries[library].declarations.contains_key(name) {
-            return None;
-        }
-        let imports = &self.libraries[library].imports;
-        let mut candidates: Vec<_> = imports
-            .iter()
-            .filter(|import| {
-                import.prefix.as_deref() == prefix && allows(&import.combinators, name)
-            })
+        let mut candidates: Vec<_> = self
+            .visible_imports(unit, prefix, name)
             .filter_map(|import| match &import.target {
-                ImportTarget::Sdk(uri) if is_sdk_member(uri, name) => {
-                    Some(DeclarationIdentity::Sdk {
-                        library: uri.clone(),
-                        name: name.to_string(),
-                    })
-                }
+                ImportTarget::Sdk(uri) => sdk_member(uri, name),
                 _ => None,
             })
             .collect();
-        if prefix.is_none()
-            && self.libraries[library].implicit_core
-            && is_sdk_member("dart:core", name)
-        {
-            candidates.push(DeclarationIdentity::Sdk {
-                library: "dart:core".to_string(),
-                name: name.to_string(),
-            });
+        if prefix.is_none() && unit.implicit_core {
+            candidates.extend(sdk_member("dart:core", name));
         }
         unique_declaration(candidates)
     }
 
+    fn visible_imports<'s>(
+        &self,
+        unit: &'s Library,
+        prefix: Option<&'s str>,
+        name: &'s str,
+    ) -> impl Iterator<Item = &'s Import> {
+        unit.imports.iter().filter(move |import| {
+            import.prefix.as_deref() == prefix && allows(&import.combinators, name)
+        })
+    }
+
     fn resolve_unprefixed_declaration(
         &self,
-        library: usize,
+        library: LibraryId,
         name: &str,
     ) -> Option<DeclarationIdentity> {
-        if self.libraries[library].declarations.contains_key(name) {
-            return (self.libraries[library].declarations.get(name) == Some(&NameIdentity::Type))
-                .then(|| DeclarationIdentity::Project {
-                    library,
-                    name: name.to_string(),
-                });
+        let unit = self.get(library);
+        if let Some(identity) = unit.declarations.get(name) {
+            return (*identity == NameIdentity::Type).then(|| DeclarationIdentity::Project {
+                library,
+                name: name.to_string(),
+            });
         }
         let mut candidates = Vec::new();
-        for import in &self.libraries[library].imports {
-            if import.prefix.is_some() || !allows(&import.combinators, name) {
-                continue;
-            }
+        for import in self.visible_imports(unit, None, name) {
             if matches!(import.target, ImportTarget::Unknown) {
                 return None;
             }
-            if let Some(candidate) = self.target_declaration(&import.target, name) {
-                candidates.push(candidate);
-            }
+            candidates.extend(self.target_declaration(&import.target, name));
         }
-        if self.libraries[library].implicit_core && is_sdk_type("dart:core", name) {
-            candidates.push(DeclarationIdentity::Sdk {
-                library: "dart:core".to_string(),
-                name: name.to_string(),
-            });
+        if unit.implicit_core {
+            candidates.extend(sdk_type("dart:core", name));
         }
         unique_declaration(candidates)
     }
 
     fn resolve_prefixed_declaration(
         &self,
-        library: usize,
+        library: LibraryId,
         prefix: &str,
         name: &str,
     ) -> Option<DeclarationIdentity> {
-        if self.libraries[library].declarations.contains_key(prefix) {
+        let unit = self.get(library);
+        if unit.declarations.contains_key(prefix) {
             return None;
         }
-        let imports = self.libraries[library].imports.iter().filter(|import| {
-            import.prefix.as_deref() == Some(prefix) && allows(&import.combinators, name)
-        });
         let mut candidates = Vec::new();
-        for import in imports {
+        for import in self.visible_imports(unit, Some(prefix), name) {
             if matches!(import.target, ImportTarget::Unknown) {
                 return None;
             }
-            if let Some(candidate) = self.target_declaration(&import.target, name) {
-                candidates.push(candidate);
-            }
+            candidates.extend(self.target_declaration(&import.target, name));
         }
         unique_declaration(candidates)
     }
@@ -441,91 +462,67 @@ impl IdentityIndex {
             ImportTarget::Library(library) => {
                 self.exported_declaration(*library, name, NameIdentity::Type, &mut HashSet::new())
             }
-            ImportTarget::Sdk(uri) if is_sdk_type(uri, name) => Some(DeclarationIdentity::Sdk {
-                library: uri.clone(),
-                name: name.to_string(),
-            }),
-            ImportTarget::Package(package) if is_known_package_type(package, name) => {
-                Some(DeclarationIdentity::Package {
-                    package: package.clone(),
-                    name: name.to_string(),
-                })
-            }
-            ImportTarget::Sdk(_) | ImportTarget::Package(_) | ImportTarget::Unknown => None,
+            ImportTarget::Sdk(uri) => sdk_type(uri, name),
+            ImportTarget::Package(package) => package_type(package, name),
+            ImportTarget::Unknown => None,
         }
     }
 
-    fn resolve_unprefixed(&self, library: usize, name: &str) -> NameIdentity {
-        if let Some(identity) = self.libraries[library].declarations.get(name) {
+    fn resolve_unprefixed(&self, library: LibraryId, name: &str) -> NameIdentity {
+        let unit = self.get(library);
+        if let Some(identity) = unit.declarations.get(name) {
             return *identity;
         }
-
-        let imports = self.libraries[library]
-            .imports
-            .iter()
-            .filter(|import| import.prefix.is_none() && allows(&import.combinators, name));
         if self.resolve_unprefixed_declaration(library, name).is_some() {
             return NameIdentity::Type;
         }
-
         let mut result = None;
-        for import in imports {
+        for import in self.visible_imports(unit, None, name) {
             combine(&mut result, self.target_identity(&import.target, name));
         }
-        if self.libraries[library].implicit_core && is_core_type(name) {
+        if unit.implicit_core && sdk_type("dart:core", name).is_some() {
             combine(&mut result, NameIdentity::Type);
         }
         result.unwrap_or(NameIdentity::Unknown)
     }
 
-    fn resolve_prefixed(&self, library: usize, prefix: &str, name: &str) -> NameIdentity {
-        if self.libraries[library].declarations.contains_key(prefix) {
+    fn resolve_prefixed(&self, library: LibraryId, prefix: &str, name: &str) -> NameIdentity {
+        let unit = self.get(library);
+        if unit.declarations.contains_key(prefix) {
             return NameIdentity::Unknown;
         }
-        let imports = self.libraries[library]
-            .imports
-            .iter()
-            .filter(|import| {
-                import.prefix.as_deref() == Some(prefix) && allows(&import.combinators, name)
-            })
-            .collect::<Vec<_>>();
         if self
             .resolve_prefixed_declaration(library, prefix, name)
             .is_some()
         {
             return NameIdentity::Type;
         }
-
         let mut result = None;
-        for import in &imports {
+        for import in self.visible_imports(unit, Some(prefix), name) {
             combine(&mut result, self.target_identity(&import.target, name));
         }
-        if imports.is_empty() {
-            NameIdentity::Unknown
-        } else {
-            result.unwrap_or(NameIdentity::Unknown)
-        }
+        result.unwrap_or(NameIdentity::Unknown)
     }
 
     fn exported_declaration(
         &self,
-        library: usize,
+        library: LibraryId,
         name: &str,
         namespace: NameIdentity,
-        visiting: &mut HashSet<usize>,
+        visiting: &mut HashSet<LibraryId>,
     ) -> Option<DeclarationIdentity> {
-        if name.starts_with('_') || self.libraries[library].incomplete || !visiting.insert(library)
-        {
+        let unit = self.get(library);
+        if name.starts_with('_') || unit.incomplete || !visiting.insert(library) {
             return None;
         }
-        if self.libraries[library].declarations.get(name) == Some(&namespace) {
+        if unit.declarations.get(name) == Some(&namespace) {
             visiting.remove(&library);
             return Some(DeclarationIdentity::Project {
                 library,
                 name: name.to_string(),
             });
         }
-        let candidates = self.libraries[library]
+        let candidates = unit
             .exports
             .iter()
             .filter(|export| allows(&export.combinators, name))
@@ -533,21 +530,9 @@ impl IdentityIndex {
                 ImportTarget::Library(target) => {
                     self.exported_declaration(*target, name, namespace, visiting)
                 }
-                ImportTarget::Sdk(uri)
-                    if namespace == NameIdentity::Type && is_sdk_type(uri, name) =>
-                {
-                    Some(DeclarationIdentity::Sdk {
-                        library: uri.clone(),
-                        name: name.to_string(),
-                    })
-                }
-                ImportTarget::Package(package)
-                    if namespace == NameIdentity::Type && is_known_package_type(package, name) =>
-                {
-                    Some(DeclarationIdentity::Package {
-                        package: package.clone(),
-                        name: name.to_string(),
-                    })
+                ImportTarget::Sdk(uri) if namespace == NameIdentity::Type => sdk_type(uri, name),
+                ImportTarget::Package(package) if namespace == NameIdentity::Type => {
+                    package_type(package, name)
                 }
                 _ => None,
             })
@@ -556,29 +541,28 @@ impl IdentityIndex {
         unique_declaration(candidates)
     }
 
-    fn exported(&self, library: usize, name: &str, visiting: &mut HashSet<usize>) -> NameIdentity {
-        if name.starts_with('_') || self.libraries[library].incomplete || !visiting.insert(library)
-        {
+    fn exported(
+        &self,
+        library: LibraryId,
+        name: &str,
+        visiting: &mut HashSet<LibraryId>,
+    ) -> NameIdentity {
+        let unit = self.get(library);
+        if name.starts_with('_') || unit.incomplete || !visiting.insert(library) {
             return NameIdentity::Unknown;
         }
-        if let Some(identity) = self.libraries[library].declarations.get(name) {
+        if let Some(identity) = unit.declarations.get(name) {
             visiting.remove(&library);
             return *identity;
         }
         let mut result = None;
-        for export in &self.libraries[library].exports {
+        for export in &unit.exports {
             if !allows(&export.combinators, name) {
                 continue;
             }
             let identity = match &export.target {
                 ImportTarget::Library(target) => self.exported(*target, name, visiting),
-                ImportTarget::Sdk(uri) if is_sdk_type(uri, name) => NameIdentity::Type,
-                ImportTarget::Package(package) if is_known_package_type(package, name) => {
-                    NameIdentity::Type
-                }
-                ImportTarget::Sdk(_) | ImportTarget::Package(_) | ImportTarget::Unknown => {
-                    NameIdentity::Unknown
-                }
+                target => self.target_identity(target, name),
             };
             combine(&mut result, identity);
         }
@@ -587,15 +571,18 @@ impl IdentityIndex {
     }
 
     fn target_identity(&self, target: &ImportTarget, name: &str) -> NameIdentity {
-        match target {
-            ImportTarget::Library(library) => self.exported(*library, name, &mut HashSet::new()),
-            ImportTarget::Sdk(uri) if is_sdk_type(uri, name) => NameIdentity::Type,
-            ImportTarget::Package(package) if is_known_package_type(package, name) => {
-                NameIdentity::Type
+        let known = match target {
+            ImportTarget::Library(library) => {
+                return self.exported(*library, name, &mut HashSet::new());
             }
-            ImportTarget::Sdk(_) | ImportTarget::Package(_) | ImportTarget::Unknown => {
-                NameIdentity::Unknown
-            }
+            ImportTarget::Sdk(uri) => sdk_type(uri, name).is_some(),
+            ImportTarget::Package(package) => package_type(package, name).is_some(),
+            ImportTarget::Unknown => false,
+        };
+        if known {
+            NameIdentity::Type
+        } else {
+            NameIdentity::Unknown
         }
     }
 }
@@ -652,190 +639,220 @@ fn allows(combinators: &[ImportCombinator], name: &str) -> bool {
 fn resolve_uri(
     from: &Path,
     uri: &str,
-    by_path: &HashMap<PathBuf, usize>,
+    by_path: &HashMap<PathBuf, FileId>,
+    file_library: &[LibraryId],
     packages: &[PackageIdentity],
 ) -> ImportTarget {
     if uri.starts_with("dart:") {
         return ImportTarget::Sdk(uri.to_string());
     }
-    if let Some(rest) = uri.strip_prefix("package:") {
-        let Some((package, subpath)) = rest.split_once('/') else {
-            return ImportTarget::Unknown;
-        };
-        let mut matches = packages
-            .iter()
-            .filter(|candidate| candidate.name == package);
-        let Some(matched) = matches.next() else {
-            return ImportTarget::Package(package.to_string());
-        };
-        if matches.next().is_some() {
-            return ImportTarget::Unknown;
-        }
-        let lib_root = canonical_or_lexical(&matched.lib_root);
-        let target = canonical_or_lexical(&lib_root.join(subpath));
-        if !target.starts_with(&lib_root) {
-            return ImportTarget::Unknown;
-        }
-        return by_path
-            .get(&target)
-            .copied()
-            .map(ImportTarget::Library)
-            .unwrap_or(ImportTarget::Unknown);
+    if let Some((package, _)) = uri
+        .strip_prefix("package:")
+        .and_then(|rest| rest.split_once('/'))
+        && !packages.iter().any(|candidate| candidate.name == package)
+    {
+        return ImportTarget::Package(package.to_string());
     }
-    let parent = from.parent().unwrap_or_else(|| Path::new(""));
-    by_path
-        .get(&canonical_or_lexical(&parent.join(uri)))
-        .copied()
-        .map(ImportTarget::Library)
+    import_path(from, uri, packages)
+        .and_then(|target| by_path.get(&target))
+        .map(|file| ImportTarget::Library(file_library[file.0]))
         .unwrap_or(ImportTarget::Unknown)
 }
 
-fn is_sdk_member(library: &str, name: &str) -> bool {
-    matches!(
-        (library, name),
-        ("dart:core", "print" | "pragma")
-            | ("dart:async", "scheduleMicrotask")
-            | ("dart:js_interop", "JS" | "staticInterop")
-    )
-}
-
-fn is_sdk_type(library: &str, name: &str) -> bool {
-    match library {
-        "dart:core" => is_core_type(name),
-        "dart:async" => matches!(name, "Future" | "FutureOr" | "Timer" | "Completer"),
-        "dart:ui" => name == "Color",
-        "dart:collection" => matches!(
-            name,
-            "Queue"
-                | "ListQueue"
-                | "DoubleLinkedQueue"
-                | "HashMap"
-                | "HashSet"
-                | "LinkedHashMap"
-                | "LinkedHashSet"
-                | "SplayTreeMap"
-                | "SplayTreeSet"
-        ),
-        "dart:js_interop" => matches!(
-            name,
-            "JSAny"
-                | "JSObject"
-                | "JSFunction"
-                | "JSExportedDartFunction"
-                | "JSBoxedDartObject"
-                | "JSArray"
-                | "JSPromise"
-                | "JSNumber"
-                | "JSBoolean"
-                | "JSString"
-                | "JSSymbol"
-                | "JSBigInt"
-                | "JSArrayBuffer"
-                | "JSDataView"
-                | "JSTypedArray"
-                | "JSInt8Array"
-                | "JSUint8Array"
-                | "JSUint8ClampedArray"
-                | "JSInt16Array"
-                | "JSUint16Array"
-                | "JSInt32Array"
-                | "JSUint32Array"
-                | "JSFloat32Array"
-                | "JSFloat64Array"
-                | "JSBigInt64Array"
-                | "JSBigUint64Array"
-        ),
-        _ => false,
+/// Normalized path of the project library `uri` names when imported from
+/// `from`; `None` for SDK, unknown, ambiguous or escaping package URIs.
+pub fn import_path(from: &Path, uri: &str, packages: &[PackageIdentity]) -> Option<PathBuf> {
+    if uri.starts_with("dart:") {
+        return None;
     }
-}
-
-fn is_known_package_member(package: &str, name: &str) -> bool {
-    is_known_package_type(package, name)
-        || matches!(
-            (package, name),
-            (
-                "meta",
-                "visibleForTesting" | "immutable" | "Target" | "TargetKind"
-            ) | (
-                "flutter",
-                "runApp"
-                    | "debugPrint"
-                    | "kDebugMode"
-                    | "kReleaseMode"
-                    | "kProfileMode"
-                    | "kIsWeb"
-                    | "kIsWasm"
-            ) | ("test", "TestOn" | "Timeout" | "Tags" | "OnPlatform")
-        )
-}
-
-fn is_known_package_type(package: &str, name: &str) -> bool {
-    match package {
-        "fixnum" => matches!(name, "Int32" | "Int64"),
-        "flutter" => matches!(
-            name,
-            "Widget"
-                | "StatelessWidget"
-                | "StatefulWidget"
-                | "InheritedWidget"
-                | "ProxyWidget"
-                | "RenderObjectWidget"
-                | "Key"
-                | "BuildContext"
-                | "State"
-                | "TextEditingController"
-                | "ScrollController"
-                | "PageController"
-                | "TabController"
-                | "AnimationController"
-                | "Color"
-                | "Text"
-                | "Container"
-                | "Builder"
-                | "ElevatedButton"
-                | "GestureDetector"
-                | "MaterialApp"
-        ),
-        _ => false,
+    let Some(rest) = uri.strip_prefix("package:") else {
+        let parent = from.parent().unwrap_or_else(|| Path::new(""));
+        return Some(canonical_or_lexical(&parent.join(uri)));
+    };
+    let (package, subpath) = rest.split_once('/')?;
+    let mut matches = packages
+        .iter()
+        .filter(|candidate| candidate.name == package);
+    let matched = matches.next()?;
+    if matches.next().is_some() {
+        return None;
     }
+    let lib_root = canonical_or_lexical(&matched.lib_root);
+    let target = canonical_or_lexical(&lib_root.join(subpath));
+    target.starts_with(&lib_root).then_some(target)
 }
 
-fn is_core_type(name: &str) -> bool {
-    matches!(
-        name,
-        "Object"
-            | "Enum"
-            | "Function"
-            | "Record"
-            | "Type"
-            | "Symbol"
-            | "Null"
-            | "Never"
-            | "bool"
-            | "num"
-            | "int"
-            | "double"
-            | "String"
-            | "Pattern"
-            | "Comparable"
-            | "RegExp"
-            | "Iterable"
-            | "Iterator"
-            | "List"
-            | "Set"
-            | "Map"
-            | "MapEntry"
-            | "Duration"
-            | "DateTime"
-            | "Uri"
-            | "BigInt"
-            | "Stopwatch"
-            | "StackTrace"
-            | "Expando"
-            | "WeakReference"
-            | "Finalizer"
-            | "dynamic"
-    )
+type Allowlist = &'static [(&'static str, &'static [&'static str])];
+
+const SDK_TYPES: Allowlist = &[
+    (
+        "dart:core",
+        &[
+            "Object",
+            "Enum",
+            "Function",
+            "Record",
+            "Type",
+            "Symbol",
+            "Null",
+            "Never",
+            "bool",
+            "num",
+            "int",
+            "double",
+            "String",
+            "Pattern",
+            "Comparable",
+            "RegExp",
+            "Iterable",
+            "Iterator",
+            "List",
+            "Set",
+            "Map",
+            "MapEntry",
+            "Duration",
+            "DateTime",
+            "Uri",
+            "BigInt",
+            "Stopwatch",
+            "StackTrace",
+            "Expando",
+            "WeakReference",
+            "Finalizer",
+            "dynamic",
+        ],
+    ),
+    ("dart:async", &["Future", "FutureOr", "Timer", "Completer"]),
+    ("dart:ui", &["Color"]),
+    (
+        "dart:collection",
+        &[
+            "Queue",
+            "ListQueue",
+            "DoubleLinkedQueue",
+            "HashMap",
+            "HashSet",
+            "LinkedHashMap",
+            "LinkedHashSet",
+            "SplayTreeMap",
+            "SplayTreeSet",
+        ],
+    ),
+    (
+        "dart:js_interop",
+        &[
+            "JSAny",
+            "JSObject",
+            "JSFunction",
+            "JSExportedDartFunction",
+            "JSBoxedDartObject",
+            "JSArray",
+            "JSPromise",
+            "JSNumber",
+            "JSBoolean",
+            "JSString",
+            "JSSymbol",
+            "JSBigInt",
+            "JSArrayBuffer",
+            "JSDataView",
+            "JSTypedArray",
+            "JSInt8Array",
+            "JSUint8Array",
+            "JSUint8ClampedArray",
+            "JSInt16Array",
+            "JSUint16Array",
+            "JSInt32Array",
+            "JSUint32Array",
+            "JSFloat32Array",
+            "JSFloat64Array",
+            "JSBigInt64Array",
+            "JSBigUint64Array",
+        ],
+    ),
+];
+
+const SDK_MEMBERS: Allowlist = &[
+    ("dart:core", &["print", "pragma"]),
+    ("dart:async", &["scheduleMicrotask"]),
+    ("dart:js_interop", &["JS", "staticInterop"]),
+];
+
+const PACKAGE_TYPES: Allowlist = &[
+    ("fixnum", &["Int32", "Int64"]),
+    (
+        "flutter",
+        &[
+            "Widget",
+            "StatelessWidget",
+            "StatefulWidget",
+            "InheritedWidget",
+            "ProxyWidget",
+            "RenderObjectWidget",
+            "Key",
+            "BuildContext",
+            "State",
+            "TextEditingController",
+            "ScrollController",
+            "PageController",
+            "TabController",
+            "AnimationController",
+            "Color",
+            "Text",
+            "Container",
+            "Builder",
+            "ElevatedButton",
+            "GestureDetector",
+            "MaterialApp",
+        ],
+    ),
+];
+
+const PACKAGE_MEMBERS: Allowlist = &[
+    (
+        "meta",
+        &["visibleForTesting", "immutable", "Target", "TargetKind"],
+    ),
+    (
+        "flutter",
+        &[
+            "runApp",
+            "debugPrint",
+            "kDebugMode",
+            "kReleaseMode",
+            "kProfileMode",
+            "kIsWeb",
+            "kIsWasm",
+        ],
+    ),
+    ("test", &["TestOn", "Timeout", "Tags", "OnPlatform"]),
+];
+
+fn allowed(list: Allowlist, library: &str, name: &str) -> Option<(&'static str, &'static str)> {
+    let (library, names) = list.iter().find(|(candidate, _)| *candidate == library)?;
+    let name = names.iter().find(|candidate| **candidate == name)?;
+    Some((library, name))
+}
+
+fn sdk_type(library: &str, name: &str) -> Option<DeclarationIdentity> {
+    allowed(SDK_TYPES, library, name)
+        .map(|(library, name)| DeclarationIdentity::Sdk { library, name })
+}
+
+fn sdk_member(library: &str, name: &str) -> Option<DeclarationIdentity> {
+    allowed(SDK_MEMBERS, library, name)
+        .map(|(library, name)| DeclarationIdentity::Sdk { library, name })
+}
+
+fn package_type(package: &str, name: &str) -> Option<DeclarationIdentity> {
+    allowed(PACKAGE_TYPES, package, name)
+        .map(|(package, name)| DeclarationIdentity::Package { package, name })
+}
+
+fn package_member(package: &str, name: &str) -> Option<DeclarationIdentity> {
+    package_type(package, name).or_else(|| {
+        allowed(PACKAGE_MEMBERS, package, name)
+            .map(|(package, name)| DeclarationIdentity::Package { package, name })
+    })
 }
 
 #[cfg(test)]
@@ -843,47 +860,92 @@ mod tests {
     use super::*;
     use falcon_dart_parser::parse;
 
-    #[test]
-    fn resolves_imports_prefixes_combinators_and_ambiguity() {
-        let inputs = [
-            (
-                PathBuf::from("/project/lib/a.dart"),
-                "class Foo {} typedef Alias = Foo; class Dup {} final value = 0;",
-            ),
-            (PathBuf::from("/project/lib/c.dart"), "class Dup {}"),
-            (
-                PathBuf::from("/project/lib/b.dart"),
-                "import 'a.dart' as p show Foo, Alias; import 'a.dart' show Dup; import 'c.dart' show Dup;",
-            ),
-        ];
+    fn index(inputs: &[(&str, &str)], packages: &[PackageIdentity]) -> IdentityIndex {
         let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
-        assert!(parsed.iter().all(|(_, errors)| errors.is_empty()));
         let sources: Vec<_> = inputs
             .iter()
             .zip(&parsed)
-            .map(|((path, _), (program, _))| IdentitySource {
-                path,
-                program,
-                has_parse_errors: false,
+            .map(|((path, _), (program, errors))| {
+                assert!(errors.is_empty(), "{errors:?}");
+                IdentitySource {
+                    path: Path::new(path),
+                    program,
+                    has_parse_errors: false,
+                }
             })
             .collect();
-        let index = IdentityIndex::from_project_files(&sources, &[]);
-        let file = Path::new("/project/lib/b.dart");
+        IdentityIndex::from_project_files(&sources, packages)
+    }
+
+    fn library(index: &IdentityIndex, file: &str) -> LibraryId {
+        index.library(index.file(Path::new(file)).expect("indexed file"))
+    }
+
+    fn resolve<'n>(
+        index: &IdentityIndex,
+        file: &str,
+        name: impl Into<QualifiedName<'n>>,
+    ) -> NameIdentity {
+        index.resolve(library(index, file), name.into())
+    }
+
+    fn declaration<'n>(
+        index: &IdentityIndex,
+        file: &str,
+        name: impl Into<QualifiedName<'n>>,
+    ) -> Option<DeclarationIdentity> {
+        index.resolve_declaration(library(index, file), name.into())
+    }
+
+    fn package(name: &str, lib_root: &str) -> PackageIdentity {
+        PackageIdentity {
+            name: name.to_string(),
+            lib_root: PathBuf::from(lib_root),
+        }
+    }
+
+    #[test]
+    fn resolves_imports_prefixes_combinators_and_ambiguity() {
+        let index = index(
+            &[
+                (
+                    "/project/lib/a.dart",
+                    "class Foo {} typedef Alias = Foo; class Dup {} final value = 0;",
+                ),
+                ("/project/lib/c.dart", "class Dup {}"),
+                (
+                    "/project/lib/b.dart",
+                    "import 'a.dart' as p show Foo, Alias; import 'a.dart' show Dup; import 'c.dart' show Dup;",
+                ),
+            ],
+            &[],
+        );
+        let file = "/project/lib/b.dart";
 
         assert_eq!(
-            index.resolve(file, &["p".into(), "Foo".into()]),
+            resolve(&index, file, QualifiedName::prefixed("p", "Foo")),
             NameIdentity::Type
         );
         assert_eq!(
-            index.resolve(file, &["p".into(), "Alias".into()]),
+            resolve(&index, file, QualifiedName::prefixed("p", "Alias")),
             NameIdentity::Type
         );
         assert_eq!(
-            index.resolve(file, &["p".into(), "value".into()]),
+            resolve(&index, file, QualifiedName::prefixed("p", "value")),
             NameIdentity::Unknown
         );
-        assert_eq!(index.resolve(file, &["Dup".into()]), NameIdentity::Unknown);
-        assert_eq!(index.resolve(file, &["int".into()]), NameIdentity::Type);
+        assert_eq!(resolve(&index, file, "Dup"), NameIdentity::Unknown);
+        assert_eq!(resolve(&index, file, "int"), NameIdentity::Type);
+    }
+
+    #[test]
+    fn library_lookup_normalizes_path_spellings() {
+        let index = index(&[("/project/lib/a.dart", "class Foo {}")], &[]);
+        assert_eq!(
+            index.file(Path::new("/project/lib/../lib/./a.dart")),
+            index.file(Path::new("/project/lib/a.dart"))
+        );
+        assert!(index.file(Path::new("/project/lib/a.dart")).is_some());
     }
 
     #[test]
@@ -893,369 +955,215 @@ mod tests {
             "import 'dart:core' show int;",
             "import 'dart:core' as core;",
         ] {
-            let path = PathBuf::from("/project/lib/core.dart");
-            let (program, errors) = parse(source);
-            assert!(errors.is_empty(), "{errors:?}");
-            let index = IdentityIndex::from_project_files(
-                &[IdentitySource {
-                    path: &path,
-                    program: &program,
-                    has_parse_errors: false,
-                }],
-                &[],
-            );
+            let file = "/project/lib/core.dart";
+            let index = index(&[(file, source)], &[]);
+            assert_eq!(resolve(&index, file, "Duration"), NameIdentity::Unknown);
+            assert_eq!(declaration(&index, file, "Duration"), None);
             assert_eq!(
-                index.resolve(&path, &["Duration".into()]),
-                NameIdentity::Unknown
+                index.resolve_sdk_member(library(&index, file), "print".into()),
+                None
             );
-            assert_eq!(index.resolve_declaration(&path, &["Duration".into()]), None);
-            assert_eq!(index.resolve_sdk_member(&path, &["print".into()]), None);
             if source.contains("as core") {
-                assert_eq!(
-                    index.resolve(&path, &["core".into(), "Duration".into()]),
-                    NameIdentity::Type
-                );
-                assert!(
-                    index
-                        .resolve_declaration(&path, &["core".into(), "Duration".into()],)
-                        .is_some()
-                );
+                let duration = QualifiedName::prefixed("core", "Duration");
+                assert_eq!(resolve(&index, file, duration), NameIdentity::Type);
+                assert!(declaration(&index, file, duration).is_some());
             } else {
-                assert_eq!(index.resolve(&path, &["int".into()]), NameIdentity::Type);
-                assert!(index.resolve_declaration(&path, &["int".into()]).is_some());
+                assert_eq!(resolve(&index, file, "int"), NameIdentity::Type);
+                assert!(declaration(&index, file, "int").is_some());
             }
         }
     }
 
     #[test]
     fn reexports_preserve_original_declaration_identity() {
-        let inputs = [
-            (
-                PathBuf::from("/project/lib/origin.dart"),
-                "class Box<T> {} const answer = 42;",
-            ),
-            (
-                PathBuf::from("/project/lib/barrel.dart"),
-                "export 'origin.dart';",
-            ),
-            (
-                PathBuf::from("/project/lib/chain.dart"),
-                "export 'barrel.dart';",
-            ),
-            (
-                PathBuf::from("/project/lib/main.dart"),
-                "import 'chain.dart'; Box<int>? value;",
-            ),
-        ];
-        let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
-        let sources: Vec<_> = inputs
-            .iter()
-            .zip(&parsed)
-            .map(|((path, _), (program, errors))| IdentitySource {
-                path,
-                program,
-                has_parse_errors: !errors.is_empty(),
-            })
-            .collect();
-        let index = IdentityIndex::from_project_files(&sources, &[]);
-        let origin =
-            index.resolve_declaration(Path::new("/project/lib/origin.dart"), &["Box".to_string()]);
-        let imported =
-            index.resolve_declaration(Path::new("/project/lib/main.dart"), &["Box".to_string()]);
-        assert_eq!(imported, origin);
-        let origin_value = index.resolve_value_declaration(
-            Path::new("/project/lib/origin.dart"),
-            &["answer".to_string()],
+        let index = index(
+            &[
+                (
+                    "/project/lib/origin.dart",
+                    "class Box<T> {} const answer = 42;",
+                ),
+                ("/project/lib/barrel.dart", "export 'origin.dart';"),
+                ("/project/lib/chain.dart", "export 'barrel.dart';"),
+                (
+                    "/project/lib/main.dart",
+                    "import 'chain.dart'; Box<int>? value;",
+                ),
+            ],
+            &[],
         );
+        let origin = library(&index, "/project/lib/origin.dart");
+        let main = library(&index, "/project/lib/main.dart");
+        assert_eq!(
+            index.resolve_declaration(main, "Box".into()),
+            index.resolve_declaration(origin, "Box".into())
+        );
+        let origin_value = index.resolve_value_declaration(origin, "answer".into());
         assert!(origin_value.is_some());
         assert_eq!(
-            index.resolve_value_declaration(
-                Path::new("/project/lib/main.dart"),
-                &["answer".to_string()],
-            ),
+            index.resolve_value_declaration(main, "answer".into()),
             origin_value
         );
     }
 
     #[test]
     fn duplicate_paths_to_same_declaration_converge() {
-        let inputs = [
-            (PathBuf::from("/project/lib/origin.dart"), "class Box<T> {}"),
-            (
-                PathBuf::from("/project/lib/barrel.dart"),
-                "export 'origin.dart';",
-            ),
-            (
-                PathBuf::from("/project/lib/main.dart"),
-                "import 'origin.dart'; import 'barrel.dart'; Box<int>? value;",
-            ),
-        ];
-        let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
-        assert!(parsed.iter().all(|(_, errors)| errors.is_empty()));
-        let sources: Vec<_> = inputs
-            .iter()
-            .zip(&parsed)
-            .map(|((path, _), (program, _))| IdentitySource {
-                path,
-                program,
-                has_parse_errors: false,
-            })
-            .collect();
-        let index = IdentityIndex::from_project_files(&sources, &[]);
-        let origin =
-            index.resolve_declaration(Path::new("/project/lib/origin.dart"), &["Box".to_string()]);
-        let main = Path::new("/project/lib/main.dart");
-
-        assert_eq!(
-            index.resolve(main, &["Box".to_string()]),
-            NameIdentity::Type
+        let index = index(
+            &[
+                ("/project/lib/origin.dart", "class Box<T> {}"),
+                ("/project/lib/barrel.dart", "export 'origin.dart';"),
+                (
+                    "/project/lib/main.dart",
+                    "import 'origin.dart'; import 'barrel.dart'; Box<int>? value;",
+                ),
+            ],
+            &[],
         );
+        let main = "/project/lib/main.dart";
+        assert_eq!(resolve(&index, main, "Box"), NameIdentity::Type);
         assert_eq!(
-            index.resolve_declaration(main, &["Box".to_string()]),
-            origin
+            declaration(&index, main, "Box"),
+            declaration(&index, "/project/lib/origin.dart", "Box")
         );
     }
 
     #[test]
     fn external_package_import_does_not_bind_project_library() {
-        let inputs = [
-            (PathBuf::from("/workspace/lib/foo.dart"), "class Foo {}"),
-            (
-                PathBuf::from("/workspace/lib/main.dart"),
-                "import 'package:other/foo.dart'; Foo? value;",
-            ),
-        ];
-        let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
-        assert!(parsed.iter().all(|(_, errors)| errors.is_empty()));
-        let sources: Vec<_> = inputs
-            .iter()
-            .zip(&parsed)
-            .map(|((path, _), (program, _))| IdentitySource {
-                path,
-                program,
-                has_parse_errors: false,
-            })
-            .collect();
-        let index = IdentityIndex::from_project_files(&sources, &[]);
-
-        let file = Path::new("/workspace/lib/main.dart");
-        assert_eq!(index.resolve(file, &["Foo".into()]), NameIdentity::Unknown);
-        assert_eq!(index.resolve_declaration(file, &["Foo".into()]), None);
+        let index = index(
+            &[
+                ("/workspace/lib/foo.dart", "class Foo {}"),
+                (
+                    "/workspace/lib/main.dart",
+                    "import 'package:other/foo.dart'; Foo? value;",
+                ),
+            ],
+            &[],
+        );
+        let file = "/workspace/lib/main.dart";
+        assert_eq!(resolve(&index, file, "Foo"), NameIdentity::Unknown);
+        assert_eq!(declaration(&index, file, "Foo"), None);
     }
 
     #[test]
     fn current_package_import_binds_project_library_when_owner_known() {
-        let inputs = [
-            (PathBuf::from("/workspace/lib/foo.dart"), "class Foo {}"),
-            (
-                PathBuf::from("/workspace/lib/main.dart"),
-                "import 'package:workspace/foo.dart'; Foo? value;",
-            ),
-        ];
-        let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
-        assert!(parsed.iter().all(|(_, errors)| errors.is_empty()));
-        let sources: Vec<_> = inputs
-            .iter()
-            .zip(&parsed)
-            .map(|((path, _), (program, _))| IdentitySource {
-                path,
-                program,
-                has_parse_errors: false,
-            })
-            .collect();
-        let package = PackageIdentity {
-            name: "workspace".to_string(),
-            lib_root: PathBuf::from("/workspace/lib"),
-        };
-        let index = IdentityIndex::from_project_files(&sources, &[package]);
-
-        let file = Path::new("/workspace/lib/main.dart");
-        assert_eq!(index.resolve(file, &["Foo".into()]), NameIdentity::Type);
+        let index = index(
+            &[
+                ("/workspace/lib/foo.dart", "class Foo {}"),
+                (
+                    "/workspace/lib/main.dart",
+                    "import 'package:workspace/foo.dart'; Foo? value;",
+                ),
+            ],
+            &[package("workspace", "/workspace/lib")],
+        );
+        let file = "/workspace/lib/main.dart";
+        assert_eq!(resolve(&index, file, "Foo"), NameIdentity::Type);
         assert_eq!(
-            index.resolve_declaration(file, &["Foo".into()]),
-            index.resolve_declaration(Path::new("/workspace/lib/foo.dart"), &["Foo".into()])
+            declaration(&index, file, "Foo"),
+            declaration(&index, "/workspace/lib/foo.dart", "Foo")
         );
     }
 
     #[test]
     fn package_imports_resolve_unique_workspace_packages_across_owners() {
-        let inputs = [
-            (
-                PathBuf::from("/workspace/lib/foo.dart"),
-                "class OuterFoo {}",
-            ),
-            (
-                PathBuf::from("/workspace/lib/main.dart"),
-                "import 'package:outer/foo.dart'; OuterFoo? value;",
-            ),
-            (
-                PathBuf::from("/workspace/tools/inner/lib/foo.dart"),
-                "class InnerFoo {}",
-            ),
-            (
-                PathBuf::from("/workspace/tools/inner/lib/main.dart"),
-                "import 'package:inner/foo.dart'; import 'package:outer/foo.dart'; InnerFoo? own; OuterFoo? dependency;",
-            ),
-        ];
-        let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
-        let sources: Vec<_> = inputs
-            .iter()
-            .zip(&parsed)
-            .map(|((path, _), (program, errors))| IdentitySource {
-                path,
-                program,
-                has_parse_errors: !errors.is_empty(),
-            })
-            .collect();
-        let packages = [
-            PackageIdentity {
-                name: "outer".to_string(),
-                lib_root: PathBuf::from("/workspace/lib"),
-            },
-            PackageIdentity {
-                name: "inner".to_string(),
-                lib_root: PathBuf::from("/workspace/tools/inner/lib"),
-            },
-        ];
-        let index = IdentityIndex::from_project_files(&sources, &packages);
-        let inner = Path::new("/workspace/tools/inner/lib/main.dart");
-
+        let index = index(
+            &[
+                ("/workspace/lib/foo.dart", "class OuterFoo {}"),
+                (
+                    "/workspace/lib/main.dart",
+                    "import 'package:outer/foo.dart'; OuterFoo? value;",
+                ),
+                ("/workspace/tools/inner/lib/foo.dart", "class InnerFoo {}"),
+                (
+                    "/workspace/tools/inner/lib/main.dart",
+                    "import 'package:inner/foo.dart'; import 'package:outer/foo.dart'; InnerFoo? own; OuterFoo? dependency;",
+                ),
+            ],
+            &[
+                package("outer", "/workspace/lib"),
+                package("inner", "/workspace/tools/inner/lib"),
+            ],
+        );
+        let inner = "/workspace/tools/inner/lib/main.dart";
+        assert_eq!(resolve(&index, inner, "InnerFoo"), NameIdentity::Type);
+        assert_eq!(resolve(&index, inner, "OuterFoo"), NameIdentity::Type);
         assert_eq!(
-            index.resolve(inner, &["InnerFoo".into()]),
-            NameIdentity::Type
+            declaration(&index, inner, "OuterFoo"),
+            declaration(&index, "/workspace/lib/foo.dart", "OuterFoo")
         );
         assert_eq!(
-            index.resolve(inner, &["OuterFoo".into()]),
-            NameIdentity::Type
-        );
-        assert_eq!(
-            index.resolve_declaration(inner, &["OuterFoo".into()]),
-            index.resolve_declaration(Path::new("/workspace/lib/foo.dart"), &["OuterFoo".into()])
-        );
-        assert_eq!(
-            index.resolve(Path::new("/workspace/lib/main.dart"), &["OuterFoo".into()]),
+            resolve(&index, "/workspace/lib/main.dart", "OuterFoo"),
             NameIdentity::Type
         );
     }
 
     #[test]
     fn duplicate_workspace_package_names_are_ambiguous() {
-        let inputs = [
-            (
-                PathBuf::from("/workspace/packages/first/lib/api.dart"),
-                "class FirstApi {}",
-            ),
-            (
-                PathBuf::from("/workspace/packages/second/lib/api.dart"),
-                "class SecondApi {}",
-            ),
-            (
-                PathBuf::from("/workspace/packages/consumer/lib/main.dart"),
-                "import 'package:shared/api.dart'; FirstApi? first; SecondApi? second;",
-            ),
-        ];
-        let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
-        assert!(parsed.iter().all(|(_, errors)| errors.is_empty()));
-        let sources: Vec<_> = inputs
-            .iter()
-            .zip(&parsed)
-            .map(|((path, _), (program, _))| IdentitySource {
-                path,
-                program,
-                has_parse_errors: false,
-            })
-            .collect();
-        let packages = [
-            PackageIdentity {
-                name: "shared".to_string(),
-                lib_root: PathBuf::from("/workspace/packages/first/lib"),
-            },
-            PackageIdentity {
-                name: "shared".to_string(),
-                lib_root: PathBuf::from("/workspace/packages/second/lib"),
-            },
-        ];
-        let index = IdentityIndex::from_project_files(&sources, &packages);
-        let importer = Path::new("/workspace/packages/consumer/lib/main.dart");
-
-        assert_eq!(
-            index.resolve(importer, &["FirstApi".into()]),
-            NameIdentity::Unknown
+        let index = index(
+            &[
+                (
+                    "/workspace/packages/first/lib/api.dart",
+                    "class FirstApi {}",
+                ),
+                (
+                    "/workspace/packages/second/lib/api.dart",
+                    "class SecondApi {}",
+                ),
+                (
+                    "/workspace/packages/consumer/lib/main.dart",
+                    "import 'package:shared/api.dart'; FirstApi? first; SecondApi? second;",
+                ),
+            ],
+            &[
+                package("shared", "/workspace/packages/first/lib"),
+                package("shared", "/workspace/packages/second/lib"),
+            ],
         );
+        let importer = "/workspace/packages/consumer/lib/main.dart";
+        assert_eq!(resolve(&index, importer, "FirstApi"), NameIdentity::Unknown);
         assert_eq!(
-            index.resolve(importer, &["SecondApi".into()]),
+            resolve(&index, importer, "SecondApi"),
             NameIdentity::Unknown
         );
     }
 
     #[test]
     fn package_import_target_cannot_escape_exact_lib_root() {
-        let inputs = [
-            (
-                PathBuf::from("/workspace/packages/b/private/api.dart"),
-                "class PrivateApi {}",
-            ),
-            (
-                PathBuf::from("/workspace/packages/a/lib/main.dart"),
-                "import 'package:b/../private/api.dart'; PrivateApi? value;",
-            ),
-        ];
-        let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
-        assert!(parsed.iter().all(|(_, errors)| errors.is_empty()));
-        let sources: Vec<_> = inputs
-            .iter()
-            .zip(&parsed)
-            .map(|((path, _), (program, _))| IdentitySource {
-                path,
-                program,
-                has_parse_errors: false,
-            })
-            .collect();
-        let package = PackageIdentity {
-            name: "b".to_string(),
-            lib_root: PathBuf::from("/workspace/packages/b/lib"),
-        };
-        let index = IdentityIndex::from_project_files(&sources, &[package]);
-
+        let index = index(
+            &[
+                (
+                    "/workspace/packages/b/private/api.dart",
+                    "class PrivateApi {}",
+                ),
+                (
+                    "/workspace/packages/a/lib/main.dart",
+                    "import 'package:b/../private/api.dart'; PrivateApi? value;",
+                ),
+            ],
+            &[package("b", "/workspace/packages/b/lib")],
+        );
         assert_eq!(
-            index.resolve(
-                Path::new("/workspace/packages/a/lib/main.dart"),
-                &["PrivateApi".into()]
-            ),
+            resolve(&index, "/workspace/packages/a/lib/main.dart", "PrivateApi"),
             NameIdentity::Unknown
         );
     }
 
     #[test]
     fn shares_declarations_across_parts() {
-        let inputs = [
-            (
-                PathBuf::from("/project/lib/root.dart"),
-                "library example; part 'part.dart';",
-            ),
-            (
-                PathBuf::from("/project/lib/part.dart"),
-                "part of example; class PartType {}",
-            ),
-        ];
-        let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();
-        assert!(parsed.iter().all(|(_, errors)| errors.is_empty()));
-        let sources: Vec<_> = inputs
-            .iter()
-            .zip(&parsed)
-            .map(|((path, _), (program, _))| IdentitySource {
-                path,
-                program,
-                has_parse_errors: false,
-            })
-            .collect();
-        let index = IdentityIndex::from_project_files(&sources, &[]);
-
+        let index = index(
+            &[
+                (
+                    "/project/lib/root.dart",
+                    "library example; part 'part.dart';",
+                ),
+                (
+                    "/project/lib/part.dart",
+                    "part of example; class PartType {}",
+                ),
+            ],
+            &[],
+        );
         for file in ["/project/lib/root.dart", "/project/lib/part.dart"] {
-            assert_eq!(
-                index.resolve(Path::new(file), &["PartType".into()]),
-                NameIdentity::Type
-            );
+            assert_eq!(resolve(&index, file, "PartType"), NameIdentity::Type);
         }
     }
 }

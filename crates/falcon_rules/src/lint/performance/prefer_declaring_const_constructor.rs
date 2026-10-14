@@ -40,7 +40,7 @@ fn check_class(
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let Some(owner) = model.resolve_name(std::slice::from_ref(&class.name.name)) else {
+    let Some(owner) = model.resolve_name(&class.name.name) else {
         return;
     };
     if !class.with_clause.is_empty() {
@@ -269,9 +269,7 @@ fn constructor_const(
     name: &str,
     signatures: &SignatureIndex,
 ) -> bool {
-    matches!(identity,
-        DeclarationIdentity::Sdk { library, name: declared }
-            if library == "dart:core" && declared == "Object" && name == "new")
+    (*identity == DeclarationIdentity::OBJECT && name == "new")
         || signatures.declaration(identity).is_some_and(|facts| {
             facts
                 .constructors

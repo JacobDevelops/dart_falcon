@@ -1,6 +1,6 @@
 //! Reject collection operations whose argument is proven unrelated to K, V, or E.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, TypeTruth};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -35,7 +35,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn check(&mut self, argument: &Expr, expected: &ResolvedType, state: &SemanticState<'_>) {
         let actual = state.infer(argument);
-        if state.signatures.unrelated(&actual, expected, &state.model) != TypeTruth::Yes {
+        if state.signatures.unrelated(&actual, expected, &state.model) != Truth::Yes {
             return;
         }
         let span = argument.span();

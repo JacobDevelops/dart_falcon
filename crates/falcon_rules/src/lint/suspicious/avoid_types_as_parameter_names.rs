@@ -1,6 +1,6 @@
 //! Flags parameters whose names resolve to existing types.
 
-use falcon_analyze::{AnalyzeContext, NameIdentity, Rule};
+use falcon_analyze::{AnalyzeContext, IdentityIndex, LibraryId, NameIdentity, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_formal_param};
@@ -13,14 +13,17 @@ impl Rule for AvoidTypesAsParameterNames {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(identities) = ctx.identities else {
+        let Some((identities, file)) = ctx
+            .identities
+            .and_then(|identities| Some((identities, identities.file(ctx.file_path)?)))
+        else {
             return Vec::new();
         };
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
             identities,
-            file_path: ctx.file_path,
+            library: identities.library(file),
         };
         collector.visit_program(program);
         collector.diags
@@ -30,13 +33,13 @@ impl Rule for AvoidTypesAsParameterNames {
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    identities: &'a falcon_analyze::IdentityIndex,
-    file_path: &'a std::path::Path,
+    identities: &'a IdentityIndex,
+    library: LibraryId,
 }
 
 impl Collector<'_> {
     fn resolves_to_type(&self, name: &str) -> bool {
-        self.identities.resolve(self.file_path, &[name.to_string()]) == NameIdentity::Type
+        self.identities.resolve(self.library, name.into()) == NameIdentity::Type
     }
 }
 

@@ -5,8 +5,7 @@
 //! alone; spelling, capitalization, and import-prefix shape are not evidence.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
-    TypeTruth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -58,12 +57,12 @@ impl Rule for PreferExtractingCallbacks {
             let TopLevelDecl::Class(class) = declaration else {
                 continue;
             };
-            let Some(identity) = model.resolve_name(std::slice::from_ref(&class.name.name)) else {
+            let Some(identity) = model.resolve_name(&class.name.name) else {
                 continue;
             };
             let class_type = interface(identity);
-            if signatures.is_subtype_of(&class_type, &widget, &model) != TypeTruth::Yes
-                && signatures.is_subtype_of(&class_type, &state, &model) != TypeTruth::Yes
+            if signatures.is_subtype_of(&class_type, &widget, &model) != Truth::Yes
+                && signatures.is_subtype_of(&class_type, &state, &model) != Truth::Yes
             {
                 continue;
             }
@@ -100,7 +99,7 @@ impl Visitor for CallbackCollector<'_, '_> {
             && self
                 .signatures
                 .is_subtype_of(&constructed, self.widget, self.model)
-                == TypeTruth::Yes
+                == Truth::Yes
         {
             for argument in &args.positional {
                 self.check_callback(argument);
@@ -212,7 +211,7 @@ fn expression_is_widget(
     widget: &DeclarationIdentity,
 ) -> bool {
     construction(expression, model)
-        .is_some_and(|(ty, _)| signatures.is_subtype_of(&ty, widget, model) == TypeTruth::Yes)
+        .is_some_and(|(ty, _)| signatures.is_subtype_of(&ty, widget, model) == Truth::Yes)
 }
 
 fn construction<'a>(
@@ -225,11 +224,11 @@ fn construction<'a>(
         } => Some((model.resolve_type(dart_type).with_nullable(false), args)),
         Expr::Call { callee, args, .. } => {
             let mut segments = expression_segments(callee)?;
-            if let Some(identity) = model.resolve_name(&segments) {
+            if let Some(identity) = model.resolve_dotted(&segments) {
                 return Some((interface(identity), args));
             }
             segments.pop()?;
-            let identity = model.resolve_name(&segments)?;
+            let identity = model.resolve_dotted(&segments)?;
             Some((interface(identity), args))
         }
         _ => None,
@@ -264,10 +263,10 @@ fn interface(identity: DeclarationIdentity) -> ResolvedType {
     }
 }
 
-fn flutter_identity(name: &str) -> DeclarationIdentity {
+fn flutter_identity(name: &'static str) -> DeclarationIdentity {
     DeclarationIdentity::Package {
-        package: "flutter".to_string(),
-        name: name.to_string(),
+        package: "flutter",
+        name,
     }
 }
 

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use falcon_syntax::ast::*;
 
 use crate::resolve::expression_segments;
-use crate::{DeclarationIdentity, ResolvedType, SemanticModel, SignatureIndex};
+use crate::{DeclarationIdentity, QualifiedName, ResolvedType, SemanticModel, SignatureIndex};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ConstantValue {
@@ -54,7 +54,7 @@ impl Number {
 /// Evaluates an expression from the owner's declaring library, using `model` when the owner has no project file.
 pub fn evaluate_constant(
     expression: &Expr,
-    owner: &DeclarationIdentity,
+    owner: Option<&DeclarationIdentity>,
     fields: &HashMap<&str, &Expr>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
@@ -74,7 +74,7 @@ enum ConstantState {
 }
 
 struct ConstEvaluator<'a, 'model> {
-    owner: &'a DeclarationIdentity,
+    owner: Option<&'a DeclarationIdentity>,
     fields: &'a HashMap<&'a str, &'a Expr>,
     owner_model: SemanticModel<'model>,
     model: SemanticModel<'model>,
@@ -85,12 +85,14 @@ struct ConstEvaluator<'a, 'model> {
 
 impl<'a, 'model> ConstEvaluator<'a, 'model> {
     fn new(
-        owner: &'a DeclarationIdentity,
+        owner: Option<&'a DeclarationIdentity>,
         fields: &'a HashMap<&'a str, &'a Expr>,
         model: &SemanticModel<'model>,
         signatures: &'a SignatureIndex,
     ) -> Self {
-        let model = model.for_declaration(owner).unwrap_or(*model);
+        let model = owner
+            .and_then(|owner| model.for_declaration(owner))
+            .unwrap_or(*model);
         Self {
             owner,
             fields,
@@ -116,7 +118,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             Expr::BoolLit { value, .. } => Some(ConstantValue::Bool(*value)),
             Expr::NullLit { .. } => Some(ConstantValue::Null),
             Expr::StringLit(value) => decode_string(value).map(ConstantValue::String),
-            Expr::Ident(identifier) => self.resolve_name(std::slice::from_ref(&identifier.name)),
+            Expr::Ident(identifier) => self.resolve_name(&[&identifier.name]),
             Expr::Field { .. } => self.resolve_name(&expression_segments(expression, true)?),
             Expr::Unary { op, operand, .. } => {
                 let value = self.evaluate(operand)?;
@@ -232,19 +234,24 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         }
     }
 
-    fn resolve_name(&mut self, names: &[String]) -> Option<ConstantValue> {
+    fn resolve_name(&mut self, names: &[&str]) -> Option<ConstantValue> {
         let local_name = names.last()?;
         let local_owner = if names.len() == 1 {
             self.unqualified_fields
         } else {
-            self.model.resolve_name(&names[..names.len() - 1]).as_ref() == Some(self.owner)
+            self.owner.is_some_and(|owner| {
+                self.model
+                    .resolve_dotted(&names[..names.len() - 1])
+                    .as_ref()
+                    == Some(owner)
+            })
         };
-        if local_owner
-            && let Some((&name, &expression)) = self.fields.get_key_value(local_name.as_str())
-        {
+        if local_owner && let Some((&name, &expression)) = self.fields.get_key_value(*local_name) {
             return self.initializer(ConstantKey::Field(name), expression, Some(self.owner_model));
         }
-        let identity = self.model.resolve_value(names)?;
+        let identity = self
+            .model
+            .resolve_value(QualifiedName::from_segments(names)?)?;
         let expression = self.signatures.constant_initializer(&identity)?;
         let model = self.model.for_declaration(&identity)?;
         self.initializer(ConstantKey::TopLevel(identity), expression, Some(model))
@@ -370,13 +377,13 @@ fn resolve_call_constructor(
     model: &SemanticModel<'_>,
 ) -> Option<(DeclarationIdentity, String)> {
     let mut segments = expression_segments(callee, true)?;
-    if let Some(identity) = model.resolve_name(&segments) {
+    if let Some(identity) = model.resolve_dotted(&segments) {
         return Some((identity, "new".to_string()));
     }
     let constructor = segments.pop()?;
     model
-        .resolve_name(&segments)
-        .map(|identity| (identity, constructor))
+        .resolve_name(QualifiedName::from_segments(&segments)?)
+        .map(|identity| (identity, constructor.to_string()))
 }
 
 fn const_constructor_identity(
@@ -592,8 +599,14 @@ const qualifiedOwner = Foo.a;
                 .find(|declarator| declarator.name.name == name)
                 .and_then(|declarator| declarator.initializer.as_ref())
         })?;
-        let owner = model.resolve_value(&[name.to_string()])?;
-        evaluate_constant(initializer, &owner, &HashMap::new(), model, signatures)
+        let owner = model.resolve_value(name)?;
+        evaluate_constant(
+            initializer,
+            Some(&owner),
+            &HashMap::new(),
+            model,
+            signatures,
+        )
     }
 
     #[test]
@@ -661,19 +674,19 @@ const qualifiedOwner = Foo.a;
                     })
                 })
                 .unwrap();
-            let owner = model.resolve_name(&["Foo".into()]).unwrap();
+            let owner = model.resolve_name("Foo").unwrap();
             let fields = HashMap::from([("a", field)]);
-            let mut evaluator = ConstEvaluator::new(&owner, &fields, model, signatures);
+            let mut evaluator = ConstEvaluator::new(Some(&owner), &fields, model, signatures);
             assert_eq!(
-                evaluator.resolve_name(&["b".into()]),
+                evaluator.resolve_name(&["b"]),
                 Some(ConstantValue::Number(Number::Int(2)))
             );
             assert_eq!(
-                evaluator.resolve_name(&["qualifiedOwner".into()]),
+                evaluator.resolve_name(&["qualifiedOwner"]),
                 Some(ConstantValue::Number(Number::Int(1)))
             );
             assert_eq!(
-                evaluator.resolve_name(&["a".into()]),
+                evaluator.resolve_name(&["a"]),
                 Some(ConstantValue::Number(Number::Int(1)))
             );
         });
@@ -682,10 +695,10 @@ const qualifiedOwner = Foo.a;
     #[test]
     fn completed_constants_are_reused() {
         with_constants(|_, model, signatures| {
-            let owner = model.resolve_value(&["repeated".into()]).unwrap();
+            let owner = model.resolve_value("repeated").unwrap();
             let fields = HashMap::new();
             let expression = signatures.constant_initializer(&owner).unwrap();
-            let mut evaluator = ConstEvaluator::new(&owner, &fields, model, signatures);
+            let mut evaluator = ConstEvaluator::new(Some(&owner), &fields, model, signatures);
             let expected = Some(ConstantValue::Number(Number::Int(4)));
             assert_eq!(evaluator.evaluate(expression), expected);
             assert_eq!(evaluator.constants.len(), 1);
@@ -747,7 +760,7 @@ const qualifiedOwner = Foo.a;
             Some(ConstantValue::Number(Number::Int(2)))
         );
         let owner = model
-            .resolve_name(&["origin".into(), "Foo".into()])
+            .resolve_name(QualifiedName::prefixed("origin", "Foo"))
             .unwrap();
         let class = programs[0]
             .declarations
@@ -777,12 +790,12 @@ const qualifiedOwner = Foo.a;
             .collect();
         for name in ["a", "c"] {
             assert_eq!(
-                evaluate_constant(fields[name], &owner, &fields, &model, &signatures),
+                evaluate_constant(fields[name], Some(&owner), &fields, &model, &signatures),
                 Some(ConstantValue::Number(Number::Int(2)))
             );
         }
         assert!(matches!(
-            evaluate_constant(fields["boxed"], &owner, &fields, &model, &signatures),
+            evaluate_constant(fields["boxed"], Some(&owner), &fields, &model, &signatures),
             Some(ConstantValue::Instance(..))
         ));
     }

@@ -25,10 +25,7 @@ impl Rule for NoDuplicateCaseValues {
         let mut collector = Collector {
             model: &model,
             signatures,
-            owner: DeclarationIdentity::Project {
-                library: usize::MAX,
-                name: "<file>".to_string(),
-            },
+            owner: None,
             fields: HashMap::new(),
             ctx,
             diags: Vec::new(),
@@ -41,7 +38,7 @@ impl Rule for NoDuplicateCaseValues {
 struct Collector<'a> {
     model: &'a SemanticModel<'a>,
     signatures: &'a SignatureIndex,
-    owner: DeclarationIdentity,
+    owner: Option<DeclarationIdentity>,
     fields: HashMap<String, Expr>,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
@@ -51,15 +48,12 @@ impl Visitor for Collector<'_> {
     fn visit_class_decl(&mut self, node: &ClassDecl) {
         let saved_owner = self.owner.clone();
         let saved_fields = std::mem::take(&mut self.fields);
-        let Some(owner) = self
-            .model
-            .resolve_name(std::slice::from_ref(&node.name.name))
-        else {
+        let Some(owner) = self.model.resolve_name(&node.name.name) else {
             walk_class_decl(self, node);
             self.fields = saved_fields;
             return;
         };
-        self.owner = owner;
+        self.owner = Some(owner);
         self.fields = node
             .members
             .iter()
@@ -87,11 +81,8 @@ impl Visitor for Collector<'_> {
 
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         let saved = self.owner.clone();
-        if let Some(owner) = self
-            .model
-            .resolve_value(std::slice::from_ref(&node.name.name))
-        {
-            self.owner = owner;
+        if let Some(owner) = self.model.resolve_value(&node.name.name) {
+            self.owner = Some(owner);
         }
         walk_function_decl(self, node);
         self.owner = saved;
@@ -131,7 +122,7 @@ impl Collector<'_> {
         for pattern in patterns {
             for (value, span) in pattern_constants(
                 pattern,
-                &self.owner,
+                self.owner.as_ref(),
                 &field_refs,
                 self.model,
                 self.signatures,
@@ -150,7 +141,7 @@ impl Collector<'_> {
 
 fn pattern_constants(
     pattern: &Pattern,
-    owner: &DeclarationIdentity,
+    owner: Option<&DeclarationIdentity>,
     fields: &HashMap<&str, &Expr>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,

@@ -1,6 +1,6 @@
 //! Flags an `is` check proven impossible by canonical resolved types.
 
-use falcon_analyze::{AnalyzeContext, Rule, TypeTruth};
+use falcon_analyze::{AnalyzeContext, Rule, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::Program;
 
@@ -26,7 +26,7 @@ impl Rule for AvoidUnrelatedTypeAssertions {
                         &operation.operand,
                         &operation.target,
                         &analysis.model,
-                    ) != TypeTruth::Yes
+                    ) != Truth::Yes
                 {
                     return None;
                 }

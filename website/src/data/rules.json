@@ -508,12 +508,24 @@
         "file": null,
         "line": 76,
         "message": "Unnecessary type assertion — variable is already known to be this type"
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 82,
+        "message": "Unnecessary type assertion — variable is already known to be this type"
+      },
+      {
+        "column": 36,
+        "file": null,
+        "line": 85,
+        "message": "Unnecessary type assertion — variable is already known to be this type"
       }
     ],
     "docs": "Flags an `is` check whose result is already guaranteed by the resolved static type.",
     "domains": [],
     "examples": {
-      "bad": "// Test cases for avoid-unnecessary-type-assertions rule\n// Flags 'is T' checks where the variable is already known to be T\n\nvoid testExplicitIntType() {\n  final int x = 5;\n  if (x is int) {\n    print(\"x is int\");\n  }\n}\n\nvoid testExplicitStringType() {\n  final String name = \"hello\";\n  if (name is String) {\n    print(\"name is string\");\n  }\n}\n\nvoid testExplicitListType() {\n  final List<String> items = [];\n  if (items is List) {\n    print(\"items is list\");\n  }\n}\n\nvoid testMultipleUnnecessaryAssertions() {\n  final bool active = true;\n  final double value = 3.14;\n\n  if (active is bool) {\n    print(\"active is bool\");\n  }\n\n  if (value is double) {\n    print(\"value is double\");\n  }\n}\n\nclass MyClass {\n  final int id = 42;\n\n  void checkId() {\n    if (id is int) {\n      print(\"id is int\");\n    }\n  }\n}\n\nvoid testInlineAssertion() {\n  final String message = \"test\";\n  final result = message is String ? \"yes\" : \"no\";\n}\n\n// Regression: a nested block inherits the enclosing declarations, so a\n// redundant assertion inside one is still recognised.\nvoid nestedScopeRegression() {\n  final int known = 1;\n  {\n    final inBlock = known is int;\n    print(inBlock);\n  }\n  lbl: {\n    final inLabeled = known is int;\n    print(inLabeled);\n  }\n}\n\n// Regression: try/catch/finally bodies also inherit the enclosing\n// declarations, the same way a plain nested block does.\nvoid tryScopeRegression() {\n  final int known = 1;\n  try {\n    print(known is int);\n  } catch (e) {\n    print(known is int);\n  } finally {\n    print(known is int);\n  }\n}",
+      "bad": "// Test cases for avoid-unnecessary-type-assertions rule\n// Flags 'is T' checks where the variable is already known to be T\n\nvoid testExplicitIntType() {\n  final int x = 5;\n  if (x is int) {\n    print(\"x is int\");\n  }\n}\n\nvoid testExplicitStringType() {\n  final String name = \"hello\";\n  if (name is String) {\n    print(\"name is string\");\n  }\n}\n\nvoid testExplicitListType() {\n  final List<String> items = [];\n  if (items is List) {\n    print(\"items is list\");\n  }\n}\n\nvoid testMultipleUnnecessaryAssertions() {\n  final bool active = true;\n  final double value = 3.14;\n\n  if (active is bool) {\n    print(\"active is bool\");\n  }\n\n  if (value is double) {\n    print(\"value is double\");\n  }\n}\n\nclass MyClass {\n  final int id = 42;\n\n  void checkId() {\n    if (id is int) {\n      print(\"id is int\");\n    }\n  }\n}\n\nvoid testInlineAssertion() {\n  final String message = \"test\";\n  final result = message is String ? \"yes\" : \"no\";\n}\n\n// Regression: a nested block inherits the enclosing declarations, so a\n// redundant assertion inside one is still recognised.\nvoid nestedScopeRegression() {\n  final int known = 1;\n  {\n    final inBlock = known is int;\n    print(inBlock);\n  }\n  lbl: {\n    final inLabeled = known is int;\n    print(inLabeled);\n  }\n}\n\n// Regression: try/catch/finally bodies also inherit the enclosing\n// declarations, the same way a plain nested block does.\nvoid tryScopeRegression() {\n  final int known = 1;\n  try {\n    print(known is int);\n  } catch (e) {\n    print(known is int);\n  } finally {\n    print(known is int);\n  }\n}\n\nvoid typedCollectionForAssertionRegression() {\n  final list = [\n    for (int i = 0; i < 2; i++) i is int,\n  ];\n  final map = {\n    for (int j = 0; j < 2; j++) j: j is int,\n  };\n  print([list, map]);\n}",
       "crossFile": null,
       "good": "// Good examples for avoid-unnecessary-type-assertions rule\n// Type checks where the type is not already known\n\nvoid testDynamicTypeCheck() {\n  dynamic value = 42;\n  if (value is int) {\n    print(\"value is int\");\n  }\n}\n\nvoid testObjectTypeCheck() {\n  Object obj = \"hello\";\n  if (obj is String) {\n    print(\"obj is string\");\n  }\n}\n\nvoid testParameterTypeCheck() {\n  void checkType(dynamic param) {\n    if (param is bool) {\n      print(\"param is bool\");\n    }\n  }\n}\n\nvoid testNullableTypeCheck() {\n  int? maybeInt = 5;\n  if (maybeInt is int) {\n    print(\"maybeInt is int\");\n  }\n}\n\nvoid testBroadTypeCheck() {\n  List<dynamic> items = [];\n  if (items is List<String>) {\n    print(\"items is List<String>\");\n  }\n}\n\nvoid testInheritanceTypeCheck() {\n  Object shape = Circle();\n  if (shape is Circle) {\n    print(\"shape is Circle\");\n  }\n}\n\nclass Circle {}"
     },
@@ -632,12 +644,24 @@
         "file": null,
         "line": 76,
         "message": "Unnecessary type cast — variable is already known to be this type"
+      },
+      {
+        "column": 33,
+        "file": null,
+        "line": 84,
+        "message": "Unnecessary type cast — variable is already known to be this type"
+      },
+      {
+        "column": 36,
+        "file": null,
+        "line": 87,
+        "message": "Unnecessary type cast — variable is already known to be this type"
       }
     ],
     "docs": "Flags an `as` cast to the operand's resolved static type.",
     "domains": [],
     "examples": {
-      "bad": "// Test cases for avoid-unnecessary-type-casts rule\n// Flags 'as T' casts where the variable is already T\n\nvoid testCastExplicitIntType() {\n  final int x = 5;\n  final y = x as int;\n}\n\nvoid testCastExplicitStringType() {\n  final String name = \"hello\";\n  final result = name as String;\n}\n\nvoid testCastExplicitListType() {\n  final List<String> items = [];\n  final casted = items as List<String>;\n}\n\nvoid testMultipleUnnecessaryCasts() {\n  final bool active = true;\n  final double value = 3.14;\n\n  final a = active as bool;\n  final b = value as double;\n}\n\nclass MyClass {\n  final int id = 42;\n\n  void castId() {\n    final casted = id as int;\n    print(casted);\n  }\n}\n\nvoid testInlineUnnecessaryCast() {\n  final String message = \"test\";\n  final length = (message as String).length;\n}\n\nvoid testChainedUnnecessaryCast() {\n  final Map<String, int> data = {};\n  final result = data as Map<String, int>;\n}\n\n// Regression: the cast must still be found inside Dart 3 containers.\nvoid testCastsInContainers() {\n  final int n = 5;\n  final (a, _) = (n as int, 0);\n  lbl: {\n    final b = n as int;\n    print(b);\n  }\n  final c = switch (n) {\n    0 => n as int,\n    _ => 0,\n  };\n  final d = switch (n as int) {\n    _ => 0,\n  };\n  final e = [if (n > 0) n as int];\n  final f = [...[n as int]];\n  final g = (p: n as int, q: 0);\n  print([a, c, d, e, f, g]);\n}\n\n// Regression: locals declared inside a loop or a try body are tracked, so a\n// redundant cast there is still reported.\nvoid loopScopeRegression(List<int> xs) {\n  for (final _ in xs) {\n    final int inLoop = 1;\n    print(inLoop as int);\n  }\n  try {\n    final int inTry = 2;\n    print(inTry as int);\n  } catch (e) {\n    print(e);\n  }\n}",
+      "bad": "// Test cases for avoid-unnecessary-type-casts rule\n// Flags 'as T' casts where the variable is already T\n\nvoid testCastExplicitIntType() {\n  final int x = 5;\n  final y = x as int;\n}\n\nvoid testCastExplicitStringType() {\n  final String name = \"hello\";\n  final result = name as String;\n}\n\nvoid testCastExplicitListType() {\n  final List<String> items = [];\n  final casted = items as List<String>;\n}\n\nvoid testMultipleUnnecessaryCasts() {\n  final bool active = true;\n  final double value = 3.14;\n\n  final a = active as bool;\n  final b = value as double;\n}\n\nclass MyClass {\n  final int id = 42;\n\n  void castId() {\n    final casted = id as int;\n    print(casted);\n  }\n}\n\nvoid testInlineUnnecessaryCast() {\n  final String message = \"test\";\n  final length = (message as String).length;\n}\n\nvoid testChainedUnnecessaryCast() {\n  final Map<String, int> data = {};\n  final result = data as Map<String, int>;\n}\n\n// Regression: the cast must still be found inside Dart 3 containers.\nvoid testCastsInContainers() {\n  final int n = 5;\n  final (a, _) = (n as int, 0);\n  lbl: {\n    final b = n as int;\n    print(b);\n  }\n  final c = switch (n) {\n    0 => n as int,\n    _ => 0,\n  };\n  final d = switch (n as int) {\n    _ => 0,\n  };\n  final e = [if (n > 0) n as int];\n  final f = [...[n as int]];\n  final g = (p: n as int, q: 0);\n  print([a, c, d, e, f, g]);\n}\n\n// Regression: locals declared inside a loop or a try body are tracked, so a\n// redundant cast there is still reported.\nvoid loopScopeRegression(List<int> xs) {\n  for (final _ in xs) {\n    final int inLoop = 1;\n    print(inLoop as int);\n  }\n  try {\n    final int inTry = 2;\n    print(inTry as int);\n  } catch (e) {\n    print(e);\n  }\n}\n\nvoid typedCollectionForCastRegression() {\n  final list = [\n    for (int i = 0; i < 2; i++) i as int,\n  ];\n  final map = {\n    for (int j = 0; j < 2; j++) j: j as int,\n  };\n  print([list, map]);\n}",
       "crossFile": null,
       "good": "// Good examples for avoid-unnecessary-type-casts rule\n// Type casts where the variable is not already known to be T\n\nvoid testCastDynamicToInt() {\n  dynamic value = 42;\n  final int x = value as int;\n}\n\nvoid testCastObjectToString() {\n  Object obj = \"hello\";\n  final String name = obj as String;\n}\n\nvoid testCastFromParameter() {\n  void process(dynamic param) {\n    final int x = param as int;\n    print(x);\n  }\n}\n\nvoid testCastNullableToNonNullable() {\n  int? maybeInt = 5;\n  final int nonNull = maybeInt as int;\n}\n\nvoid testCastBroadToNarrow() {\n  List<dynamic> items = [1, 2, 3];\n  final List<int> ints = items as List<int>;\n}\n\nvoid testCastBetweenUnrelatedTypes() {\n  Object shape = Circle();\n  final Circle c = shape as Circle;\n}\n\nvoid testCastFromJsonDecode() {\n  dynamic json = {\"id\": 42};\n  final Map<String, dynamic> data = json as Map<String, dynamic>;\n}\n\nclass Circle {}"
     },
@@ -965,7 +989,7 @@
   },
   {
     "crossFile": false,
-    "description": "Flags a comparison between a boolean value and a boolean literal, e.g.",
+    "description": "Don't compare boolean values to boolean literals.",
     "diagnostics": [
       {
         "column": 7,
@@ -1020,14 +1044,26 @@
         "file": null,
         "line": 20,
         "message": "Avoid comparing boolean values to boolean literals"
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 30,
+        "message": "Avoid comparing boolean values to boolean literals"
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 31,
+        "message": "Avoid comparing boolean values to boolean literals"
       }
     ],
-    "docs": "Flags a comparison between a boolean value and a boolean literal, e.g. `x == true`.\n\nComparing a known boolean to `true`/`false` is redundant: `x == true` is\njust `x`, and `x == false` is `!x`. The rule flags an `==`/`!=` where one\nside is a boolean literal and the other is provably a non-nullable boolean —\neither syntactically (a literal, `!`, an `is` check, or a comparison/logical\noperator) or a local or parameter whose inferred static type is a\nnon-nullable `bool`. A `bool?` operand is deliberately left alone, because\n`x == true` is the correct null-safe way to test a nullable boolean.",
+    "docs": "Don't compare boolean values to boolean literals.",
     "domains": [],
     "examples": {
-      "bad": "// Test cases for no-boolean-literal-compare.\n// Only comparisons whose non-literal operand is PROVABLY boolean are flagged.\n\nvoid knownBooleanComparisons(bool a, bool b, Object o) {\n  if (true == false) {}\n  if (!a == true) {}\n  if ((a && b) == true) {}\n  if ((a || b) != false) {}\n  if ((a == b) == true) {}\n  if ((o is String) == true) {}\n}\n\n// The type-resolution layer widens the check to locals/params whose inferred\n// static type is a non-nullable `bool`, not just syntactically-boolean operands.\nvoid resolvedNonNullableBooleans(bool flag) {\n  if (flag == true) {}\n  bool ready = flag;\n  if (ready != false) {}\n  final bool done = flag && ready;\n  if (done == false) {}\n}",
+      "bad": "// Test cases for no-boolean-literal-compare.\n// Only comparisons whose non-literal operand is PROVABLY boolean are flagged.\n\nvoid knownBooleanComparisons(bool a, bool b, Object o) {\n  if (true == false) {}\n  if (!a == true) {}\n  if ((a && b) == true) {}\n  if ((a || b) != false) {}\n  if ((a == b) == true) {}\n  if ((o is String) == true) {}\n}\n\n// The type-resolution layer widens the check to locals/params whose inferred\n// static type is a non-nullable `bool`, not just syntactically-boolean operands.\nvoid resolvedNonNullableBooleans(bool flag) {\n  if (flag == true) {}\n  bool ready = flag;\n  if (ready != false) {}\n  final bool done = flag && ready;\n  if (done == false) {}\n}\n\nclass Widget {\n  bool isEnabled = true;\n}\n\nbool checkStatus() => true;\n\nvoid resolvedMembersAndReturns(Widget foo) {\n  if (foo.isEnabled == true) {}\n  if (checkStatus() == false) {}\n}",
       "crossFile": null,
-      "good": "// Good cases for no-boolean-literal-compare rule\n// No violations expected\n\nvoid testBooleanDirect() {\n  if (isValid) {}\n  if (!isActive) {}\n  if (hasError) {}\n  if (!isEmpty) {}\n}\n\nvoid testBooleanNegation() {\n  if (!isReady) {}\n  if (!isDone) {}\n}\n\nvoid testInWhile() {\n  while (isRunning) {}\n  while (!shouldContinue) {}\n}\n\nbool checkStatus() {\n  return isInitialized;\n}\n\nvoid assertConditions() {\n  assert(isValid);\n  assert(!isDisabled);\n}\n\nclass Widget {\n  bool isEnabled = true;\n\n  void setState() {\n    if (isEnabled) {\n      activate();\n    }\n  }\n\n  bool canRender() => isEnabled;\n}\n\nvoid ternaryWithBoolean() {\n  final status = isActive ? \"on\" : \"off\";\n  final result = !isValid ? \"error\" : \"ok\";\n}\n\nvoid multipleComparisons() {\n  if (flag1 && !flag2) {}\n}\n\nvoid methodCall(bool condition) {\n  process(condition);\n}\n\nvoid complexLogic(bool a, bool b, bool c) {\n  if (a && (b || !c)) {\n    print('condition met');\n  }\n}\n\nbool canAccess(bool isAuthenticated, bool isAuthorized) {\n  return isAuthenticated && isAuthorized;\n}\n\nvoid toggleState(bool current) {\n  final newState = !current;\n  update(newState);\n}\n\nclass FeatureFlag {\n  bool isEnabled = false;\n\n  void check() {\n    if (!isEnabled) {\n      enable();\n    }\n  }\n}\n\n// `x == true` / `x != false` on an identifier, member access or call is exempt:\n// nullability is unknowable without type resolution, and this is the correct\n// null-safe idiom for a `bool?`.\nvoid nullableIdiom(bool? maybe, Widget foo) {\n  if (maybe == true) {}\n  if (maybe != false) {}\n  if (foo.isEnabled == true) {}\n  if (checkStatus() == false) {}\n}\n\n// A `bool?` local/param resolves to a *nullable* bool, so the resolver leaves\n// `== true` alone — it is the idiomatic null-safe form, not a redundant compare.\nvoid resolvedNullableBoolean(bool? maybe) {\n  bool? nb = maybe;\n  if (nb == true) {}\n  if (maybe != false) {}\n}"
+      "good": "// Good cases for no-boolean-literal-compare rule\n// No violations expected\n\nvoid testBooleanDirect() {\n  if (isValid) {}\n  if (!isActive) {}\n  if (hasError) {}\n  if (!isEmpty) {}\n}\n\nvoid testBooleanNegation() {\n  if (!isReady) {}\n  if (!isDone) {}\n}\n\nvoid testInWhile() {\n  while (isRunning) {}\n  while (!shouldContinue) {}\n}\n\nbool checkStatus() {\n  return isInitialized;\n}\n\nvoid assertConditions() {\n  assert(isValid);\n  assert(!isDisabled);\n}\n\nclass Widget {\n  bool isEnabled = true;\n\n  void setState() {\n    if (isEnabled) {\n      activate();\n    }\n  }\n\n  bool canRender() => isEnabled;\n}\n\nvoid ternaryWithBoolean() {\n  final status = isActive ? \"on\" : \"off\";\n  final result = !isValid ? \"error\" : \"ok\";\n}\n\nvoid multipleComparisons() {\n  if (flag1 && !flag2) {}\n}\n\nvoid methodCall(bool condition) {\n  process(condition);\n}\n\nvoid complexLogic(bool a, bool b, bool c) {\n  if (a && (b || !c)) {\n    print('condition met');\n  }\n}\n\nbool canAccess(bool isAuthenticated, bool isAuthorized) {\n  return isAuthenticated && isAuthorized;\n}\n\nvoid toggleState(bool current) {\n  final newState = !current;\n  update(newState);\n}\n\nclass FeatureFlag {\n  bool isEnabled = false;\n\n  void check() {\n    if (!isEnabled) {\n      enable();\n    }\n  }\n}\n\n// Resolved non-nullable members and returns can be compared directly.\nvoid nullableIdiom(bool? maybe, Widget foo) {\n  if (maybe == true) {}\n  if (maybe != false) {}\n}\n\n// A `bool?` local/param resolves to a *nullable* bool, so the resolver leaves\n// `== true` alone — it is the idiomatic null-safe form, not a redundant compare.\nvoid resolvedNullableBoolean(bool? maybe) {\n  bool? nb = maybe;\n  if (nb == true) {}\n  if (maybe != false) {}\n}"
     },
     "group": "complexity",
     "name": "no-boolean-literal-compare",
@@ -5185,25 +5221,25 @@
     "description": "Flags explicit `= null` initializers on declarations that already default to null.",
     "diagnostics": [
       {
-        "column": 1,
+        "column": 6,
         "file": null,
         "line": 1,
         "message": "Don't explicitly initialize variables to null."
       },
       {
-        "column": 1,
+        "column": 5,
         "file": null,
         "line": 2,
         "message": "Don't explicitly initialize variables to null."
       },
       {
-        "column": 3,
+        "column": 11,
         "file": null,
         "line": 5,
         "message": "Don't explicitly initialize variables to null."
       },
       {
-        "column": 3,
+        "column": 11,
         "file": null,
         "line": 6,
         "message": "Don't explicitly initialize variables to null."
@@ -6843,7 +6879,7 @@
   },
   {
     "crossFile": false,
-    "description": "Requires an explicit `.call` tear-off when a callable object is used as a function.",
+    "description": "Explicitly tear off callable objects' call methods.",
     "diagnostics": [
       {
         "column": 28,
@@ -7104,7 +7140,7 @@
         "message": "Explicitly tear off the 'call' method."
       }
     ],
-    "docs": "Requires an explicit `.call` tear-off when a callable object is used as a function.",
+    "docs": "Explicitly tear off callable objects' call methods.",
     "domains": [],
     "examples": {
       "bad": "class Callable {\n  const Callable();\n  void call() {}\n}\n\nclass ConstructorExpectedTypes {\n  final Function callback;\n  final Function defaultCallback;\n\n  const ConstructorExpectedTypes(\n    Callable callback, {\n    this.defaultCallback = const Callable(),\n  }) : callback = callback;\n}\n\nvoid accept(Function callback) {}\nvoid acceptNamed({required Function callback}) {}\nFunction returnTopLevel() => const Callable();\nFunction topLevelCallback = const Callable();\nset topLevelSetter(Function value) {}\n\nclass Receiver {\n  Receiver(Function callback, {required Function named});\n  Receiver.named({required Function callback});\n\n  Function fieldCallback = const Callable();\n  static Function staticCallback = const Callable();\n  set callbackSetter(Function value) {}\n  static set staticSetter(Function value) {}\n\n  void instance(Function callback, {required Function named}) {}\n  static void staticMethod(Function callback, {required Function named}) {}\n\n  Function returnMethod() => const Callable();\n\n  void assignments(Callable callback) {\n    Function localCallback = callback;\n    localCallback = callback;\n    fieldCallback = callback;\n    this.fieldCallback = callback;\n    Receiver.staticCallback = callback;\n    topLevelCallback = callback;\n    callbackSetter = callback;\n    this.callbackSetter = callback;\n    Receiver.staticSetter = callback;\n    topLevelSetter = callback;\n  }\n\n  void methodCalls(Callable callback, Receiver receiver) {\n    accept(callback);\n    acceptNamed(callback: callback);\n    instance(callback, named: callback.call);\n    instance(callback.call, named: callback);\n    this.instance(callback, named: callback.call);\n    receiver.instance(callback.call, named: callback);\n    Receiver.staticMethod(callback, named: callback.call);\n    Receiver.staticMethod(callback.call, named: callback);\n  }\n\n  void constructorCalls(Callable callback) {\n    Receiver(callback, named: callback.call);\n    Receiver(callback.call, named: callback);\n    new Receiver(callback, named: callback.call);\n    Receiver.named(callback: callback);\n  }\n\n  void localCalls(Callable callback) {\n    void localFunction(Function value, {required Function named}) {}\n    localFunction(callback, named: callback.call);\n    localFunction(callback.call, named: callback);\n\n    void Function(Function, {required Function named}) functionValue = localFunction;\n    functionValue(callback, named: callback.call);\n\n    final inferredFunctionValue = localFunction;\n    inferredFunctionValue(callback, named: callback.call);\n  }\n\n  void scoped(List<Callable> callbacks) {\n    Function localReturn() => const Callable();\n    localReturn();\n    for (Callable callback in callbacks) {\n      accept(callback);\n    }\n    try {\n      throw const Callable();\n    } on Callable catch (callback) {\n      accept(callback);\n    }\n    final (Callable callback,) = (const Callable(),);\n    accept(callback);\n  }\n}\n\nclass BaseReceiver {\n  void inherited(Function callback) {}\n  set inheritedSetter(Function callback) {}\n}\n\nclass ChildReceiver extends BaseReceiver {\n  void inheritedCalls(Callable callback) {\n    inherited(callback);\n    this.inherited(callback);\n    inheritedSetter = callback;\n    this.inheritedSetter = callback;\n  }\n}\n\nvoid topLevelCalls(Callable callback, Receiver receiver) {\n  Receiver(callback, named: callback.call);\n  receiver.instance(callback, named: callback.call);\n}",
@@ -8861,7 +8897,7 @@
         "message": "Use 'isEmpty' instead of comparing 'length' to 0."
       }
     ],
-    "docs": "Flags `.length` comparisons equivalent to a `.isEmpty` check.\n\nCollections and strings expose an `isEmpty` getter that states intent\ndirectly and, for lazy iterables, can be cheaper than computing the full\n`length`. Comparing `length` against a constant forces the reader to decode\nthe boundary, so `list.isEmpty` should replace forms such as `length == 0`,\n`length < 1`, and `length <= 0`, together with their operand-swapped mirrors\n(`0 == length`, `1 > length`, `0 >= length`).\n\nOnly a plain `.length` property access matches against the relevant integer\nliteral. A null-aware `receiver?.length` is deliberately left alone: that\ncomparison also has to account for a `null` receiver, so `isEmpty` is not a\ndrop-in replacement.\n\nType knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context\nand the receiver's static type is *positively proven* to be a concrete type\nthat (a) definitely has no `isEmpty` member (`member_lookup … ProvenAbsent`)\nand (b) is definitely not a core collection/string (`is_subtype … ProvenNo`\nfor `Iterable`, `String`, `Map`), suggesting `isEmpty` would be wrong, so the\ndiagnostic is withheld. An `Unknown` receiver — the common case, and every\nreceiver when no type index is attached — keeps firing.",
+    "docs": "Flags `.length` comparisons equivalent to a `.isEmpty` check.\n\nCollections and strings expose an `isEmpty` getter that states intent\ndirectly and, for lazy iterables, can be cheaper than computing the full\n`length`. Comparing `length` against a constant forces the reader to decode\nthe boundary, so `list.isEmpty` should replace forms such as `length == 0`,\n`length < 1`, and `length <= 0`, together with their operand-swapped mirrors\n(`0 == length`, `1 > length`, `0 >= length`).\n\nOnly a plain `.length` property access matches against the relevant integer\nliteral. A null-aware `receiver?.length` is deliberately left alone: that\ncomparison also has to account for a `null` receiver, so `isEmpty` is not a\ndrop-in replacement.\n\nType knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context\nand the receiver's static type is *positively proven* to be a concrete type\nthat (a) definitely has no `isEmpty` member (`member_lookup … Absent`)\nand (b) is definitely not a core collection/string (`is_subtype … No`\nfor `Iterable`, `String`, `Map`), suggesting `isEmpty` would be wrong, so the\ndiagnostic is withheld. An `Unknown` receiver — the common case, and every\nreceiver when no type index is attached — keeps firing.",
     "domains": [],
     "examples": {
       "bad": "void bad() {\n  if (list.length == 0) return;\n  if (0 == items.length) return;\n  if (str.length < 1) return;\n  if (map.length <= 0) return;\n  if (1 > set.length) return;\n  if (0 >= names.length) return;\n}\n\n// A class implementing a core collection still inherits `isEmpty` (from\n// Iterable), so the suggestion is valid and the diagnostic keeps firing.\nclass Bag implements Iterable<int> {\n  int get length => 0;\n}\n\n// A class whose supertype chain leaves the project is `Unknown`, never\n// `ProvenAbsent` — an unresolved ancestor could contribute `isEmpty` — so the\n// diagnostic keeps firing (type knowledge suppresses only on positive proof).\nclass Offsite extends Frobnicator {\n  int get length => 0;\n}\n\nvoid typedReceivers(Bag b, Offsite o) {\n  if (b.length == 0) return;\n  if (o.length == 0) return;\n}\n\n// A static method returns some other type (a Map here), not the enclosing class,\n// so `Config.load()` is Unknown, never `Config`. Typing it as `Config` (a named\n// constructor guess) would wrongly suppress; the diagnostic must keep firing.\nclass Config {\n  static Map<String, String> load() => {};\n}\n\nvoid staticCallReceiver() {\n  if (Config.load().length == 0) return;\n}",
@@ -8931,7 +8967,7 @@
         "message": "Use 'isNotEmpty' instead of comparing 'length' to 0."
       }
     ],
-    "docs": "Flags `.length` comparisons equivalent to a `.isNotEmpty` check.\n\nCollections and strings expose an `isNotEmpty` getter that reads as plain\nintent and, for lazy iterables, can avoid computing the full `length`.\nComparing `length` against a constant makes the reader infer the meaning, so\n`list.isNotEmpty` should replace forms such as `length != 0`, `length > 0`,\nand `length >= 1`, along with their operand-swapped mirrors (`0 != length`,\n`0 < length`, `1 <= length`).\n\nOnly a plain `.length` property access matches against the relevant integer\nliteral. A null-aware `receiver?.length` is deliberately left alone: that\ncomparison also has to account for a `null` receiver, so `isNotEmpty` is not\na drop-in replacement.\n\nType knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context\nand the receiver's static type is *positively proven* to be a concrete type\nthat (a) definitely has no `isNotEmpty` member (`member_lookup …\nProvenAbsent`) and (b) is definitely not a core collection/string\n(`is_subtype … ProvenNo` for `Iterable`, `String`, `Map`), suggesting\n`isNotEmpty` would be wrong, so the diagnostic is withheld. An `Unknown`\nreceiver — the common case, and every receiver when no type index is\nattached — keeps firing.",
+    "docs": "Flags `.length` comparisons equivalent to a `.isNotEmpty` check.\n\nCollections and strings expose an `isNotEmpty` getter that reads as plain\nintent and, for lazy iterables, can avoid computing the full `length`.\nComparing `length` against a constant makes the reader infer the meaning, so\n`list.isNotEmpty` should replace forms such as `length != 0`, `length > 0`,\nand `length >= 1`, along with their operand-swapped mirrors (`0 != length`,\n`0 < length`, `1 <= length`).\n\nOnly a plain `.length` property access matches against the relevant integer\nliteral. A null-aware `receiver?.length` is deliberately left alone: that\ncomparison also has to account for a `null` receiver, so `isNotEmpty` is not\na drop-in replacement.\n\nType knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context\nand the receiver's static type is *positively proven* to be a concrete type\nthat (a) definitely has no `isNotEmpty` member (`member_lookup …\nAbsent`) and (b) is definitely not a core collection/string\n(`is_subtype … No` for `Iterable`, `String`, `Map`), suggesting\n`isNotEmpty` would be wrong, so the diagnostic is withheld. An `Unknown`\nreceiver — the common case, and every receiver when no type index is\nattached — keeps firing.",
     "domains": [],
     "examples": {
       "bad": "void bad() {\n  if (list.length != 0) return;\n  if (0 != items.length) return;\n  if (str.length > 0) return;\n  if (0 < map.length) return;\n  if (set.length >= 1) return;\n  if (1 <= names.length) return;\n}\n\n// A class implementing a core collection still inherits `isNotEmpty` (from\n// Iterable), so the suggestion is valid and the diagnostic keeps firing.\nclass Bag implements Iterable<int> {\n  int get length => 0;\n}\n\n// A class whose supertype chain leaves the project is `Unknown`, never\n// `ProvenAbsent` — an unresolved ancestor could contribute `isNotEmpty` — so the\n// diagnostic keeps firing (type knowledge suppresses only on positive proof).\nclass Offsite extends Frobnicator {\n  int get length => 0;\n}\n\nvoid typedReceivers(Bag b, Offsite o) {\n  if (b.length != 0) return;\n  if (o.length != 0) return;\n}",
@@ -9189,7 +9225,7 @@
         "message": "Use 'whereType<T>()' instead of 'where' with an 'is' check."
       }
     ],
-    "docs": "Flags `.where((e) => e is T)`, which `.whereType<T>()` expresses directly.\n\n\nFiltering an iterable with an `is` test is exactly what `Iterable.whereType`\ndoes, but the getter also narrows the element type, yielding an\n`Iterable<T>` instead of leaving the original element type in place. Using\n`whereType<T>()` is shorter, avoids the throwaway closure, and removes the\ncasts or checks that a bare `where` filter would still require downstream.\nThe rule matches a `.where` call carrying exactly one positional argument and\nno named arguments, where that argument is a one-parameter arrow closure of\nthe form `param is T` — the test must be non-negated and applied to the\nclosure's own parameter.\n\nType knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context\nand the receiver's static type is *positively proven* to be a concrete type\nthat (a) is definitely not an `Iterable` (`is_subtype … ProvenNo`) and (b)\ndefinitely has no `whereType` member (`member_lookup … ProvenAbsent`), then\n`.whereType<T>()` does not exist on the receiver and rewriting would be wrong,\nso the diagnostic is withheld. A user type carrying its own `whereType` keeps\nfiring (the rewrite is valid there), and an `Unknown` receiver — the common\ncase, and every receiver when no type index is attached — keeps firing.",
+    "docs": "Flags `.where((e) => e is T)`, which `.whereType<T>()` expresses directly.\n\n\nFiltering an iterable with an `is` test is exactly what `Iterable.whereType`\ndoes, but the getter also narrows the element type, yielding an\n`Iterable<T>` instead of leaving the original element type in place. Using\n`whereType<T>()` is shorter, avoids the throwaway closure, and removes the\ncasts or checks that a bare `where` filter would still require downstream.\nThe rule matches a `.where` call carrying exactly one positional argument and\nno named arguments, where that argument is a one-parameter arrow closure of\nthe form `param is T` — the test must be non-negated and applied to the\nclosure's own parameter.\n\nType knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context\nand the receiver's static type is *positively proven* to be a concrete type\nthat (a) is definitely not an `Iterable` (`is_subtype … No`) and (b)\ndefinitely has no `whereType` member (`member_lookup … Absent`), then\n`.whereType<T>()` does not exist on the receiver and rewriting would be wrong,\nso the diagnostic is withheld. A user type carrying its own `whereType` keeps\nfiring (the rewrite is valid there), and an `Unknown` receiver — the common\ncase, and every receiver when no type index is attached — keeps firing.",
     "domains": [],
     "examples": {
       "bad": "void bad() {\n  var a = items.where((e) => e is String);\n  var b = list.where((x) => x is int);\n  var c = things.where((t) => t is Widget);\n  var d = values.where((v) => v is double).toList();\n  var e = data.where((item) => item is Map);\n}\n\n// A `List` receiver IS an Iterable (`is_subtype(List, Iterable)` is `Yes`, not\n// `ProvenNo`), so `whereType<T>()` applies and the diagnostic keeps firing even\n// with type knowledge attached.\nvoid iterableReceiver(List<int> xs) {\n  xs.where((e) => e is int);\n}\n\n// `Custom` is not an Iterable, but it carries its own `whereType` — so\n// `member_lookup` is `Found`, never `ProvenAbsent`, and the rewrite is valid.\n// The diagnostic keeps firing (type knowledge suppresses only on positive proof\n// that `whereType` is absent).\nclass Custom {\n  Custom where(bool Function(dynamic) test) => this;\n  Iterable<T> whereType<T>() => throw '';\n\n  void run() {\n    this.where((e) => e is String);\n  }\n}",
@@ -10131,19 +10167,19 @@
     "description": "Flags a `final` or `const` variable given a nullable type but initialized to a provably non-null value.",
     "diagnostics": [
       {
-        "column": 1,
+        "column": 12,
         "file": null,
         "line": 1,
         "message": "Unnecessary nullable type for a final variable declaration."
       },
       {
-        "column": 1,
+        "column": 15,
         "file": null,
         "line": 2,
         "message": "Unnecessary nullable type for a final variable declaration."
       },
       {
-        "column": 3,
+        "column": 21,
         "file": null,
         "line": 5,
         "message": "Unnecessary nullable type for a final variable declaration."
@@ -10295,7 +10331,7 @@
         "message": "Unnecessary string interpolation; use the expression directly."
       }
     ],
-    "docs": "Flags a string literal whose entire content is a single interpolation of a\nprovably non-nullable `String`.\n\nWhen a string is nothing but `'$x'` or `'${x}'` and `x` is already a string,\nwrapping the value in quotes and interpolation markers is redundant — the\nliteral is equivalent to writing the expression directly. The quotes only add\nnoise and obscure that no formatting or concatenation is happening. The rule\nrequires the interpolation to span the whole content, whether a bare\n`$identifier` or a full `${...}` expression; a string with any surrounding\ntext, or two adjacent interpolations like `'$a$b'`, is left alone. Raw strings\nare never flagged. Use the interpolated expression on its own.\n\nThe `String` requirement is enforced, not assumed. The type proof is\nfile-local ([`LocalTypes`]), widened by the project index's declared/builtin\nreturn types keyed on the member name for member accesses and calls\n(`toUpperCase` -> `String`), and sound-over-precise: it fires only when the\ninterpolated expression is *known* to be a non-nullable `String` (a string\nliteral, a local/param declared `String`, `String + String`, a call returning\n`String`, …). `String?` and unknown types never fire — replacing `'${n + 1}'`\n(an `int`) with `n + 1` would silently change the value's type, the very bug\nthis guards. A null-aware access (`a?.b`) is never proven, since its result is\nnullable regardless of the member's own return type.",
+    "docs": "Flags a string literal whose entire content is a single interpolation of a\nprovably non-nullable `String`.\n\nWhen a string is nothing but `'$x'` or `'${x}'` and `x` is already a string,\nwrapping the value in quotes and interpolation markers is redundant — the\nliteral is equivalent to writing the expression directly. The quotes only add\nnoise and obscure that no formatting or concatenation is happening. The rule\nrequires the interpolation to span the whole content, whether a bare\n`$identifier` or a full `${...}` expression; a string with any surrounding\ntext, or two adjacent interpolations like `'$a$b'`, is left alone. Raw strings\nare never flagged. Use the interpolated expression on its own.\n\nCanonical receiver and signature facts must prove a non-nullable `String`.\nNullable or unknown values and null-aware accesses are left alone.",
     "domains": [],
     "examples": {
       "bad": "// Bad: the whole string is a single interpolation of a provably non-nullable String.\nString examples(String name) {\n  final a = '$name';\n  final b = '${name}';\n  final c = \"$name\";\n  final s = 'x';\n  final d = '$s';\n  final e = '${'lit'}';\n  final f = 'a' + 'b';\n  final g = '$f';\n  final h = '${name.toUpperCase()}';\n  return '$a$b$c$d$e$g$h';\n}",
@@ -10723,12 +10759,18 @@
         "file": null,
         "line": 25,
         "message": "Use a super parameter instead of forwarding a parameter to super."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 33,
+        "message": "Use a super parameter instead of forwarding a parameter to super."
       }
     ],
     "docs": "Flags a constructor parameter forwarded verbatim to `super(...)` and used nowhere else.\n\nSince Dart 2.17, a parameter that exists only to be passed straight through to\nthe superclass constructor can be declared as a super parameter — `super.x` —\nwhich removes both the parameter declaration and the redundant `super(x)`\nargument. Doing so cuts boilerplate and keeps subclass constructors in sync\nwith the base class automatically. The rule is conservative: it fires only\nwhen the parameter is used exactly once across the entire constructor (all\ninitializers plus the body), forwarded either as a plain positional `super`\nargument at the matching index or as a named argument `super(x: x)`. Convert\nit to a `super.` parameter.",
     "domains": [],
     "examples": {
-      "bad": "// Parameters forwarded verbatim to super and used nowhere else.\nclass Base {\n  Base(int a);\n  Base.two(int a, int b);\n  Base.named({int? x});\n}\n\nclass A extends Base {\n  A(int a) : super(a);\n}\n\nclass B extends Base {\n  B(int a, int b) : super.two(a, b);\n}\n\nclass C extends Base {\n  C({int? x}) : super.named(x: x);\n}\n\nclass D extends Base {\n  D(int a) : super(a);\n}\n\nclass E extends Base {\n  E(int a) : super(a);\n}",
+      "bad": "// Parameters forwarded verbatim to super and used nowhere else.\nclass Base {\n  Base(int a);\n  Base.two(int a, int b);\n  Base.named({int? x});\n}\n\nclass A extends Base {\n  A(int a) : super(a);\n}\n\nclass B extends Base {\n  B(int a, int b) : super.two(a, b);\n}\n\nclass C extends Base {\n  C({int? x}) : super.named(x: x);\n}\n\nclass D extends Base {\n  D(int a) : super(a);\n}\n\nclass E extends Base {\n  E(int a) : super(a);\n}\n\nclass ObjectBase {\n  ObjectBase(Object e);\n}\n\nclass CatchBinding extends ObjectBase {\n  CatchBinding(Object e) : super(e) {\n    try {} catch (e) {}\n  }\n}",
       "crossFile": null,
       "good": "// Cases that must not be flagged.\nclass Base {\n  Base(int a);\n  Base.two(int a, int b);\n}\n\nclass A extends Base {\n  A(int a) : super(a) {\n    print(a);\n  }\n}\n\nclass B extends Base {\n  B(super.a);\n}\n\nclass C extends Base {\n  C(int value) : super(value + 1);\n}\n\nclass D extends Base {\n  D(int a, int b) : super.two(b, a);\n}\n\nclass E extends Base {\n  E(int a, int b) : super.two(a, b) {\n    print(a);\n    print(b);\n  }\n}"
     },
@@ -11637,7 +11679,7 @@
         "message": "Unnecessary empty statement — remove the `;` or replace it with a block"
       }
     ],
-    "docs": "Flags stray empty statements (a lone `;`).\n\nA solitary semicolon does nothing, and where it slips in it usually changes\nmeaning: `while (cond);` turns the following block into an unconditional body,\nand a stray `;` after an `if` header detaches the intended branch. It is\nalmost always an accidental extra semicolon or a loop body that should have\nbeen a block. Remove it, or replace it with the block that was intended. The\nsemicolons in a `for (;;)` header are loop syntax, not statements, and are\nnever reported.",
+    "docs": "Flags stray empty statements (a lone `;`).\n\nA solitary semicolon does nothing, and where it slips in it usually changes\nmeaning: `while (cond);` turns the following block into an unconditional body,\nand a stray `;` after an `if` header detaches the intended branch. It is\nalmost always an accidental extra semicolon or a loop body that should have\nbeen a block. Remove it, or replace it with the block that was intended. The\nsemicolons in a `for (;;)` header are loop syntax, not statements, and are\nnever reported. A real `null;` expression statement is not an empty statement.",
     "domains": [],
     "examples": {
       "bad": "void f1() {\n  ;\n}\n\nvoid f2() {\n  print('x');\n  ;\n}\n\nvoid f3(bool x) {\n  while (x) ;\n}\n\nvoid f4() {\n  for (var i = 0; i < 1; i++) ;\n}\n\nvoid f5(bool x) {\n  if (x) ;\n}\n\nvoid f6() {\n  print('a');\n  ;\n  print('b');\n}",

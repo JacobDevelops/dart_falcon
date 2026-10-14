@@ -105,17 +105,17 @@ fn proven_scalar_value(expression: &Expr, state: &SemanticState<'_>) -> bool {
 }
 
 fn scalar_type(ty: &ResolvedType) -> bool {
-    match ty {
-        ResolvedType::Null => true,
-        ResolvedType::Interface {
-            identity: DeclarationIdentity::Sdk { library, name },
-            ..
-        } => {
-            library == "dart:core"
-                && matches!(name.as_str(), "bool" | "int" | "double" | "num" | "String")
-        }
-        _ => false,
-    }
+    matches!(
+        ty,
+        ResolvedType::Null
+            | ResolvedType::Interface {
+                identity: DeclarationIdentity::Sdk {
+                    library: "dart:core",
+                    name: "bool" | "int" | "double" | "num" | "String",
+                },
+                ..
+            }
+    )
 }
 
 /// `None` when the span is out of bounds or off a UTF-8 boundary, so a bad span

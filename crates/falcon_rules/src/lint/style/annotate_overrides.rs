@@ -1,19 +1,15 @@
 //! Requires `@override` on members that override an inherited declaration.
 
-use falcon_analyze::{AnalyzeContext, MemberFacts, Rule, SemanticMemberKind, SignatureIndex};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, MemberFacts, MemberKind, Rule, SemanticModel,
+    SignatureIndex,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 pub struct AnnotateOverrides;
 
-type Candidate<'a> = (
-    &'a str,
-    &'a Span,
-    &'a [Annotation],
-    SemanticMemberKind,
-    bool,
-    bool,
-);
+type Candidate<'a> = (&'a str, &'a Span, &'a [Annotation], MemberKind);
 
 impl Rule for AnnotateOverrides {
     fn name(&self) -> &'static str {
@@ -21,27 +17,48 @@ impl Rule for AnnotateOverrides {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let (Some(_), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
         };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
         for decl in &program.declarations {
             match decl {
-                TopLevelDecl::Class(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::Mixin(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::MixinClass(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::Enum(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::ExtensionType(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
+                TopLevelDecl::Class(node) => check_members(
+                    model.resolve_name(&node.name.name),
+                    &node.members,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::Mixin(node) => check_members(
+                    model.resolve_name(&node.name.name),
+                    &node.members,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::MixinClass(node) => check_members(
+                    model.resolve_name(&node.name.name),
+                    &node.members,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::Enum(node) => check_members(
+                    model.resolve_name(&node.name.name),
+                    &node.members,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::ExtensionType(node) => check_members(
+                    model.resolve_name(&node.name.name),
+                    &node.members,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
                 TopLevelDecl::ClassTypeAlias(_)
                 | TopLevelDecl::Extension(_)
                 | TopLevelDecl::Function(_)
@@ -64,15 +81,13 @@ fn has_override(annotations: &[Annotation]) -> bool {
 }
 
 fn check_members(
-    type_name: &str,
+    owner: Option<DeclarationIdentity>,
     members: &[ClassMember],
     signatures: &SignatureIndex,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let Some(owner) = ctx.identities.and_then(|identities| {
-        identities.resolve_declaration(ctx.file_path, &[type_name.to_string()])
-    }) else {
+    let Some(owner) = owner else {
         return;
     };
     for member in members {
@@ -85,9 +100,7 @@ fn check_members(
                         declarator.name.name.as_str(),
                         &declarator.name.span,
                         field.annotations.as_slice(),
-                        SemanticMemberKind::Field,
-                        true,
-                        field.keyword == falcon_syntax::ast::VarKeyword::Var,
+                        MemberKind::field(field),
                     )
                 })
                 .collect(),
@@ -95,33 +108,25 @@ fn check_members(
                 method.name.name.as_str(),
                 &method.name.span,
                 method.annotations.as_slice(),
-                SemanticMemberKind::Method,
-                false,
-                false,
+                MemberKind::Method,
             )],
             ClassMember::Getter(getter) if !getter.is_static => vec![(
                 getter.name.name.as_str(),
                 &getter.name.span,
                 getter.annotations.as_slice(),
-                SemanticMemberKind::Getter,
-                true,
-                false,
+                MemberKind::Getter,
             )],
             ClassMember::Setter(setter) if !setter.is_static => vec![(
                 setter.name.name.as_str(),
                 &setter.name.span,
                 setter.annotations.as_slice(),
-                SemanticMemberKind::Setter,
-                false,
-                true,
+                MemberKind::Setter,
             )],
             ClassMember::Operator(operator) => vec![(
                 operator.op.as_str(),
                 &operator.span,
                 operator.annotations.as_slice(),
-                SemanticMemberKind::Operator,
-                false,
-                false,
+                MemberKind::Operator,
             )],
             ClassMember::Field(_)
             | ClassMember::Constructor(_)
@@ -130,14 +135,10 @@ fn check_members(
             | ClassMember::Setter(_)
             | ClassMember::Error(_) => Vec::new(),
         };
-        for (name, span, annotations, kind, has_getter, has_setter) in candidates {
+        for (name, span, annotations, kind) in candidates {
             let overrides = signatures
                 .inherited_member_facts(&owner, name)
-                .is_some_and(|facts| {
-                    facts
-                        .iter()
-                        .any(|fact| compatible(kind, has_getter, has_setter, fact))
-                });
+                .is_some_and(|facts| facts.iter().any(|fact| compatible(kind, fact)));
             if !has_override(annotations) && overrides {
                 diags.push(ctx.diagnostic(
                     "annotate-overrides",
@@ -149,19 +150,12 @@ fn check_members(
     }
 }
 
-fn compatible(
-    declared: SemanticMemberKind,
-    has_getter: bool,
-    has_setter: bool,
-    inherited: &MemberFacts,
-) -> bool {
+fn compatible(declared: MemberKind, inherited: &MemberFacts) -> bool {
     match declared {
-        SemanticMemberKind::Method => inherited.kind == SemanticMemberKind::Method,
-        SemanticMemberKind::Getter => inherited.has_getter,
-        SemanticMemberKind::Setter => inherited.has_setter,
-        SemanticMemberKind::Operator => inherited.kind == SemanticMemberKind::Operator,
-        SemanticMemberKind::Field => {
-            (has_getter && inherited.has_getter) || (has_setter && inherited.has_setter)
+        MemberKind::Method | MemberKind::Operator => inherited.kind == declared,
+        _ => {
+            (declared.has_getter() && inherited.kind.has_getter())
+                || (declared.has_setter() && inherited.kind.has_setter())
         }
     }
 }

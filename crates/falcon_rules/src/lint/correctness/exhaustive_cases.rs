@@ -2,14 +2,14 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationFacts, DeclarationIdentity, ResolvedType, Rule,
-    SemanticModel, SignatureIndex, TypeEnvironment, TypeParameterScope, evaluate_constant,
+    SemanticModel, SignatureIndex, evaluate_constant,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt, walk_top_level_decl};
 
 pub struct ExhaustiveCases;
 
@@ -19,18 +19,14 @@ impl Rule for ExhaustiveCases {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
             ctx,
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
-            signatures,
-            environment: TypeEnvironment::new(),
-            type_parameters: TypeParameterScope::default(),
         };
-        collector.visit_program(program);
+        visit_program(&mut collector, program, state);
         collector.diagnostics
     }
 }
@@ -38,14 +34,10 @@ impl Rule for ExhaustiveCases {
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    model: SemanticModel<'a>,
-    signatures: &'a SignatureIndex,
-    environment: TypeEnvironment,
-    type_parameters: TypeParameterScope,
 }
 
 impl Collector<'_> {
-    fn check_switch(&mut self, node: &SwitchStmt) {
+    fn check_switch(&mut self, node: &SwitchStmt, state: &SemanticState<'_>) {
         if node.cases.iter().any(|group| {
             group
                 .cases
@@ -54,21 +46,16 @@ impl Collector<'_> {
         }) {
             return;
         }
-        let ResolvedType::Interface { identity, .. } = self.environment.infer_with_signatures(
-            &node.subject,
-            &self.model,
-            self.signatures,
-            &self.type_parameters,
-        ) else {
+        let ResolvedType::Interface { identity, .. } = state.infer(&node.subject) else {
             return;
         };
-        let Some(facts) = self.signatures.declaration(&identity) else {
+        let Some(facts) = state.signatures.declaration(&identity) else {
             return;
         };
         if !is_enum_like(facts, &identity) {
             return;
         }
-        let values = constant_values(facts, &identity, &self.model, self.signatures);
+        let values = constant_values(facts, &identity, &state.model, &state.signatures);
         if values.len() < 2 {
             return;
         }
@@ -78,7 +65,7 @@ impl Collector<'_> {
                 let SwitchCaseKind::Pattern(pattern, _) = case else {
                     continue;
                 };
-                if let Some(name) = constant_pattern_name(pattern, &identity, &self.model)
+                if let Some(name) = constant_pattern_name(pattern, &identity, &state.model)
                     && let Some(value) = values.get(&name)
                 {
                     covered.insert(value.clone());
@@ -102,118 +89,18 @@ impl Collector<'_> {
                 .unwrap_or(aliases[0]);
             self.diagnostics.push(self.ctx.diagnostic(
                 "exhaustive-cases",
-                format!(
-                    "Add a case for '{}.{}'.",
-                    identity_name(&identity),
-                    preferred.name
-                ),
+                format!("Add a case for '{}.{}'.", identity.name(), preferred.name),
                 *node.subject.span(),
             ));
         }
     }
-
-    fn function(&mut self, params: Option<&FormalParamList>, body: Option<&FunctionBody>) {
-        let saved = std::mem::replace(&mut self.environment, TypeEnvironment::new());
-        if let Some(params) = params {
-            self.environment
-                .bind_params(params, &self.model, &self.type_parameters);
-        }
-        if let Some(body) = body {
-            match body {
-                FunctionBody::Block(block) => {
-                    for statement in &block.stmts {
-                        visit_statement(self, statement);
-                    }
-                }
-                FunctionBody::Arrow(expression, _) => self.visit_expr(expression),
-                FunctionBody::Native(_, _) => {}
-            }
-        }
-        self.environment = saved;
-    }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        let Some(type_params) = declaration_type_params(node) else {
-            walk_top_level_decl(self, node);
-            return;
-        };
-        self.type_parameters.push(type_params, &self.model);
-        walk_top_level_decl(self, node);
-        self.type_parameters.pop();
-    }
-
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.type_parameters.push(&node.type_params, &self.model);
-        self.function(node.params(), node.body.as_ref());
-        self.type_parameters.pop();
-    }
-
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.type_parameters.push(&node.type_params, &self.model);
-        self.function(Some(&node.params), node.body.as_ref());
-        self.type_parameters.pop();
-    }
-
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.function(Some(&node.params), node.body.as_ref());
-    }
-
-    fn visit_expr(&mut self, node: &Expr) {
-        walk_expr(self, node);
-    }
-
-    fn visit_local_var(&mut self, declaration: &LocalVarDecl) {
-        falcon_syntax::visitor::walk_local_var(self, declaration);
-        let ty = declaration
-            .var_type
-            .as_ref()
-            .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
-            .unwrap_or(ResolvedType::Unknown);
-        for declarator in &declaration.declarators {
-            self.environment
-                .declare(declarator.name.name.clone(), ty.clone());
+impl SemanticRuleVisitor for Collector<'_> {
+    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+        if let Stmt::Switch(switch) = node {
+            self.check_switch(switch, state);
         }
-    }
-
-    fn visit_stmt(&mut self, node: &Stmt) {
-        match node {
-            Stmt::Block(block) => {
-                self.environment.push_scope();
-                for statement in &block.stmts {
-                    visit_statement(self, statement);
-                }
-                self.environment.pop_scope();
-            }
-            Stmt::Switch(switch) => {
-                self.check_switch(switch);
-                walk_stmt(self, node);
-            }
-            Stmt::LocalFunc(function) => {
-                self.type_parameters
-                    .push(&function.type_params, &self.model);
-                self.function(Some(&function.params), Some(&function.body));
-                self.type_parameters.pop();
-            }
-            _ => walk_stmt(self, node),
-        }
-    }
-}
-
-fn visit_statement(visitor: &mut impl Visitor, statement: &Stmt) {
-    visitor.visit_stmt(statement);
-}
-
-fn declaration_type_params(node: &TopLevelDecl) -> Option<&[TypeParam]> {
-    match node {
-        TopLevelDecl::Class(declaration) => Some(&declaration.type_params),
-        TopLevelDecl::Mixin(declaration) => Some(&declaration.type_params),
-        TopLevelDecl::MixinClass(declaration) => Some(&declaration.type_params),
-        TopLevelDecl::Enum(declaration) => Some(&declaration.type_params),
-        TopLevelDecl::Extension(declaration) => Some(&declaration.type_params),
-        TopLevelDecl::ExtensionType(declaration) => Some(&declaration.type_params),
-        _ => None,
     }
 }
 
@@ -247,14 +134,21 @@ fn constant_values(
     let fields = facts
         .static_consts
         .iter()
-        .filter(|constant| exact_identity(&constant.ty, identity))
         .map(|constant| (constant.name.as_str(), &constant.initializer))
         .collect::<HashMap<_, _>>();
-    fields
+    facts
+        .static_consts
         .iter()
-        .filter_map(|(name, expression)| {
-            evaluate_constant(expression, identity, &fields, model, signatures)
-                .map(|value| ((*name).to_string(), value))
+        .filter(|constant| exact_identity(&constant.ty, identity))
+        .filter_map(|constant| {
+            evaluate_constant(
+                &constant.initializer,
+                Some(identity),
+                &fields,
+                model,
+                signatures,
+            )
+            .map(|value| (constant.name.clone(), value))
         })
         .collect()
 }
@@ -280,16 +174,43 @@ fn constant_pattern_name(
     if names.len() == 1 {
         return names.into_iter().next();
     }
-    let owner = model.resolve_name(&names[..names.len() - 1]);
+    let owner = model.resolve_dotted(&names[..names.len() - 1]);
     (owner.as_ref() == Some(identity))
         .then(|| names.last().cloned())
         .flatten()
 }
 
-fn identity_name(identity: &DeclarationIdentity) -> &str {
-    match identity {
-        DeclarationIdentity::Project { name, .. }
-        | DeclarationIdentity::Sdk { name, .. }
-        | DeclarationIdentity::Package { name, .. } => name,
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+
+    use super::*;
+
+    #[test]
+    fn single_file_fallback_preserves_owner_constant_dependencies() {
+        let source = include_str!("../../../tests/corpus/exhaustive-cases/owner-dependencies.dart");
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let path = Path::new("owner-dependencies.dart");
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path,
+                program: &program,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let types = TypeIndex::from_program(&program);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(path, source, &config)
+            .with_identities(&identities)
+            .with_types(&types);
+        let diagnostics = ExhaustiveCases.analyze(&program, &ctx);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].message, "Add a case for 'Token.second'.");
     }
 }

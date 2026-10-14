@@ -2,7 +2,9 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule, SemanticMemberKind, SignatureIndex};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, MemberKind, Rule, SemanticModel, SignatureIndex,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -14,27 +16,48 @@ impl Rule for AvoidRenamingMethodParameters {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let (Some(_), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
         };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
         for decl in &program.declarations {
             match decl {
-                TopLevelDecl::Class(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::Mixin(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::MixinClass(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::Enum(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
-                TopLevelDecl::ExtensionType(node) => {
-                    check_members(&node.name.name, &node.members, signatures, ctx, &mut diags)
-                }
+                TopLevelDecl::Class(node) => check_members(
+                    model.resolve_name(&node.name.name),
+                    &node.members,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::Mixin(node) => check_members(
+                    model.resolve_name(&node.name.name),
+                    &node.members,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::MixinClass(node) => check_members(
+                    model.resolve_name(&node.name.name),
+                    &node.members,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::Enum(node) => check_members(
+                    model.resolve_name(&node.name.name),
+                    &node.members,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
+                TopLevelDecl::ExtensionType(node) => check_members(
+                    model.resolve_name(&node.name.name),
+                    &node.members,
+                    signatures,
+                    ctx,
+                    &mut diags,
+                ),
                 TopLevelDecl::ClassTypeAlias(_)
                 | TopLevelDecl::Extension(_)
                 | TopLevelDecl::Function(_)
@@ -52,34 +75,30 @@ fn positional_param_names(params: &FormalParamList) -> Vec<&Identifier> {
 }
 
 fn check_members(
-    type_name: &str,
+    owner: Option<DeclarationIdentity>,
     members: &[ClassMember],
     signatures: &SignatureIndex,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let Some(owner) = ctx.identities.and_then(|identities| {
-        identities.resolve_declaration(ctx.file_path, &[type_name.to_string()])
-    }) else {
+    let Some(owner) = owner else {
         return;
     };
     for member in members {
-        let (name, kind, params): (&str, SemanticMemberKind, Vec<&Identifier>) = match member {
+        let (name, kind, params): (&str, MemberKind, Vec<&Identifier>) = match member {
             ClassMember::Method(method) if !method.is_static => (
                 &method.name.name,
-                SemanticMemberKind::Method,
+                MemberKind::Method,
                 positional_param_names(&method.params),
             ),
             ClassMember::Operator(operator) => (
                 &operator.op,
-                SemanticMemberKind::Operator,
+                MemberKind::Operator,
                 positional_param_names(&operator.params),
             ),
-            ClassMember::Setter(setter) if !setter.is_static => (
-                &setter.name.name,
-                SemanticMemberKind::Setter,
-                vec![&setter.param],
-            ),
+            ClassMember::Setter(setter) if !setter.is_static => {
+                (&setter.name.name, MemberKind::Setter, vec![&setter.param])
+            }
             ClassMember::Field(_)
             | ClassMember::Constructor(_)
             | ClassMember::Method(_)

@@ -2,152 +2,33 @@
 
 mod identity;
 mod library;
-mod local_types;
-mod project_index;
-mod receiver;
 mod semantic;
 mod type_index;
 
 pub use identity::{
-    DeclarationIdentity, IdentityIndex, IdentitySource, NameIdentity, PackageIdentity,
+    DeclarationIdentity, FileId, IdentityIndex, IdentitySource, LibraryId, NameIdentity,
+    PackageIdentity, QualifiedName, import_path,
 };
 pub use library::{
     LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, library_unit,
 };
-pub use local_types::LocalTypes;
-pub use project_index::{ProgramSource, ProjectIndex};
-pub use receiver::ReceiverTypes;
 pub(crate) use semantic::expression_segments;
 pub use semantic::{
-    DeclarationFacts, MemberFacts, ResolvedSignature, ResolvedType, SemanticMemberKind,
-    SemanticModel, SignatureIndex, TypeEnvironment, TypeParameterId, TypeParameterScope, TypeTruth,
+    DeclarationFacts, MemberFacts, ParameterOwner, ResolvedSignature, ResolvedType, SemanticModel,
+    SignatureIndex, TypeEnvironment, TypeParameterId, TypeParameterScope,
 };
-pub use type_index::{LibrarySource, MemberKind, MemberResult, SubtypeResult, TypeIndex, TypeKind};
+pub use type_index::{LibrarySource, MemberKind, MemberResult, TypeIndex, TypeKind};
 
-use falcon_syntax::ast::DartType;
-
-/// A coarse static type — a tiny subset of the Dart type system, only what the
-/// resolver-dependent rules actually need.
-///
-/// This is intentionally not a general type representation: generic arguments,
-/// type parameters, and structural types collapse into [`StaticType::Other`] or
-/// [`StaticType::Unknown`]. Nullability is tracked for the core scalar types
-/// (and `Other`) because `bool?` vs `bool` is the exact distinction that makes
-/// `no-boolean-literal-compare` unsafe without it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StaticType {
-    Bool {
-        nullable: bool,
-    },
-    Int {
-        nullable: bool,
-    },
-    Double {
-        nullable: bool,
-    },
-    Num {
-        nullable: bool,
-    },
-    String {
-        nullable: bool,
-    },
-    /// The `void` type. A distinct, *known* fact (unlike [`StaticType::Unknown`]).
-    Void,
-    /// The `dynamic` type.
-    Dynamic,
-    /// Type is genuinely unknown / could not be resolved soundly.
+/// A three-valued proof: `No` means proven false, never "not proven true".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Truth {
+    Yes,
+    No,
     Unknown,
-    /// Any other named type (classes, `Future`, `List`, enums, …).
-    Other {
-        name: String,
-        nullable: bool,
-    },
 }
 
-impl StaticType {
-    /// Whether this type is (statically known to be) nullable. [`StaticType::Unknown`]
-    /// and [`StaticType::Dynamic`] are treated as *possibly* nullable and return
-    /// `true` — callers that need certainty should match on the variant.
-    pub fn is_nullable(&self) -> bool {
-        match self {
-            StaticType::Bool { nullable }
-            | StaticType::Int { nullable }
-            | StaticType::Double { nullable }
-            | StaticType::Num { nullable }
-            | StaticType::String { nullable }
-            | StaticType::Other { nullable, .. } => *nullable,
-            StaticType::Void => false,
-            StaticType::Dynamic | StaticType::Unknown => true,
-        }
-    }
-
-    /// `true` only for a *non-nullable* `bool`. This is the precise predicate
-    /// `no-boolean-literal-compare` needs: `x == true` is redundant only when `x`
-    /// is a non-nullable bool (for `bool?` it is the idiomatic null-safe form).
-    pub fn is_non_nullable_bool(&self) -> bool {
-        matches!(self, StaticType::Bool { nullable: false })
-    }
-
-    /// `true` for the known `void` type.
-    pub fn is_void(&self) -> bool {
-        matches!(self, StaticType::Void)
-    }
-
-    /// Return a copy with the given nullability, where the variant carries one.
-    /// Variants without a nullability flag (`Void`, `Dynamic`, `Unknown`) are
-    /// returned unchanged.
-    pub fn with_nullable(&self, nullable: bool) -> StaticType {
-        match self {
-            StaticType::Bool { .. } => StaticType::Bool { nullable },
-            StaticType::Int { .. } => StaticType::Int { nullable },
-            StaticType::Double { .. } => StaticType::Double { nullable },
-            StaticType::Num { .. } => StaticType::Num { nullable },
-            StaticType::String { .. } => StaticType::String { nullable },
-            StaticType::Other { name, .. } => StaticType::Other {
-                name: name.clone(),
-                nullable,
-            },
-            other => other.clone(),
-        }
-    }
-
-    /// Map a syntactic [`DartType`] to a coarse [`StaticType`].
-    ///
-    /// Core scalar names map to their dedicated variants (carrying the written
-    /// nullability); `void`/`dynamic` map to their variants; every other named
-    /// type becomes [`StaticType::Other`]. Function and record types are not
-    /// modeled — they collapse to `Other` with a synthetic name so nullability
-    /// is still available, which is all any consumer needs.
-    pub fn from_dart_type(ty: &DartType) -> StaticType {
-        match ty {
-            DartType::Void { .. } => StaticType::Void,
-            DartType::Dynamic { .. } => StaticType::Dynamic,
-            DartType::Function(f) => StaticType::Other {
-                name: "Function".to_string(),
-                nullable: f.is_nullable,
-            },
-            DartType::Record(r) => StaticType::Other {
-                name: "Record".to_string(),
-                nullable: r.is_nullable,
-            },
-            DartType::Named(n) => {
-                let nullable = n.is_nullable;
-                // Use the final segment ("prefix.Type" → "Type") as the name.
-                let name = n.segments.last().map(|id| id.name.as_str()).unwrap_or("");
-                match name {
-                    "bool" => StaticType::Bool { nullable },
-                    "int" => StaticType::Int { nullable },
-                    "double" => StaticType::Double { nullable },
-                    "num" => StaticType::Num { nullable },
-                    "String" => StaticType::String { nullable },
-                    "Never" => StaticType::Unknown,
-                    "" => StaticType::Unknown,
-                    other => StaticType::Other {
-                        name: other.to_string(),
-                        nullable,
-                    },
-                }
-            }
-        }
+impl From<bool> for Truth {
+    fn from(value: bool) -> Self {
+        if value { Self::Yes } else { Self::No }
     }
 }

@@ -1,25 +1,17 @@
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
 
-use crate::resolve::{IdentityIndex, LibraryUnit, ProjectIndex, SignatureIndex, TypeIndex};
+use crate::resolve::{IdentityIndex, LibraryUnit, SignatureIndex, TypeIndex};
 
 /// Per-file analysis context passed to every rule.
 ///
-/// The optional [`AnalyzeContext::project`] index is the seam for the
-/// resolver-dependent rules: when present it carries cross-file (or, in degraded
-/// single-file mode, this file's) declaration return-type facts. It defaults to
-/// `None`, so every existing rule and construction site is unaffected — a rule
-/// only reaches for it when it needs type facts, and must behave conservatively
-/// when it is absent.
+/// Resolving drivers attach declaration identities, type facts, and signatures.
+/// Non-resolving callers leave those optional indexes absent.
 pub struct AnalyzeContext<'a> {
     pub file_path: &'a std::path::Path,
     pub source: &'a str,
     pub config: &'a FalconConfig,
-    /// Cross-file declaration index, when the driver has one. `None` for callers
-    /// that have no project view (or have not opted into resolution).
-    pub project: Option<&'a ProjectIndex>,
-    /// Cross-file *type* index (kinds, supertypes, members), when the driver has
-    /// one. Same opt-in and absence semantics as [`AnalyzeContext::project`].
+    /// Cross-file type facts, when resolving analysis is enabled.
     pub types: Option<&'a TypeIndex>,
     /// Project-wide declaration identity index for rules that must distinguish
     /// type literals from values. Absent outside resolving analysis.
@@ -32,14 +24,12 @@ pub struct AnalyzeContext<'a> {
 }
 
 impl<'a> AnalyzeContext<'a> {
-    /// Construct a context without a project index (the common, non-resolving
-    /// case). Equivalent to setting `project: None`.
+    /// Construct a non-resolving context.
     pub fn new(file_path: &'a std::path::Path, source: &'a str, config: &'a FalconConfig) -> Self {
         Self {
             file_path,
             source,
             config,
-            project: None,
             types: None,
             identities: None,
             signatures: None,
@@ -60,12 +50,6 @@ impl<'a> AnalyzeContext<'a> {
             self.file_path.to_string_lossy().into_owned(),
             span,
         )
-    }
-
-    /// Attach a project index, enabling resolver-dependent rules to consult it.
-    pub fn with_project(mut self, project: &'a ProjectIndex) -> Self {
-        self.project = Some(project);
-        self
     }
 
     /// Attach a cross-file type index.

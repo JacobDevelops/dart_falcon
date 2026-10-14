@@ -2,7 +2,7 @@
 
 use falcon_analyze::{
     AnalyzeContext, BuildContextFlowAnalyzer, DeclarationIdentity, ResolvedType, Rule,
-    SemanticModel, SignatureIndex, TypeTruth,
+    SemanticModel, SignatureIndex, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
@@ -66,10 +66,7 @@ impl Collector<'_> {
     }
 
     fn is_state_class(&self, class: &ClassDecl) -> bool {
-        let Some(identity) = self
-            .model
-            .resolve_name(std::slice::from_ref(&class.name.name))
-        else {
+        let Some(identity) = self.model.resolve_name(&class.name.name) else {
             return false;
         };
         let ty = ResolvedType::Interface {
@@ -79,10 +76,10 @@ impl Collector<'_> {
             extension_type: false,
         };
         let state = DeclarationIdentity::Package {
-            package: "flutter".to_string(),
-            name: "State".to_string(),
+            package: "flutter",
+            name: "State",
         };
-        self.signatures.is_subtype_of(&ty, &state, self.model) == TypeTruth::Yes
+        self.signatures.is_subtype_of(&ty, &state, self.model) == Truth::Yes
     }
 }
 

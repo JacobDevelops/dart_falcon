@@ -11,38 +11,58 @@
 //! text, or two adjacent interpolations like `'$a$b'`, is left alone. Raw strings
 //! are never flagged. Use the interpolated expression on its own.
 //!
-//! The `String` requirement is enforced, not assumed. The type proof is
-//! file-local ([`LocalTypes`]), widened by the project index's declared/builtin
-//! return types keyed on the member name for member accesses and calls
-//! (`toUpperCase` -> `String`), and sound-over-precise: it fires only when the
-//! interpolated expression is *known* to be a non-nullable `String` (a string
-//! literal, a local/param declared `String`, `String + String`, a call returning
-//! `String`, …). `String?` and unknown types never fire — replacing `'${n + 1}'`
-//! (an `int`) with `n + 1` would silently change the value's type, the very bug
-//! this guards. A null-aware access (`a?.b`) is never proven, since its result is
-//! nullable regardless of the member's own return type.
+//! Canonical receiver and signature facts must prove a non-nullable `String`.
+//! Nullable or unknown values and null-aware accesses are left alone.
 
-use falcon_analyze::{AnalyzeContext, LocalTypes, ProjectIndex, Rule, StaticType};
+use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 pub struct UnnecessaryStringInterpolations;
-
 impl Rule for UnnecessaryStringInterpolations {
     fn name(&self) -> &'static str {
         "unnecessary-string-interpolations"
     }
-
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let Some(state) = SemanticState::new(program, ctx) else {
+            return Vec::new();
+        };
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
-            lt: LocalTypes::new(),
-            project: ctx.project,
         };
-        collector.visit_program(program);
+        visit_program(&mut collector, program, state);
         collector.diags
+    }
+}
+struct Collector<'a> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'a>,
+}
+impl SemanticRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        let Expr::StringLit(node) = node else {
+            return;
+        };
+        let Some(lit) = StringLitNode::delimiter(&node.raw) else {
+            return;
+        };
+        if !lit.terminated
+            || lit.is_raw
+            || !is_whole_interpolation(lit.content)
+            || node.interpolations.len() != 1
+        {
+            return;
+        }
+        let ty = state.infer(&node.interpolations[0].expr);
+        if ty.interface("dart:core", "String") && !ty.nullable() {
+            self.diags.push(self.ctx.diagnostic(
+                "unnecessary-string-interpolations",
+                "Unnecessary string interpolation; use the expression directly.",
+                node.span,
+            ));
+        }
     }
 }
 
@@ -87,233 +107,90 @@ fn is_whole_interpolation(content: &str) -> bool {
     }
 }
 
-struct Collector<'a> {
-    diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
-    lt: LocalTypes,
-    project: Option<&'a ProjectIndex>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::{IdentityIndex, IdentitySource, SemanticModel, SignatureIndex, TypeIndex};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::Path;
 
-impl Collector<'_> {
-    /// Whether the interpolated expression is provably a non-nullable `String`.
-    ///
-    /// [`LocalTypes`] answers for literals, locals and params; it returns
-    /// `Unknown` for member accesses and calls, so those fall back to the
-    /// project index's declared/builtin return type keyed on the member name
-    /// (`toUpperCase` -> `String`). A null-aware access (`a?.b`) is never
-    /// proven — its result is nullable regardless of the member's own type.
-    fn is_non_nullable_string(&self, expr: &Expr) -> bool {
-        if matches!(
-            self.lt.of_expr(expr),
-            StaticType::String { nullable: false }
-        ) {
-            return true;
+    fn resolving(source: &str, check: impl FnOnce(&Program, &AnalyzeContext<'_>)) {
+        let program = parse(source).0;
+        let path = Path::new("test.dart");
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path,
+                program: &program,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let types = TypeIndex::from_program(&program);
+        let model = SemanticModel::new(path, &identities, Some(&types));
+        let signatures = SignatureIndex::from_program(&program, &model);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(path, source, &config)
+            .with_identities(&identities)
+            .with_types(&types)
+            .with_signatures(&signatures);
+        check(&program, &ctx);
+    }
+
+    #[test]
+    fn canonical_inference_preserves_numeric_and_string_joins() {
+        struct Probe(Vec<falcon_analyze::ResolvedType>);
+        impl SemanticRuleVisitor for Probe {
+            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+                if let Expr::Call { callee, args, .. } = node
+                    && matches!(callee.as_ref(), Expr::Ident(id) if id.name == "probe")
+                {
+                    self.0
+                        .extend(args.positional.iter().map(|expr| state.infer(expr)));
+                }
+            }
         }
-        let Some(index) = self.project else {
-            return false;
-        };
-        let member = match expr {
-            Expr::Call { callee, .. } => match callee.as_ref() {
-                Expr::Field {
-                    field,
-                    is_null_safe: false,
-                    ..
-                } => &field.name,
-                Expr::Ident(id) => &id.name,
-                _ => return false,
+        resolving(
+            "String text() => 'x'; void f(int x, num n, String b, String? maybe) {
+                probe(x + 1.0, x + 1, n + x, 'a' + b, text().toUpperCase(), maybe, maybe!);
+                var value = true; probe(value);
+                { var value = 1; probe(value); } probe(value);
+                probe(x as double, [1], {'a': 1}, x > 0, unknown);
+            }",
+            |program, ctx| {
+                let mut probe = Probe(Vec::new());
+                visit_program(
+                    &mut probe,
+                    program,
+                    SemanticState::new(program, ctx).unwrap(),
+                );
+                for (ty, name) in probe.0.iter().zip([
+                    "double", "int", "num", "String", "String", "String", "String", "bool", "int",
+                    "bool", "double", "List", "Map", "bool",
+                ]) {
+                    assert!(ty.interface("dart:core", name), "{ty:?} != {name}");
+                }
+                assert_eq!(probe.0.len(), 15);
+                assert!(probe.0[5].nullable());
+                assert!(!probe.0[6].nullable());
+                assert_eq!(probe.0[14], falcon_analyze::ResolvedType::Unknown);
             },
-            Expr::Field {
-                field,
-                is_null_safe: false,
-                ..
-            } => &field.name,
-            _ => return false,
-        };
-        matches!(
-            index.return_type(member),
-            StaticType::String { nullable: false }
-        )
+        );
     }
 
-    /// Walk a function/method/getter/setter/closure body whose signature bindings
-    /// already live in the current (innermost) scope.
-    fn walk_body(&mut self, body: &FunctionBody) {
-        match body {
-            FunctionBody::Block(b) => {
-                for s in &b.stmts {
-                    self.visit_stmt(s);
-                }
-            }
-            FunctionBody::Arrow(e, _) => self.visit_expr(e),
-            FunctionBody::Native(_, _) => {}
-        }
-    }
-}
-
-impl Visitor for Collector<'_> {
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
-        if let Some(params) = node.params() {
-            self.lt.bind_params(params);
-        }
-        if let Some(body) = &node.body {
-            self.walk_body(body);
-        }
-        self.lt = saved;
-    }
-
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
-        let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
-        self.lt.bind_params(&node.params);
-        if let Some(body) = &node.body {
-            self.walk_body(body);
-        }
-        self.lt = saved;
-    }
-
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
-        self.lt.bind_params(&node.params);
-        if let Some(body) = &node.body {
-            self.walk_body(body);
-        }
-        self.lt = saved;
-    }
-
-    fn visit_getter_decl(&mut self, node: &GetterDecl) {
-        let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
-        if let Some(body) = &node.body {
-            self.walk_body(body);
-        }
-        self.lt = saved;
-    }
-
-    fn visit_setter_decl(&mut self, node: &SetterDecl) {
-        let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
-        let ty = node
-            .param_type
-            .as_ref()
-            .map(StaticType::from_dart_type)
-            .unwrap_or(StaticType::Unknown);
-        self.lt.declare(node.param.name.clone(), ty);
-        if let Some(body) = &node.body {
-            self.walk_body(body);
-        }
-        self.lt = saved;
-    }
-
-    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
-        for d in &lv.declarators {
-            if let Some(init) = &d.initializer {
-                self.visit_expr(init);
-            }
-        }
-        self.lt.declare_local(lv);
-    }
-
-    fn visit_stmt(&mut self, node: &Stmt) {
-        match node {
-            Stmt::PatternDecl(pd) => {
-                self.visit_expr(&pd.init);
-                self.lt.bind_pattern(&pd.pattern);
-            }
-            Stmt::Block(b) => {
-                self.lt.push_scope();
-                for s in &b.stmts {
-                    self.visit_stmt(s);
-                }
-                self.lt.pop_scope();
-            }
-            Stmt::For(f) => {
-                self.lt.push_scope();
-                if let Some(init) = &f.init {
-                    if let ForInit::VarDecl(lv) = init {
-                        for d in &lv.declarators {
-                            if let Some(e) = &d.initializer {
-                                self.visit_expr(e);
-                            }
-                        }
-                    }
-                    self.lt.bind_for_init(init);
-                }
-                if let Some(cond) = &f.condition {
-                    self.visit_expr(cond);
-                }
-                for u in &f.update {
-                    self.visit_expr(u);
-                }
-                self.visit_stmt(&f.body);
-                self.lt.pop_scope();
-            }
-            Stmt::TryCatch(tc) => {
-                self.lt.push_scope();
-                for s in &tc.body.stmts {
-                    self.visit_stmt(s);
-                }
-                self.lt.pop_scope();
-                for catch in &tc.catches {
-                    self.lt.push_scope();
-                    self.lt.bind_catch(catch);
-                    for s in &catch.body.stmts {
-                        self.visit_stmt(s);
-                    }
-                    self.lt.pop_scope();
-                }
-                if let Some(fin) = &tc.finally {
-                    self.lt.push_scope();
-                    for s in &fin.stmts {
-                        self.visit_stmt(s);
-                    }
-                    self.lt.pop_scope();
-                }
-            }
-            _ => walk_stmt(self, node),
-        }
-    }
-
-    fn visit_expr(&mut self, node: &Expr) {
-        match node {
-            Expr::FuncExpr { params, body, .. } => {
-                self.lt.push_scope();
-                self.lt.bind_params(params);
-                self.walk_body(body);
-                self.lt.pop_scope();
-            }
-            Expr::Assign { target, value, .. } => {
-                self.visit_expr(target);
-                self.visit_expr(value);
-                // Track the reassignment so a later string sees the current type.
-                if let Expr::Ident(id) = target.as_ref() {
-                    let ty = self.lt.of_expr(value);
-                    self.lt.reassign(&id.name, ty);
-                }
-            }
-            _ => walk_expr(self, node),
-        }
-    }
-
-    fn visit_string_lit(&mut self, node: &StringLitNode) {
-        let Some(lit) = StringLitNode::delimiter(&node.raw) else {
-            return;
-        };
-        // The whole literal must be exactly one interpolation, and that
-        // interpolation must have parsed cleanly to a single expression.
-        if !lit.terminated
-            || lit.is_raw
-            || !is_whole_interpolation(lit.content)
-            || node.interpolations.len() != 1
-        {
-            return;
-        }
-        // Fire only when the interpolated expression is provably a non-nullable
-        // `String`; `String?` and unknown types are left alone.
-        if !self.is_non_nullable_string(&node.interpolations[0].expr) {
-            return;
-        }
-        self.diags.push(self.ctx.diagnostic(
-            "unnecessary-string-interpolations",
-            "Unnecessary string interpolation; use the expression directly.",
-            node.span,
-        ));
+    #[test]
+    fn interpolation_requires_nonnullable_canonical_string() {
+        resolving(
+            "void f(String text, String? maybe) {
+                print('$text'); print('${text.toUpperCase()}'); print('${'a' + text}');
+                print('$maybe'); print('${maybe?.toUpperCase()}'); print('$unknown');
+            }",
+            |program, ctx| {
+                assert_eq!(
+                    UnnecessaryStringInterpolations.analyze(program, ctx).len(),
+                    3
+                )
+            },
+        );
     }
 }

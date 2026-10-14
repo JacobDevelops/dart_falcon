@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel};
+use falcon_analyze::{AnalyzeContext, QualifiedName, Rule, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -229,16 +229,14 @@ fn canonical_library_annotation(annotation: &Annotation, ctx: &AnalyzeContext) -
         return false;
     };
     let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-    let segments = annotation
-        .name
-        .iter()
-        .map(|segment| segment.name.clone())
-        .collect::<Vec<_>>();
+    let Some(name) = QualifiedName::from_identifiers(&annotation.name) else {
+        return false;
+    };
     let annotation_type = model
-        .resolve_name(&segments)
-        .or_else(|| model.resolve_imported_member(&segments))
+        .resolve_name(name)
+        .or_else(|| model.resolve_imported_member(name))
         .or_else(|| {
-            let value = model.resolve_value(&segments)?;
+            let value = model.resolve_value(name)?;
             signatures.constant_type(&value).cloned()
         });
     annotation_type
@@ -286,17 +284,12 @@ fn late_trust_pragma(
     declared_names: &HashSet<String>,
     ctx: &AnalyzeContext,
 ) -> bool {
-    let segments = annotation
-        .name
-        .iter()
-        .map(|segment| segment.name.clone())
-        .collect::<Vec<_>>();
     let canonical = ctx.identities.is_some_and(|identities| {
-        matches!(
-            identities.resolve_sdk_member(ctx.file_path, &segments),
-            Some(DeclarationIdentity::Sdk { library, name })
-                if library == "dart:core" && name == "pragma"
-        )
+        QualifiedName::from_identifiers(&annotation.name)
+            .and_then(|name| {
+                SemanticModel::new(ctx.file_path, identities, ctx.types).resolve_sdk_member(name)
+            })
+            .is_some_and(|identity| identity.is_sdk("dart:core", "pragma"))
     });
     (canonical
         || (ctx.identities.is_none()

@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_annotation, walk_dart_type};
@@ -66,14 +66,14 @@ impl SemanticRuleVisitor for Usage {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         match node {
             Expr::Ident(identifier) if !state.environment.is_bound(&identifier.name) => {
-                let names = [identifier.name.clone()];
-                match state.model.resolve_imported_member(&names) {
+                let names = &identifier.name;
+                match state.model.resolve_imported_member(names) {
                     Some(identity) if framework_identity(&identity) => {
                         self.unprefixed.insert(identifier.name.clone());
                     }
-                    None if state.model.resolve_name(&names).is_none()
-                        && state.model.resolve_value(&names).is_none()
-                        && state.model.resolve_sdk_member(&names).is_none() =>
+                    None if state.model.resolve_name(names).is_none()
+                        && state.model.resolve_value(names).is_none()
+                        && state.model.resolve_sdk_member(names).is_none() =>
                     {
                         self.unknown.insert(identifier.name.clone());
                     }
@@ -84,8 +84,8 @@ impl SemanticRuleVisitor for Usage {
                 if let Expr::Ident(prefix) = object.as_ref()
                     && !state.environment.is_bound(&prefix.name)
                 {
-                    let names = [prefix.name.clone(), field.name.clone()];
-                    match state.model.resolve_imported_member(&names) {
+                    let names = QualifiedName::prefixed(&prefix.name, &field.name);
+                    match state.model.resolve_imported_member(names) {
                         Some(identity) if framework_identity(&identity) => {
                             self.prefixed
                                 .insert((prefix.name.clone(), field.name.clone()));
@@ -137,29 +137,32 @@ impl Visitor for TypeUsage<'_, '_> {
     }
 
     fn visit_annotation(&mut self, node: &Annotation) {
-        let segments = node
-            .name
-            .iter()
-            .map(|segment| segment.name.clone())
-            .collect::<Vec<_>>();
-        if let Some(identity) = self.model.resolve_imported_member(&segments)
+        if let Some(name) = QualifiedName::from_identifiers(&node.name)
+            && let Some(identity) = self.model.resolve_imported_member(name)
             && framework_identity(&identity)
         {
-            if let [name] = segments.as_slice() {
-                self.unprefixed.insert(name.clone());
-            } else if let [prefix, name] = segments.as_slice() {
-                self.prefixed.insert((prefix.clone(), name.clone()));
-            }
+            match name.prefix {
+                None => self.unprefixed.insert(name.name.to_string()),
+                Some(prefix) => self
+                    .prefixed
+                    .insert((prefix.to_string(), name.name.to_string())),
+            };
         }
         walk_annotation(self, node);
     }
 }
 
 fn framework_identity(identity: &DeclarationIdentity) -> bool {
-    matches!(identity,
-        DeclarationIdentity::Package { package, .. } if package == "flutter")
-        || matches!(identity,
-            DeclarationIdentity::Sdk { library, .. } if library == "dart:async")
+    matches!(
+        identity,
+        DeclarationIdentity::Package {
+            package: "flutter",
+            ..
+        } | DeclarationIdentity::Sdk {
+            library: "dart:async",
+            ..
+        }
+    )
 }
 
 fn import_targets_framework(import: &ImportDirective) -> bool {

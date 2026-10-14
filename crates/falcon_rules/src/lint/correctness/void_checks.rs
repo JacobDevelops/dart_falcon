@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedSignature, ResolvedType, Rule, TypeParameterId, TypeTruth,
+    AnalyzeContext, ResolvedSignature, ResolvedType, Rule, Truth, TypeParameterId,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
@@ -58,7 +58,7 @@ impl Collector<'_> {
                 if state
                     .model
                     .acceptable_for_void_context(return_type, &actual)
-                    == TypeTruth::No
+                    == Truth::No
                 {
                     self.diagnostics.push(self.ctx.diagnostic(
                         "void-checks",
@@ -74,7 +74,7 @@ impl Collector<'_> {
             return;
         }
         let actual = state.infer(value);
-        if state.model.acceptable_for_void_context(expected, &actual) == TypeTruth::No {
+        if state.model.acceptable_for_void_context(expected, &actual) == Truth::No {
             self.diagnostics.push(self.ctx.diagnostic(
                 "void-checks",
                 "This value is not valid for a generic type instantiated with void.",
@@ -131,7 +131,7 @@ impl Collector<'_> {
             }
             _ => return None,
         };
-        let identity = state.model.resolve_name(&segments)?;
+        let identity = state.model.resolve_dotted(&segments)?;
         Some(ResolvedType::Interface {
             identity,
             arguments: type_args
@@ -175,18 +175,14 @@ impl Collector<'_> {
     ) {
         match callee {
             Expr::Ident(identifier) if !state.environment.is_bound(&identifier.name) => {
-                if let Some(identity) = state
-                    .model
-                    .resolve_value(std::slice::from_ref(&identifier.name))
+                if let Some(identity) = state.model.resolve_value(&identifier.name)
                     && let Some(signature) = state.signatures.function(&identity).cloned()
                 {
                     let substitutions = self.substitutions(&signature, &[], type_args, state);
                     self.check_arguments(&signature, &substitutions, args, state);
                     return;
                 }
-                if let Some(identity) = state
-                    .model
-                    .resolve_name(std::slice::from_ref(&identifier.name))
+                if let Some(identity) = state.model.resolve_name(&identifier.name)
                     && let Some(signature) = state.signatures.constructor(&identity, "new").cloned()
                 {
                     let owner_arguments: Vec<_> = type_args
@@ -247,7 +243,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             && state
                 .model
                 .acceptable_for_void_context(return_type, &actual_return)
-                == TypeTruth::No
+                == Truth::No
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "void-checks",

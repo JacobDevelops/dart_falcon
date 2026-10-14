@@ -19,3 +19,14 @@ void resolvedNonNullableBooleans(bool flag) {
   final bool done = flag && ready;
   if (done == false) {} /* expect: no-boolean-literal-compare */
 }
+
+class Widget {
+  bool isEnabled = true;
+}
+
+bool checkStatus() => true;
+
+void resolvedMembersAndReturns(Widget foo) {
+  if (foo.isEnabled == true) {} /* expect: no-boolean-literal-compare */
+  if (checkStatus() == false) {} /* expect: no-boolean-literal-compare */
+}

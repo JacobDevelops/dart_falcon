@@ -16,8 +16,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::resolve::ProgramSource;
-use falcon_analyze::{CrossFileRule, LocalTypes, ProjectFile, ProjectIndex, StaticType};
+use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::{
+    AnalyzeContext, CrossFileRule, IdentityIndex, IdentitySource, LibrarySource, ProjectFile,
+    SignatureIndex, TypeIndex, group_libraries,
+};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::ast::*;
@@ -32,7 +35,7 @@ impl CrossFileRule for UnnecessaryNullable {
         NAME
     }
 
-    fn analyze_project(&self, files: &[ProjectFile], _config: &FalconConfig) -> Vec<Diagnostic> {
+    fn analyze_project(&self, files: &[ProjectFile], config: &FalconConfig) -> Vec<Diagnostic> {
         // Count every function/method by name project-wide so we only reason
         // about names that resolve to exactly one declaration.
         let mut decl_count: HashMap<String, usize> = HashMap::new();
@@ -45,22 +48,52 @@ impl CrossFileRule for UnnecessaryNullable {
             }
         }
 
-        // Cross-file return-type index, so a call/field argument whose declared
-        // return type is a known non-nullable type can be recognized as non-null
-        // (strengthening the literal-`null` matching below).
-        let sources: Vec<ProgramSource> = files
+        let project_files: Vec<_> = files
             .iter()
-            .map(|f| ProgramSource {
-                program: &f.program,
-                has_parse_errors: f.has_parse_errors,
+            .map(|file| (file.path.clone(), &file.program))
+            .collect();
+        let grouping = group_libraries(&project_files);
+        let types = TypeIndex::from_library_files(files.iter().enumerate().map(|(index, file)| {
+            LibrarySource {
+                program: &file.program,
+                has_parse_errors: file.has_parse_errors,
+                has_unresolved_parts: grouping.is_unresolved(index),
+            }
+        }));
+        let sources: Vec<_> = files
+            .iter()
+            .map(|file| IdentitySource {
+                path: &file.path,
+                program: &file.program,
+                has_parse_errors: file.has_parse_errors,
             })
             .collect();
-        let index = ProjectIndex::from_project_files(&sources);
-
-        // Gather every call site (and bare tear-off reference) across all files.
-        let mut collector = CallCollector::new(&index);
-        for f in files {
-            collector.visit_program(&f.program);
+        let identities = IdentityIndex::from_project_files(&sources, &[]);
+        let signatures = SignatureIndex::from_project_files(&project_files, &identities, &types);
+        let mut calls = Vec::new();
+        let mut tear_offs = HashSet::new();
+        for file in files {
+            let ctx = AnalyzeContext::new(&file.path, &file.source, config)
+                .with_types(&types)
+                .with_identities(&identities)
+                .with_signatures(&signatures);
+            let mut members = MemberBindings(HashSet::new());
+            members.visit_program(&file.program);
+            let mut nullability = ArgumentNullability {
+                values: HashMap::new(),
+                members: members.0,
+            };
+            let state = SemanticState::new(&file.program, &ctx)
+                .expect("project identities were built above");
+            visit_program(&mut nullability, &file.program, state);
+            let mut collector = CallCollector {
+                calls: Vec::new(),
+                tear_offs: HashSet::new(),
+                nullability: &nullability.values,
+            };
+            collector.visit_program(&file.program);
+            calls.extend(collector.calls);
+            tear_offs.extend(collector.tear_offs);
         }
 
         let mut diags = Vec::new();
@@ -73,14 +106,11 @@ impl CrossFileRule for UnnecessaryNullable {
                     continue; // ambiguous name — can't attribute call sites
                 }
                 // Used as a value (tear-off): callers are opaque, so bail.
-                if collector.tear_offs.contains(&target.name) {
+                if tear_offs.contains(&target.name) {
                     continue;
                 }
-                let calls: Vec<&CallInfo> = collector
-                    .calls
-                    .iter()
-                    .filter(|c| c.name == target.name)
-                    .collect();
+                let calls: Vec<&CallInfo> =
+                    calls.iter().filter(|c| c.name == target.name).collect();
                 if calls.is_empty() {
                     continue; // no evidence of how it's called
                 }
@@ -312,50 +342,22 @@ fn is_null_expr(e: &Expr) -> bool {
     matches!(e, Expr::NullLit { .. })
 }
 
-/// Whether an argument expression *might* be null. Literal `null` obviously is;
-/// beyond that an argument is proven non-null only when [`LocalTypes::of_expr`]
-/// infers a non-nullable type (literals, `new`, arithmetic, …) or the project
-/// index resolves the callee/getter to a known non-nullable return type.
-/// Everything else stays "maybe null" so the rule never flags a param that could
-/// legitimately receive null.
-fn arg_maybe_null(arg: &Expr, lt: &LocalTypes, index: &ProjectIndex) -> bool {
-    if is_null_expr(arg) {
-        return true;
-    }
-    if !lt.of_expr(arg).is_nullable() {
-        return false;
-    }
-    if let Some(name) = arg_return_name(arg) {
-        let rt = index.return_type(&name);
-        if rt != StaticType::Unknown && !rt.is_nullable() {
-            return false;
-        }
-    }
-    true
-}
-
-/// The name whose declared return type describes `arg`'s value: the callee of a
-/// call, or the accessed getter/field.
-fn arg_return_name(arg: &Expr) -> Option<String> {
-    match arg {
-        Expr::Call { callee, .. } => callee_name(callee),
-        Expr::Field { field, .. } => Some(field.name.clone()),
-        _ => None,
-    }
-}
-
-fn call_info(name: String, args: &ArgList, lt: &LocalTypes, index: &ProjectIndex) -> CallInfo {
+fn call_info(name: String, args: &ArgList, collector: &CallCollector<'_>) -> CallInfo {
+    let maybe_null = |arg: &Expr| {
+        let span = arg.span();
+        collector
+            .nullability
+            .get(&(span.start, span.end))
+            .copied()
+            .unwrap_or(true)
+    };
     CallInfo {
         name,
-        positional_maybe_null: args
-            .positional
-            .iter()
-            .map(|a| arg_maybe_null(a, lt, index))
-            .collect(),
+        positional_maybe_null: args.positional.iter().map(maybe_null).collect(),
         named_maybe_null: args
             .named
             .iter()
-            .map(|a| (a.name.name.clone(), arg_maybe_null(&a.value, lt, index)))
+            .map(|arg| (arg.name.name.clone(), maybe_null(&arg.value)))
             .collect(),
     }
 }
@@ -372,20 +374,99 @@ struct CallCollector<'a> {
     calls: Vec<CallInfo>,
     /// Names used as bare values (tear-offs), not as a call callee.
     tear_offs: HashSet<String>,
-    index: &'a ProjectIndex,
-    /// A file-local scope tracker with no bindings: it resolves the structurally
-    /// non-null argument forms (literals, `new`, arithmetic) without full scope
-    /// tracking, which is all the null-flow heuristic needs.
-    lt: LocalTypes,
+    nullability: &'a HashMap<(usize, usize), bool>,
 }
 
-impl<'a> CallCollector<'a> {
-    fn new(index: &'a ProjectIndex) -> Self {
-        Self {
-            calls: Vec::new(),
-            tear_offs: HashSet::new(),
-            index,
-            lt: LocalTypes::new(),
+struct ArgumentNullability {
+    values: HashMap<(usize, usize), bool>,
+    members: HashSet<String>,
+}
+
+impl ArgumentNullability {
+    fn record(&mut self, args: &ArgList, state: &SemanticState<'_>) {
+        for arg in args
+            .positional
+            .iter()
+            .chain(args.named.iter().map(|arg| &arg.value))
+        {
+            let span = arg.span();
+            let mut shadow = MemberReference {
+                names: &self.members,
+                found: false,
+            };
+            if state.enclosing_type.is_some() && !self.members.is_empty() {
+                shadow.visit_expr(arg);
+            }
+            self.values.insert(
+                (span.start, span.end),
+                shadow.found || state.infer(arg).nullable(),
+            );
+        }
+    }
+}
+
+struct MemberBindings(HashSet<String>);
+
+impl Visitor for MemberBindings {
+    fn visit_class_member(&mut self, member: &ClassMember) {
+        match member {
+            ClassMember::Method(method) => {
+                self.0.insert(method.name.name.clone());
+            }
+            ClassMember::Getter(getter) => {
+                self.0.insert(getter.name.name.clone());
+            }
+            ClassMember::Setter(setter) => {
+                self.0.insert(setter.name.name.clone());
+            }
+            ClassMember::Field(field) => {
+                self.0.extend(
+                    field
+                        .declarators
+                        .iter()
+                        .map(|declarator| declarator.name.name.clone()),
+                );
+            }
+            _ => {}
+        }
+        falcon_syntax::visitor::walk_class_member(self, member);
+    }
+}
+
+struct MemberReference<'a> {
+    names: &'a HashSet<String>,
+    found: bool,
+}
+
+impl Visitor for MemberReference<'_> {
+    fn visit_expr(&mut self, expr: &Expr) {
+        if self.found {
+            return;
+        }
+        if let Expr::Ident(identifier) = expr
+            && self.names.contains(&identifier.name)
+        {
+            self.found = true;
+        } else {
+            walk_expr(self, expr);
+        }
+    }
+}
+
+impl SemanticRuleVisitor for ArgumentNullability {
+    fn visit_expr(&mut self, expr: &Expr, state: &SemanticState<'_>) {
+        match expr {
+            Expr::Call { args, .. } => self.record(args, state),
+            Expr::Cascade { sections, .. } => {
+                for section in sections {
+                    for op in &section.ops {
+                        if let CascadeOp::Call(_, _, args) = op {
+                            self.record(args, state);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -395,7 +476,7 @@ impl Visitor for CallCollector<'_> {
         match node {
             Expr::Call { callee, args, .. } => {
                 if let Some(name) = callee_name(callee) {
-                    self.calls.push(call_info(name, args, &self.lt, self.index));
+                    self.calls.push(call_info(name, args, self));
                 }
                 // Recurse into the callee's receiver (but not the callee name
                 // itself) and the arguments.
@@ -419,12 +500,7 @@ impl Visitor for CallCollector<'_> {
                     for op in &section.ops {
                         match op {
                             CascadeOp::Call(ident, _, args) => {
-                                self.calls.push(call_info(
-                                    ident.name.clone(),
-                                    args,
-                                    &self.lt,
-                                    self.index,
-                                ));
+                                self.calls.push(call_info(ident.name.clone(), args, self));
                                 for a in &args.positional {
                                     self.visit_expr(a);
                                 }
@@ -491,5 +567,63 @@ impl Visitor for NullAssignFinder {
             self.names.insert(id.name.clone());
         }
         walk_expr(self, node);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_dart_parser::parse;
+
+    fn count(source: &str) -> usize {
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        UnnecessaryNullable
+            .analyze_project(
+                &[ProjectFile {
+                    path: "test.dart".into(),
+                    source: source.into(),
+                    program,
+                    has_parse_errors: false,
+                }],
+                &FalconConfig::default(),
+            )
+            .len()
+    }
+
+    #[test]
+    fn known_return_proves_nonnull_but_local_shadow_does_not() {
+        assert_eq!(
+            count("int value() => 1; void _take(int? x) {} void f() { _take(value()); }"),
+            1
+        );
+        assert_eq!(
+            count(
+                "int value() => 1; void _take(int? x) {} void f(int? Function() value) { _take(value()); }"
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                "int value() => 1; void _take(int? x) {} void f() { int? value() => null; _take(value()); }"
+            ),
+            0
+        );
+        assert_eq!(
+            count("void _take(int? x) {} void f(int? x) { _take(x); }"),
+            0
+        );
+        assert_eq!(
+            count(
+                "int value() => 1; void _take(int? x) {} class C { int? Function() get value => () => null; void f() { _take(value()); } }"
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                "int value() => 1; void _take(int? x) {} void f() { for (final value in <int? Function()>[() => null]) { _take(value()); } }"
+            ),
+            0
+        );
     }
 }

@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, Rule, SemanticModel, SignatureIndex, TypeIndex,
+    AnalyzeContext, DeclarationIdentity, Rule, SemanticModel, SignatureIndex, Truth, TypeIndex,
     evaluate_constant,
 };
 use falcon_diagnostics::Diagnostic;
@@ -27,13 +27,16 @@ impl Rule for PreferConstConstructorsInImmutables {
             let TopLevelDecl::Class(class) = decl else {
                 continue;
             };
-            let Some(owner) = model.resolve_name(std::slice::from_ref(&class.name.name)) else {
+            let Some(owner) = model.resolve_name(&class.name.name) else {
                 continue;
             };
-            let immutable = ctx
-                .types
-                .and_then(|types| types.is_immutable_type(&class.name.name))
-                .unwrap_or_else(|| is_immutable(&class.annotations, program));
+            let immutable = ctx.types.map_or(Truth::Unknown, |types| {
+                types.is_immutable_type(&class.name.name)
+            });
+            let immutable = match immutable {
+                Truth::Unknown => is_immutable(&class.annotations, program),
+                known => known == Truth::Yes,
+            };
             if !immutable || !class_fields_allow_const(class, &owner, &model, signatures) {
                 continue;
             }
@@ -186,7 +189,7 @@ fn constructor_can_be_const(
             types.constructor_is_const(
                 &type_name,
                 redirect.constructor_name.as_ref().map(|n| n.name.as_str()),
-            ) == Some(true)
+            ) == Truth::Yes
         });
     }
     if !empty_body(constructor.body.as_ref()) {
@@ -204,7 +207,7 @@ fn constructor_can_be_const(
             })
     {
         return types.is_some_and(|types| {
-            types.constructor_is_const(&class.name.name, target) == Some(true)
+            types.constructor_is_const(&class.name.name, target) == Truth::Yes
         });
     }
     let allowed = constructor
@@ -263,7 +266,7 @@ fn constructor_can_be_const(
         .and_then(type_name)
         .unwrap_or_else(|| "Object".to_string());
     types.is_none_or(|types| {
-        types.constructor_is_const(&super_name, super_call.flatten()) == Some(true)
+        types.constructor_is_const(&super_name, super_call.flatten()) == Truth::Yes
     })
 }
 
@@ -366,8 +369,14 @@ impl Visitor for PotentiallyConstant<'_, '_> {
             return;
         }
         if !matches!(node, Expr::Call { .. } | Expr::New { .. })
-            && evaluate_constant(node, self.owner, self.fields, self.model, self.signatures)
-                .is_some()
+            && evaluate_constant(
+                node,
+                Some(self.owner),
+                self.fields,
+                self.model,
+                self.signatures,
+            )
+            .is_some()
         {
             return;
         }
@@ -381,7 +390,7 @@ impl Visitor for PotentiallyConstant<'_, '_> {
                 self.valid = self.allowed.contains(&identifier.name)
                     || evaluate_constant(
                         node,
-                        self.owner,
+                        Some(self.owner),
                         self.fields,
                         self.model,
                         self.signatures,
@@ -438,13 +447,13 @@ fn const_constructor(
     let Some(mut segments) = expression_segments(callee) else {
         return false;
     };
-    let (identity, constructor) = if let Some(identity) = model.resolve_name(&segments) {
+    let (identity, constructor) = if let Some(identity) = model.resolve_dotted(&segments) {
         (identity, "new".to_string())
     } else {
         let Some(constructor) = segments.pop() else {
             return false;
         };
-        let Some(identity) = model.resolve_name(&segments) else {
+        let Some(identity) = model.resolve_dotted(&segments) else {
             return false;
         };
         (identity, constructor)

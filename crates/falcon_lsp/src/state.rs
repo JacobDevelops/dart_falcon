@@ -12,9 +12,8 @@ use lsp_types::Uri;
 
 use falcon_analyze::{
     AnalyzeContext, CrossFileRuleRegistry, IdentityIndex, IdentitySource, LibraryGrouping,
-    LibrarySource, PackageIdentity, ProgramSource, ProjectFile, ProjectIndex, RuleRegistry,
-    SignatureIndex, TypeIndex, canonical_or_lexical, group_libraries, library_unit,
-    syntax_error_diagnostics,
+    LibrarySource, PackageIdentity, ProjectFile, RuleRegistry, SignatureIndex, TypeIndex,
+    canonical_or_lexical, group_libraries, import_path, library_unit, syntax_error_diagnostics,
 };
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::parse;
@@ -64,7 +63,6 @@ pub struct DocumentState {
 /// same facts instead of walking, parsing, and indexing the workspace repeatedly.
 struct SemanticSnapshot {
     files: Vec<ProjectFile>,
-    project: ProjectIndex,
     types: TypeIndex,
     identities: IdentityIndex,
     signatures: SignatureIndex,
@@ -290,7 +288,6 @@ impl LspState {
                 .collect::<Vec<_>>();
             library = library_unit(&snapshot.grouping, &programs, file_index);
             ctx = ctx
-                .with_project(&snapshot.project)
                 .with_types(&snapshot.types)
                 .with_identities(&snapshot.identities)
                 .with_signatures(&snapshot.signatures)
@@ -455,14 +452,6 @@ impl LspState {
             return;
         }
         let files = self.collect_project_files(ProjectView::Semantic);
-        let program_sources = files
-            .iter()
-            .map(|file| ProgramSource {
-                program: &file.program,
-                has_parse_errors: file.has_parse_errors,
-            })
-            .collect::<Vec<_>>();
-        let project = ProjectIndex::from_project_files(&program_sources);
         let semantic_files = files
             .iter()
             .map(|file| (file.path.clone(), &file.program))
@@ -500,7 +489,6 @@ impl LspState {
         );
         self.semantic_snapshot = Some(SemanticSnapshot {
             files,
-            project,
             types,
             identities,
             signatures,
@@ -659,29 +647,7 @@ fn resolve_dependency(
     by_path: &HashMap<PathBuf, usize>,
     packages: &[PackageIdentity],
 ) -> Option<usize> {
-    if uri.starts_with("dart:") {
-        return None;
-    }
-    if let Some(rest) = uri.strip_prefix("package:") {
-        let (package_name, subpath) = rest.split_once('/')?;
-        let mut matches = packages
-            .iter()
-            .filter(|package| package.name == package_name);
-        let package = matches.next()?;
-        if matches.next().is_some() {
-            return None;
-        }
-        let lib_root = canonical_or_lexical(&package.lib_root);
-        let target = canonical_or_lexical(&lib_root.join(subpath));
-        return target
-            .starts_with(&lib_root)
-            .then(|| by_path.get(&target).copied())
-            .flatten();
-    }
-    let parent = from.parent().unwrap_or_else(|| Path::new(""));
-    by_path
-        .get(&canonical_or_lexical(&parent.join(uri)))
-        .copied()
+    by_path.get(&import_path(from, uri, packages)?).copied()
 }
 
 /// The directory the cross-file pass walks: the config file's parent, else the

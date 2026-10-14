@@ -1,6 +1,6 @@
 //! Reject equality checks between types proven to be unrelated.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, TypeTruth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -48,7 +48,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             if state
                 .signatures
                 .unrelated(&left_type, &right_type, &state.model)
-                == TypeTruth::Yes
+                == Truth::Yes
             {
                 self.diagnostics.push(self.ctx.diagnostic(
                     "unrelated-type-equality-checks",
@@ -77,7 +77,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             if state
                 .signatures
                 .unrelated(matched, &value_type, &state.model)
-                == TypeTruth::Yes
+                == Truth::Yes
             {
                 self.diagnostics.push(self.ctx.diagnostic(
                     "unrelated-type-equality-checks",

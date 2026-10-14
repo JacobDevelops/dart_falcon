@@ -1,6 +1,8 @@
 //! Flags instance fields that redeclare inherited concrete fields.
 
-use falcon_analyze::{AnalyzeContext, IdentityIndex, Rule, SemanticMemberKind, SignatureIndex};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, MemberKind, Rule, SemanticModel, SignatureIndex,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -15,45 +17,41 @@ impl Rule for OverriddenFields {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
         };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
         for decl in &program.declarations {
             match decl {
                 TopLevelDecl::Class(node) => check_members(
-                    &node.name.name,
+                    model.resolve_name(&node.name.name),
                     &node.members,
-                    identities,
                     signatures,
                     ctx,
                     &mut diags,
                 ),
                 TopLevelDecl::Mixin(node) => check_members(
-                    &node.name.name,
+                    model.resolve_name(&node.name.name),
                     &node.members,
-                    identities,
                     signatures,
                     ctx,
                     &mut diags,
                 ),
                 TopLevelDecl::MixinClass(node) => check_members(
-                    &node.name.name,
+                    model.resolve_name(&node.name.name),
                     &node.members,
-                    identities,
                     signatures,
                     ctx,
                     &mut diags,
                 ),
                 TopLevelDecl::Enum(node) => check_members(
-                    &node.name.name,
+                    model.resolve_name(&node.name.name),
                     &node.members,
-                    identities,
                     signatures,
                     ctx,
                     &mut diags,
                 ),
                 TopLevelDecl::ExtensionType(node) => check_members(
-                    &node.name.name,
+                    model.resolve_name(&node.name.name),
                     &node.members,
-                    identities,
                     signatures,
                     ctx,
                     &mut diags,
@@ -71,15 +69,13 @@ impl Rule for OverriddenFields {
 }
 
 fn check_members(
-    type_name: &str,
+    owner: Option<DeclarationIdentity>,
     members: &[ClassMember],
-    identities: &IdentityIndex,
     signatures: &SignatureIndex,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let Some(owner) = identities.resolve_declaration(ctx.file_path, &[type_name.to_string()])
-    else {
+    let Some(owner) = owner else {
         return;
     };
     for field in members.iter().filter_map(|member| match member {
@@ -97,9 +93,13 @@ fn check_members(
                 .inherited_member_facts(&owner, &declarator.name.name)
                 .is_some_and(|facts| {
                     facts.iter().any(|fact| {
-                        fact.kind == SemanticMemberKind::Field
-                            && !fact.is_abstract
-                            && !fact.is_covariant
+                        matches!(
+                            fact.kind,
+                            MemberKind::Field {
+                                covariant: false,
+                                ..
+                            }
+                        ) && !fact.is_abstract
                     })
                 });
             if inherited_field {

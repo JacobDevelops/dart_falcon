@@ -74,15 +74,15 @@ fn construction<'a>(
             let constructor = constructor_name
                 .as_ref()
                 .map_or_else(|| "new".to_string(), |name| name.name.clone());
-            Some((model.resolve_name(&segments)?, constructor, args))
+            Some((model.resolve_dotted(&segments)?, constructor, args))
         }
         Expr::Call { callee, args, .. } => {
             let mut segments = expression_segments(callee)?;
-            if let Some(identity) = model.resolve_name(&segments) {
+            if let Some(identity) = model.resolve_dotted(&segments) {
                 return Some((identity, "new".to_string(), args));
             }
             let constructor = segments.pop()?;
-            Some((model.resolve_name(&segments)?, constructor, args))
+            Some((model.resolve_dotted(&segments)?, constructor, args))
         }
         _ => None,
     }
@@ -108,12 +108,7 @@ fn expression_segments(expression: &Expr) -> Option<Vec<String>> {
 }
 
 fn is_color(identity: &DeclarationIdentity) -> bool {
-    matches!(identity,
-        DeclarationIdentity::Sdk { library, name }
-            if library == "dart:ui" && name == "Color")
-        || matches!(identity,
-            DeclarationIdentity::Package { package, name }
-                if package == "flutter" && name == "Color")
+    identity.is_sdk("dart:ui", "Color") || identity.is_package("flutter", "Color")
 }
 
 fn is_full_hex(value: &str) -> bool {

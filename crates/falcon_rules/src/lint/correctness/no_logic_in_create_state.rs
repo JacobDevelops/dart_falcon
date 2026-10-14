@@ -6,8 +6,7 @@
 //! constructor identity is not guessed from a name suffix.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
-    TypeTruth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -31,11 +30,11 @@ impl Rule for NoLogicInCreateState {
             let TopLevelDecl::Class(class) = declaration else {
                 continue;
             };
-            let Some(identity) = model.resolve_name(std::slice::from_ref(&class.name.name)) else {
+            let Some(identity) = model.resolve_name(&class.name.name) else {
                 continue;
             };
             if signatures.is_subtype_of(&interface(identity), &stateful_widget, &model)
-                != TypeTruth::Yes
+                != Truth::Yes
             {
                 continue;
             }
@@ -50,7 +49,7 @@ impl Rule for NoLogicInCreateState {
                     continue;
                 };
                 if signatures.is_subtype_of(&model.resolve_type(return_type), &state, &model)
-                    != TypeTruth::Yes
+                    != Truth::Yes
                 {
                     continue;
                 }
@@ -105,12 +104,10 @@ fn body_result(
         };
     };
     match signatures.is_subtype_of(&constructed, state, model) {
-        TypeTruth::Yes if args.positional.is_empty() && args.named.is_empty() => {
-            BodyResult::Trivial
-        }
-        TypeTruth::Yes => BodyResult::Violation,
-        TypeTruth::No => BodyResult::Violation,
-        TypeTruth::Unknown => BodyResult::Unknown,
+        Truth::Yes if args.positional.is_empty() && args.named.is_empty() => BodyResult::Trivial,
+        Truth::Yes => BodyResult::Violation,
+        Truth::No => BodyResult::Violation,
+        Truth::Unknown => BodyResult::Unknown,
     }
 }
 
@@ -124,9 +121,9 @@ fn construction<'a>(
         } => Some((model.resolve_type(dart_type).with_nullable(false), args)),
         Expr::Call { callee, args, .. } => {
             let mut segments = expression_segments(callee)?;
-            let identity = model.resolve_name(&segments).or_else(|| {
+            let identity = model.resolve_dotted(&segments).or_else(|| {
                 segments.pop();
-                model.resolve_name(&segments)
+                model.resolve_dotted(&segments)
             })?;
             Some((interface(identity), args))
         }
@@ -167,9 +164,9 @@ fn interface(identity: DeclarationIdentity) -> ResolvedType {
     }
 }
 
-fn flutter_identity(name: &str) -> DeclarationIdentity {
+fn flutter_identity(name: &'static str) -> DeclarationIdentity {
     DeclarationIdentity::Package {
-        package: "flutter".to_string(),
-        name: name.to_string(),
+        package: "flutter",
+        name,
     }
 }

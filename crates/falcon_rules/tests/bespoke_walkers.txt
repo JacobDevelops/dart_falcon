@@ -4,14 +4,6 @@
 # infrastructure. The detector sees their catch-all arms, but those arms
 # delegate to walk_expr rather than swallowing the node, so they cannot go
 # blind and are pinned here permanently rather than awaiting migration.
-# Same exception, same reason, for the four suspicious-rule entries below:
-# avoid_ignoring_return_values, avoid_passing_async_when_sync_expected and
-# avoid_print implement falcon_syntax::visitor::Visitor and their visit_stmt
-# catch-alls are `_ => walk_stmt(self, node)`, so an unhandled variant recurses
-# through the shared exhaustive walker instead of stopping. They only override
-# the arms that open a lexical scope. avoid_ignoring_return_values::signature is
-# not a walker at all — the textual scan matches `substitute_signature(` as a
-# self-recursive call.
 cross_file/unnecessary_nullable.rs::visit_expr
 lint/complexity/avoid_nested_if.rs::count_ifs_including
 lint/complexity/avoid_nested_if.rs::walk
@@ -28,31 +20,19 @@ lint/correctness/use_once_constructors_once_provider.rs::scan_stmt
 lint/correctness/valid_regexps.rs::expression_segments
 lint/lexical_usage.rs::visit_expr
 lint/semantic_scope.rs::visit_expr
-lint/semantic_type_operations.rs::visit_stmt
 lint/style/binary_expression_operand_order.rs::scan_expr
 lint/style/binary_expression_operand_order.rs::scan_stmt
 lint/style/boolean_prefixes.rs::scan_stmt
 lint/style/newline_before_return.rs::scan_stmt
 lint/style/no_magic_number.rs::root_name
 lint/style/prefer_collection_literals.rs::collect_stmt_returns
-lint/style/prefer_is_empty.rs::visit_expr
-lint/style/prefer_is_empty.rs::visit_stmt
-lint/style/prefer_is_not_empty.rs::visit_expr
-lint/style/prefer_is_not_empty.rs::visit_stmt
 lint/style/prefer_iterable_of.rs::base_type_name
-lint/style/prefer_iterable_where_type.rs::visit_expr
-lint/style/prefer_iterable_where_type.rs::visit_stmt
-lint/style/unnecessary_string_interpolations.rs::visit_expr
-lint/style/unnecessary_string_interpolations.rs::visit_stmt
 lint/style/unnecessary_this.rs::visit_stmt
 lint/style/use_design_system_item.rs::callee_base_name
 lint/style/use_design_system_item.rs::scan_expr
 lint/style/use_design_system_item.rs::scan_stmt
 lint/style/use_spacer_as_expanded_child.rs::scan_expr
 lint/style/use_spacer_as_expanded_child.rs::scan_stmt
-lint/suspicious/avoid_ignoring_return_values.rs::signature
-lint/suspicious/avoid_ignoring_return_values.rs::visit_stmt
-lint/suspicious/avoid_passing_async_when_sync_expected.rs::visit_stmt
 lint/suspicious/avoid_print.rs::visit_stmt
 lint/suspicious/empty_catches.rs::walk_expr
 lint/suspicious/empty_catches.rs::walk_stmt

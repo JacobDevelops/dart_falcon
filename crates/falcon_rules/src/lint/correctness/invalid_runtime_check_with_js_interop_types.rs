@@ -2,14 +2,13 @@
 
 use std::collections::HashSet;
 
+use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
-    TypeEnvironment, TypeParameterScope, TypeTruth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt, walk_top_level_decl};
 
 pub struct InvalidRuntimeCheckWithJsInteropTypes;
 
@@ -19,19 +18,15 @@ impl Rule for InvalidRuntimeCheckWithJsInteropTypes {
     }
 
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
+        let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
         };
-        let mut collector = Collector {
-            diagnostics: Vec::new(),
+        let mut visitor = RuntimeChecks {
             ctx,
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
-            signatures,
-            environment: TypeEnvironment::new(),
-            type_parameters: TypeParameterScope::default(),
+            diagnostics: Vec::new(),
         };
-        collector.visit_program(program);
-        collector.diagnostics
+        visit_program(&mut visitor, program, state);
+        visitor.diagnostics
     }
 }
 
@@ -50,12 +45,10 @@ enum Interop {
 }
 
 struct Collector<'a> {
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: &'a mut Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    model: SemanticModel<'a>,
+    model: &'a SemanticModel<'a>,
     signatures: &'a SignatureIndex,
-    environment: TypeEnvironment,
-    type_parameters: TypeParameterScope,
 }
 
 impl Collector<'_> {
@@ -80,9 +73,13 @@ impl Collector<'_> {
                 extension_type,
                 ..
             } => {
-                if is_js_sdk(identity) {
+                if let DeclarationIdentity::Sdk {
+                    library: "dart:js_interop",
+                    name,
+                } = identity
+                {
                     return Normalized {
-                        ty: js_type(identity_name(identity)),
+                        ty: js_type(name),
                         interop: Interop::Sdk,
                     };
                 }
@@ -285,8 +282,7 @@ impl Collector<'_> {
             return true;
         }
         if let ResolvedType::Interface { identity, .. } = right
-            && matches!(identity, DeclarationIdentity::Sdk { library, name }
-                if library == "dart:core" && name == "Object")
+            && *identity == DeclarationIdentity::OBJECT
         {
             return true;
         }
@@ -314,8 +310,8 @@ impl Collector<'_> {
                     return true;
                 }
                 self.signatures
-                    .is_subtype_of(left, right_identity, &self.model)
-                    == TypeTruth::Yes
+                    .is_subtype_of(left, right_identity, self.model)
+                    == Truth::Yes
             }
             (ResolvedType::Null, ResolvedType::Null) => true,
             (ResolvedType::Void, ResolvedType::Void) => true,
@@ -340,8 +336,8 @@ impl Collector<'_> {
                 left_identity == right_identity
                     || self
                         .signatures
-                        .is_subtype_of(left, right_identity, &self.model)
-                        == TypeTruth::Yes
+                        .is_subtype_of(left, right_identity, self.model)
+                        == Truth::Yes
             }
             (ResolvedType::TypeParameter { bound, .. }, right) => {
                 self.original_subtype(bound, right)
@@ -350,15 +346,8 @@ impl Collector<'_> {
         }
     }
 
-    fn check(&mut self, expression: &Expr, target: &DartType, span: &Span, is_check: bool) {
-        let source = self.environment.infer_with_signatures(
-            expression,
-            &self.model,
-            self.signatures,
-            &self.type_parameters,
-        );
-        let target = self.model.resolve_type_in(target, &self.type_parameters);
-        if self.invalid_test(&source, &target, is_check) {
+    fn check(&mut self, source: &ResolvedType, target: &ResolvedType, span: &Span, is_check: bool) {
+        if self.invalid_test(source, target, is_check) {
             self.diagnostics.push(self.ctx.diagnostic(
                 "invalid-runtime-check-with-js-interop-types",
                 if is_check {
@@ -370,154 +359,70 @@ impl Collector<'_> {
             ));
         }
     }
-
-    fn function(&mut self, params: Option<&FormalParamList>, body: Option<&FunctionBody>) {
-        let saved = std::mem::replace(&mut self.environment, TypeEnvironment::new());
-        if let Some(params) = params {
-            self.environment
-                .bind_params(params, &self.model, &self.type_parameters);
-        }
-        if let Some(body) = body {
-            match body {
-                FunctionBody::Block(block) => block
-                    .stmts
-                    .iter()
-                    .for_each(|stmt| visit_statement(self, stmt)),
-                FunctionBody::Arrow(expression, _) => self.visit_expr(expression),
-                FunctionBody::Native(_, _) => {}
-            }
-        }
-        self.environment = saved;
-    }
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        let Some(type_params) = declaration_type_params(node) else {
-            walk_top_level_decl(self, node);
-            return;
-        };
-        self.type_parameters.push(type_params, &self.model);
-        walk_top_level_decl(self, node);
-        self.type_parameters.pop();
-    }
+struct RuntimeChecks<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    diagnostics: Vec<Diagnostic>,
+}
 
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.type_parameters.push(&node.type_params, &self.model);
-        self.function(node.params(), node.body.as_ref());
-        self.type_parameters.pop();
-    }
-
-    fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.type_parameters.push(&node.type_params, &self.model);
-        self.function(Some(&node.params), node.body.as_ref());
-        self.type_parameters.pop();
-    }
-
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.function(Some(&node.params), node.body.as_ref());
-    }
-
-    fn visit_expr(&mut self, node: &Expr) {
-        match node {
+impl SemanticRuleVisitor for RuntimeChecks<'_> {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        let (expr, target, span, is_check) = match node {
             Expr::Is {
                 expr,
                 dart_type,
                 span,
                 ..
-            } => self.check(expr, dart_type, span, true),
+            } => (expr, dart_type, span, true),
             Expr::As {
                 expr,
                 dart_type,
                 span,
-            } => self.check(expr, dart_type, span, false),
-            _ => {}
-        }
-        walk_expr(self, node);
+            } => (expr, dart_type, span, false),
+            _ => return,
+        };
+        let mut checker = Collector {
+            diagnostics: &mut self.diagnostics,
+            ctx: self.ctx,
+            model: &state.model,
+            signatures: &state.signatures,
+        };
+        checker.check(
+            &state.infer(expr),
+            &state.model.resolve_type_in(target, &state.type_parameters),
+            span,
+            is_check,
+        );
     }
 
-    fn visit_local_var(&mut self, declaration: &LocalVarDecl) {
-        falcon_syntax::visitor::walk_local_var(self, declaration);
-        let ty = declaration
-            .var_type
-            .as_ref()
-            .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
-            .unwrap_or(ResolvedType::Unknown);
-        for declarator in &declaration.declarators {
-            self.environment
-                .declare(declarator.name.name.clone(), ty.clone());
+    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+        let Stmt::TryCatch(statement) = node else {
+            return;
+        };
+        let checker = Collector {
+            diagnostics: &mut self.diagnostics,
+            ctx: self.ctx,
+            model: &state.model,
+            signatures: &state.signatures,
+        };
+        for catch in &statement.catches {
+            if let Some(exception_type) = &catch.exception_type {
+                let ty = state
+                    .model
+                    .resolve_type_in(exception_type, &state.type_parameters);
+                if !matches!(
+                    checker.normalize(&ty).interop,
+                    Interop::None | Interop::Unknown
+                ) {
+                    checker.diagnostics.push(checker.ctx.diagnostic(
+                        "invalid-runtime-check-with-js-interop-types",
+                        "JS interop types cannot be used as catch types.",
+                        catch.span,
+                    ));
+                }
+            }
         }
-    }
-
-    fn visit_stmt(&mut self, node: &Stmt) {
-        match node {
-            Stmt::Block(block) => {
-                self.environment.push_scope();
-                for statement in &block.stmts {
-                    visit_statement(self, statement);
-                }
-                self.environment.pop_scope();
-            }
-            Stmt::TryCatch(statement) => {
-                for body_statement in &statement.body.stmts {
-                    visit_statement(self, body_statement);
-                }
-                for catch in &statement.catches {
-                    if let Some(exception_type) = &catch.exception_type {
-                        let ty = self
-                            .model
-                            .resolve_type_in(exception_type, &self.type_parameters);
-                        if !matches!(
-                            self.normalize(&ty).interop,
-                            Interop::None | Interop::Unknown
-                        ) {
-                            self.diagnostics.push(self.ctx.diagnostic(
-                                "invalid-runtime-check-with-js-interop-types",
-                                "JS interop types cannot be used as catch types.",
-                                catch.span,
-                            ));
-                        }
-                    }
-                    self.environment.push_scope();
-                    if let Some(exception) = &catch.exception_var {
-                        let ty = catch
-                            .exception_type
-                            .as_ref()
-                            .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
-                            .unwrap_or(ResolvedType::Dynamic);
-                        self.environment.declare(exception.name.clone(), ty);
-                    }
-                    for catch_statement in &catch.body.stmts {
-                        visit_statement(self, catch_statement);
-                    }
-                    self.environment.pop_scope();
-                }
-                if let Some(finally) = &statement.finally {
-                    for finally_statement in &finally.stmts {
-                        visit_statement(self, finally_statement);
-                    }
-                }
-            }
-            Stmt::LocalFunc(function) => {
-                self.type_parameters
-                    .push(&function.type_params, &self.model);
-                self.function(Some(&function.params), Some(&function.body));
-                self.type_parameters.pop();
-            }
-            _ => walk_stmt(self, node),
-        }
-    }
-}
-
-fn declaration_type_params(node: &TopLevelDecl) -> Option<&[TypeParam]> {
-    match node {
-        TopLevelDecl::Class(declaration) => Some(&declaration.type_params),
-        TopLevelDecl::Mixin(declaration) => Some(&declaration.type_params),
-        TopLevelDecl::MixinClass(declaration) => Some(&declaration.type_params),
-        TopLevelDecl::Enum(declaration) => Some(&declaration.type_params),
-        TopLevelDecl::Extension(declaration) => Some(&declaration.type_params),
-        TopLevelDecl::ExtensionType(declaration) => Some(&declaration.type_params),
-        _ => None,
     }
 }
 
@@ -550,17 +455,16 @@ fn named_invalid(
 }
 
 fn has_annotation(annotations: &[DeclarationIdentity], name: &str) -> bool {
-    annotations.iter().any(|annotation| {
-        matches!(annotation, DeclarationIdentity::Sdk { library, name: found }
-            if library == "dart:js_interop" && found == name)
-    })
+    annotations
+        .iter()
+        .any(|annotation| annotation.is_sdk("dart:js_interop", name))
 }
 
-fn js_type(name: &str) -> ResolvedType {
+fn js_type(name: &'static str) -> ResolvedType {
     ResolvedType::Interface {
         identity: DeclarationIdentity::Sdk {
-            library: "dart:js_interop".to_string(),
-            name: name.to_string(),
+            library: "dart:js_interop",
+            name,
         },
         arguments: Vec::new(),
         nullable: false,
@@ -569,23 +473,21 @@ fn js_type(name: &str) -> ResolvedType {
 }
 
 fn is_js_sdk(identity: &DeclarationIdentity) -> bool {
-    matches!(identity, DeclarationIdentity::Sdk { library, .. } if library == "dart:js_interop")
-}
-
-fn identity_name(identity: &DeclarationIdentity) -> &str {
-    match identity {
-        DeclarationIdentity::Project { name, .. }
-        | DeclarationIdentity::Sdk { name, .. }
-        | DeclarationIdentity::Package { name, .. } => name,
-    }
+    matches!(
+        identity,
+        DeclarationIdentity::Sdk {
+            library: "dart:js_interop",
+            ..
+        }
+    )
 }
 
 fn js_subtype(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool {
     if !is_js_sdk(left) || !is_js_sdk(right) {
         return false;
     }
-    let left = identity_name(left);
-    let right = identity_name(right);
+    let left = left.name();
+    let right = right.name();
     if right == "JSAny" {
         return true;
     }
@@ -632,8 +534,4 @@ fn js_subtype(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool {
                 | "JSBigInt64Array"
                 | "JSBigUint64Array"
         )
-}
-
-fn visit_statement(visitor: &mut impl Visitor, statement: &Stmt) {
-    visitor.visit_stmt(statement);
 }

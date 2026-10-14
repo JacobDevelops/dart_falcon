@@ -91,7 +91,7 @@ impl Collector<'_> {
             }
             _ => return None,
         };
-        state.model.resolve_name(&segments)
+        state.model.resolve_dotted(&segments)
     }
 
     fn applicable_non_sdk_member(
@@ -116,9 +116,8 @@ impl Collector<'_> {
     fn check_call(&mut self, callee: &Expr, args: &ArgList, state: &SemanticState<'_>) {
         if let Expr::Ident(identifier) = callee {
             if !state.environment.is_bound(&identifier.name)
-                && let Some(DeclarationIdentity::Sdk { library, name }) = state
-                    .model
-                    .resolve_sdk_member(std::slice::from_ref(&identifier.name))
+                && let Some(DeclarationIdentity::Sdk { library, name }) =
+                    state.model.resolve_sdk_member(&identifier.name)
                 && library == "dart:async"
                 && name == "scheduleMicrotask"
             {
@@ -138,7 +137,7 @@ impl Collector<'_> {
                 return;
             }
             if let DeclarationIdentity::Sdk { library, name } = identity {
-                match (library.as_str(), name.as_str(), field.name.as_str()) {
+                match (library, name, field.name.as_str()) {
                     ("dart:async", "Future", "doWhile") => self.check_arguments(args, &[0], &[]),
                     ("dart:async", "Future", "forEach") => self.check_arguments(args, &[1], &[]),
                     ("dart:async", "Future", "wait") => {
@@ -202,7 +201,7 @@ impl Collector<'_> {
         let DeclarationIdentity::Sdk { library, name } = identity else {
             return false;
         };
-        match (library.as_str(), name.as_str(), constructor) {
+        match (*library, *name, constructor) {
             ("dart:async", "Future", None | Some("microtask") | Some("sync")) => {
                 self.check_arguments(args, &[0], &[]);
                 true

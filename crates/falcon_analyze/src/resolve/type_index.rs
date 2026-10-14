@@ -10,7 +10,7 @@
 //!    extension-type across the project, keyed by simple name. Because lookups
 //!    are name-keyed, two declarations of the same name are recorded as
 //!    *ambiguous*: every lookup through them poisons to [`MemberResult::Unknown`]
-//!    / [`SubtypeResult::Unknown`] rather than pick one.
+//!    / [`Truth::Unknown`] rather than pick one.
 //! 2. **A curated CORE table** — `dart:core` / `dart:collection` types falcon
 //!    cannot see (`Object`, `Iterable`, `List`, `Map`, `String`, `num`, …) with
 //!    their common members and the subtype edges between them.
@@ -21,7 +21,7 @@
 //! ## Soundness discipline (three-valued, poisoning)
 //!
 //! Both lookups are three-valued and **Unknown poisons**: a definite answer
-//! ([`MemberResult::ProvenAbsent`] / [`SubtypeResult::ProvenNo`]) is returned
+//! ([`MemberResult::Absent`] / [`Truth::No`]) is returned
 //! *only* when the entire supertype chain is resolved — every ancestor known, no
 //! ambiguity, no unresolved external edge, no unresolved part. The instant
 //! certainty is lost the answer degrades to `Unknown`. A consumer may thus miss a
@@ -32,6 +32,8 @@ use std::ops::ControlFlow;
 use std::sync::OnceLock;
 
 use falcon_syntax::ast::*;
+
+use super::Truth;
 
 /// The declaration kind of a named type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,32 +51,37 @@ pub enum MemberKind {
     Method,
     Getter,
     Setter,
-    Field,
+    Field { writable: bool, covariant: bool },
     Operator,
+}
+
+impl MemberKind {
+    pub fn field(field: &FieldDecl) -> Self {
+        Self::Field {
+            writable: field.keyword == VarKeyword::Var,
+            covariant: field.is_covariant,
+        }
+    }
+
+    pub fn has_getter(self) -> bool {
+        matches!(self, Self::Getter | Self::Field { .. })
+    }
+
+    pub fn has_setter(self) -> bool {
+        matches!(self, Self::Setter | Self::Field { writable: true, .. })
+    }
 }
 
 /// Three-valued result of a member lookup on a type.
 ///
-/// [`MemberResult::ProvenAbsent`] is only ever returned when the type's full
+/// [`MemberResult::Absent`] is only ever returned when the type's full
 /// supertype chain is resolved and no ancestor declares the member; any
 /// uncertainty (unknown ancestor, ambiguous name, unresolved part) degrades the
 /// answer to [`MemberResult::Unknown`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemberResult {
     Found(MemberKind),
-    ProvenAbsent,
-    Unknown,
-}
-
-/// Three-valued result of a subtype query.
-///
-/// [`SubtypeResult::ProvenNo`] is only ever returned when `sub`'s full ancestor
-/// chain is resolved and `super` appears nowhere in it; any uncertainty degrades
-/// to [`SubtypeResult::Unknown`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SubtypeResult {
-    Yes,
-    ProvenNo,
+    Absent,
     Unknown,
 }
 
@@ -146,8 +153,8 @@ impl TypeIndex {
     /// spurious), but skipping is not silent: it marks the whole index
     /// `incomplete`, poisoning every three-valued lookup to `Unknown`. A skipped
     /// file could redeclare a name we recorded as unique or declare an ancestor
-    /// we never saw, so once one is dropped no `Found` / `ProvenAbsent` /
-    /// `Yes` / `ProvenNo` answer can be trusted.
+    /// we never saw, so once one is dropped no `Found` / `Absent` /
+    /// `Yes` / `No` answer can be trusted.
     pub fn from_library_files<'a, I>(files: I) -> Self
     where
         I: IntoIterator<Item = LibrarySource<'a>>,
@@ -199,7 +206,7 @@ impl TypeIndex {
     /// Look up `member` on `type_name`, walking the supertype chain.
     ///
     /// Returns [`MemberResult::Found`] on the first ancestor declaring it,
-    /// [`MemberResult::ProvenAbsent`] only when the *entire* chain is resolved and
+    /// [`MemberResult::Absent`] only when the *entire* chain is resolved and
     /// none declares it, and [`MemberResult::Unknown`] whenever the chain has any
     /// unresolved edge (unknown ancestor, ambiguity, or unresolved part).
     pub fn member_lookup(&self, type_name: &str, member: &str) -> MemberResult {
@@ -209,34 +216,35 @@ impl TypeIndex {
             _ => None,
         }) {
             ControlFlow::Break(kind) => MemberResult::Found(kind),
-            ControlFlow::Continue(true) => MemberResult::ProvenAbsent,
+            ControlFlow::Continue(true) => MemberResult::Absent,
             ControlFlow::Continue(false) => MemberResult::Unknown,
         }
     }
 
     /// Whether `sub` is a subtype of `super_`, walking `sub`'s ancestor chain.
     ///
-    /// Returns [`SubtypeResult::Yes`] on a name match, [`SubtypeResult::ProvenNo`]
+    /// Returns [`Truth::Yes`] on a name match, [`Truth::No`]
     /// only when `sub`'s entire chain is resolved and never names `super_`, and
-    /// [`SubtypeResult::Unknown`] whenever the chain has an unresolved edge.
-    pub fn is_subtype(&self, sub: &str, super_: &str) -> SubtypeResult {
+    /// [`Truth::Unknown`] whenever the chain has an unresolved edge.
+    pub fn is_subtype(&self, sub: &str, super_: &str) -> Truth {
         if sub == super_ {
-            return SubtypeResult::Yes;
+            return Truth::Yes;
         }
         match self.walk_ancestors(sub, |name, _| (name == super_).then_some(())) {
-            ControlFlow::Break(()) => SubtypeResult::Yes,
-            ControlFlow::Continue(true) => SubtypeResult::ProvenNo,
-            ControlFlow::Continue(false) => SubtypeResult::Unknown,
+            ControlFlow::Break(()) => Truth::Yes,
+            ControlFlow::Continue(true) => Truth::No,
+            ControlFlow::Continue(false) => Truth::Unknown,
         }
     }
 
     /// Whether a type is directly or transitively immutable.
-    pub fn is_immutable_type(&self, type_name: &str) -> Option<bool> {
+    pub fn is_immutable_type(&self, type_name: &str) -> Truth {
         match self.walk_ancestors(type_name, |_, resolved| {
             matches!(resolved, Some(Resolved::User(entry)) if entry.is_immutable).then_some(())
         }) {
-            ControlFlow::Break(()) => Some(true),
-            ControlFlow::Continue(complete) => complete.then_some(false),
+            ControlFlow::Break(()) => Truth::Yes,
+            ControlFlow::Continue(true) => Truth::No,
+            ControlFlow::Continue(false) => Truth::Unknown,
         }
     }
 
@@ -278,9 +286,9 @@ impl TypeIndex {
     }
 
     /// Whether a named constructor is declared or implicitly available as const.
-    pub fn constructor_is_const(&self, type_name: &str, name: Option<&str>) -> Option<bool> {
+    pub fn constructor_is_const(&self, type_name: &str, name: Option<&str>) -> Truth {
         if self.incomplete {
-            return None;
+            return Truth::Unknown;
         }
         let name = name.filter(|name| !name.is_empty()).unwrap_or("new");
         self.constructor_is_const_inner(type_name, name, &mut HashSet::new())
@@ -291,25 +299,25 @@ impl TypeIndex {
         type_name: &'a str,
         name: &'a str,
         visited: &mut HashSet<(&'a str, &'a str)>,
-    ) -> Option<bool> {
+    ) -> Truth {
         if !visited.insert((type_name, name)) {
-            return None;
+            return Truth::Unknown;
         }
-        match self.resolve(type_name)? {
-            Resolved::Ambiguous => None,
-            Resolved::Core(_) => Some(type_name == "Object" && name == "new"),
-            Resolved::User(entry) => {
+        match self.resolve(type_name) {
+            None | Some(Resolved::Ambiguous) => Truth::Unknown,
+            Some(Resolved::Core(_)) => (type_name == "Object" && name == "new").into(),
+            Some(Resolved::User(entry)) => {
                 if entry.has_unresolved_parts {
-                    return None;
+                    return Truth::Unknown;
                 }
-                if let Some(is_const) = entry.constructors.get(name) {
-                    return Some(*is_const);
+                if let Some(&is_const) = entry.constructors.get(name) {
+                    return is_const.into();
                 }
                 if !entry.constructors.is_empty()
                     || name != "new"
                     || !entry.all_instance_fields_final
                 {
-                    return Some(false);
+                    return Truth::No;
                 }
                 let superclass = entry.superclass.as_deref().unwrap_or("Object");
                 self.constructor_is_const_inner(superclass, "new", visited)
@@ -412,7 +420,10 @@ impl TypeIndex {
                     for v in &e.variants {
                         members
                             .entry(v.name.name.clone())
-                            .or_insert(MemberKind::Field);
+                            .or_insert(MemberKind::Field {
+                                writable: false,
+                                covariant: false,
+                            });
                     }
                     self.add_type(
                         &e.name.name,
@@ -541,7 +552,7 @@ fn collect_members(members: &[ClassMember]) -> HashMap<String, MemberKind> {
         match member {
             ClassMember::Field(f) => {
                 for d in &f.declarators {
-                    map.insert(d.name.name.clone(), MemberKind::Field);
+                    map.insert(d.name.name.clone(), MemberKind::field(f));
                 }
             }
             ClassMember::Method(m) => {
@@ -907,7 +918,10 @@ mod tests {
         );
         assert_eq!(
             idx.member_lookup("C", "baz"),
-            MemberResult::Found(MemberKind::Field)
+            MemberResult::Found(MemberKind::Field {
+                writable: true,
+                covariant: false
+            })
         );
     }
 
@@ -924,8 +938,8 @@ mod tests {
     fn absent_member_on_fully_resolved_chain_is_proven_absent() {
         // C's only ancestor is the implicit Object, which lacks `foo`.
         let idx = index("class C {}");
-        assert_eq!(idx.member_lookup("C", "foo"), MemberResult::ProvenAbsent);
-        assert_eq!(idx.is_immutable_type("C"), Some(false));
+        assert_eq!(idx.member_lookup("C", "foo"), MemberResult::Absent);
+        assert_eq!(idx.is_immutable_type("C"), Truth::No);
         // Object's own members remain findable through the implicit edge.
         assert_eq!(
             idx.member_lookup("C", "toString"),
@@ -938,7 +952,7 @@ mod tests {
         // `Widget` is external/unknown → cannot prove `foo` absent.
         let idx = index("class C extends Widget {}");
         assert_eq!(idx.member_lookup("C", "foo"), MemberResult::Unknown);
-        assert_eq!(idx.is_immutable_type("C"), None);
+        assert_eq!(idx.is_immutable_type("C"), Truth::Unknown);
         // But an own member is still found despite the unresolved ancestor.
         let idx2 = index("class C extends Widget { void foo() {} }");
         assert_eq!(
@@ -990,7 +1004,7 @@ mod tests {
             MemberResult::Found(MemberKind::Getter)
         );
         // Truly absent on a fully-known core chain.
-        assert_eq!(idx.member_lookup("int", "nope"), MemberResult::ProvenAbsent);
+        assert_eq!(idx.member_lookup("int", "nope"), MemberResult::Absent);
     }
 
     #[test]
@@ -1013,9 +1027,9 @@ mod tests {
              @immutable class A { const A.named(); }
              class B extends A { final int value; B(this.value) : super.named(); }",
         );
-        assert_eq!(idx.is_immutable_type("B"), Some(true));
-        assert_eq!(idx.constructor_is_const("A", Some("named")), Some(true));
-        assert_eq!(idx.constructor_is_const("Object", None), Some(true));
+        assert_eq!(idx.is_immutable_type("B"), Truth::Yes);
+        assert_eq!(idx.constructor_is_const("A", Some("named")), Truth::Yes);
+        assert_eq!(idx.constructor_is_const("Object", None), Truth::Yes);
     }
 
     #[test]
@@ -1028,15 +1042,15 @@ mod tests {
              class E { const E.named(); }",
         );
         for name in [None, Some("new"), Some("")] {
-            assert_eq!(idx.constructor_is_const("Object", name), Some(true));
-            assert_eq!(idx.constructor_is_const("A", name), Some(true));
-            assert_eq!(idx.constructor_is_const("B", name), Some(true));
-            assert_eq!(idx.constructor_is_const("C", name), Some(false));
-            assert_eq!(idx.constructor_is_const("D", name), Some(false));
-            assert_eq!(idx.constructor_is_const("E", name), Some(false));
+            assert_eq!(idx.constructor_is_const("Object", name), Truth::Yes);
+            assert_eq!(idx.constructor_is_const("A", name), Truth::Yes);
+            assert_eq!(idx.constructor_is_const("B", name), Truth::Yes);
+            assert_eq!(idx.constructor_is_const("C", name), Truth::No);
+            assert_eq!(idx.constructor_is_const("D", name), Truth::No);
+            assert_eq!(idx.constructor_is_const("E", name), Truth::No);
         }
-        assert_eq!(idx.constructor_is_const("A", Some("named")), Some(true));
-        assert_eq!(idx.constructor_is_const("A", Some("missing")), Some(false));
+        assert_eq!(idx.constructor_is_const("A", Some("named")), Truth::Yes);
+        assert_eq!(idx.constructor_is_const("A", Some("missing")), Truth::No);
     }
 
     // ── Subtype ──────────────────────────────────────────────────────────────────
@@ -1044,9 +1058,9 @@ mod tests {
     #[test]
     fn subtype_reflexive_and_direct() {
         let idx = index("class A {} class B extends A {}");
-        assert_eq!(idx.is_subtype("A", "A"), SubtypeResult::Yes);
-        assert_eq!(idx.is_subtype("B", "A"), SubtypeResult::Yes);
-        assert_eq!(idx.is_subtype("B", "Object"), SubtypeResult::Yes);
+        assert_eq!(idx.is_subtype("A", "A"), Truth::Yes);
+        assert_eq!(idx.is_subtype("B", "A"), Truth::Yes);
+        assert_eq!(idx.is_subtype("B", "Object"), Truth::Yes);
     }
 
     #[test]
@@ -1055,36 +1069,36 @@ mod tests {
             "class A {} class B extends A {} class C extends B {}
              mixin M {} class D with M implements A {}",
         );
-        assert_eq!(idx.is_subtype("C", "A"), SubtypeResult::Yes);
-        assert_eq!(idx.is_subtype("D", "M"), SubtypeResult::Yes);
-        assert_eq!(idx.is_subtype("D", "A"), SubtypeResult::Yes);
+        assert_eq!(idx.is_subtype("C", "A"), Truth::Yes);
+        assert_eq!(idx.is_subtype("D", "M"), Truth::Yes);
+        assert_eq!(idx.is_subtype("D", "A"), Truth::Yes);
     }
 
     #[test]
     fn subtype_proven_no_on_resolved_chains() {
         let idx = index("class A {} class B {}");
-        assert_eq!(idx.is_subtype("A", "B"), SubtypeResult::ProvenNo);
+        assert_eq!(idx.is_subtype("A", "B"), Truth::No);
         // Core chains too.
-        assert_eq!(idx.is_subtype("String", "int"), SubtypeResult::ProvenNo);
-        assert_eq!(idx.is_subtype("List", "Iterable"), SubtypeResult::Yes);
-        assert_eq!(idx.is_subtype("int", "num"), SubtypeResult::Yes);
+        assert_eq!(idx.is_subtype("String", "int"), Truth::No);
+        assert_eq!(idx.is_subtype("List", "Iterable"), Truth::Yes);
+        assert_eq!(idx.is_subtype("int", "num"), Truth::Yes);
     }
 
     #[test]
     fn subtype_unknown_on_unresolved_edge() {
         let idx = index("class B extends Widget {}");
         // Could be a subtype of anything Widget extends → cannot prove no.
-        assert_eq!(idx.is_subtype("B", "State"), SubtypeResult::Unknown);
+        assert_eq!(idx.is_subtype("B", "State"), Truth::Unknown);
         // But the direct, named ancestor is still a proven Yes.
-        assert_eq!(idx.is_subtype("B", "Widget"), SubtypeResult::Yes);
+        assert_eq!(idx.is_subtype("B", "Widget"), Truth::Yes);
     }
 
     #[test]
     fn subtype_ambiguous_is_unknown() {
         let idx = index("class C {} class C {} class D extends C {}");
-        assert_eq!(idx.is_subtype("D", "Object"), SubtypeResult::Yes);
+        assert_eq!(idx.is_subtype("D", "Object"), Truth::Yes);
         // Passing through ambiguous C poisons the rest of the chain.
-        assert_eq!(idx.is_subtype("D", "Foo"), SubtypeResult::Unknown);
+        assert_eq!(idx.is_subtype("D", "Foo"), Truth::Unknown);
     }
 
     #[test]
@@ -1093,14 +1107,14 @@ mod tests {
         let idx = index("class A extends B {} class B extends A {}");
         // Never resolves to Q, and the chain is a self-referential cycle that the
         // visited-set breaks; both A and B are known so it terminates.
-        assert_eq!(idx.is_subtype("A", "B"), SubtypeResult::Yes);
-        assert_eq!(idx.is_subtype("A", "Q"), SubtypeResult::ProvenNo);
+        assert_eq!(idx.is_subtype("A", "B"), Truth::Yes);
+        assert_eq!(idx.is_subtype("A", "Q"), Truth::No);
     }
 
     #[test]
     fn enum_is_subtype_of_enum_with_index_member() {
         let idx = index("enum Color { red, green }");
-        assert_eq!(idx.is_subtype("Color", "Enum"), SubtypeResult::Yes);
+        assert_eq!(idx.is_subtype("Color", "Enum"), Truth::Yes);
         assert_eq!(
             idx.member_lookup("Color", "index"),
             MemberResult::Found(MemberKind::Getter)
@@ -1108,7 +1122,10 @@ mod tests {
         // Enum constants are recorded as members.
         assert_eq!(
             idx.member_lookup("Color", "red"),
-            MemberResult::Found(MemberKind::Field)
+            MemberResult::Found(MemberKind::Field {
+                writable: false,
+                covariant: false
+            })
         );
     }
 
@@ -1132,10 +1149,10 @@ mod tests {
         // The skipped file could redeclare `Good` (hidden ambiguity) or declare
         // an ancestor we never saw, so no definite answer through it is sound.
         assert_eq!(idx.member_lookup("Good", "m"), MemberResult::Unknown);
-        assert_eq!(idx.is_subtype("Good", "Object"), SubtypeResult::Unknown);
-        assert_eq!(idx.is_immutable_type("Good"), None);
+        assert_eq!(idx.is_subtype("Good", "Object"), Truth::Unknown);
+        assert_eq!(idx.is_immutable_type("Good"), Truth::Unknown);
         // Reflexive subtyping is a syntactic identity, unaffected by the drop.
-        assert_eq!(idx.is_subtype("Good", "Good"), SubtypeResult::Yes);
+        assert_eq!(idx.is_subtype("Good", "Good"), Truth::Yes);
         assert!(!idx.is_known_type("Bad"));
     }
 
@@ -1162,7 +1179,7 @@ mod tests {
         assert!(!idx.is_known_type("List"));
         assert_eq!(idx.member_lookup("List", "mine"), MemberResult::Unknown);
         assert_eq!(idx.member_lookup("List", "add"), MemberResult::Unknown);
-        assert_eq!(idx.is_subtype("List", "Iterable"), SubtypeResult::Unknown);
+        assert_eq!(idx.is_subtype("List", "Iterable"), Truth::Unknown);
         // A non-colliding user type still resolves as a user type.
         let idx2 = index("class Widgetish { void mine() {} }");
         assert_eq!(
@@ -1182,7 +1199,7 @@ mod tests {
         let idx = TypeIndex::from_library_files(sources);
         // A member could live in the unseen part → cannot prove absence.
         assert_eq!(idx.member_lookup("C", "ghost"), MemberResult::Unknown);
-        assert_eq!(idx.is_immutable_type("C"), None);
+        assert_eq!(idx.is_immutable_type("C"), Truth::Unknown);
         // A member we *do* see is still a definite Found.
         assert_eq!(
             idx.member_lookup("C", "own"),
@@ -1218,6 +1235,6 @@ mod tests {
             idx.member_lookup("Dog", "breathe"),
             MemberResult::Found(MemberKind::Method)
         );
-        assert_eq!(idx.is_subtype("Dog", "Animal"), SubtypeResult::Yes);
+        assert_eq!(idx.is_subtype("Dog", "Animal"), Truth::Yes);
     }
 }

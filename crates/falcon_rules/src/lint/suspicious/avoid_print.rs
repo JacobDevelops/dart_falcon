@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel};
+use falcon_analyze::{AnalyzeContext, Rule, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
@@ -19,7 +19,9 @@ impl Rule for AvoidPrint {
             return Vec::new();
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
-        if !matches!(model.resolve_sdk_member(&["print".to_string()]), Some(DeclarationIdentity::Sdk { library, name }) if library == "dart:core" && name == "print")
+        if !model
+            .resolve_sdk_member("print")
+            .is_some_and(|identity| identity.is_sdk("dart:core", "print"))
         {
             return Vec::new();
         }

@@ -8,21 +8,28 @@ use std::path::{Path, PathBuf};
 
 use falcon_syntax::ast::{
     BinaryOp, ClassMember, DartType, Expr, FormalParam, FormalParamList, FunctionBody,
-    InitializingFormal, Program, TopLevelDecl, TypeParam,
+    InitializingFormal, Program, TopLevelDecl, TypeParam, VarKeyword,
 };
 
-use super::{DeclarationIdentity, IdentityIndex, SubtypeResult, TypeIndex};
+use super::{
+    DeclarationIdentity, FileId, IdentityIndex, LibraryId, MemberKind, NameIdentity, QualifiedName,
+    Truth, TypeIndex,
+};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TypeTruth {
-    Yes,
-    No,
-    Unknown,
+/// The declaration that introduces a type-parameter list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParameterOwner {
+    /// Keyed by the source offset of the list's first parameter.
+    Source {
+        file: Option<FileId>,
+        offset: usize,
+    },
+    Sdk(&'static str),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeParameterId {
-    pub owner: usize,
+    pub owner: ParameterOwner,
     pub ordinal: usize,
     pub name: String,
 }
@@ -112,8 +119,7 @@ impl ResolvedType {
     }
 
     pub fn interface(&self, library: &str, name: &str) -> bool {
-        matches!(self, Self::Interface { identity: DeclarationIdentity::Sdk { library: found_library, name: found_name }, .. }
-            if found_library == library && found_name == name)
+        matches!(self, Self::Interface { identity, .. } if identity.is_sdk(library, name))
     }
 
     pub fn arguments(&self) -> &[ResolvedType] {
@@ -127,13 +133,14 @@ impl ResolvedType {
 #[derive(Debug, Clone, Default)]
 pub struct TypeParameterScope {
     scopes: Vec<HashMap<String, ResolvedType>>,
-    next_owner: usize,
 }
 
 impl TypeParameterScope {
     pub fn push(&mut self, params: &[TypeParam], model: &SemanticModel<'_>) {
-        let owner = self.next_owner;
-        self.next_owner += 1;
+        let owner = ParameterOwner::Source {
+            file: model.file,
+            offset: params.first().map_or(0, |param| param.span.start),
+        };
         self.scopes.push(HashMap::new());
         for (ordinal, param) in params.iter().enumerate() {
             self.scopes
@@ -191,19 +198,18 @@ impl TypeParameterScope {
 
 #[derive(Clone, Copy)]
 pub struct SemanticModel<'a> {
-    file: &'a Path,
+    file: Option<FileId>,
+    library: Option<LibraryId>,
     identities: &'a IdentityIndex,
     types: Option<&'a TypeIndex>,
 }
 
 impl<'a> SemanticModel<'a> {
-    pub fn new(
-        file: &'a Path,
-        identities: &'a IdentityIndex,
-        types: Option<&'a TypeIndex>,
-    ) -> Self {
+    pub fn new(file: &Path, identities: &'a IdentityIndex, types: Option<&'a TypeIndex>) -> Self {
+        let file = identities.file(file);
         Self {
             file,
+            library: file.map(|file| identities.library(file)),
             identities,
             types,
         }
@@ -213,8 +219,12 @@ impl<'a> SemanticModel<'a> {
         &self,
         identity: &DeclarationIdentity,
     ) -> Option<SemanticModel<'a>> {
+        let DeclarationIdentity::Project { library, .. } = identity else {
+            return None;
+        };
         Some(Self {
-            file: self.identities.declaration_file(identity)?,
+            file: None,
+            library: Some(*library),
             identities: self.identities,
             types: None,
         })
@@ -224,36 +234,61 @@ impl<'a> SemanticModel<'a> {
         self.resolve_type_in(ty, &TypeParameterScope::default())
     }
 
-    pub fn file_path(&self) -> &Path {
-        self.file
-    }
-
-    pub fn extension_visible(&self, declaring_file: &Path, name: Option<&str>) -> bool {
-        self.identities
-            .extension_visible(self.file, declaring_file, name)
+    fn extension_visible(&self, declaring: Option<LibraryId>, name: Option<&str>) -> bool {
+        self.library
+            .zip(declaring)
+            .is_some_and(|(from, declaring)| {
+                self.identities.extension_visible(from, declaring, name)
+            })
     }
 
     fn member_visible(&self, declaring_type: &DeclarationIdentity, name: &str) -> bool {
         !name.starts_with('_')
             || matches!(declaring_type, DeclarationIdentity::Project { library, .. }
-                if self.identities.library_identity(self.file) == Some(*library))
+                if self.library == Some(*library))
     }
 
-    pub fn resolve_name(&self, segments: &[String]) -> Option<DeclarationIdentity> {
-        self.identities.resolve_declaration(self.file, segments)
-    }
-
-    pub fn resolve_value(&self, segments: &[String]) -> Option<DeclarationIdentity> {
+    pub fn resolve_name<'n>(
+        &self,
+        name: impl Into<QualifiedName<'n>>,
+    ) -> Option<DeclarationIdentity> {
         self.identities
-            .resolve_value_declaration(self.file, segments)
+            .resolve_declaration(self.library?, name.into())
     }
 
-    pub fn resolve_sdk_member(&self, segments: &[String]) -> Option<DeclarationIdentity> {
-        self.identities.resolve_sdk_member(self.file, segments)
+    pub fn name_identity<'n>(&self, name: impl Into<QualifiedName<'n>>) -> NameIdentity {
+        self.library.map_or(NameIdentity::Unknown, |library| {
+            self.identities.resolve(library, name.into())
+        })
     }
 
-    pub fn resolve_imported_member(&self, segments: &[String]) -> Option<DeclarationIdentity> {
-        self.identities.resolve_imported_member(self.file, segments)
+    /// [`Self::resolve_name`] for a dotted name; `None` beyond two segments.
+    pub fn resolve_dotted<S: AsRef<str>>(&self, segments: &[S]) -> Option<DeclarationIdentity> {
+        self.resolve_name(QualifiedName::from_segments(segments)?)
+    }
+
+    pub fn resolve_value<'n>(
+        &self,
+        name: impl Into<QualifiedName<'n>>,
+    ) -> Option<DeclarationIdentity> {
+        self.identities
+            .resolve_value_declaration(self.library?, name.into())
+    }
+
+    pub fn resolve_sdk_member<'n>(
+        &self,
+        name: impl Into<QualifiedName<'n>>,
+    ) -> Option<DeclarationIdentity> {
+        self.identities
+            .resolve_sdk_member(self.library?, name.into())
+    }
+
+    pub fn resolve_imported_member<'n>(
+        &self,
+        name: impl Into<QualifiedName<'n>>,
+    ) -> Option<DeclarationIdentity> {
+        self.identities
+            .resolve_imported_member(self.library?, name.into())
     }
 
     pub fn resolve_type_in(&self, ty: &DartType, parameters: &TypeParameterScope) -> ResolvedType {
@@ -261,22 +296,17 @@ impl<'a> SemanticModel<'a> {
             DartType::Void { .. } => ResolvedType::Void,
             DartType::Dynamic { .. } => ResolvedType::Dynamic,
             DartType::Named(named) => {
-                if named.segments.len() == 1
-                    && let Some(parameter) = parameters.lookup(&named.segments[0].name)
+                if let [segment] = named.segments.as_slice()
+                    && let Some(parameter) = parameters.lookup(&segment.name)
                 {
                     return parameter.with_nullable(named.is_nullable);
                 }
-                let segments: Vec<String> = named
-                    .segments
-                    .iter()
-                    .map(|segment| segment.name.clone())
-                    .collect();
-                let Some(identity) = self.identities.resolve_declaration(self.file, &segments)
+                let Some(identity) = QualifiedName::from_identifiers(&named.segments)
+                    .and_then(|name| self.resolve_name(name))
                 else {
                     return ResolvedType::Unknown;
                 };
-                if matches!(&identity, DeclarationIdentity::Sdk { library, name } if library == "dart:core" && name == "Null")
-                {
+                if identity.is_sdk("dart:core", "Null") {
                     return ResolvedType::Null;
                 }
                 let extension_type = matches!(&identity, DeclarationIdentity::Project { name, .. }
@@ -351,11 +381,11 @@ impl<'a> SemanticModel<'a> {
         }
     }
 
-    pub fn core_type(&self, name: &str, nullable: bool) -> ResolvedType {
+    pub fn core_type(&self, name: &'static str, nullable: bool) -> ResolvedType {
         ResolvedType::Interface {
             identity: DeclarationIdentity::Sdk {
-                library: "dart:core".to_string(),
-                name: name.to_string(),
+                library: "dart:core",
+                name,
             },
             arguments: Vec::new(),
             nullable,
@@ -363,30 +393,30 @@ impl<'a> SemanticModel<'a> {
         }
     }
 
-    pub fn is_future_like(&self, ty: &ResolvedType) -> TypeTruth {
+    pub fn is_future_like(&self, ty: &ResolvedType) -> Truth {
         match ty {
-            ResolvedType::Dynamic | ResolvedType::Null => TypeTruth::Yes,
-            ResolvedType::Unknown => TypeTruth::Unknown,
+            ResolvedType::Dynamic | ResolvedType::Null => Truth::Yes,
+            ResolvedType::Unknown => Truth::Unknown,
             ResolvedType::Interface {
                 extension_type: true,
                 ..
-            } => TypeTruth::Yes,
+            } => Truth::Yes,
             ResolvedType::Interface {
-                identity: DeclarationIdentity::Sdk { library, name },
+                identity:
+                    DeclarationIdentity::Sdk {
+                        library: "dart:async",
+                        name: "Future" | "FutureOr",
+                    },
                 ..
-            } if library == "dart:async" && matches!(name.as_str(), "Future" | "FutureOr") => {
-                TypeTruth::Yes
-            }
+            } => Truth::Yes,
             ResolvedType::TypeParameter { bound, .. } => self.is_future_like(bound),
             ResolvedType::Interface {
                 identity: DeclarationIdentity::Project { name, .. },
                 ..
-            } => match self.types.map(|types| types.is_subtype(name, "Future")) {
-                Some(SubtypeResult::Yes) => TypeTruth::Yes,
-                Some(SubtypeResult::ProvenNo) => TypeTruth::No,
-                Some(SubtypeResult::Unknown) | None => TypeTruth::Unknown,
-            },
-            _ => TypeTruth::No,
+            } => self
+                .types
+                .map_or(Truth::Unknown, |types| types.is_subtype(name, "Future")),
+            _ => Truth::No,
         }
     }
 
@@ -455,27 +485,26 @@ impl<'a> SemanticModel<'a> {
 
     pub fn void_context(&self, ty: &ResolvedType) -> bool {
         matches!(ty, ResolvedType::Void)
-            || matches!(ty, ResolvedType::Interface { identity: DeclarationIdentity::Sdk { library, name }, arguments, .. }
-                if library == "dart:async" && matches!(name.as_str(), "Future" | "FutureOr")
-                    && arguments.first().is_some_and(|argument| self.void_context(argument)))
+            || matches!(ty, ResolvedType::Interface { identity: DeclarationIdentity::Sdk { library: "dart:async", name: "Future" | "FutureOr" }, arguments, .. }
+                if arguments.first().is_some_and(|argument| self.void_context(argument)))
     }
 
     pub fn acceptable_for_void_context(
         &self,
         expected: &ResolvedType,
         actual: &ResolvedType,
-    ) -> TypeTruth {
+    ) -> Truth {
         if matches!(actual, ResolvedType::Unknown) {
-            return TypeTruth::Unknown;
+            return Truth::Unknown;
         }
         if matches!(expected, ResolvedType::Void) {
             return if matches!(
                 actual,
                 ResolvedType::Void | ResolvedType::Null | ResolvedType::Never
             ) {
-                TypeTruth::Yes
+                Truth::Yes
             } else {
-                TypeTruth::No
+                Truth::No
             };
         }
         let ResolvedType::Interface {
@@ -484,23 +513,23 @@ impl<'a> SemanticModel<'a> {
             ..
         } = expected
         else {
-            return TypeTruth::Unknown;
+            return Truth::Unknown;
         };
-        if library != "dart:async" || !matches!(name.as_str(), "Future" | "FutureOr") {
-            return TypeTruth::Unknown;
+        if *library != "dart:async" || !matches!(*name, "Future" | "FutureOr") {
+            return Truth::Unknown;
         }
-        if name == "FutureOr" && matches!(actual, ResolvedType::Dynamic) {
-            return TypeTruth::Yes;
+        if *name == "FutureOr" && matches!(actual, ResolvedType::Dynamic) {
+            return Truth::Yes;
         }
         if matches!(
             actual,
             ResolvedType::Null | ResolvedType::Never | ResolvedType::Void
-        ) && name == "FutureOr"
+        ) && *name == "FutureOr"
         {
-            return TypeTruth::Yes;
+            return Truth::Yes;
         }
         let Some(expected_argument) = arguments.first() else {
-            return TypeTruth::Unknown;
+            return Truth::Unknown;
         };
         let ResolvedType::Interface {
             identity:
@@ -512,27 +541,27 @@ impl<'a> SemanticModel<'a> {
             ..
         } = actual
         else {
-            return TypeTruth::No;
+            return Truth::No;
         };
-        if actual_library != "dart:async" {
-            return TypeTruth::No;
+        if *actual_library != "dart:async" {
+            return Truth::No;
         }
-        if actual_name == "Future" {
+        if *actual_name == "Future" {
             return actual_arguments
                 .first()
                 .map(|argument| self.acceptable_for_void_context(expected_argument, argument))
-                .unwrap_or(TypeTruth::Unknown);
+                .unwrap_or(Truth::Unknown);
         }
-        if name == "FutureOr" && actual_name == "FutureOr" {
+        if *name == "FutureOr" && *actual_name == "FutureOr" {
             return actual_arguments
                 .first()
                 .map(|argument| self.acceptable_for_void_context(expected_argument, argument))
-                .unwrap_or(TypeTruth::Unknown);
+                .unwrap_or(Truth::Unknown);
         }
-        TypeTruth::No
+        Truth::No
     }
 
-    pub fn unrelated(&self, left: &ResolvedType, right: &ResolvedType) -> TypeTruth {
+    pub fn unrelated(&self, left: &ResolvedType, right: &ResolvedType) -> Truth {
         if matches!(
             left,
             ResolvedType::Unknown
@@ -546,16 +575,16 @@ impl<'a> SemanticModel<'a> {
                 | ResolvedType::Never
                 | ResolvedType::Null
         ) {
-            return TypeTruth::Unknown;
+            return Truth::Unknown;
         }
         if left == right {
-            return TypeTruth::No;
+            return Truth::No;
         }
         if numeric(left) && numeric(right) {
-            return TypeTruth::No;
+            return Truth::No;
         }
         if fixnum_and_int(left, right) || fixnum_and_int(right, left) {
-            return TypeTruth::No;
+            return Truth::No;
         }
         match (left, right) {
             (
@@ -572,33 +601,33 @@ impl<'a> SemanticModel<'a> {
             ) => {
                 if left_id == right_id {
                     if left_arguments.len() != right_arguments.len() {
-                        return TypeTruth::Unknown;
+                        return Truth::Unknown;
                     }
                     return if left_arguments
                         .iter()
                         .zip(right_arguments)
-                        .any(|(left, right)| self.unrelated(left, right) == TypeTruth::Yes)
+                        .any(|(left, right)| self.unrelated(left, right) == Truth::Yes)
                     {
-                        TypeTruth::Yes
+                        Truth::Yes
                     } else {
-                        TypeTruth::No
+                        Truth::No
                     };
                 }
                 let (Some(left_name), Some(right_name)) =
                     (subtype_name(left_id), subtype_name(right_id))
                 else {
-                    return TypeTruth::Unknown;
+                    return Truth::Unknown;
                 };
                 let Some(types) = self.types else {
-                    return TypeTruth::Unknown;
+                    return Truth::Unknown;
                 };
                 match (
                     types.is_subtype(left_name, right_name),
                     types.is_subtype(right_name, left_name),
                 ) {
-                    (SubtypeResult::Yes, _) | (_, SubtypeResult::Yes) => TypeTruth::No,
-                    (SubtypeResult::ProvenNo, SubtypeResult::ProvenNo) => TypeTruth::Yes,
-                    _ => TypeTruth::Unknown,
+                    (Truth::Yes, _) | (_, Truth::Yes) => Truth::No,
+                    (Truth::No, Truth::No) => Truth::Yes,
+                    _ => Truth::Unknown,
                 }
             }
             (ResolvedType::TypeParameter { bound, .. }, other)
@@ -633,7 +662,7 @@ impl<'a> SemanticModel<'a> {
                         .map(|(name, _)| name)
                         .eq(right_named.iter().map(|(name, _)| name))
                 {
-                    return TypeTruth::Yes;
+                    return Truth::Yes;
                 }
                 if let (
                     ResolvedType::Function {
@@ -645,9 +674,9 @@ impl<'a> SemanticModel<'a> {
                         ..
                     },
                 ) = (left, right)
-                    && self.unrelated(left_return, right_return) == TypeTruth::Yes
+                    && self.unrelated(left_return, right_return) == Truth::Yes
                 {
-                    return TypeTruth::Yes;
+                    return Truth::Yes;
                 }
                 if left_positional
                     .iter()
@@ -658,14 +687,14 @@ impl<'a> SemanticModel<'a> {
                             .zip(right_named)
                             .map(|((_, left), (_, right))| (left, right)),
                     )
-                    .any(|(left, right)| self.unrelated(left, right) == TypeTruth::Yes)
+                    .any(|(left, right)| self.unrelated(left, right) == Truth::Yes)
                 {
-                    TypeTruth::Yes
+                    Truth::Yes
                 } else {
-                    TypeTruth::No
+                    Truth::No
                 }
             }
-            _ => TypeTruth::Yes,
+            _ => Truth::Yes,
         }
     }
 }
@@ -704,24 +733,12 @@ pub struct StaticConstFacts {
     pub is_deprecated: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SemanticMemberKind {
-    Method,
-    Getter,
-    Setter,
-    Operator,
-    Field,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemberFacts {
     pub declaring_type: DeclarationIdentity,
-    pub kind: SemanticMemberKind,
+    pub kind: MemberKind,
     pub is_static: bool,
     pub is_abstract: bool,
-    pub is_covariant: bool,
-    pub has_getter: bool,
-    pub has_setter: bool,
     pub positional_parameter_names: Vec<String>,
 }
 
@@ -738,7 +755,7 @@ pub struct DeclarationFacts {
 
 #[derive(Debug, Clone)]
 struct ExtensionFacts {
-    declaring_file: PathBuf,
+    declaring_library: Option<LibraryId>,
     name: Option<String>,
     on_type: ResolvedType,
     members: HashSet<String>,
@@ -817,9 +834,7 @@ impl SignatureIndex {
                 TopLevelDecl::Function(function) => {
                     let mut parameters = TypeParameterScope::default();
                     parameters.push(&function.type_params, model);
-                    if let Some(identity) =
-                        model.resolve_value(std::slice::from_ref(&function.name.name))
-                    {
+                    if let Some(identity) = model.resolve_value(&function.name.name) {
                         self.functions.insert(
                             identity,
                             signature(
@@ -834,13 +849,10 @@ impl SignatureIndex {
                         );
                     }
                 }
-                TopLevelDecl::Variable(variable)
-                    if variable.keyword == falcon_syntax::ast::VarKeyword::Const =>
-                {
+                TopLevelDecl::Variable(variable) if variable.keyword == VarKeyword::Const => {
                     for declarator in &variable.declarators {
                         if let Some(initializer) = &declarator.initializer
-                            && let Some(identity) =
-                                model.resolve_value(std::slice::from_ref(&declarator.name.name))
+                            && let Some(identity) = model.resolve_value(&declarator.name.name)
                         {
                             if let Some(constant_type) = constructed_identity(initializer, model) {
                                 self.constant_types.insert(identity.clone(), constant_type);
@@ -913,7 +925,7 @@ impl SignatureIndex {
                     let mut parameters = TypeParameterScope::default();
                     parameters.push(&extension.type_params, model);
                     self.extensions.push(ExtensionFacts {
-                        declaring_file: model.file_path().to_path_buf(),
+                        declaring_library: model.library,
                         name: extension.name.as_ref().map(|name| name.name.clone()),
                         on_type: model.resolve_type_in(&extension.on_type, &parameters),
                         members: extension
@@ -1002,7 +1014,7 @@ impl SignatureIndex {
                 let Some(superclass) = superclass else {
                     continue;
                 };
-                let Some(identity) = model.resolve_name(std::slice::from_ref(name)) else {
+                let Some(identity) = model.resolve_name(name) else {
                     continue;
                 };
                 let mut scope = TypeParameterScope::default();
@@ -1164,7 +1176,7 @@ impl SignatureIndex {
         model: &SemanticModel<'_>,
     ) {
         let (extension_representation, is_abstract) = declaration_kind;
-        let Some(identity) = model.resolve_name(&[name.to_string()]) else {
+        let Some(identity) = model.resolve_name(name) else {
             return;
         };
         let mut scope = TypeParameterScope::default();
@@ -1175,12 +1187,7 @@ impl SignatureIndex {
         let annotations = annotations
             .iter()
             .filter_map(|annotation| {
-                let segments = annotation
-                    .name
-                    .iter()
-                    .map(|segment| segment.name.clone())
-                    .collect::<Vec<_>>();
-                model.resolve_imported_member(&segments)
+                model.resolve_imported_member(QualifiedName::from_identifiers(&annotation.name)?)
             })
             .collect();
         let constructors = members
@@ -1214,8 +1221,10 @@ impl SignatureIndex {
                                             self.member_entry(&identity, &parameter.name.name)
                                                 .filter(|entry| {
                                                     entry.facts.iter().any(|fact| {
-                                                        fact.kind == SemanticMemberKind::Field
-                                                            && !fact.is_static
+                                                        matches!(
+                                                            fact.kind,
+                                                            MemberKind::Field { .. }
+                                                        ) && !fact.is_static
                                                     })
                                                 })
                                                 .and_then(|entry| entry.field.as_ref())
@@ -1240,8 +1249,7 @@ impl SignatureIndex {
             .iter()
             .filter_map(|member| match member {
                 ClassMember::Field(field)
-                    if field.is_static
-                        && field.keyword == falcon_syntax::ast::VarKeyword::Const =>
+                    if field.is_static && field.keyword == VarKeyword::Const =>
                 {
                     Some(field)
                 }
@@ -1321,8 +1329,8 @@ impl SignatureIndex {
         for name in ["TestOn", "Timeout", "Tags", "OnPlatform"] {
             self.declarations.insert(
                 DeclarationIdentity::Package {
-                    package: "test".to_string(),
-                    name: name.to_string(),
+                    package: "test",
+                    name,
                 },
                 DeclarationFacts {
                     annotations: Vec::new(),
@@ -1336,22 +1344,18 @@ impl SignatureIndex {
             );
         }
         let add = |index: &mut Self,
-                   library: &str,
-                   type_name: &str,
+                   library: &'static str,
+                   type_name: &'static str,
                    arity: usize,
                    member: &str,
                    positional: Vec<ResolvedType>,
                    return_type: ResolvedType| {
             let parameters: Vec<_> = (0..arity)
-                .map(|ordinal| TypeParameterId {
-                    owner: sdk_owner(type_name),
-                    ordinal,
-                    name: format!("{type_name}#{ordinal}"),
-                })
+                .map(|ordinal| sdk_parameter(type_name, ordinal))
                 .collect();
             let identity = DeclarationIdentity::Sdk {
-                library: library.to_string(),
-                name: type_name.to_string(),
+                library,
+                name: type_name,
             };
             let entry = index
                 .member_entries
@@ -1368,34 +1372,25 @@ impl SignatureIndex {
                 return_type,
             });
         };
-        let parameter =
-            |type_name: &str, _arity: usize, ordinal: usize| ResolvedType::TypeParameter {
-                id: TypeParameterId {
-                    owner: sdk_owner(type_name),
-                    ordinal,
-                    name: format!("{type_name}#{ordinal}"),
-                },
-                bound: Box::new(ResolvedType::Dynamic),
-                nullable: false,
-            };
+        let parameter = |type_name: &'static str, ordinal: usize| ResolvedType::TypeParameter {
+            id: sdk_parameter(type_name, ordinal),
+            bound: Box::new(ResolvedType::Dynamic),
+            nullable: false,
+        };
         let object = DeclarationIdentity::Sdk {
-            library: "dart:core".to_string(),
-            name: "Object".to_string(),
+            library: "dart:core",
+            name: "Object",
         };
         for (name, kind, parameters) in [
-            (
-                "==",
-                SemanticMemberKind::Operator,
-                vec!["other".to_string()],
-            ),
+            ("==", MemberKind::Operator, vec!["other".to_string()]),
             (
                 "noSuchMethod",
-                SemanticMemberKind::Method,
+                MemberKind::Method,
                 vec!["invocation".to_string()],
             ),
-            ("hashCode", SemanticMemberKind::Getter, Vec::new()),
-            ("runtimeType", SemanticMemberKind::Getter, Vec::new()),
-            ("toString", SemanticMemberKind::Method, Vec::new()),
+            ("hashCode", MemberKind::Getter, Vec::new()),
+            ("runtimeType", MemberKind::Getter, Vec::new()),
+            ("toString", MemberKind::Method, Vec::new()),
         ] {
             self.member_entries
                 .entry(object.clone())
@@ -1408,9 +1403,6 @@ impl SignatureIndex {
                     kind,
                     is_static: false,
                     is_abstract: false,
-                    is_covariant: false,
-                    has_getter: kind == SemanticMemberKind::Getter,
-                    has_setter: kind == SemanticMemberKind::Setter,
                     positional_parameter_names: parameters,
                 });
         }
@@ -1420,7 +1412,7 @@ impl SignatureIndex {
             "List",
             1,
             "add",
-            vec![parameter("List", 1, 0)],
+            vec![parameter("List", 0)],
             ResolvedType::Void,
         );
         add(
@@ -1429,7 +1421,7 @@ impl SignatureIndex {
             "List",
             1,
             "[]=",
-            vec![ResolvedType::Dynamic, parameter("List", 1, 0)],
+            vec![ResolvedType::Dynamic, parameter("List", 0)],
             ResolvedType::Void,
         );
         add(
@@ -1438,11 +1430,11 @@ impl SignatureIndex {
             "Set",
             1,
             "add",
-            vec![parameter("Set", 1, 0)],
+            vec![parameter("Set", 0)],
             ResolvedType::Interface {
                 identity: DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "bool".to_string(),
+                    library: "dart:core",
+                    name: "bool",
                 },
                 arguments: Vec::new(),
                 nullable: false,
@@ -1455,7 +1447,7 @@ impl SignatureIndex {
             "Queue",
             1,
             "add",
-            vec![parameter("Queue", 1, 0)],
+            vec![parameter("Queue", 0)],
             ResolvedType::Void,
         );
         add(
@@ -1464,7 +1456,7 @@ impl SignatureIndex {
             "Map",
             2,
             "[]=",
-            vec![parameter("Map", 2, 0), parameter("Map", 2, 1)],
+            vec![parameter("Map", 0), parameter("Map", 1)],
             ResolvedType::Void,
         );
         for (library, name) in [
@@ -1472,15 +1464,17 @@ impl SignatureIndex {
             ("dart:core", "Set"),
             ("dart:collection", "Queue"),
         ] {
-            let parameter = parameter(name, 1, 0);
-            let identity = DeclarationIdentity::Sdk {
-                library: library.to_string(),
-                name: name.to_string(),
+            let parameter_id = sdk_parameter(name, 0);
+            let parameter = ResolvedType::TypeParameter {
+                id: parameter_id.clone(),
+                bound: Box::new(ResolvedType::Dynamic),
+                nullable: false,
             };
+            let identity = DeclarationIdentity::Sdk { library, name };
             let supertype = ResolvedType::Interface {
                 identity: DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "Iterable".to_string(),
+                    library: "dart:core",
+                    name: "Iterable",
                 },
                 arguments: vec![parameter.clone()],
                 nullable: false,
@@ -1488,19 +1482,13 @@ impl SignatureIndex {
             };
             self.supertypes.insert(
                 identity.clone(),
-                (
-                    vec![match &parameter {
-                        ResolvedType::TypeParameter { id, .. } => id.clone(),
-                        _ => unreachable!(),
-                    }],
-                    vec![supertype.clone()],
-                ),
+                (vec![parameter_id], vec![supertype.clone()]),
             );
             self.member_supertypes.insert(identity, vec![supertype]);
         }
         let string = DeclarationIdentity::Sdk {
-            library: "dart:core".to_string(),
-            name: "String".to_string(),
+            library: "dart:core",
+            name: "String",
         };
         let entry = self
             .member_entries
@@ -1516,8 +1504,8 @@ impl SignatureIndex {
             named: HashMap::new(),
             return_type: ResolvedType::Interface {
                 identity: DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "String".to_string(),
+                    library: "dart:core",
+                    name: "String",
                 },
                 arguments: Vec::new(),
                 nullable: false,
@@ -1525,14 +1513,10 @@ impl SignatureIndex {
             },
         });
         let iterable = DeclarationIdentity::Sdk {
-            library: "dart:core".to_string(),
-            name: "Iterable".to_string(),
+            library: "dart:core",
+            name: "Iterable",
         };
-        let map_parameter = TypeParameterId {
-            owner: sdk_owner("Iterable"),
-            ordinal: 1,
-            name: "map#T".to_string(),
-        };
+        let map_parameter = sdk_parameter("Iterable.map", 0);
         let map_type = ResolvedType::TypeParameter {
             id: map_parameter.clone(),
             bound: Box::new(ResolvedType::Dynamic),
@@ -1546,23 +1530,19 @@ impl SignatureIndex {
             .or_default();
         entry.is_instance_method = true;
         entry.signature = Some(ResolvedSignature {
-            owner_parameters: vec![TypeParameterId {
-                owner: sdk_owner("Iterable"),
-                ordinal: 0,
-                name: "Iterable#0".to_string(),
-            }],
+            owner_parameters: vec![sdk_parameter("Iterable", 0)],
             call_parameters: vec![map_parameter],
             positional: vec![ResolvedType::Function {
                 return_type: Box::new(map_type.clone()),
-                positional: vec![parameter("Iterable", 1, 0)],
+                positional: vec![parameter("Iterable", 0)],
                 named: Vec::new(),
                 nullable: false,
             }],
             named: HashMap::new(),
             return_type: ResolvedType::Interface {
                 identity: DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "Iterable".to_string(),
+                    library: "dart:core",
+                    name: "Iterable",
                 },
                 arguments: vec![map_type],
                 nullable: false,
@@ -1571,13 +1551,13 @@ impl SignatureIndex {
         });
 
         let widget = DeclarationIdentity::Package {
-            package: "flutter".to_string(),
-            name: "Widget".to_string(),
+            package: "flutter",
+            name: "Widget",
         };
         let key = ResolvedType::Interface {
             identity: DeclarationIdentity::Package {
-                package: "flutter".to_string(),
-                name: "Key".to_string(),
+                package: "flutter",
+                name: "Key",
             },
             arguments: Vec::new(),
             nullable: true,
@@ -1597,8 +1577,8 @@ impl SignatureIndex {
             "MaterialApp",
         ] {
             let identity = DeclarationIdentity::Package {
-                package: "flutter".to_string(),
-                name: name.to_string(),
+                package: "flutter",
+                name,
             };
             let supertype = ResolvedType::Interface {
                 identity: widget.clone(),
@@ -1642,7 +1622,7 @@ impl SignatureIndex {
         members: &[ClassMember],
         model: &SemanticModel<'_>,
     ) {
-        let Some(identity) = model.resolve_name(&[name.to_string()]) else {
+        let Some(identity) = model.resolve_name(name) else {
             return;
         };
         let mut scope = TypeParameterScope::default();
@@ -1689,12 +1669,9 @@ impl SignatureIndex {
                     let entry = entries.entry(method.name.name.clone()).or_default();
                     entry.facts.push(MemberFacts {
                         declaring_type: identity.clone(),
-                        kind: SemanticMemberKind::Method,
+                        kind: MemberKind::Method,
                         is_static: method.is_static,
                         is_abstract: method.is_abstract,
-                        is_covariant: false,
-                        has_getter: false,
-                        has_setter: false,
                         positional_parameter_names: positional_parameter_names(&method.params),
                     });
                     scope.push(&method.type_params, model);
@@ -1741,18 +1718,15 @@ impl SignatureIndex {
                         let entry = entries.entry(declarator.name.name.clone()).or_default();
                         entry.facts.push(MemberFacts {
                             declaring_type: identity.clone(),
-                            kind: SemanticMemberKind::Field,
+                            kind: MemberKind::field(field),
                             is_static: field.is_static,
                             is_abstract: field.is_abstract,
-                            is_covariant: field.is_covariant,
-                            has_getter: true,
-                            has_setter: field.keyword == falcon_syntax::ast::VarKeyword::Var,
                             positional_parameter_names: Vec::new(),
                         });
                         entry.field = Some((owner_parameters.clone(), field_type.clone()));
                         if !field.is_static {
                             entry.read = Some(field_type.clone());
-                            if field.keyword == falcon_syntax::ast::VarKeyword::Var {
+                            if field.keyword == VarKeyword::Var {
                                 entry.write = Some(field_type.clone());
                             }
                         }
@@ -1762,12 +1736,9 @@ impl SignatureIndex {
                     let entry = entries.entry(getter.name.name.clone()).or_default();
                     entry.facts.push(MemberFacts {
                         declaring_type: identity.clone(),
-                        kind: SemanticMemberKind::Getter,
+                        kind: MemberKind::Getter,
                         is_static: getter.is_static,
                         is_abstract: getter.is_abstract,
-                        is_covariant: false,
-                        has_getter: true,
-                        has_setter: false,
                         positional_parameter_names: Vec::new(),
                     });
                     let return_type = getter
@@ -1784,12 +1755,9 @@ impl SignatureIndex {
                     let entry = entries.entry(setter.name.name.clone()).or_default();
                     entry.facts.push(MemberFacts {
                         declaring_type: identity.clone(),
-                        kind: SemanticMemberKind::Setter,
+                        kind: MemberKind::Setter,
                         is_static: setter.is_static,
                         is_abstract: setter.is_abstract,
-                        is_covariant: false,
-                        has_getter: false,
-                        has_setter: true,
                         positional_parameter_names: vec![setter.param.name.clone()],
                     });
                     let parameter_type = setter
@@ -1811,12 +1779,9 @@ impl SignatureIndex {
                         .facts
                         .push(MemberFacts {
                             declaring_type: identity.clone(),
-                            kind: SemanticMemberKind::Operator,
+                            kind: MemberKind::Operator,
                             is_static: false,
                             is_abstract: operator.body.is_none() && !operator.is_external,
-                            is_covariant: false,
-                            has_getter: false,
-                            has_setter: false,
                             positional_parameter_names: positional_parameter_names(
                                 &operator.params,
                             ),
@@ -1844,14 +1809,14 @@ impl SignatureIndex {
         ty: &ResolvedType,
         target: &DeclarationIdentity,
         model: &SemanticModel<'_>,
-    ) -> TypeTruth {
+    ) -> Truth {
         if matches!(ty, ResolvedType::Unknown | ResolvedType::Dynamic) {
-            return TypeTruth::Unknown;
+            return Truth::Unknown;
         }
         if self.instantiated_identity(ty, target, model).is_some() {
-            TypeTruth::Yes
+            Truth::Yes
         } else {
-            TypeTruth::Unknown
+            Truth::Unknown
         }
     }
 
@@ -1911,20 +1876,11 @@ impl SignatureIndex {
         }) || entry.facts.iter().any(|fact| {
             !fact.is_static
                 && (match access {
-                    InstanceAccess::Read => matches!(
-                        fact.kind,
-                        SemanticMemberKind::Method
-                            | SemanticMemberKind::Getter
-                            | SemanticMemberKind::Field
-                    ),
-                    InstanceAccess::Write => fact.has_setter,
-                    InstanceAccess::Invoke => matches!(
-                        fact.kind,
-                        SemanticMemberKind::Method
-                            | SemanticMemberKind::Getter
-                            | SemanticMemberKind::Field
-                            | SemanticMemberKind::Operator
-                    ),
+                    InstanceAccess::Read => {
+                        fact.kind == MemberKind::Method || fact.kind.has_getter()
+                    }
+                    InstanceAccess::Write => fact.kind.has_setter(),
+                    InstanceAccess::Invoke => fact.kind != MemberKind::Setter,
                 })
         })
     }
@@ -1989,8 +1945,13 @@ impl SignatureIndex {
             for supertype in supertypes {
                 self.collect_inherited_member_facts(owner, supertype, name, visited, facts)?;
             }
-        } else if !matches!(identity, DeclarationIdentity::Sdk { library, name } if library == "dart:core" && name == "Object")
-        {
+        } else if !matches!(
+            identity,
+            DeclarationIdentity::Sdk {
+                library: "dart:core",
+                name: "Object"
+            }
+        ) {
             return None;
         }
         Some(())
@@ -2001,7 +1962,7 @@ impl SignatureIndex {
         left: &ResolvedType,
         right: &ResolvedType,
         model: &SemanticModel<'_>,
-    ) -> TypeTruth {
+    ) -> Truth {
         if let (
             ResolvedType::Interface {
                 identity: left_identity,
@@ -2102,9 +2063,7 @@ impl SignatureIndex {
         if self.has_cyclic_supertypes(identity, &mut HashSet::new(), &mut HashSet::new()) {
             return None;
         }
-        if matches!(identity, DeclarationIdentity::Sdk { library: found_library, name: found_name }
-            if found_library == library && found_name == name)
-        {
+        if identity.is_sdk(library, name) {
             return Some(ty.clone());
         }
         let (parameters, supertypes) = self.supertypes.get(identity)?;
@@ -2127,14 +2086,14 @@ impl SignatureIndex {
     ) -> bool {
         self.extensions.iter().any(|extension| {
             extension.members.contains(name)
-                && model.extension_visible(&extension.declaring_file, extension.name.as_deref())
+                && model.extension_visible(extension.declaring_library, extension.name.as_deref())
                 && match &extension.on_type {
                     ResolvedType::Interface {
                         identity: target, ..
-                    } => self.is_subtype_of(receiver, target, model) == TypeTruth::Yes,
+                    } => self.is_subtype_of(receiver, target, model) == Truth::Yes,
                     ResolvedType::Dynamic => true,
                     ResolvedType::Unknown => false,
-                    target => self.unrelated(receiver, target, model) != TypeTruth::Yes,
+                    target => self.unrelated(receiver, target, model) != Truth::Yes,
                 }
         })
     }
@@ -2151,12 +2110,8 @@ impl SignatureIndex {
         {
             return Some(owner);
         }
-        let object = model.core_type("Object", false);
-        let ResolvedType::Interface { identity, .. } = &object else {
-            unreachable!()
-        };
-        self.has_instance_declaration(identity, name, access)
-            .then_some(object)
+        self.has_instance_declaration(&DeclarationIdentity::OBJECT, name, access)
+            .then(|| model.core_type("Object", false))
     }
 
     fn resolved_instance_owner_before_object(
@@ -2174,8 +2129,13 @@ impl SignatureIndex {
         else {
             return None;
         };
-        if matches!(identity, DeclarationIdentity::Sdk { library, name } if library == "dart:core" && name == "Object")
-        {
+        if matches!(
+            identity,
+            DeclarationIdentity::Sdk {
+                library: "dart:core",
+                name: "Object"
+            }
+        ) {
             return None;
         }
         if self.has_cyclic_supertypes(identity, &mut HashSet::new(), &mut HashSet::new()) {
@@ -2310,9 +2270,9 @@ fn constructed_identity(
         },
         Expr::Call { callee, .. } => {
             let mut segments = expression_segments(callee, false)?;
-            model.resolve_name(&segments).or_else(|| {
+            model.resolve_dotted(&segments).or_else(|| {
                 segments.pop();
-                model.resolve_name(&segments)
+                model.resolve_dotted(&segments)
             })
         }
         _ => None,
@@ -2322,18 +2282,18 @@ fn constructed_identity(
 pub(crate) fn expression_segments(
     expression: &Expr,
     allow_generic_instantiation: bool,
-) -> Option<Vec<String>> {
+) -> Option<Vec<&str>> {
     let mut current = expression;
     let mut segments = Vec::new();
     loop {
         match current {
             Expr::Ident(identifier) => {
-                segments.push(identifier.name.clone());
+                segments.push(identifier.name.as_str());
                 segments.reverse();
                 return Some(segments);
             }
             Expr::Field { object, field, .. } => {
-                segments.push(field.name.clone());
+                segments.push(field.name.as_str());
                 current = object;
             }
             Expr::GenericInstantiation { target, .. } if allow_generic_instantiation => {
@@ -2348,15 +2308,9 @@ fn annotation_targets_library(
     annotation: &falcon_syntax::ast::Annotation,
     model: &SemanticModel<'_>,
 ) -> bool {
-    let segments = annotation
-        .name
-        .iter()
-        .map(|segment| segment.name.clone())
-        .collect::<Vec<_>>();
     if !matches!(
-        model.resolve_imported_member(&segments),
-        Some(DeclarationIdentity::Package { package, name })
-            if package == "meta" && name == "Target"
+        QualifiedName::from_identifiers(&annotation.name).and_then(|name| model.resolve_imported_member(name)),
+        Some(identity) if identity.is_package("meta", "Target")
     ) {
         return false;
     }
@@ -2376,9 +2330,8 @@ fn target_kind_library(expression: &Expr, model: &SemanticModel<'_>) -> bool {
                 return false;
             };
             matches!(
-                model.resolve_imported_member(&segments),
-                Some(DeclarationIdentity::Package { package, name })
-                    if package == "meta" && name == "TargetKind"
+                QualifiedName::from_segments(&segments).and_then(|name| model.resolve_imported_member(name)),
+                Some(identity) if identity.is_package("meta", "TargetKind")
             )
         }
         Expr::List { elements, .. } | Expr::Set { elements, .. } => {
@@ -2402,9 +2355,9 @@ fn infer_const_initializer_type(
             let Some(mut segments) = expression_segments(callee, false) else {
                 return ResolvedType::Unknown;
             };
-            let identity = model.resolve_name(&segments).or_else(|| {
+            let identity = model.resolve_dotted(&segments).or_else(|| {
                 segments.pop();
-                model.resolve_name(&segments)
+                model.resolve_dotted(&segments)
             });
             identity.map_or(ResolvedType::Unknown, |identity| ResolvedType::Interface {
                 identity,
@@ -2606,7 +2559,22 @@ impl TypeEnvironment {
         type_parameters: &TypeParameterScope,
         lookup: &impl Fn(&str) -> Option<ResolvedType>,
     ) -> ResolvedType {
-        if let Expr::Field { object, field, .. } = expr {
+        let infer = |expr| {
+            self.infer_with_signatures_using_lookup(
+                expr,
+                model,
+                signatures,
+                type_parameters,
+                lookup,
+            )
+        };
+        if let Expr::Field {
+            object,
+            field,
+            is_null_safe,
+            ..
+        } = expr
+        {
             let receiver = self.infer_with_signatures_using_lookup(
                 object,
                 model,
@@ -2617,7 +2585,12 @@ impl TypeEnvironment {
             if let Some((original, substitutions)) =
                 signatures.resolved_field(&receiver, &field.name, model)
             {
-                return model.substitute(&original, &substitutions);
+                let ty = model.substitute(&original, &substitutions);
+                return if *is_null_safe {
+                    ty.with_nullable(true)
+                } else {
+                    ty
+                };
             }
         }
         if let Expr::Call {
@@ -2628,8 +2601,7 @@ impl TypeEnvironment {
                 Expr::Ident(identifier)
                     if !self.is_bound(&identifier.name) && lookup(&identifier.name).is_none() =>
                 {
-                    if let Some(identity) =
-                        model.resolve_value(std::slice::from_ref(&identifier.name))
+                    if let Some(identity) = model.resolve_value(&identifier.name)
                         && let Some(signature) = signatures.function(&identity)
                     {
                         let substitutions: HashMap<_, _> = signature
@@ -2645,9 +2617,7 @@ impl TypeEnvironment {
                             .collect();
                         return model.substitute(&signature.return_type, &substitutions);
                     }
-                    if let Some(identity) =
-                        model.resolve_name(std::slice::from_ref(&identifier.name))
-                    {
+                    if let Some(identity) = model.resolve_name(&identifier.name) {
                         return ResolvedType::Interface {
                             identity,
                             arguments: type_args
@@ -2659,7 +2629,30 @@ impl TypeEnvironment {
                         };
                     }
                 }
-                Expr::Field { object, field, .. } => {
+                Expr::Field {
+                    object,
+                    field,
+                    is_null_safe,
+                    ..
+                } => {
+                    if !*is_null_safe
+                        && let Some(segments) = expression_segments(object, false)
+                        && segments
+                            .first()
+                            .is_some_and(|head| !self.is_bound(head) && lookup(head).is_none())
+                        && let Some(identity) = model.resolve_dotted(&segments)
+                        && signatures.constructor(&identity, &field.name).is_some()
+                    {
+                        return ResolvedType::Interface {
+                            identity,
+                            arguments: type_args
+                                .iter()
+                                .map(|ty| model.resolve_type_in(ty, type_parameters))
+                                .collect(),
+                            nullable: false,
+                            extension_type: false,
+                        };
+                    }
                     let receiver = self.infer_with_signatures_using_lookup(
                         object,
                         model,
@@ -2678,7 +2671,12 @@ impl TypeEnvironment {
                                 )
                             },
                         ));
-                        return model.substitute(&signature.return_type, &substitutions);
+                        let ty = model.substitute(&signature.return_type, &substitutions);
+                        return if *is_null_safe {
+                            ty.with_nullable(true)
+                        } else {
+                            ty
+                        };
                     }
                 }
                 Expr::GenericInstantiation {
@@ -2687,8 +2685,7 @@ impl TypeEnvironment {
                     ..
                 } => {
                     if let Expr::Ident(identifier) = target.as_ref()
-                        && let Some(identity) =
-                            model.resolve_value(std::slice::from_ref(&identifier.name))
+                        && let Some(identity) = model.resolve_value(&identifier.name)
                         && let Some(signature) = signatures.function(&identity)
                     {
                         let substitutions: HashMap<_, _> = signature
@@ -2757,18 +2754,19 @@ impl TypeEnvironment {
                     nullable: false,
                 }
             }
-            _ => self.infer(expr, model, type_parameters, lookup),
-        }
-    }
-
-    fn infer(
-        &self,
-        expr: &Expr,
-        model: &SemanticModel<'_>,
-        type_parameters: &TypeParameterScope,
-        lookup: &impl Fn(&str) -> Option<ResolvedType>,
-    ) -> ResolvedType {
-        match expr {
+            Expr::Is { .. }
+            | Expr::Unary {
+                op: falcon_syntax::ast::UnaryOp::Bang,
+                ..
+            } => model.core_type("bool", false),
+            Expr::Unary { operand, .. } | Expr::PostfixIncDec { operand, .. } => {
+                let ty = infer(operand);
+                if numeric(&ty) {
+                    ty.with_nullable(false)
+                } else {
+                    ResolvedType::Unknown
+                }
+            }
             Expr::IntLit { .. } => model.core_type("int", false),
             Expr::DoubleLit { .. } => model.core_type("double", false),
             Expr::StringLit(_) => model.core_type("String", false),
@@ -2778,16 +2776,14 @@ impl TypeEnvironment {
                 lookup(&identifier.name).unwrap_or_else(|| self.lookup(&identifier.name))
             }
             Expr::As { dart_type, .. } => model.resolve_type_in(dart_type, type_parameters),
-            Expr::NullAssert { operand, .. } => self
-                .infer(operand, model, type_parameters, lookup)
-                .with_nullable(false),
+            Expr::NullAssert { operand, .. } => infer(operand).with_nullable(false),
             Expr::New { dart_type, .. } => model
                 .resolve_type_in(dart_type, type_parameters)
                 .with_nullable(false),
             Expr::List { type_arg, .. } => ResolvedType::Interface {
                 identity: DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "List".to_string(),
+                    library: "dart:core",
+                    name: "List",
                 },
                 arguments: vec![
                     type_arg
@@ -2800,8 +2796,8 @@ impl TypeEnvironment {
             },
             Expr::Set { type_arg, .. } => ResolvedType::Interface {
                 identity: DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "Set".to_string(),
+                    library: "dart:core",
+                    name: "Set",
                 },
                 arguments: vec![
                     type_arg
@@ -2814,8 +2810,8 @@ impl TypeEnvironment {
             },
             Expr::Map { type_args, .. } => ResolvedType::Interface {
                 identity: DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "Map".to_string(),
+                    library: "dart:core",
+                    name: "Map",
                 },
                 arguments: type_args
                     .iter()
@@ -2835,11 +2831,31 @@ impl TypeEnvironment {
                 | BinaryOp::GtEq
                 | BinaryOp::And
                 | BinaryOp::Or => model.core_type("bool", false),
+                BinaryOp::NullCoalesce => ResolvedType::Unknown,
+                BinaryOp::Div => model.core_type("double", false),
                 _ => {
-                    let left = self.infer(left, model, type_parameters, lookup);
-                    let right = self.infer(right, model, type_parameters, lookup);
-                    if left == right {
-                        left
+                    let left = infer(left);
+                    let right = infer(right);
+                    if *op == BinaryOp::Add
+                        && left.interface("dart:core", "String")
+                        && !left.nullable()
+                        && right.interface("dart:core", "String")
+                        && !right.nullable()
+                    {
+                        model.core_type("String", false)
+                    } else if numeric(&left) && numeric(&right) {
+                        let name = if left.interface("dart:core", "double")
+                            || right.interface("dart:core", "double")
+                        {
+                            "double"
+                        } else if left.interface("dart:core", "int")
+                            && right.interface("dart:core", "int")
+                        {
+                            "int"
+                        } else {
+                            "num"
+                        };
+                        model.core_type(name, false)
                     } else {
                         ResolvedType::Unknown
                     }
@@ -2850,8 +2866,8 @@ impl TypeEnvironment {
                 else_expr,
                 ..
             } => {
-                let then_type = self.infer(then_expr, model, type_parameters, lookup);
-                let else_type = self.infer(else_expr, model, type_parameters, lookup);
+                let then_type = infer(then_expr);
+                let else_type = infer(else_expr);
                 if then_type == else_type {
                     then_type
                 } else {
@@ -2863,36 +2879,45 @@ impl TypeEnvironment {
     }
 }
 
-fn sdk_owner(type_name: &str) -> usize {
-    match type_name {
-        "Iterable" => usize::MAX - 1,
-        "List" => usize::MAX - 2,
-        "Set" => usize::MAX - 3,
-        "Queue" => usize::MAX - 4,
-        "Map" => usize::MAX - 5,
-        _ => usize::MAX - 100,
+fn sdk_parameter(owner: &'static str, ordinal: usize) -> TypeParameterId {
+    TypeParameterId {
+        owner: ParameterOwner::Sdk(owner),
+        ordinal,
+        name: format!("{owner}#{ordinal}"),
     }
 }
 
 fn subtype_name(identity: &DeclarationIdentity) -> Option<&str> {
     match identity {
-        DeclarationIdentity::Project { name, .. } | DeclarationIdentity::Sdk { name, .. } => {
-            Some(name)
-        }
         DeclarationIdentity::Package { .. } => None,
+        identity => Some(identity.name()),
     }
 }
 
 fn numeric(ty: &ResolvedType) -> bool {
-    matches!(ty, ResolvedType::Interface { identity: DeclarationIdentity::Sdk { library, name }, .. }
-        if library == "dart:core" && matches!(name.as_str(), "int" | "double" | "num"))
+    matches!(
+        ty,
+        ResolvedType::Interface {
+            identity: DeclarationIdentity::Sdk {
+                library: "dart:core",
+                name: "int" | "double" | "num"
+            },
+            ..
+        }
+    )
 }
 
 fn fixnum_and_int(fixnum: &ResolvedType, int: &ResolvedType) -> bool {
-    matches!(fixnum, ResolvedType::Interface { identity: DeclarationIdentity::Package { package, name }, .. }
-        if package == "fixnum" && matches!(name.as_str(), "Int32" | "Int64"))
-        && matches!(int, ResolvedType::Interface { identity: DeclarationIdentity::Sdk { library, name }, .. }
-            if library == "dart:core" && name == "int")
+    matches!(
+        fixnum,
+        ResolvedType::Interface {
+            identity: DeclarationIdentity::Package {
+                package: "fixnum",
+                name: "Int32" | "Int64"
+            },
+            ..
+        }
+    ) && int.interface("dart:core", "int")
 }
 
 #[cfg(test)]
@@ -2972,9 +2997,9 @@ mod tests {
                     .iter()
                     .map(|param| model.resolve_type(param.param_type.as_ref().unwrap()))
                     .collect();
-                assert_eq!(model.unrelated(&types[0], &types[1]), TypeTruth::No);
-                assert_eq!(model.unrelated(&types[0], &types[2]), TypeTruth::Yes);
-                assert_eq!(model.unrelated(&types[0], &types[3]), TypeTruth::Unknown);
+                assert_eq!(model.unrelated(&types[0], &types[1]), Truth::No);
+                assert_eq!(model.unrelated(&types[0], &types[2]), Truth::Yes);
+                assert_eq!(model.unrelated(&types[0], &types[3]), Truth::Unknown);
             },
         );
     }
@@ -2986,7 +3011,7 @@ mod tests {
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let signature = signatures
-                    .function(&model.resolve_value(&["compare".to_string()]).unwrap())
+                    .function(&model.resolve_value("compare").unwrap())
                     .unwrap();
                 let ResolvedType::TypeParameter { bound, .. } = &signature.positional[0] else {
                     panic!()
@@ -3006,7 +3031,7 @@ mod tests {
         with_model("void accept<T>(T value) {}", |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             let signature = signatures
-                .function(&model.resolve_value(&["accept".to_string()]).unwrap())
+                .function(&model.resolve_value("accept").unwrap())
                 .unwrap();
             assert!(contains_parameter(&signature.positional[0]));
             let substitutions =
@@ -3015,11 +3040,11 @@ mod tests {
             assert_eq!(expected, ResolvedType::Void);
             assert_eq!(
                 model.acceptable_for_void_context(&expected, &model.core_type("int", false)),
-                TypeTruth::No
+                Truth::No
             );
             assert_eq!(
                 model.acceptable_for_void_context(&expected, &ResolvedType::Null),
-                TypeTruth::Yes
+                Truth::Yes
             );
         });
     }
@@ -3030,7 +3055,7 @@ mod tests {
             "class Value<T> { Value(this.value); final T value; T read() => value; }",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let identity = model.resolve_name(&["Value".to_string()]).unwrap();
+                let identity = model.resolve_name("Value").unwrap();
                 let constructor = signatures.constructor(&identity, "new").unwrap();
                 let (parameters, field) = signatures.field(&identity, "value").unwrap();
                 assert_eq!(&constructor.owner_parameters, parameters);
@@ -3125,7 +3150,13 @@ mod tests {
                         model.resolve_type_in(function.return_type.as_ref().unwrap(), &scope);
                     let environment = TypeEnvironment::new();
                     assert_eq!(
-                        environment.infer(expression, model, &scope, &|_| None),
+                        environment.infer_with_signatures_using_lookup(
+                            expression,
+                            model,
+                            &signatures,
+                            &scope,
+                            &|_| None
+                        ),
                         expected
                     );
                     assert_eq!(
@@ -3171,12 +3202,34 @@ mod tests {
     }
 
     #[test]
+    fn same_named_type_parameters_of_different_declarations_stay_distinct() {
+        with_model(
+            "class B<T> { T get x => throw 0; } class A<T> extends B<int> {}",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let a = ResolvedType::Interface {
+                    identity: model.resolve_name("A").unwrap(),
+                    arguments: vec![model.core_type("String", false)],
+                    nullable: false,
+                    extension_type: false,
+                };
+                let (field, substitutions) = signatures.resolved_field(&a, "x", model).unwrap();
+                assert!(
+                    model
+                        .substitute(&field, &substitutions)
+                        .interface("dart:core", "int")
+                );
+            },
+        );
+    }
+
+    #[test]
     fn implementation_lookup_prefers_later_mixins_and_excludes_interfaces() {
         with_model(
             "class Base { num value() => 0; num field = 0; } mixin First<T> { T value() => throw UnimplementedError(); T field; } mixin Second<T> { T value() => throw UnimplementedError(); T field; } abstract class Contract { bool value(); bool field; int only(); } class Child extends Base with First<String>, Second<int> implements Contract {} class InterfaceOnly implements Contract {}",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let child_identity = model.resolve_name(&["Child".to_string()]).unwrap();
+                let child_identity = model.resolve_name("Child").unwrap();
                 let child = ResolvedType::Interface {
                     identity: child_identity,
                     arguments: Vec::new(),
@@ -3199,19 +3252,19 @@ mod tests {
                 );
                 assert_eq!(
                     signatures.resolved_member_owner(&child, "value", model),
-                    model.resolve_name(&["Second".to_string()])
+                    model.resolve_name("Second")
                 );
 
-                let contract = model.resolve_name(&["Contract".to_string()]).unwrap();
+                let contract = model.resolve_name("Contract").unwrap();
                 let interface_only = ResolvedType::Interface {
-                    identity: model.resolve_name(&["InterfaceOnly".to_string()]).unwrap(),
+                    identity: model.resolve_name("InterfaceOnly").unwrap(),
                     arguments: Vec::new(),
                     nullable: false,
                     extension_type: false,
                 };
                 assert_eq!(
                     signatures.is_subtype_of(&interface_only, &contract, model),
-                    TypeTruth::Yes
+                    Truth::Yes
                 );
                 assert!(
                     signatures
@@ -3229,13 +3282,13 @@ mod tests {
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let child = ResolvedType::Interface {
-                    identity: model.resolve_name(&["Child".to_string()]).unwrap(),
+                    identity: model.resolve_name("Child").unwrap(),
                     arguments: Vec::new(),
                     nullable: false,
                     extension_type: false,
                 };
-                let base = model.resolve_name(&["Base".to_string()]).unwrap();
-                let mixin = model.resolve_name(&["StaticMembers".to_string()]).unwrap();
+                let base = model.resolve_name("Base").unwrap();
+                let mixin = model.resolve_name("StaticMembers").unwrap();
 
                 let (signature, substitutions) =
                     signatures.resolved_member(&child, "method", model).unwrap();
@@ -3298,7 +3351,7 @@ mod tests {
         ] {
             with_model(source, |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let identity = model.resolve_name(&["Value".to_string()]).unwrap();
+                let identity = model.resolve_name("Value").unwrap();
                 assert!(
                     signatures
                         .field(&identity, "value")
@@ -3317,7 +3370,7 @@ mod tests {
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let child = ResolvedType::Interface {
-                    identity: model.resolve_name(&["Child".to_string()]).unwrap(),
+                    identity: model.resolve_name("Child").unwrap(),
                     arguments: Vec::new(),
                     nullable: false,
                     extension_type: false,
@@ -3350,7 +3403,7 @@ mod tests {
             "class Base { Base.named(String input); int named(bool input) => 0; } class Child extends Base { Child(super.input) : super.named(); }",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let base = model.resolve_name(&["Base".to_string()]).unwrap();
+                let base = model.resolve_name("Base").unwrap();
                 let receiver = ResolvedType::Interface {
                     identity: base.clone(),
                     arguments: Vec::new(),
@@ -3371,7 +3424,7 @@ mod tests {
                         .interface("dart:core", "int")
                 );
 
-                let child = model.resolve_name(&["Child".to_string()]).unwrap();
+                let child = model.resolve_name("Child").unwrap();
                 assert!(
                     signatures.constructor(&child, "new").unwrap().positional[0]
                         .interface("dart:core", "String")
@@ -3387,7 +3440,7 @@ mod tests {
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let child = ResolvedType::Interface {
-                    identity: model.resolve_name(&["Child".to_string()]).unwrap(),
+                    identity: model.resolve_name("Child").unwrap(),
                     arguments: Vec::new(),
                     nullable: false,
                     extension_type: false,
@@ -3412,7 +3465,7 @@ mod tests {
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let child = ResolvedType::Interface {
-                    identity: model.resolve_name(&["Child".to_string()]).unwrap(),
+                    identity: model.resolve_name("Child").unwrap(),
                     arguments: Vec::new(),
                     nullable: false,
                     extension_type: false,
@@ -3438,7 +3491,7 @@ mod tests {
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let child = ResolvedType::Interface {
-                    identity: model.resolve_name(&["Child".to_string()]).unwrap(),
+                    identity: model.resolve_name("Child").unwrap(),
                     arguments: Vec::new(),
                     nullable: false,
                     extension_type: false,
@@ -3465,14 +3518,14 @@ mod tests {
                 let signatures = SignatureIndex::from_program(program, model);
                 for (class_name, owner_name) in [("FromBase", "Base"), ("FromMixin", "First")] {
                     let receiver = ResolvedType::Interface {
-                        identity: model.resolve_name(&[class_name.to_string()]).unwrap(),
+                        identity: model.resolve_name(class_name).unwrap(),
                         arguments: Vec::new(),
                         nullable: false,
                         extension_type: false,
                     };
                     assert_eq!(
                         signatures.resolved_member_owner(&receiver, "toString", model),
-                        model.resolve_name(&[owner_name.to_string()])
+                        model.resolve_name(owner_name)
                     );
                 }
             },
@@ -3504,8 +3557,8 @@ mod tests {
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
                 let iterable = DeclarationIdentity::Sdk {
-                    library: "dart:core".to_string(),
-                    name: "Iterable".to_string(),
+                    library: "dart:core",
+                    name: "Iterable",
                 };
                 let signature = signatures.member(&iterable, "map").unwrap();
                 assert_eq!(signature.call_parameters.len(), 1);
@@ -3589,7 +3642,7 @@ mod tests {
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let model = SemanticModel::new(&part_path, &identities, Some(&types));
         let child = ResolvedType::Interface {
-            identity: model.resolve_name(&["Child".to_string()]).unwrap(),
+            identity: model.resolve_name("Child").unwrap(),
             arguments: Vec::new(),
             nullable: false,
             extension_type: false,
@@ -3650,7 +3703,7 @@ mod tests {
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let model = SemanticModel::new(&child_path, &identities, Some(&types));
         let child = ResolvedType::Interface {
-            identity: model.resolve_name(&["Child".to_string()]).unwrap(),
+            identity: model.resolve_name("Child").unwrap(),
             arguments: Vec::new(),
             nullable: false,
             extension_type: false,
@@ -3713,9 +3766,9 @@ mod tests {
         let files = [(base_path.clone(), &base), (middle_path, &middle)];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let model = SemanticModel::new(&base_path, &identities, Some(&types));
-        let base_identity = model.resolve_name(&["Base".to_string()]).unwrap();
+        let base_identity = model.resolve_name("Base").unwrap();
         let child = ResolvedType::Interface {
-            identity: model.resolve_name(&["Child".to_string()]).unwrap(),
+            identity: model.resolve_name("Child").unwrap(),
             arguments: Vec::new(),
             nullable: false,
             extension_type: false,
@@ -3742,8 +3795,8 @@ mod tests {
             "class A extends B { int field = 0; void method() {} } class B extends A {}",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let a = model.resolve_name(&["A".to_string()]).unwrap();
-                let b = model.resolve_name(&["B".to_string()]).unwrap();
+                let a = model.resolve_name("A").unwrap();
+                let b = model.resolve_name("B").unwrap();
                 let receiver = ResolvedType::Interface {
                     identity: a,
                     arguments: Vec::new(),
@@ -3753,7 +3806,7 @@ mod tests {
 
                 assert_eq!(
                     signatures.is_subtype_of(&receiver, &b, model),
-                    TypeTruth::Unknown
+                    Truth::Unknown
                 );
                 assert!(
                     signatures
@@ -3780,13 +3833,13 @@ mod tests {
             "class Base<T> { final T value; Base(this.value); } class Middle extends Base<String> { Middle(super.value); } class Leaf extends Middle { Leaf(super.value); }",
             |program, model| {
                 let signatures = SignatureIndex::from_program(program, model);
-                let base = model.resolve_name(&["Base".to_string()]).unwrap();
+                let base = model.resolve_name("Base").unwrap();
                 assert!(contains_parameter(
                     &signatures.declaration(&base).unwrap().constructors[0].parameters[0].ty
                 ));
 
                 for name in ["Middle", "Leaf"] {
-                    let identity = model.resolve_name(&[name.to_string()]).unwrap();
+                    let identity = model.resolve_name(name).unwrap();
                     let facts = signatures.declaration(&identity).unwrap();
                     assert!(facts.constructors[0].parameters[0].is_super);
                     assert!(
@@ -3858,7 +3911,7 @@ mod tests {
         ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let model = SemanticModel::new(&leaf_path, &identities, Some(&types));
-        let leaf_identity = model.resolve_name(&["Leaf".to_string()]).unwrap();
+        let leaf_identity = model.resolve_name("Leaf").unwrap();
         assert!(
             signatures.declaration(&leaf_identity).unwrap().constructors[0].parameters[0]
                 .ty
@@ -3913,7 +3966,7 @@ mod tests {
         let files = [(a_path.clone(), &a), (b_path, &b)];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let model = SemanticModel::new(&a_path, &identities, Some(&types));
-        let leaf = model.resolve_name(&["A6".to_string()]).unwrap();
+        let leaf = model.resolve_name("A6").unwrap();
 
         assert!(
             signatures.declaration(&leaf).unwrap().constructors[0].parameters[0]

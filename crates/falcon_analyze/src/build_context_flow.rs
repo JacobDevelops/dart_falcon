@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    DeclarationIdentity, ResolvedType, SemanticModel, SignatureIndex, TypeEnvironment,
-    TypeParameterScope, TypeTruth,
+    DeclarationIdentity, ResolvedType, SemanticModel, SignatureIndex, Truth, TypeEnvironment,
+    TypeParameterScope,
 };
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, bound_names, walk_expr};
@@ -1256,11 +1256,11 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
 
     fn is_build_context(&self, ty: &ResolvedType) -> bool {
         let target = DeclarationIdentity::Package {
-            package: "flutter".to_string(),
-            name: "BuildContext".to_string(),
+            package: "flutter",
+            name: "BuildContext",
         };
         matches!(ty, ResolvedType::Interface { identity, .. } if identity == &target)
-            || self.signatures.is_subtype_of(ty, &target, self.model) == TypeTruth::Yes
+            || self.signatures.is_subtype_of(ty, &target, self.model) == Truth::Yes
     }
 
     fn use_context(&mut self, expression: &Expr, state: &State) {

@@ -22,11 +22,10 @@ pub use parallel::{
 pub use registry::{RuleRegistry, with_rules_stack};
 pub use resolve::{
     DeclarationFacts, DeclarationIdentity, IdentityIndex, IdentitySource, LibraryGrouping,
-    LibrarySource, LocalTypes, MemberFacts, MemberKind, MemberResult, NameIdentity,
-    PackageIdentity, ProgramSource, ProjectIndex, ReceiverTypes, ResolvedSignature, ResolvedType,
-    SemanticMemberKind, SemanticModel, SignatureIndex, StaticType, SubtypeResult, TypeEnvironment,
-    TypeIndex, TypeParameterId, TypeParameterScope, TypeTruth, canonical_or_lexical,
-    group_libraries, library_unit,
+    LibraryId, LibrarySource, MemberFacts, MemberKind, MemberResult, NameIdentity, PackageIdentity,
+    ParameterOwner, QualifiedName, ResolvedSignature, ResolvedType, SemanticModel, SignatureIndex,
+    Truth, TypeEnvironment, TypeIndex, TypeParameterId, TypeParameterScope, canonical_or_lexical,
+    group_libraries, import_path, library_unit,
 };
 pub use rule::Rule;
 pub use suppressions::{FileSuppressions, RuleLookup};

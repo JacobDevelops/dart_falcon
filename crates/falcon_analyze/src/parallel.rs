@@ -10,8 +10,8 @@ use falcon_diagnostics::{Diagnostic, Severity, Span};
 use falcon_syntax::ast::Program;
 
 use crate::resolve::{
-    IdentityIndex, IdentitySource, LibrarySource, LibraryUnit, PackageIdentity, ProgramSource,
-    ProjectIndex, SignatureIndex, TypeIndex, group_libraries, library_unit,
+    IdentityIndex, IdentitySource, LibrarySource, LibraryUnit, PackageIdentity, SignatureIndex,
+    TypeIndex, group_libraries, library_unit,
 };
 use crate::{AnalyzeContext, ProjectFile, RuleRegistry};
 
@@ -65,9 +65,7 @@ pub fn syntax_error_diagnostics(path: &Path, errors: &[ParseError]) -> Vec<Diagn
         .collect()
 }
 
-/// A parsed file awaiting analysis. Retained across the parse-then-analyze
-/// reorder so a single cross-file [`ProjectIndex`] can be built from every
-/// program before the per-file pass runs (resolver-dependent rules need it).
+/// A parsed file retained until shared semantic indexes are built.
 struct Parsed {
     path: PathBuf,
     source: String,
@@ -102,9 +100,7 @@ fn retain(parsed: Vec<Parsed>, collect_programs: bool) -> Vec<ProjectFile> {
         .collect()
 }
 
-/// Build one cross-file [`ProjectIndex`] from every parsed program, then run the
-/// per-file rules with that index attached to each context. Shared by the
-/// parallel and sequential resolving entry points.
+/// Build shared semantic indexes, then run parallel or sequential per-file rules.
 fn analyze_indexed(
     registry: &RuleRegistry,
     parsed: &[Parsed],
@@ -112,17 +108,6 @@ fn analyze_indexed(
     parallel: bool,
     packages: &[PackageIdentity],
 ) -> Vec<Diagnostic> {
-    let index = {
-        let sources: Vec<ProgramSource> = parsed
-            .iter()
-            .map(|p| ProgramSource {
-                program: &p.program,
-                has_parse_errors: !p.parse_errors.is_empty(),
-            })
-            .collect();
-        ProjectIndex::from_project_files(&sources)
-    };
-
     // Partition files into libraries, then build the type index (each type
     // inheriting its library's unresolved-part flag) and per-file library units.
     let project_files: Vec<(PathBuf, &Program)> = parsed
@@ -157,7 +142,6 @@ fn analyze_indexed(
         let span = info_span!("analyze_file", file = %p.path.display());
         let _enter = span.enter();
         let ctx = AnalyzeContext::new(&p.path, &p.source, config)
-            .with_project(&index)
             .with_types(&type_index)
             .with_identities(&identities)
             .with_signatures(&signatures)
@@ -218,11 +202,8 @@ pub fn analyze_sequential_collecting(
     analyze_sequential_collecting_resolving(registry, files, config, collect_programs, false, &[])
 }
 
-/// Like [`analyze_parallel_collecting`], but with `resolve` controlling whether a
-/// shared cross-file [`ProjectIndex`] is built and attached to every file's
-/// [`AnalyzeContext::project`]. When `resolve` is set the driver parses all files
-/// first, builds one index from every program, then runs the per-file pass with
-/// that index; otherwise it takes the per-file fast path (no index, zero cost).
+/// Like [`analyze_parallel_collecting`], but optionally builds shared semantic
+/// indexes before the per-file pass. Without resolution, uses the per-file fast path.
 pub fn analyze_parallel_collecting_resolving(
     registry: &RuleRegistry,
     files: &[(PathBuf, String)],

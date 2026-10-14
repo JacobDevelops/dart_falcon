@@ -2,7 +2,7 @@
 //! `State` subclass's `initState` override.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, TypeTruth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -25,10 +25,10 @@ impl Rule for ProperSuperInitState {
             let TopLevelDecl::Class(class) = declaration else {
                 continue;
             };
-            let Some(identity) = model.resolve_name(std::slice::from_ref(&class.name.name)) else {
+            let Some(identity) = model.resolve_name(&class.name.name) else {
                 continue;
             };
-            if signatures.is_subtype_of(&interface(identity), &state, &model) != TypeTruth::Yes {
+            if signatures.is_subtype_of(&interface(identity), &state, &model) != Truth::Yes {
                 continue;
             }
             for member in &class.members {
@@ -90,7 +90,7 @@ fn interface(identity: DeclarationIdentity) -> ResolvedType {
 
 fn flutter_state() -> DeclarationIdentity {
     DeclarationIdentity::Package {
-        package: "flutter".to_string(),
-        name: "State".to_string(),
+        package: "flutter",
+        name: "State",
     }
 }
