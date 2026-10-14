@@ -18,18 +18,22 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_class_member, walk_function_decl, walk_local_var, walk_top_level_decl,
+};
 
 #[derive(Default)]
 pub struct BooleanPrefixes;
 
 impl Rule for BooleanPrefixes {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        let prefixes = resolve_prefixes(ctx);
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx, &prefixes);
-        }
-        diags
+        let mut visitor = Collector {
+            diags: Vec::new(),
+            ctx,
+            prefixes: resolve_prefixes(ctx),
+        };
+        visitor.visit_program(program);
+        visitor.diags
     }
 }
 
@@ -97,118 +101,56 @@ fn check_declarators(
     }
 }
 
-fn scan_top(
-    decl: &TopLevelDecl,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    prefixes: &[String],
-) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            // A top-level function/getter whose return type is `bool`.
-            if !matches!(f.kind, falcon_syntax::ast::FunctionKind::Setter(_))
-                && is_bool_type(f.return_type.as_ref())
-            {
-                check_name(&f.name, diags, ctx, prefixes);
-            }
-            if let Some(body) = &f.body {
-                scan_body(body, diags, ctx, prefixes);
-            }
-        }
-        TopLevelDecl::Variable(v) => check_declarators(&v.declarators, diags, ctx, prefixes),
-        _ => {
-            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
-                scan_member(member, diags, ctx, prefixes);
-            }
-        }
-    }
+struct Collector<'a, 'ctx> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
+    prefixes: Vec<String>,
 }
 
-fn scan_member(
-    member: &ClassMember,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    prefixes: &[String],
-) {
-    match member {
-        ClassMember::Field(f) => check_declarators(&f.declarators, diags, ctx, prefixes),
-        ClassMember::Method(m) => {
-            if !is_override(&m.annotations) && is_bool_type(m.return_type.as_ref()) {
-                check_name(&m.name, diags, ctx, prefixes);
-            }
-            if let Some(body) = &m.body {
-                scan_body(body, diags, ctx, prefixes);
-            }
+impl Visitor for Collector<'_, '_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) {
+        if let TopLevelDecl::Variable(v) = decl {
+            check_declarators(&v.declarators, &mut self.diags, self.ctx, &self.prefixes);
         }
-        ClassMember::Getter(g) => {
-            if !is_override(&g.annotations) && is_bool_type(g.return_type.as_ref()) {
-                check_name(&g.name, diags, ctx, prefixes);
-            }
-            if let Some(body) = &g.body {
-                scan_body(body, diags, ctx, prefixes);
-            }
-        }
-        // Setters and constructors are out of scope; their bodies can still
-        // declare boolean-literal locals.
-        ClassMember::Constructor(c) => {
-            if let Some(body) = &c.body {
-                scan_body(body, diags, ctx, prefixes);
-            }
-        }
-        ClassMember::Setter(s) => {
-            if let Some(body) = &s.body {
-                scan_body(body, diags, ctx, prefixes);
-            }
-        }
-        _ => {}
+        walk_top_level_decl(self, decl);
     }
-}
 
-fn scan_body(
-    body: &FunctionBody,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    prefixes: &[String],
-) {
-    if let FunctionBody::Block(b) = body {
-        scan_stmts(&b.stmts, diags, ctx, prefixes);
-    }
-}
-
-fn scan_stmts(
-    stmts: &[Stmt],
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    prefixes: &[String],
-) {
-    for s in stmts {
-        scan_stmt(s, diags, ctx, prefixes);
-    }
-}
-
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, prefixes: &[String]) {
-    match stmt {
-        Stmt::LocalVar(lv) => check_declarators(&lv.declarators, diags, ctx, prefixes),
-        Stmt::Block(b) => scan_stmts(&b.stmts, diags, ctx, prefixes),
-        Stmt::If(i) => {
-            scan_stmt(&i.then_branch, diags, ctx, prefixes);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx, prefixes);
-            }
+    fn visit_function_decl(&mut self, f: &FunctionDecl) {
+        if !matches!(f.kind, FunctionKind::Setter(_)) && is_bool_type(f.return_type.as_ref()) {
+            check_name(&f.name, &mut self.diags, self.ctx, &self.prefixes);
         }
-        Stmt::While(w) => scan_stmt(&w.body, diags, ctx, prefixes),
-        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx, prefixes),
-        Stmt::For(f) => scan_stmt(&f.body, diags, ctx, prefixes),
-        Stmt::TryCatch(tc) => {
-            scan_stmts(&tc.body.stmts, diags, ctx, prefixes);
-            for catch in &tc.catches {
-                scan_stmts(&catch.body.stmts, diags, ctx, prefixes);
+        walk_function_decl(self, f);
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) {
+        let named_return = match member {
+            ClassMember::Field(f) => {
+                check_declarators(&f.declarators, &mut self.diags, self.ctx, &self.prefixes);
+                None
             }
-            if let Some(fin) = &tc.finally {
-                scan_stmts(&fin.stmts, diags, ctx, prefixes);
+            ClassMember::Method(m) if !is_override(&m.annotations) => {
+                Some((&m.name, m.return_type.as_ref()))
             }
+            ClassMember::Getter(g) if !is_override(&g.annotations) => {
+                Some((&g.name, g.return_type.as_ref()))
+            }
+            _ => None,
+        };
+        if let Some((name, ty)) = named_return
+            && is_bool_type(ty)
+        {
+            check_name(name, &mut self.diags, self.ctx, &self.prefixes);
         }
-        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx, prefixes),
-        _ => {}
+        walk_class_member(self, member);
+    }
+
+    fn visit_local_var(&mut self, local: &LocalVarDecl) {
+        check_declarators(
+            &local.declarators,
+            &mut self.diags,
+            self.ctx,
+            &self.prefixes,
+        );
+        walk_local_var(self, local);
     }
 }

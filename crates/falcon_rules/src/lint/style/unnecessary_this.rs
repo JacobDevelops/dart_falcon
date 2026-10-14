@@ -89,6 +89,12 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
         self.scopes.pop();
     }
 
+    fn scoped_stmt(&mut self, statement: &Stmt) {
+        self.scopes.push();
+        self.visit_stmt(statement);
+        self.scopes.pop();
+    }
+
     fn local(&mut self, declaration: &LocalVarDecl) {
         for declarator in &declaration.declarators {
             if let Some(initializer) = &declarator.initializer {
@@ -127,11 +133,9 @@ impl Visitor for Collector<'_, '_> {
 
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
-            Stmt::Block(block) => {
+            Stmt::Block(_) => {
                 self.scopes.push();
-                for statement in &block.stmts {
-                    self.visit_stmt(statement);
-                }
+                walk_stmt(self, node);
                 self.scopes.pop();
             }
             Stmt::LocalVar(declaration) => self.visit_local_var(declaration),
@@ -146,13 +150,9 @@ impl Visitor for Collector<'_, '_> {
             Stmt::If(statement) => match &statement.condition {
                 IfCondition::Expr(condition) => {
                     self.visit_expr(condition);
-                    self.scopes.push();
-                    self.visit_stmt(&statement.then_branch);
-                    self.scopes.pop();
+                    self.scoped_stmt(&statement.then_branch);
                     if let Some(branch) = &statement.else_branch {
-                        self.scopes.push();
-                        self.visit_stmt(branch);
-                        self.scopes.pop();
+                        self.scoped_stmt(branch);
                     }
                 }
                 IfCondition::Case(value, pattern, guard) => {
@@ -165,9 +165,7 @@ impl Visitor for Collector<'_, '_> {
                     self.visit_stmt(&statement.then_branch);
                     self.scopes.pop();
                     if let Some(branch) = &statement.else_branch {
-                        self.scopes.push();
-                        self.visit_stmt(branch);
-                        self.scopes.pop();
+                        self.scoped_stmt(branch);
                     }
                 }
             },
@@ -187,9 +185,7 @@ impl Visitor for Collector<'_, '_> {
             }
             Stmt::While(statement) => {
                 self.visit_expr(&statement.condition);
-                self.scopes.push();
-                self.visit_stmt(&statement.body);
-                self.scopes.pop();
+                self.scoped_stmt(&statement.body);
             }
             Stmt::DoWhile(statement) => {
                 self.scopes.push();

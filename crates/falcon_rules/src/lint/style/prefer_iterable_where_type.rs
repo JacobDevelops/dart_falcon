@@ -25,7 +25,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
-use super::prefer_is_empty::lacks_collection_member;
+use super::collection_checks::lacks_collection_member;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]

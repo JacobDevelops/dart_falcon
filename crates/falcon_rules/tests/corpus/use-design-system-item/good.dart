@@ -9,3 +9,11 @@ Widget build(BuildContext context) {
 class MyWidget {
   Widget make() => AppButton(label: 'ok');
 }
+
+final namedConstructor = Container.named();
+final prefixedCall = framework.Container();
+
+class Initializers {
+  final named = Container.named();
+  final replacement = AppContainer();
+}

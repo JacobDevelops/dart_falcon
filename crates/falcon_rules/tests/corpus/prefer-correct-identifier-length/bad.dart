@@ -44,3 +44,46 @@ void nestedDeclarations() {
   };
   print(callback);
 }
+
+final topCallback = () {
+  final aa = 1; /* expect: prefer-correct-identifier-length */
+  return aa;
+};
+
+class ClosureDeclarations {
+  final callback = () {
+    final bb = 2; /* expect: prefer-correct-identifier-length */
+    return bb;
+  };
+
+  Object arrow() => () {
+    final cc = 3; /* expect: prefer-correct-identifier-length */
+    return cc;
+  };
+
+  int operator +(int value) {
+    final dd = value; /* expect: prefer-correct-identifier-length */
+    return dd;
+  }
+}
+
+enum MemberDeclarations {
+  value;
+
+  int read() {
+    final ee = 4; /* expect: prefer-correct-identifier-length */
+    return ee;
+  }
+}
+
+class InitializerDeclarations {
+  final Object callback;
+  InitializerDeclarations() : callback = (() {
+    final ff = 5; /* expect: prefer-correct-identifier-length */
+    return ff;
+  });
+}
+
+List<int> collectionLoop(int count) => [
+  for (var w = 0; w < count; w++) w, /* expect: prefer-correct-identifier-length */
+];

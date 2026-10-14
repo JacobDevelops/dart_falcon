@@ -120,3 +120,9 @@ class GoodLayout7 extends StatelessWidget {
     );
   }
 }
+
+final prefixedExpanded = new framework.Expanded(child: Container());
+final prefixedChild = Expanded(child: new framework.Container());
+final namedExpanded = Expanded.named(child: Container());
+final namedChild = Expanded(child: SizedBox.named());
+final populated = Expanded(child: Container(child: Text('content')));

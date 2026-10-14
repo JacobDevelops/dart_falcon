@@ -101,8 +101,9 @@ fn check_class(
                 continue;
             }
             let has_decl_init = d.initializer.is_some();
-            let touched_by_ctor = generative.iter().any(|c| inits_field(c, name))
-                || members.iter().any(|m| ctor_inits_any(m, name));
+            let touched_by_ctor = members.iter().any(
+                |member| matches!(member, ClassMember::Constructor(c) if inits_field(c, name)),
+            );
 
             let ok = if has_decl_init {
                 !touched_by_ctor
@@ -125,10 +126,6 @@ fn is_redirecting(c: &ConstructorDecl) -> bool {
     c.initializers
         .iter()
         .any(|i| matches!(i, ConstructorInitializer::ThisCall { .. }))
-}
-
-fn ctor_inits_any(member: &ClassMember, name: &str) -> bool {
-    matches!(member, ClassMember::Constructor(c) if inits_field(c, name))
 }
 
 fn inits_field(c: &ConstructorDecl, name: &str) -> bool {

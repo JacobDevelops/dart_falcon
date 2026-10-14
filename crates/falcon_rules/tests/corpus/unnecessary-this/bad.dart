@@ -64,3 +64,26 @@ class TryScopes {
     print(this.value); /* expect: unnecessary-this */
   }
 }
+
+class BranchScopes {
+  int value = 0;
+  void run(bool flag, Object subject) {
+    if (flag) {
+      final value = 1;
+      print(this.value + value);
+    } else {
+      print(this.value); /* expect: unnecessary-this */
+    }
+    if (subject case final value) {
+      print(this.value + value.hashCode);
+    } else {
+      print(this.value); /* expect: unnecessary-this */
+    }
+    while (flag) {
+      final value = 2;
+      print(this.value + value);
+      break;
+    }
+    print(this.value); /* expect: unnecessary-this */
+  }
+}

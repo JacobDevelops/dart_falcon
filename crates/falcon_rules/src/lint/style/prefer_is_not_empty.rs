@@ -22,104 +22,16 @@
 //! receiver — the common case, and every receiver when no type index is
 //! attached — keeps firing.
 
+use super::collection_checks::{Emptiness, analyze_emptiness};
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
-use falcon_syntax::ast::*;
-
-use super::prefer_is_empty::lacks_collection_member;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]
 pub struct PreferIsNotEmpty;
 impl Rule for PreferIsNotEmpty {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
-    }
-}
-struct Collector<'a> {
-    diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
-}
-
-impl SemanticRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Binary {
-            op,
-            left,
-            right,
-            span,
-        } = node
-        else {
-            return;
-        };
-        if let Some(receiver) = not_empty_comparison_receiver(op, left, right)
-            && !lacks_collection_member(
-                self.ctx,
-                receiver,
-                state,
-                "isNotEmpty",
-                &["Iterable", "String", "Map"],
-            )
-        {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-is-not-empty",
-                "Use 'isNotEmpty' instead of comparing 'length' to 0.",
-                *span,
-            ));
-        }
-    }
-}
-
-fn not_empty_comparison_receiver<'a>(
-    op: &BinaryOp,
-    left: &'a Expr,
-    right: &'a Expr,
-) -> Option<&'a Expr> {
-    match op {
-        // length != 0 / 0 != length
-        BinaryOp::NotEq => length_receiver(left)
-            .filter(|_| is_int(right, 0))
-            .or_else(|| length_receiver(right).filter(|_| is_int(left, 0))),
-        // length > 0
-        BinaryOp::Gt => length_receiver(left).filter(|_| is_int(right, 0)),
-        // 0 < length
-        BinaryOp::Lt => length_receiver(right).filter(|_| is_int(left, 0)),
-        // length >= 1
-        BinaryOp::GtEq => length_receiver(left).filter(|_| is_int(right, 1)),
-        // 1 <= length
-        BinaryOp::LtEq => length_receiver(right).filter(|_| is_int(left, 1)),
-        _ => None,
-    }
-}
-
-/// The receiver object of a `.length` property access, if `expr` is one.
-fn length_receiver(expr: &Expr) -> Option<&Expr> {
-    match expr {
-        Expr::Field {
-            object,
-            field,
-            is_null_safe: false,
-            ..
-        } if field.name == "length" => Some(object),
-        _ => None,
-    }
-}
-
-/// True for an integer literal equal to `n`.
-fn is_int(expr: &Expr, n: i64) -> bool {
-    if let Expr::IntLit { value, .. } = expr {
-        value.replace('_', "").parse::<i64>().ok() == Some(n)
-    } else {
-        false
+        analyze_emptiness(program, ctx, Emptiness::NotEmpty)
     }
 }
 

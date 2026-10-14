@@ -9,49 +9,34 @@
 //! a `child` parameter, it only considers constructions whose callee is
 //! PascalCase — implicit `Foo(...)` calls and explicit `new`/`const Foo(...)`.
 
+use super::traversal::for_each_expr;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct SortChildPropertiesLast;
 
 impl Rule for SortChildPropertiesLast {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        collector.visit_program(program);
-        collector.diags
-    }
-}
-
-struct Collector<'a> {
-    diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
-}
-
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Some((name, args, _)) = crate::lint::flutter::widget_construction(node)
-        // Widget constructors are PascalCase; requiring that keeps this off
-        // ordinary function calls that happen to take a `child:` argument.
-        && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-        && !args.named.is_empty()
-        {
-            let last = args.named.len() - 1;
-            for (i, named) in args.named.iter().enumerate() {
-                if matches!(named.name.name.as_str(), "child" | "children") && i != last {
-                    self.diags.push(self.ctx.diagnostic(
-                        "sort-child-properties-last",
-                        "The child/children argument should be last in a widget constructor call.",
-                        named.span,
-                    ));
+        let mut diags = Vec::new();
+        for_each_expr(program, |node| {
+            if let Some((name, args, _)) = crate::lint::flutter::widget_construction(node)
+                && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                && !args.named.is_empty()
+            {
+                let last = args.named.len() - 1;
+                for (i, named) in args.named.iter().enumerate() {
+                    if matches!(named.name.name.as_str(), "child" | "children") && i != last {
+                        diags.push(ctx.diagnostic(
+                            "sort-child-properties-last",
+                            "The child/children argument should be last in a widget constructor call.",
+                            named.span,
+                        ));
+                    }
                 }
             }
-        }
-        walk_expr(self, node);
+        });
+        diags
     }
 }

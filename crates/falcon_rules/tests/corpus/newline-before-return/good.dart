@@ -58,3 +58,36 @@ bool check(int x) {
 
   return false;
 }
+
+final callbacks = [
+  () {
+    return 1;
+  },
+];
+
+int firstInEachList(int value) {
+  switch (value) {
+    case 0:
+      return value;
+    default:
+      return 1;
+  }
+}
+
+void firstInNestedLists() {
+  try {
+    return;
+  } catch (error) {
+    return;
+  } finally {
+    return;
+  }
+}
+
+void singleStatementBranches(bool flag) {
+  if (flag) return;
+  while (flag) return;
+  label: {
+    return;
+  }
+}

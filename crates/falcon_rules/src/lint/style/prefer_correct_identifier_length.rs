@@ -7,6 +7,8 @@
 //! variables, and plain function and method names are never checked, because
 //! short names are often idiomatic there. A single leading underscore is stripped
 //! before both the length and exception checks, so `_id` is judged as `id`.
+//! Declarations in initializer closures, arrow bodies, operators, and enum
+//! members follow the same policy as declarations in ordinary function bodies.
 //!
 //! ## Options
 //!
@@ -19,14 +21,15 @@ use std::collections::HashSet;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, bound_names, walk_enum_decl, walk_field_decl, walk_getter_decl, walk_local_var,
+    walk_setter_decl, walk_stmt, walk_top_level_decl,
+};
 
 #[derive(Default)]
 pub struct PreferCorrectIdentifierLength;
 
-/// Resolved options for one analysis pass. dcl defaults: min 3, max 300, no
-/// exceptions. There is deliberately no built-in exception list — dcl has none,
-/// and the scope below never reaches short-lived names like loop or lambda
-/// parameters where single letters are idiomatic.
+// No built-in exceptions: dcl has none, and short-lived bindings are exempt by scope.
 struct IdentCfg {
     min_length: usize,
     max_length: usize,
@@ -52,41 +55,17 @@ fn ident_cfg(ctx: &AnalyzeContext) -> IdentCfg {
 
 impl Rule for PreferCorrectIdentifierLength {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        let cfg = ident_cfg(ctx);
-        for decl in &program.declarations {
-            match decl {
-                // dcl checks *variable declarations*, so a function's own name
-                // and parameters are out of scope; only its local variables are.
-                TopLevelDecl::Function(func) => {
-                    if let Some(body) = &func.body {
-                        check_body(body, &mut diags, ctx, &cfg);
-                    }
-                }
-                TopLevelDecl::Variable(var) => {
-                    for decl in &var.declarators {
-                        check_ident(&decl.name, &mut diags, ctx, &cfg);
-                    }
-                }
-                TopLevelDecl::Enum(e) => {
-                    // Enum constants are checked as declarations…
-                    for variant in &e.variants {
-                        check_ident(&variant.name, &mut diags, ctx, &cfg);
-                    }
-                }
-                _ => {}
-            }
-            if let Some(members) = crate::lint::declarations::members_of(decl) {
-                check_members(members, &mut diags, ctx, &cfg);
-            }
-        }
-        diags
+        let mut collector = Names {
+            diags: Vec::new(),
+            ctx,
+            cfg: ident_cfg(ctx),
+        };
+        collector.visit_program(program);
+        collector.diags
     }
 }
 
-/// dcl strips a single leading underscore before both the exception check and
-/// the length check, so `_id` matches the `id` exception and `_ab` is judged as
-/// the two-character `ab`.
+// Strip exactly one leading underscore, including when matching exceptions.
 fn is_invalid(name: &str, cfg: &IdentCfg) -> bool {
     let stripped = name.strip_prefix('_').unwrap_or(name);
     if cfg.exceptions.contains(stripped) {
@@ -107,97 +86,66 @@ fn check_ident(
     }
 }
 
-fn check_members(
-    members: &[ClassMember],
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    cfg: &IdentCfg,
-) {
-    for member in members {
-        match member {
-            // Fields are variable declarations.
-            ClassMember::Field(field) => {
-                for decl in &field.declarators {
-                    check_ident(&decl.name, diags, ctx, cfg);
-                }
-            }
-            // Only getters and setters have their *name* checked (dcl only
-            // inspects accessor declarations, not plain methods).
-            ClassMember::Getter(getter) => {
-                check_ident(&getter.name, diags, ctx, cfg);
-                if let Some(body) = &getter.body {
-                    check_body(body, diags, ctx, cfg);
-                }
-            }
-            ClassMember::Setter(setter) => {
-                check_ident(&setter.name, diags, ctx, cfg);
-                if let Some(body) = &setter.body {
-                    check_body(body, diags, ctx, cfg);
-                }
-            }
-            // Methods and constructors: names and parameters are out of scope,
-            // but their bodies still declare checkable local variables.
-            ClassMember::Method(method) => {
-                if let Some(body) = &method.body {
-                    check_body(body, diags, ctx, cfg);
-                }
-            }
-            ClassMember::Constructor(ctor) => {
-                if let Some(body) = &ctor.body {
-                    check_body(body, diags, ctx, cfg);
-                }
-            }
-            _ => {}
-        }
+struct Names<'a, 'ctx> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
+    cfg: IdentCfg,
+}
+
+impl Names<'_, '_> {
+    fn check(&mut self, ident: &Identifier) {
+        check_ident(ident, &mut self.diags, self.ctx, &self.cfg);
     }
 }
 
-fn check_body(
-    body: &FunctionBody,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-    cfg: &IdentCfg,
-) {
-    match body {
-        FunctionBody::Block(block) => check_stmts(&block.stmts, diags, ctx, cfg),
-        FunctionBody::Arrow(_, _) | FunctionBody::Native(_, _) => {}
-    }
-}
-
-fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cfg: &IdentCfg) {
-    struct Names<'a, 'ctx> {
-        diags: &'a mut Vec<Diagnostic>,
-        ctx: &'a AnalyzeContext<'ctx>,
-        cfg: &'a IdentCfg,
-    }
-
-    impl falcon_syntax::visitor::Visitor for Names<'_, '_> {
-        fn visit_stmt(&mut self, stmt: &Stmt) {
-            check_stmt(stmt, self.diags, self.ctx, self.cfg);
-            falcon_syntax::visitor::walk_stmt(self, stmt);
-        }
-
-        fn visit_local_var(&mut self, local: &LocalVarDecl) {
-            for decl in &local.declarators {
-                check_ident(&decl.name, self.diags, self.ctx, self.cfg);
+impl Visitor for Names<'_, '_> {
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        if let TopLevelDecl::Variable(variable) = node {
+            for declarator in &variable.declarators {
+                self.check(&declarator.name);
             }
-            falcon_syntax::visitor::walk_local_var(self, local);
         }
+        walk_top_level_decl(self, node);
     }
 
-    let mut visitor = Names { diags, ctx, cfg };
-    for stmt in stmts {
-        falcon_syntax::visitor::Visitor::visit_stmt(&mut visitor, stmt);
-    }
-}
-
-/// Checks the names one statement declares. Nested statements are reached by the
-/// caller's walker, so this must not recurse itself.
-fn check_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cfg: &IdentCfg) {
-    if let Stmt::PatternDecl(pattern_decl) = stmt {
-        for name in falcon_syntax::visitor::bound_names(&pattern_decl.pattern) {
-            check_ident(name, diags, ctx, cfg);
+    fn visit_enum_decl(&mut self, node: &EnumDecl) {
+        for variant in &node.variants {
+            self.check(&variant.name);
         }
+        walk_enum_decl(self, node);
+    }
+
+    fn visit_field_decl(&mut self, node: &FieldDecl) {
+        for declarator in &node.declarators {
+            self.check(&declarator.name);
+        }
+        walk_field_decl(self, node);
+    }
+
+    fn visit_getter_decl(&mut self, node: &GetterDecl) {
+        self.check(&node.name);
+        walk_getter_decl(self, node);
+    }
+
+    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+        self.check(&node.name);
+        walk_setter_decl(self, node);
+    }
+
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        for declarator in &node.declarators {
+            self.check(&declarator.name);
+        }
+        walk_local_var(self, node);
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if let Stmt::PatternDecl(declaration) = node {
+            for name in bound_names(&declaration.pattern) {
+                self.check(name);
+            }
+        }
+        walk_stmt(self, node);
     }
 }
 

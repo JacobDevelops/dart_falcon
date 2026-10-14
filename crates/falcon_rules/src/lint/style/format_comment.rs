@@ -24,11 +24,8 @@ use regex::Regex;
 #[derive(Default)]
 pub struct FormatComment;
 
-/// Resolved options for one analysis pass.
 struct CommentCfg {
-    /// When true, only `///` doc comments are checked.
     only_doc_comments: bool,
-    /// A comment whose text matches any of these is skipped entirely.
     ignored_patterns: Vec<Regex>,
 }
 
@@ -40,8 +37,6 @@ fn comment_cfg(ctx: &AnalyzeContext) -> CommentCfg {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // Compile each pattern leniently: an invalid regex is ignored rather than
-    // panicking on user config.
     let ignored_patterns = crate::lint::options::strings(opts, "ignored_patterns")
         .into_iter()
         .flatten()
@@ -66,30 +61,18 @@ impl Rule for FormatComment {
     }
 }
 
-/// One line comment token lifted straight from the source text.
 struct CommentToken<'a> {
-    /// Byte offset of the leading `/`.
     start: usize,
-    /// Marker: `"///"` for doc comments, `"//"` for regular comments.
     marker: &'static str,
-    /// The full lexeme, `//`/`///` slashes included, to end of line.
     lexeme: &'a str,
-    /// 1-indexed source line the comment begins on.
     line: usize,
 }
 
 const PUNCTUATION: [char; 4] = ['.', '!', '?', ':'];
 
-/// Terminators that end a "sentence" for the multiline split. Unlike dcl's
-/// `[\.|:]` char class, `:` is NOT a terminator: a colon introduces a clause
-/// that may legitimately start lowercase ("Word: lowercase clause."), and the
-/// single-line path never splits on it — treating it as a boundary here made
-/// the verdict depend on how the comment happened to be line-wrapped.
+// A colon introduces a clause, not a new sentence.
 const SENTENCE_TERMINATORS: [char; 2] = ['.', '|'];
 
-/// Scan raw source for `//` / `///` line comments, skipping strings and block
-/// comments. This mirrors dart_code_linter operating on the analyzer token
-/// stream: block (`/* */`) comments are not this rule's concern.
 fn collect_comment_tokens(source: &str) -> Vec<CommentToken<'_>> {
     let bytes = source.as_bytes();
     let len = bytes.len();
@@ -123,8 +106,7 @@ fn collect_comment_tokens(source: &str) -> Vec<CommentToken<'_>> {
                     slashes += 1;
                     i += 1;
                 }
-                // `///` is a doc comment; `////+` (four or more) is a regular
-                // comment per Dart, matching dcl's `startsWith('///')` guard.
+                // Four or more slashes mark a regular comment.
                 let marker = if slashes == 3 { "///" } else { "//" };
                 while i < len && bytes[i] != b'\n' {
                     i += 1;
@@ -136,7 +118,7 @@ fn collect_comment_tokens(source: &str) -> Vec<CommentToken<'_>> {
                     line,
                 });
             }
-            b'"' => {
+            quote @ (b'"' | b'\'') => {
                 i += 1;
                 while i < len {
                     match bytes[i] {
@@ -145,24 +127,7 @@ fn collect_comment_tokens(source: &str) -> Vec<CommentToken<'_>> {
                             line += 1;
                             i += 1;
                         }
-                        b'"' => {
-                            i += 1;
-                            break;
-                        }
-                        _ => i += 1,
-                    }
-                }
-            }
-            b'\'' => {
-                i += 1;
-                while i < len {
-                    match bytes[i] {
-                        b'\\' => i += 2,
-                        b'\n' => {
-                            line += 1;
-                            i += 1;
-                        }
-                        b'\'' => {
+                        byte if byte == quote => {
                             i += 1;
                             break;
                         }
@@ -177,9 +142,6 @@ fn collect_comment_tokens(source: &str) -> Vec<CommentToken<'_>> {
     tokens
 }
 
-/// Group consecutive same-kind comment lines into one block, the way the Dart
-/// analyzer coalesces a run of `///` lines into a single `Comment` node. A block
-/// break happens on a type change or a non-comment gap (blank line / code).
 fn group_comments<'a, 'b>(tokens: &'b [CommentToken<'a>]) -> Vec<&'b [CommentToken<'a>]> {
     let mut groups = Vec::new();
     let mut start = 0;
@@ -205,7 +167,6 @@ fn check_group(
     cfg: &CommentCfg,
 ) {
     let is_doc = group.first().map(|t| t.marker == "///").unwrap_or(false);
-    // Regular comments are only linted when `only_doc_comments` is off.
     if !is_doc && cfg.only_doc_comments {
         return;
     }
@@ -219,8 +180,8 @@ fn check_group(
         return;
     }
 
+    // Doc blocks report once; regular blocks report each non-ignored token.
     if is_doc {
-        // dcl reports one issue on the whole doc-comment node.
         let start = group[0].start;
         diags.push(ctx.diagnostic(
             "format-comment",
@@ -231,10 +192,8 @@ fn check_group(
             },
         ));
     } else {
-        // dcl reports one issue per non-ignored regular-comment token.
         for tok in group {
-            let stripped = tok.lexeme.replacen(tok.marker, "", 1);
-            let trimmed = stripped.trim();
+            let trimmed = tok.lexeme[tok.marker.len()..].trim();
             if is_ignore_comment(trimmed) || is_ignored_pattern(trimmed, cfg) {
                 continue;
             }
@@ -250,8 +209,6 @@ fn check_group(
     }
 }
 
-/// A single-line comment is valid when it is empty, an `ignore:` directive, a
-/// `{@...}` macro, matches an ignored pattern, or reads as one sentence.
 fn has_valid_single_line(lexeme: &str, marker: &str, cfg: &CommentCfg) -> bool {
     let comment_text = &lexeme[marker.len()..];
     let text = comment_text.trim();
@@ -265,18 +222,11 @@ fn has_valid_single_line(lexeme: &str, marker: &str, cfg: &CommentCfg) -> bool {
     is_valid_sentence(comment_text)
 }
 
-/// A multi-line block is valid when every sentence in the concatenated body
-/// (markers stripped, code fences / macros / ignore lines removed) is a valid
-/// sentence. Crucially the block is joined *before* sentence-splitting, so a
-/// sentence that wraps across `///` lines is judged as a whole — continuation
-/// lines are never flagged on their own.
 fn has_valid_multiline(group: &[CommentToken<'_>], cfg: &CommentCfg) -> bool {
     let text = extract_text(group, cfg);
     split_sentences(&text).iter().all(|s| is_valid_sentence(s))
 }
 
-/// Concatenate line contents (marker stripped), skipping fenced code blocks,
-/// macro-only lines, and ignore/ignored-pattern lines.
 fn extract_text(group: &[CommentToken<'_>], cfg: &CommentCfg) -> String {
     let mut result = String::new();
     let mut skip_fenced = false;
@@ -296,9 +246,6 @@ fn should_skip(text: &str, cfg: &CommentCfg) -> bool {
     is_macros(text) || is_ignore_comment(trimmed) || is_ignored_pattern(trimmed, cfg)
 }
 
-/// A sentence is valid when it starts with a space (i.e. the marker is followed
-/// by whitespace), its first non-space character is upper-case, and it ends in
-/// sentence punctuation.
 fn is_valid_sentence(sentence: &str) -> bool {
     let trimmed = sentence.trim();
     if trimmed.is_empty() {
@@ -318,21 +265,14 @@ fn is_valid_sentence(sentence: &str) -> bool {
     upper && last_symbol && has_empty_space
 }
 
-/// Split on the zero-width boundary *after* a `.`/`|` that is followed by
-/// whitespace or end-of-text — a hand-rolled equivalent of dcl's lookbehind
-/// `RegExp(r'(?<=([\.|:](?=\s|\n|$)))')` (minus `:`, see SENTENCE_TERMINATORS),
-/// which the `regex` crate cannot express.
+// The regex crate cannot express this zero-width lookbehind boundary.
 fn split_sentences(text: &str) -> Vec<&str> {
     let mut sentences = Vec::new();
     let mut start = 0;
-    let chars: Vec<(usize, char)> = text.char_indices().collect();
-    for idx in 0..chars.len() {
-        let (pos, c) = chars[idx];
+    let mut chars = text.char_indices().peekable();
+    while let Some((pos, c)) = chars.next() {
         if SENTENCE_TERMINATORS.contains(&c) {
-            let next_is_ws_or_end = chars
-                .get(idx + 1)
-                .map(|(_, nc)| nc.is_whitespace())
-                .unwrap_or(true);
+            let next_is_ws_or_end = chars.peek().is_none_or(|(_, next)| next.is_whitespace());
             if next_is_ws_or_end {
                 let end = pos + c.len_utf8();
                 sentences.push(&text[start..end]);
@@ -347,15 +287,12 @@ fn split_sentences(text: &str) -> Vec<&str> {
 }
 
 fn is_ignore_comment(text: &str) -> bool {
-    // Dart analyzer directives plus falcon's own `falcon-ignore` / `falcon-ignore-all`
-    // suppressions: none of these are prose, so the rule leaves them alone.
     text.starts_with("ignore:")
         || text.starts_with("ignore_for_file:")
         || text.starts_with("falcon-ignore")
 }
 
 fn is_macros(text: &str) -> bool {
-    // `{@...}` dartdoc macro directive.
     match text.find("{@") {
         Some(open) => text.as_bytes()[open + 2..].contains(&b'}'),
         None => false,
@@ -364,4 +301,37 @@ fn is_macros(text: &str) -> bool {
 
 fn is_ignored_pattern(text: &str, cfg: &CommentCfg) -> bool {
     cfg.ignored_patterns.iter().any(|re| re.is_match(text))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn comment_scan_skips_both_quote_styles_and_escaped_quotes() {
+        let source = r#"'// not a comment' "// also not a comment" 'escaped \' // text' "escaped \" // text"
+// First.
+/// Second."#;
+        let tokens = collect_comment_tokens(source);
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0].lexeme, "// First.");
+        assert_eq!(tokens[0].marker, "//");
+        assert_eq!(tokens[0].line, 2);
+        assert_eq!(tokens[1].lexeme, "/// Second.");
+        assert_eq!(tokens[1].marker, "///");
+        assert_eq!(tokens[1].line, 3);
+    }
+
+    #[test]
+    fn sentence_boundaries_preserve_unicode_and_colon_clauses() {
+        assert_eq!(
+            split_sentences(" Élan: lowercase clause. Next| Last."),
+            [" Élan: lowercase clause.", " Next|", " Last."]
+        );
+        assert_eq!(
+            split_sentences(" Value.without spaces"),
+            [" Value.without spaces"]
+        );
+        assert!(split_sentences("").is_empty());
+    }
 }

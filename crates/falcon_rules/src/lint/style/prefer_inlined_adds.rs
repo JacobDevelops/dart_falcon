@@ -7,52 +7,38 @@
 //! takes exactly one positional argument and no named arguments; multi-argument
 //! or named calls, and cascades on non-list receivers, are ignored.
 
+use super::traversal::for_each_expr;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct PreferInlinedAdds;
 
 impl Rule for PreferInlinedAdds {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        collector.visit_program(program);
-        collector.diags
-    }
-}
-
-struct Collector<'a> {
-    diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
-}
-
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::Cascade {
-            object, sections, ..
-        } = node
-            && matches!(&**object, Expr::List { .. })
-        {
-            for section in sections {
-                // A section reports at most once: multiple `add` ops in one
-                // cascade section share the same span, so stop after the first.
-                for op in &section.ops {
-                    if let CascadeOp::Call(ident, _, args) = op
-                        && ident.name == "add"
-                        && args.positional.len() == 1
-                        && args.named.is_empty()
-                    {
-                        self.diags.push(self.ctx.diagnostic("prefer-inlined-adds", "Inline the added element into the collection literal instead of using 'add'.", section.span));
-                        break;
+        let mut diags = Vec::new();
+        for_each_expr(program, |node| {
+            if let Expr::Cascade {
+                object, sections, ..
+            } = node
+                && matches!(&**object, Expr::List { .. })
+            {
+                for section in sections {
+                    // Stop after one match because operations in a section share its span.
+                    for op in &section.ops {
+                        if let CascadeOp::Call(ident, _, args) = op
+                            && ident.name == "add"
+                            && args.positional.len() == 1
+                            && args.named.is_empty()
+                        {
+                            diags.push(ctx.diagnostic("prefer-inlined-adds", "Inline the added element into the collection literal instead of using 'add'.", section.span));
+                            break;
+                        }
                     }
                 }
             }
-        }
-        walk_expr(self, node);
+        });
+        diags
     }
 }

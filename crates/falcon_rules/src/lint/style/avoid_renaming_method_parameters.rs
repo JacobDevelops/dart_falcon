@@ -8,6 +8,8 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+use super::override_members::override_member_owners;
+
 #[derive(Default)]
 pub struct AvoidRenamingMethodParameters;
 
@@ -18,50 +20,14 @@ impl Rule for AvoidRenamingMethodParameters {
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
-        for decl in &program.declarations {
-            match decl {
-                TopLevelDecl::Class(node) => check_members(
-                    model.resolve_name(&node.name.name),
-                    &node.members,
-                    signatures,
-                    ctx,
-                    &mut diags,
-                ),
-                TopLevelDecl::Mixin(node) => check_members(
-                    model.resolve_name(&node.name.name),
-                    &node.members,
-                    signatures,
-                    ctx,
-                    &mut diags,
-                ),
-                TopLevelDecl::MixinClass(node) => check_members(
-                    model.resolve_name(&node.name.name),
-                    &node.members,
-                    signatures,
-                    ctx,
-                    &mut diags,
-                ),
-                TopLevelDecl::Enum(node) => check_members(
-                    model.resolve_name(&node.name.name),
-                    &node.members,
-                    signatures,
-                    ctx,
-                    &mut diags,
-                ),
-                TopLevelDecl::ExtensionType(node) => check_members(
-                    model.resolve_name(&node.name.name),
-                    &node.members,
-                    signatures,
-                    ctx,
-                    &mut diags,
-                ),
-                TopLevelDecl::ClassTypeAlias(_)
-                | TopLevelDecl::Extension(_)
-                | TopLevelDecl::Function(_)
-                | TopLevelDecl::Variable(_)
-                | TopLevelDecl::TypeAlias(_)
-                | TopLevelDecl::Error(_) => {}
-            }
+        for (name, members) in override_member_owners(program) {
+            check_members(
+                model.resolve_name(name),
+                members,
+                signatures,
+                ctx,
+                &mut diags,
+            );
         }
         diags
     }

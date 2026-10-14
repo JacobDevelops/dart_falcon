@@ -32,3 +32,32 @@ void nestedReturns() {
   print('done');
   return; /* expect: newline-before-return */
 }
+
+final callback = () {
+  print('callback');
+  return 1; /* expect: newline-before-return */
+};
+
+int switchReturns(int value) {
+  switch (value) {
+    case 0:
+      print(value);
+      return value; /* expect: newline-before-return */
+    default:
+      return 1;
+  }
+}
+
+void labeledReturn() {
+  label: {
+    print('label');
+    return; /* expect: newline-before-return */
+  }
+}
+
+class Operand {
+  Operand operator +(Operand other) {
+    print(other);
+    return other; /* expect: newline-before-return */
+  }
+}

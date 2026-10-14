@@ -41,3 +41,17 @@ void containersRegression() {
   };
   print(closure);
 }
+
+typedef Pair = (int, String); /* expect: avoid-positional-fields-in-records */
+
+void typePositions(Object value) {
+  final cast = value as (int, String); /* expect: avoid-positional-fields-in-records */
+  final test = value is (int, String); /* expect: avoid-positional-fields-in-records */
+  final callback = ((int, String) pair) => pair; /* expect: avoid-positional-fields-in-records */
+  print([cast, test, callback]);
+}
+
+final callback = () {
+  final pair = (1, 2); /* expect: avoid-positional-fields-in-records */
+  return pair;
+};

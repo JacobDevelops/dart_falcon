@@ -32,24 +32,20 @@ use falcon_analyze::{AnalyzeContext, Rule, TypeIndex};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_expr, walk_field_decl, walk_function_decl, walk_getter_decl, walk_method_decl,
-    walk_top_level_decl,
+    Visitor, walk_expr, walk_field_decl, walk_function_body, walk_function_decl, walk_getter_decl,
+    walk_method_decl, walk_stmt, walk_top_level_decl,
 };
 
 #[derive(Default)]
 pub struct PreferCollectionLiterals;
 
-/// Constructors whose default invocation is expressible as a literal.
 const NAMES: [&str; 5] = ["List", "Map", "Set", "LinkedHashMap", "LinkedHashSet"];
 
-/// Concrete collection types a `{}`/`[]` literal cannot stand in for — a matching
-/// declared context type *requires* the constructor.
+// A literal's Map/Set type cannot replace these concrete declared contexts.
 const CONCRETE: [&str; 2] = ["LinkedHashMap", "LinkedHashSet"];
 
 impl Rule for PreferCollectionLiterals {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        // Pre-pass: spans of constructors sitting in a concrete-typed slot, which a
-        // collection literal would not preserve.
         let mut scan = ContextScan {
             suppressed: HashSet::new(),
         };
@@ -76,9 +72,7 @@ struct Collector<'a> {
 impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Some((span, name)) = default_collection_ctor(node) {
-            // A user type shadowing a core collection name → the literal would
-            // build the core type, not the user's. `type_kind` is `Some` only for
-            // user declarations (core names carry none).
+            // Core collection names have no type_kind; user declarations do.
             let user_shadow = self.types.is_some_and(|t| t.type_kind(name).is_some());
             let context_required = self.suppressed.contains(&(span.start, span.end));
             if !user_shadow && !context_required {
@@ -93,15 +87,11 @@ impl Visitor for Collector<'_> {
     }
 }
 
-/// Pre-pass collecting constructor spans that must be suppressed because their
-/// immediate declared context requires the concrete collection type.
 struct ContextScan {
     suppressed: HashSet<(usize, usize)>,
 }
 
 impl ContextScan {
-    /// Record any declarator initializer that constructs the concrete type named
-    /// by `ty`.
     fn record_decls(&mut self, ty: &Option<DartType>, decls: &[VarDeclarator]) {
         let Some(ty) = ty else { return };
         let Some(expected) = concrete_context(ty) else {
@@ -114,7 +104,6 @@ impl ContextScan {
         }
     }
 
-    /// Record `expr`'s span when it is a default constructor for `expected`.
     fn record_if_matching(&mut self, expr: &Expr, expected: &str) {
         if let Some((span, base)) = default_collection_ctor(expr)
             && base == expected
@@ -123,69 +112,39 @@ impl ContextScan {
         }
     }
 
-    /// Record returns in a function body whose declared return type is `expected`.
     fn collect_returns(&mut self, body: &FunctionBody, expected: &str) {
         match body {
             FunctionBody::Arrow(e, _) => self.record_if_matching(e, expected),
-            FunctionBody::Block(b) => {
-                for s in &b.stmts {
-                    self.collect_stmt_returns(s, expected);
-                }
-            }
-            FunctionBody::Native(_, _) => {}
+            _ => walk_function_body(
+                &mut ReturnScan {
+                    contexts: self,
+                    expected,
+                },
+                body,
+            ),
         }
+    }
+}
+
+struct ReturnScan<'a, 'b> {
+    contexts: &'a mut ContextScan,
+    expected: &'b str,
+}
+
+impl Visitor for ReturnScan<'_, '_> {
+    fn visit_stmt(&mut self, node: &Stmt) {
+        if matches!(node, Stmt::LocalFunc(_)) {
+            return;
+        }
+        if let Stmt::Return(ret) = node
+            && let Some(value) = &ret.value
+        {
+            self.contexts.record_if_matching(value, self.expected);
+        }
+        walk_stmt(self, node);
     }
 
-    /// Recurse through control-flow statements recording `return` values that
-    /// construct `expected`. Stops at nested function boundaries (a `LocalFunc`
-    /// carries its own return context and is walked separately).
-    fn collect_stmt_returns(&mut self, stmt: &Stmt, expected: &str) {
-        match stmt {
-            Stmt::Return(r) => {
-                if let Some(v) = &r.value {
-                    self.record_if_matching(v, expected);
-                }
-            }
-            Stmt::Block(b) => {
-                for s in &b.stmts {
-                    self.collect_stmt_returns(s, expected);
-                }
-            }
-            Stmt::If(i) => {
-                self.collect_stmt_returns(&i.then_branch, expected);
-                if let Some(e) = &i.else_branch {
-                    self.collect_stmt_returns(e, expected);
-                }
-            }
-            Stmt::While(w) => self.collect_stmt_returns(&w.body, expected),
-            Stmt::DoWhile(d) => self.collect_stmt_returns(&d.body, expected),
-            Stmt::For(f) => self.collect_stmt_returns(&f.body, expected),
-            Stmt::TryCatch(tc) => {
-                for s in &tc.body.stmts {
-                    self.collect_stmt_returns(s, expected);
-                }
-                for catch in &tc.catches {
-                    for s in &catch.body.stmts {
-                        self.collect_stmt_returns(s, expected);
-                    }
-                }
-                if let Some(fin) = &tc.finally {
-                    for s in &fin.stmts {
-                        self.collect_stmt_returns(s, expected);
-                    }
-                }
-            }
-            Stmt::Switch(sw) => {
-                for case in &sw.cases {
-                    for s in &case.body {
-                        self.collect_stmt_returns(s, expected);
-                    }
-                }
-            }
-            Stmt::Labeled(l) => self.collect_stmt_returns(&l.stmt, expected),
-            _ => {}
-        }
-    }
+    fn visit_expr(&mut self, _node: &Expr) {}
 }
 
 impl Visitor for ContextScan {
@@ -237,8 +196,6 @@ impl Visitor for ContextScan {
     }
 }
 
-/// The concrete collection type name (`LinkedHashMap`/`LinkedHashSet`) written as
-/// `ty`, ignoring nullability and type arguments; `None` for anything else.
 fn concrete_context(ty: &DartType) -> Option<&str> {
     if let DartType::Named(nt) = ty
         && let Some(seg) = nt.segments.last()
@@ -249,10 +206,6 @@ fn concrete_context(ty: &DartType) -> Option<&str> {
     None
 }
 
-/// Span and base type name of a *default* constructor invocation of a known
-/// collection type with no arguments (`List()`, `Map<K, V>()`, `LinkedHashSet.new()`,
-/// `new Set()`); `None` for named constructors (`List.filled`, `Map.of`) and any
-/// invocation that carries arguments.
 fn default_collection_ctor(expr: &Expr) -> Option<(&Span, &str)> {
     match expr {
         Expr::Call {
@@ -332,8 +285,6 @@ mod tests {
 
     #[test]
     fn concrete_context_suppresses_only_relevant_ctor() {
-        // Declared `LinkedHashMap` → `{}` would not preserve it → suppress. Context
-        // suppression is syntactic, so it holds with or without a type index.
         let src = "import 'dart:collection'; \
                    void f() { LinkedHashMap<int, int> m = LinkedHashMap(); }";
         assert_eq!(count_no_types(src), 0);
@@ -342,7 +293,6 @@ mod tests {
 
     #[test]
     fn non_concrete_context_still_fires() {
-        // Declared `Map` → a `{}` literal is assignable → still fires.
         let src = "import 'dart:collection'; \
                    void f() { Map<int, int> m = LinkedHashMap(); }";
         assert_eq!(count_with_types(src), 1);
@@ -350,20 +300,15 @@ mod tests {
 
     #[test]
     fn var_context_still_fires() {
-        // No annotation on `var` → nothing required → fires.
         let src = "import 'dart:collection'; void f() { var m = LinkedHashMap(); }";
         assert_eq!(count_with_types(src), 1);
     }
 
     #[test]
     fn nested_arg_position_still_fires() {
-        // The constructor is an argument, not the direct initializer, so the
-        // concrete context does not reach it.
         let src = "import 'dart:collection'; \
                    LinkedHashMap<int, int> id(LinkedHashMap<int, int> x) => x; \
                    void f() { LinkedHashMap<int, int> m = id(LinkedHashMap()); }";
-        // Outer `id(...)` initializer is a call, not a ctor; inner `LinkedHashMap()`
-        // is an argument → fires once.
         assert_eq!(count_with_types(src), 1);
     }
 
@@ -383,8 +328,36 @@ mod tests {
     }
 
     #[test]
+    fn concrete_returns_follow_control_flow_without_crossing_function_boundaries() {
+        for body in [
+            "{ return LinkedHashMap(); }",
+            "if (flag) return LinkedHashMap(); else return LinkedHashMap();",
+            "while (flag) { return LinkedHashMap(); }",
+            "do { return LinkedHashMap(); } while (flag);",
+            "for (; flag;) { return LinkedHashMap(); }",
+            "try { return LinkedHashMap(); } catch (e) { return LinkedHashMap(); } finally { return LinkedHashMap(); }",
+            "switch (value) { case 0: return LinkedHashMap(); default: return LinkedHashMap(); }",
+            "label: { return LinkedHashMap(); }",
+        ] {
+            let source = format!(
+                "import 'dart:collection'; LinkedHashMap make(bool flag, int value) {{ {body} }}"
+            );
+            assert_eq!(count_no_types(&source), 0, "{body}");
+            assert_eq!(count_with_types(&source), 0, "{body}");
+        }
+        let source = "import 'dart:collection';
+            LinkedHashMap make() {
+                Map local() { return LinkedHashMap(); }
+                LinkedHashMap concrete() { return LinkedHashMap(); }
+                var closure = () { return LinkedHashMap(); };
+                return LinkedHashMap();
+            }";
+        assert_eq!(count_no_types(source), 3);
+        assert_eq!(count_with_types(source), 3);
+    }
+
+    #[test]
     fn user_declared_shadow_suppresses_only_with_types() {
-        // A user `List` shadows core `List` → the literal would build the wrong type.
         let src = "class List {} void f() { var a = List(); }";
         assert_eq!(count_no_types(src), 1, "no type index → fire (baseline)");
         assert_eq!(count_with_types(src), 0, "user-declared List → suppress");

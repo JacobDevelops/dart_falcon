@@ -14,7 +14,7 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -84,20 +84,15 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
             }
         }
     }
-    if let Some(FunctionBody::Block(block)) = &ctor.body {
-        for stmt in &block.stmts {
-            counter.visit_stmt(stmt);
-        }
-    } else if let Some(FunctionBody::Arrow(expr, _)) = &ctor.body {
-        counter.visit_expr(expr);
+    if let Some(body) = &ctor.body {
+        walk_function_body(&mut counter, body);
     }
 
     let used_once = |name: &str| counter.counts.get(name) == Some(&1);
 
     // Positional params forward verbatim only when the super call passes the
     // same identifier at the same positional index (order-preserving).
-    let positional: Vec<&FormalParam> = ctor.params.positional().collect();
-    for (i, param) in positional.iter().enumerate() {
+    for (i, param) in ctor.params.positional().enumerate() {
         if param.initializing.is_some() {
             continue;
         }

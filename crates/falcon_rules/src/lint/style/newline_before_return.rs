@@ -3,25 +3,29 @@
 //! Separating a `return` from the statements above it with a blank line makes
 //! the exit point of a block visually distinct, so readers can spot where
 //! control leaves the function without parsing the surrounding code. The rule
-//! only checks returns that follow another statement in the same block — the
-//! first statement of a block is never flagged, since there is nothing to
-//! separate it from. A blank line is any run of whitespace containing two or
-//! more newlines, so intervening spaces and tabs do not matter.
+//! only checks returns that follow another statement in the same statement
+//! list — the first statement of a block or switch case is never flagged,
+//! since there is nothing to separate it from. A blank line is any run of
+//! whitespace containing two or more newlines; spaces and tabs do not matter.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_class_member, walk_expr, walk_function_decl, walk_stmt,
+};
 
 #[derive(Default)]
 pub struct NewlineBeforeReturn;
 
 impl Rule for NewlineBeforeReturn {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
-        diags
+        let mut visitor = Collector {
+            diags: Vec::new(),
+            ctx,
+        };
+        visitor.visit_program(program);
+        visitor.diags
     }
 }
 
@@ -61,78 +65,64 @@ fn check_stmts_for_return(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &Ana
     }
 }
 
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match decl {
-        TopLevelDecl::Function(f) => {
-            if let Some(body) = &f.body {
-                scan_body(body, diags, ctx);
-            }
-        }
-        _ => {
-            for member in crate::lint::declarations::members_of(decl).unwrap_or_default() {
-                scan_member(member, diags, ctx);
-            }
+struct Collector<'a, 'ctx> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
+}
+
+impl Collector<'_, '_> {
+    fn check_body(&mut self, body: Option<&FunctionBody>) {
+        if let Some(FunctionBody::Block(block)) = body {
+            check_stmts_for_return(&block.stmts, &mut self.diags, self.ctx);
         }
     }
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let body = match member {
-        ClassMember::Method(m) => m.body.as_ref(),
-        ClassMember::Constructor(c) => c.body.as_ref(),
-        ClassMember::Getter(g) => g.body.as_ref(),
-        ClassMember::Setter(s) => s.body.as_ref(),
-        _ => None,
-    };
-    if let Some(b) = body {
-        scan_body(b, diags, ctx);
+impl Visitor for Collector<'_, '_> {
+    fn visit_function_decl(&mut self, function: &FunctionDecl) {
+        self.check_body(function.body.as_ref());
+        walk_function_decl(self, function);
     }
-}
 
-fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match body {
-        FunctionBody::Block(b) => {
-            check_stmts_for_return(&b.stmts, diags, ctx);
-            scan_stmts(&b.stmts, diags, ctx);
-        }
-        FunctionBody::Arrow(_, _) | FunctionBody::Native(_, _) => {}
+    fn visit_class_member(&mut self, member: &ClassMember) {
+        self.check_body(match member {
+            ClassMember::Method(m) => m.body.as_ref(),
+            ClassMember::Constructor(c) => c.body.as_ref(),
+            ClassMember::Getter(g) => g.body.as_ref(),
+            ClassMember::Setter(s) => s.body.as_ref(),
+            ClassMember::Operator(o) => o.body.as_ref(),
+            _ => None,
+        });
+        walk_class_member(self, member);
     }
-}
 
-fn scan_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for s in stmts {
-        scan_stmt(s, diags, ctx);
+    fn visit_stmt(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Block(b) => check_stmts_for_return(&b.stmts, &mut self.diags, self.ctx),
+            Stmt::Switch(s) => {
+                for case in &s.cases {
+                    check_stmts_for_return(&case.body, &mut self.diags, self.ctx);
+                }
+            }
+            Stmt::TryCatch(t) => {
+                check_stmts_for_return(&t.body.stmts, &mut self.diags, self.ctx);
+                for catch in &t.catches {
+                    check_stmts_for_return(&catch.body.stmts, &mut self.diags, self.ctx);
+                }
+                if let Some(finally) = &t.finally {
+                    check_stmts_for_return(&finally.stmts, &mut self.diags, self.ctx);
+                }
+            }
+            Stmt::LocalFunc(f) => self.check_body(Some(&f.body)),
+            _ => {}
+        }
+        walk_stmt(self, stmt);
     }
-}
 
-fn scan_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match stmt {
-        Stmt::Block(b) => {
-            check_stmts_for_return(&b.stmts, diags, ctx);
-            scan_stmts(&b.stmts, diags, ctx);
+    fn visit_expr(&mut self, expr: &Expr) {
+        if let Expr::FuncExpr { body, .. } = expr {
+            self.check_body(Some(body));
         }
-        Stmt::If(i) => {
-            scan_stmt(&i.then_branch, diags, ctx);
-            if let Some(eb) = &i.else_branch {
-                scan_stmt(eb, diags, ctx);
-            }
-        }
-        Stmt::While(w) => scan_stmt(&w.body, diags, ctx),
-        Stmt::DoWhile(d) => scan_stmt(&d.body, diags, ctx),
-        Stmt::For(f) => scan_stmt(&f.body, diags, ctx),
-        Stmt::TryCatch(tc) => {
-            check_stmts_for_return(&tc.body.stmts, diags, ctx);
-            scan_stmts(&tc.body.stmts, diags, ctx);
-            for catch in &tc.catches {
-                check_stmts_for_return(&catch.body.stmts, diags, ctx);
-                scan_stmts(&catch.body.stmts, diags, ctx);
-            }
-            if let Some(fin) = &tc.finally {
-                check_stmts_for_return(&fin.stmts, diags, ctx);
-                scan_stmts(&fin.stmts, diags, ctx);
-            }
-        }
-        Stmt::LocalFunc(lf) => scan_body(&lf.body, diags, ctx),
-        _ => {}
+        walk_expr(self, expr);
     }
 }

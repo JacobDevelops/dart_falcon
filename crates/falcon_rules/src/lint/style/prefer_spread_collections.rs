@@ -7,57 +7,43 @@
 //! list, set, or map literal that takes exactly one positional argument and no
 //! named arguments; other shapes and non-literal receivers are ignored.
 
+use super::traversal::for_each_expr;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct PreferSpreadCollections;
 
 impl Rule for PreferSpreadCollections {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        collector.visit_program(program);
-        collector.diags
-    }
-}
-
-struct Collector<'a> {
-    diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
-}
-
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::Cascade {
-            object, sections, ..
-        } = node
-            && is_collection_literal(object)
-        {
-            for section in sections {
-                // A section reports at most once: multiple `addAll` ops in one
-                // cascade section share the same span, so stop after the first.
-                for op in &section.ops {
-                    if let CascadeOp::Call(ident, _, args) = op
-                        && ident.name == "addAll"
-                        && args.positional.len() == 1
-                        && args.named.is_empty()
-                    {
-                        self.diags.push(self.ctx.diagnostic(
-                            "prefer-spread-collections",
-                            "Use the spread operator '...' instead of 'addAll'.",
-                            section.span,
-                        ));
-                        break;
+        let mut diags = Vec::new();
+        for_each_expr(program, |node| {
+            if let Expr::Cascade {
+                object, sections, ..
+            } = node
+                && is_collection_literal(object)
+            {
+                for section in sections {
+                    // Stop after one match because operations in a section share its span.
+                    for op in &section.ops {
+                        if let CascadeOp::Call(ident, _, args) = op
+                            && ident.name == "addAll"
+                            && args.positional.len() == 1
+                            && args.named.is_empty()
+                        {
+                            diags.push(ctx.diagnostic(
+                                "prefer-spread-collections",
+                                "Use the spread operator '...' instead of 'addAll'.",
+                                section.span,
+                            ));
+                            break;
+                        }
                     }
                 }
             }
-        }
-        walk_expr(self, node);
+        });
+        diags
     }
 }
 

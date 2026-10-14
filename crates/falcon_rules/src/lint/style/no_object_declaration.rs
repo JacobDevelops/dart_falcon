@@ -11,17 +11,19 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 
 #[derive(Default)]
 pub struct NoObjectDeclaration;
 
 impl Rule for NoObjectDeclaration {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            scan_top(decl, &mut diags, ctx);
-        }
-        diags
+        let mut visitor = Collector {
+            diags: Vec::new(),
+            ctx,
+        };
+        visitor.visit_program(program);
+        visitor.diags
     }
 }
 
@@ -47,25 +49,34 @@ fn check_type(ty: Option<&DartType>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
     }
 }
 
-/// dart_code_linter's `no-object-declaration` only visits `FieldDeclaration`s
-/// and `MethodDeclaration`s (which include getters and operators), checking the
-/// field type and the member return type respectively. Parameters, local
-/// variables, top-level members, and setters are out of scope.
-fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let Some(members) = crate::lint::declarations::members_of(decl) else {
-        return;
-    };
-    for m in members {
-        scan_member(m, diags, ctx);
-    }
+struct Collector<'a, 'ctx> {
+    diags: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
 }
 
-fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    match member {
-        ClassMember::Field(f) => check_type(f.field_type.as_ref(), diags, ctx),
-        ClassMember::Method(m) => check_type(m.return_type.as_ref(), diags, ctx),
-        ClassMember::Getter(g) => check_type(g.return_type.as_ref(), diags, ctx),
-        ClassMember::Operator(o) => check_type(o.return_type.as_ref(), diags, ctx),
-        _ => {}
+impl Visitor for Collector<'_, '_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) {
+        if matches!(
+            decl,
+            TopLevelDecl::Class(_)
+                | TopLevelDecl::Mixin(_)
+                | TopLevelDecl::MixinClass(_)
+                | TopLevelDecl::Enum(_)
+                | TopLevelDecl::Extension(_)
+                | TopLevelDecl::ExtensionType(_)
+        ) {
+            walk_top_level_decl(self, decl);
+        }
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) {
+        let ty = match member {
+            ClassMember::Field(f) => f.field_type.as_ref(),
+            ClassMember::Method(m) => m.return_type.as_ref(),
+            ClassMember::Getter(g) => g.return_type.as_ref(),
+            ClassMember::Operator(o) => o.return_type.as_ref(),
+            _ => None,
+        };
+        check_type(ty, &mut self.diags, self.ctx);
     }
 }

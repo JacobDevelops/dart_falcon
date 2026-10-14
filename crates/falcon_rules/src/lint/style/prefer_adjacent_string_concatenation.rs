@@ -7,47 +7,34 @@
 //! adjacency cannot express that. Prefer writing the pieces side by side, which
 //! also reads naturally when splitting a long string across lines.
 
+use super::traversal::for_each_expr;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct PreferAdjacentStringConcatenation;
 
 impl Rule for PreferAdjacentStringConcatenation {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        collector.visit_program(program);
-        collector.diags
-    }
-}
-
-struct Collector<'a> {
-    diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
-}
-
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::Binary {
-            op: BinaryOp::Add,
-            left,
-            right,
-            span,
-        } = node
-            && matches!(left.as_ref(), Expr::StringLit(_))
-            && matches!(right.as_ref(), Expr::StringLit(_))
-        {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-adjacent-string-concatenation",
-                "Use adjacent string literals instead of the `+` operator.",
-                *span,
-            ));
-        }
-        walk_expr(self, node);
+        let mut diags = Vec::new();
+        for_each_expr(program, |node| {
+            if let Expr::Binary {
+                op: BinaryOp::Add,
+                left,
+                right,
+                span,
+            } = node
+                && matches!(left.as_ref(), Expr::StringLit(_))
+                && matches!(right.as_ref(), Expr::StringLit(_))
+            {
+                diags.push(ctx.diagnostic(
+                    "prefer-adjacent-string-concatenation",
+                    "Use adjacent string literals instead of the `+` operator.",
+                    *span,
+                ));
+            }
+        });
+        diags
     }
 }

@@ -20,3 +20,13 @@ class Store {
 Object topLevel() => 0;
 Object globalValue = 0;
 dynamic dynamicValue = 42;
+
+class ExplicitScope {
+  List<Object> values = [];
+  ExplicitScope(Object value);
+  void callback() {
+    Object localFunction(Object value) => value;
+    final closure = (Object value) => value;
+    print([localFunction, closure]);
+  }
+}

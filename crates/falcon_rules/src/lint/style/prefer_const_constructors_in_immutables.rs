@@ -116,14 +116,8 @@ fn class_lexical_value_names(class: &ClassDecl) -> HashSet<String> {
     names
 }
 
-fn class_fields_allow_const(
-    class: &ClassDecl,
-    owner: &DeclarationIdentity,
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
-) -> bool {
-    let shadowed = class_lexical_value_names(class);
-    let fields = class
+fn class_field_initializers(class: &ClassDecl) -> HashMap<&str, &Expr> {
+    class
         .members
         .iter()
         .filter_map(|member| match member {
@@ -142,7 +136,17 @@ fn class_fields_allow_const(
                     .map(|initializer| (declarator.name.name.as_str(), initializer))
             })
         })
-        .collect::<HashMap<_, _>>();
+        .collect()
+}
+
+fn class_fields_allow_const(
+    class: &ClassDecl,
+    owner: &DeclarationIdentity,
+    model: &SemanticModel<'_>,
+    signatures: &SignatureIndex,
+) -> bool {
+    let shadowed = class_lexical_value_names(class);
+    let fields = class_field_initializers(class);
     let allowed = HashSet::new();
     class.with_clause.is_empty()
         && class.members.iter().all(|member| match member {
@@ -183,7 +187,7 @@ fn constructor_can_be_const(
         };
         return types.is_some_and(|types| {
             types.constructor_is_const(
-                &type_name,
+                type_name,
                 redirect.constructor_name.as_ref().map(|n| n.name.as_str()),
             ) == Truth::Yes
         });
@@ -214,26 +218,7 @@ fn constructor_can_be_const(
         .collect::<HashSet<_>>();
     let mut shadowed = class_lexical_value_names(class);
     shadowed.extend(allowed.iter().cloned());
-    let fields = class
-        .members
-        .iter()
-        .filter_map(|member| match member {
-            ClassMember::Field(field)
-                if !field.is_static && (field.keyword != falcon_syntax::ast::VarKeyword::Var) =>
-            {
-                Some(field)
-            }
-            _ => None,
-        })
-        .flat_map(|field| {
-            field.declarators.iter().filter_map(|declarator| {
-                declarator
-                    .initializer
-                    .as_ref()
-                    .map(|initializer| (declarator.name.name.as_str(), initializer))
-            })
-        })
-        .collect::<HashMap<_, _>>();
+    let fields = class_field_initializers(class);
     if !constructor.initializers.iter().all(|initializer| {
         initializer_allows_const(
             initializer,
@@ -260,9 +245,9 @@ fn constructor_can_be_const(
         .extends
         .as_ref()
         .and_then(type_name)
-        .unwrap_or_else(|| "Object".to_string());
+        .unwrap_or("Object");
     types.is_none_or(|types| {
-        types.constructor_is_const(&super_name, super_call.flatten()) == Truth::Yes
+        types.constructor_is_const(super_name, super_call.flatten()) == Truth::Yes
     })
 }
 
@@ -297,9 +282,9 @@ fn initializer_allows_const(
     }
 }
 
-fn type_name(ty: &DartType) -> Option<String> {
+fn type_name(ty: &DartType) -> Option<&str> {
     match ty {
-        DartType::Named(named) => named.segments.last().map(|name| name.name.clone()),
+        DartType::Named(named) => named.segments.last().map(|name| name.name.as_str()),
         _ => None,
     }
 }

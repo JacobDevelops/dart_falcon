@@ -21,147 +21,17 @@
 //! diagnostic is withheld. An `Unknown` receiver — the common case, and every
 //! receiver when no type index is attached — keeps firing.
 
-use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberResult, ResolvedType, Rule, Truth,
-};
+use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
-use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use super::collection_checks::{Emptiness, analyze_emptiness};
 
 #[derive(Default)]
 pub struct PreferIsEmpty;
 impl Rule for PreferIsEmpty {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
-    }
-}
-struct Collector<'a> {
-    diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
-}
-pub(super) fn lacks_collection_member(
-    ctx: &AnalyzeContext<'_>,
-    receiver: &Expr,
-    state: &SemanticState<'_>,
-    member: &str,
-    targets: &[&'static str],
-) -> bool {
-    let ty = state.infer(receiver);
-    if state
-        .signatures
-        .resolved_member_facts(&ty, member, &state.model)
-        .is_some()
-        || targets.iter().any(|name| {
-            state.signatures.is_subtype_of(
-                &ty,
-                &DeclarationIdentity::Sdk {
-                    library: "dart:core",
-                    name,
-                },
-                &state.model,
-            ) == Truth::Yes
-        })
-    {
-        return false;
-    }
-    let (
-        Some(types),
-        ResolvedType::Interface {
-            identity: identity @ DeclarationIdentity::Project { .. },
-            ..
-        },
-    ) = (ctx.types, ty)
-    else {
-        return false;
-    };
-    let name = identity.name();
-    // The identity index proves positive facts; TypeIndex still supplies negative proofs.
-    types.member_lookup(name, member) == MemberResult::Absent
-        && targets
-            .iter()
-            .all(|target| types.is_subtype(name, target) == Truth::No)
-}
-
-impl SemanticRuleVisitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        let Expr::Binary {
-            op,
-            left,
-            right,
-            span,
-        } = node
-        else {
-            return;
-        };
-        if let Some(receiver) = empty_comparison_receiver(op, left, right)
-            && !lacks_collection_member(
-                self.ctx,
-                receiver,
-                state,
-                "isEmpty",
-                &["Iterable", "String", "Map"],
-            )
-        {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-is-empty",
-                "Use 'isEmpty' instead of comparing 'length' to 0.",
-                *span,
-            ));
-        }
-    }
-}
-
-fn empty_comparison_receiver<'a>(
-    op: &BinaryOp,
-    left: &'a Expr,
-    right: &'a Expr,
-) -> Option<&'a Expr> {
-    match op {
-        // length == 0 / 0 == length
-        BinaryOp::EqEq => length_receiver(left)
-            .filter(|_| is_int(right, 0))
-            .or_else(|| length_receiver(right).filter(|_| is_int(left, 0))),
-        // length < 1
-        BinaryOp::Lt => length_receiver(left).filter(|_| is_int(right, 1)),
-        // 1 > length
-        BinaryOp::Gt => length_receiver(right).filter(|_| is_int(left, 1)),
-        // length <= 0
-        BinaryOp::LtEq => length_receiver(left).filter(|_| is_int(right, 0)),
-        // 0 >= length
-        BinaryOp::GtEq => length_receiver(right).filter(|_| is_int(left, 0)),
-        _ => None,
-    }
-}
-
-/// The receiver object of a `.length` property access, if `expr` is one.
-fn length_receiver(expr: &Expr) -> Option<&Expr> {
-    match expr {
-        Expr::Field {
-            object,
-            field,
-            is_null_safe: false,
-            ..
-        } if field.name == "length" => Some(object),
-        _ => None,
-    }
-}
-
-/// True for an integer literal equal to `n`.
-fn is_int(expr: &Expr, n: i64) -> bool {
-    if let Expr::IntLit { value, .. } = expr {
-        value.replace('_', "").parse::<i64>().ok() == Some(n)
-    } else {
-        false
+        analyze_emptiness(program, ctx, Emptiness::Empty)
     }
 }
 

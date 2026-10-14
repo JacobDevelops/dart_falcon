@@ -58,3 +58,6 @@ void numericOperations(int x, double y, num z) {
 bool logicalCombinations(bool a, bool b, int count) {
   return a && b || count == 5;
 }
+
+final exemptComparisons = [null == 0, null == null, value == 0, 0 + value];
+final nestedExemptComparisons = (valid: null == false, other: value < 0);

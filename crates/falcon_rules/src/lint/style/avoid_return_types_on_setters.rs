@@ -10,57 +10,72 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 
 #[derive(Default)]
 pub struct AvoidReturnTypesOnSetters;
 
 impl Rule for AvoidReturnTypesOnSetters {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
+        let mut collector = Collector {
+            ctx,
+            diags: Vec::new(),
+        };
+        collector.visit_program(program);
 
-        for decl in &program.declarations {
-            match decl {
-                // Top-level setters keep their return type in the AST directly.
-                TopLevelDecl::Function(func)
-                    if matches!(func.kind, falcon_syntax::ast::FunctionKind::Setter(_))
-                        && func.return_type.is_some() =>
-                {
-                    diags.push(ctx.diagnostic(
-                        "avoid-return-types-on-setters",
-                        "Avoid return types on setters.".to_string(),
-                        func.name.span,
-                    ));
-                }
-                _ => {
-                    if let Some(members) = crate::lint::declarations::members_of(decl) {
-                        check_members(members, ctx, &mut diags);
-                    }
-                }
-            }
-        }
-
-        diags
+        collector.diags
     }
 }
 
-fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    for member in members {
-        if let ClassMember::Setter(setter) = member
-            && setter_has_return_type(setter, ctx.source)
-        {
-            diags.push(ctx.diagnostic(
+struct Collector<'a, 'ctx> {
+    ctx: &'a AnalyzeContext<'ctx>,
+    diags: Vec<Diagnostic>,
+}
+
+impl Visitor for Collector<'_, '_> {
+    fn visit_top_level_decl(&mut self, decl: &TopLevelDecl) {
+        match decl {
+            TopLevelDecl::Function(function) => self.visit_function_decl(function),
+            TopLevelDecl::Class(_)
+            | TopLevelDecl::Mixin(_)
+            | TopLevelDecl::MixinClass(_)
+            | TopLevelDecl::Enum(_)
+            | TopLevelDecl::Extension(_)
+            | TopLevelDecl::ExtensionType(_) => walk_top_level_decl(self, decl),
+            _ => {}
+        }
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) {
+        if let ClassMember::Setter(setter) = member {
+            self.visit_setter_decl(setter);
+        }
+    }
+
+    fn visit_expr(&mut self, _: &Expr) {}
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        if matches!(node.kind, FunctionKind::Setter(_)) && node.return_type.is_some() {
+            self.diags.push(self.ctx.diagnostic(
                 "avoid-return-types-on-setters",
-                "Avoid return types on setters.".to_string(),
-                setter.name.span,
+                "Avoid return types on setters.",
+                node.name.span,
+            ));
+        }
+    }
+
+    fn visit_setter_decl(&mut self, node: &SetterDecl) {
+        if setter_has_return_type(node, self.ctx.source) {
+            self.diags.push(self.ctx.diagnostic(
+                "avoid-return-types-on-setters",
+                "Avoid return types on setters.",
+                node.name.span,
             ));
         }
     }
 }
 
-// A class setter's return type is parsed and dropped, so recover it from the
-// source slice preceding the `set` keyword. Everything between the last
-// annotation and the setter name is `[modifiers] [return type] set`; if a token
-// other than `static`/`external`/`set` survives, a return type was written.
+// Member setter return types are absent from the AST, so recover the modifier region.
 fn setter_has_return_type(setter: &SetterDecl, source: &str) -> bool {
     let ann_end = setter
         .annotations
@@ -74,15 +89,12 @@ fn setter_has_return_type(setter: &SetterDecl, source: &str) -> bool {
         None => return false,
     };
     let stripped = strip_comments(region);
-    let remaining: Vec<&str> = stripped
+    stripped
         .split_whitespace()
-        .filter(|w| !matches!(*w, "static" | "external" | "set"))
-        .collect();
-    !remaining.is_empty()
+        .any(|word| !matches!(word, "static" | "external" | "set"))
 }
 
-// Comments in the modifier region are not return types. Mirrors the comment arms
-// of `skip_trivia` in `type_init_formals.rs` (kept local rather than shared).
+// Comments are not return types; keep this scanner aligned with type_init_formals::skip_trivia.
 fn strip_comments(region: &str) -> String {
     let bytes = region.as_bytes();
     let mut out = String::with_capacity(region.len());

@@ -129,29 +129,6 @@ impl ScopeCollector {
     }
 }
 
-/// Statement kinds that introduce bindings. `Block`, `Switch`, and `TryCatch` are
-/// absent: `visit_stmt` handles those before it classifies.
-enum StmtScope<'a> {
-    PatternDecl(&'a PatternDeclaration),
-    For(&'a ForStmt),
-    IfCase(&'a IfStmt, &'a Pattern),
-    LocalFunc(&'a LocalFuncDecl),
-    Other,
-}
-
-fn classify_stmt_scope(stmt: &Stmt) -> StmtScope<'_> {
-    match stmt {
-        Stmt::PatternDecl(pattern) => StmtScope::PatternDecl(pattern),
-        Stmt::For(for_stmt) => StmtScope::For(for_stmt),
-        Stmt::If(if_stmt) => match &if_stmt.condition {
-            IfCondition::Case(_, pattern, _) => StmtScope::IfCase(if_stmt, pattern),
-            IfCondition::Expr(_) => StmtScope::Other,
-        },
-        Stmt::LocalFunc(local) => StmtScope::LocalFunc(local),
-        _ => StmtScope::Other,
-    }
-}
-
 impl Visitor for ScopeCollector {
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         if let Some(body) = &node.body {
@@ -267,36 +244,31 @@ impl Visitor for ScopeCollector {
             _ => {}
         }
 
-        let mut pushed_end = None;
-        match classify_stmt_scope(node) {
-            StmtScope::PatternDecl(decl) => {
+        match node {
+            Stmt::PatternDecl(decl) => {
                 if let Some(scope) = self.current_tail(decl.span.end) {
                     self.bind_pattern(&decl.pattern, &scope);
                 }
             }
-            StmtScope::For(for_stmt) => {
+            Stmt::For(for_stmt) => {
                 if let Some(init) = &for_stmt.init {
                     self.bind_for_init(init, for_stmt);
                 }
             }
-            StmtScope::IfCase(if_stmt, pattern) => {
-                let scope = Span::new(pattern.span().end, if_stmt.then_branch.span().end);
-                self.bind_pattern(pattern, &scope);
-            }
-            StmtScope::LocalFunc(local) => {
-                self.bind_params(&local.params, local.body.span());
-                if let FunctionBody::Block(block) = &local.body {
-                    self.bind_local_functions(block);
-                    self.block_ends.push(block.span.end);
-                    pushed_end = Some(block.span.end);
+            Stmt::If(if_stmt) => {
+                if let IfCondition::Case(_, pattern, _) = &if_stmt.condition {
+                    let scope = Span::new(pattern.span().end, if_stmt.then_branch.span().end);
+                    self.bind_pattern(pattern, &scope);
                 }
             }
-            StmtScope::Other => {}
+            Stmt::LocalFunc(local) => {
+                self.bind_params(&local.params, local.body.span());
+                self.with_body(&local.body, |this| walk_stmt(this, node));
+                return;
+            }
+            _ => {}
         }
         walk_stmt(self, node);
-        if pushed_end.is_some() {
-            self.block_ends.pop();
-        }
     }
 
     fn visit_expr(&mut self, node: &Expr) {
