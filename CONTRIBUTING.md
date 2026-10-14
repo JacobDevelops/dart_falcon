@@ -80,7 +80,7 @@ notes, is in
 [`crates/falcon_rules/tests/corpus/FIXTURE_FORMAT.md`](./crates/falcon_rules/tests/corpus/FIXTURE_FORMAT.md).
 
 `cargo xtask validate-rules` runs the whole corpus; `cargo xtask validate-rules
-<rule-id>` runs one rule.
+--rule <rule-id>` runs one rule.
 
 ## Adding a rule end-to-end
 
@@ -120,7 +120,7 @@ notes, is in
    exactly once. A rule that's missing from either will fail `cargo test`.
 
 6. **Write the corpus** (`bad.dart` + `good.dart`, plus `config.json` if the rule
-   takes options), then run `cargo xtask validate-rules <rule-id>` until green.
+   takes options), then run `cargo xtask validate-rules --rule <rule-id>` until green.
 
 ### Rule options
 

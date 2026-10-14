@@ -1,71 +1,107 @@
-use std::collections::{HashMap, HashSet};
+use clap::{Args, Parser, Subcommand};
+use falcon_rules::meta::{DOMAINS, GROUPS, RULE_METADATA, RuleMeta, RuleSource};
+use serde_json::{Map, Value, json};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[derive(Parser)]
+#[command(name = "cargo xtask")]
+struct Cli {
+    #[command(subcommand)]
+    task: Task,
+}
+
+#[derive(Subcommand)]
+enum Task {
+    /// Generate rule implementation and fixture stubs.
+    Codegen {
+        #[command(subcommand)]
+        target: Codegen,
+    },
+    /// Validate rule implementations against the golden corpus.
+    ValidateRules(ValidateRules),
+    /// Enforce the performance budget on the jfit mobile library.
+    PerfLock(PerfLock),
+    /// Generate the configuration schema.
+    Schema {
+        #[arg(long)]
+        check: bool,
+    },
+    /// Generate the documentation website's data.
+    Docgen,
+}
+
+#[derive(Subcommand)]
+enum Codegen {
+    Rule {
+        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(GROUPS))]
+        group: String,
+        #[arg(long, help = "Rule id, used verbatim")]
+        name: String,
+    },
+}
+
+#[derive(Args)]
+struct ValidateRules {
+    #[arg(
+        long,
+        help = "Corpus directory (default: crates/falcon_rules/tests/corpus)"
+    )]
+    corpus: Option<PathBuf>,
+    #[arg(
+        long,
+        default_value_t = 0.85,
+        help = "Fuzzy message match threshold, 0.0-1.0"
+    )]
+    threshold: f64,
+    #[arg(long, help = "Filter to a single rule")]
+    rule: Option<String>,
+    #[arg(long, help = "Falcon binary (default: build target/debug/falcon)")]
+    falcon_bin: Option<PathBuf>,
+    #[arg(long, help = "Output results as JSON")]
+    json: bool,
+}
+
+#[derive(Args)]
+struct PerfLock {
+    #[arg(
+        long,
+        help = "Corpus (default: apps/mobile/lib under $JFIT_PATH or /home/jacob/Documents/Developer/jfit)"
+    )]
+    corpus: Option<PathBuf>,
+    #[arg(long, default_value_t = 5, help = "Timed runs to take the median of")]
+    runs: usize,
+    #[arg(
+        long,
+        default_value_t = 1000,
+        help = "Wall-clock budget in milliseconds"
+    )]
+    budget_ms: u128,
+    #[arg(long, help = "Falcon binary (default: target/release/falcon)")]
+    falcon_bin: Option<PathBuf>,
+    #[arg(long, help = "Don't rebuild the release binary first")]
+    skip_build: bool,
+    #[arg(long, help = "Output results as JSON")]
+    json: bool,
+}
+
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(|s| s.as_str()) {
-        Some("codegen") => codegen(&args[1..]),
-        Some("validate-rules") => validate_rules(&args[1..]),
-        Some("perf-lock") => perf_lock(&args[1..]),
-        Some("schema") => schema(&args[1..]),
-        Some("docgen") => docgen(&args[1..]),
-        _ => {
-            eprintln!("Usage: cargo xtask <task>");
-            eprintln!("Available tasks:");
-            eprintln!("  codegen         Generate rule implementation + fixture stubs");
-            eprintln!("  validate-rules  Validate rule implementations against golden corpus");
-            eprintln!(
-                "  docgen          Emit website/src/data/{{rules,domains}}.json for the docs site"
-            );
-            eprintln!(
-                "  perf-lock       Enforce the M6 performance lock (<1000ms on jfit mobile lib)"
-            );
-            eprintln!(
-                "  schema          Generate schema/falcon.schema.json (--check to verify drift)"
-            );
-            eprintln!();
-            eprintln!("codegen usage:");
-            eprintln!(
-                "  cargo xtask codegen rule --group <complexity|correctness|performance|style|suspicious> --name <rule-id>"
-            );
-            eprintln!();
-            eprintln!("validate-rules flags:");
-            eprintln!(
-                "  --corpus <path>      Path to corpus directory (default: crates/falcon_rules/tests/corpus)"
-            );
-            eprintln!(
-                "  --threshold <float>  Fuzzy message match threshold 0.0-1.0 (default: 0.85)"
-            );
-            eprintln!("  --rule <name>        Filter to a single rule");
-            eprintln!(
-                "  --falcon-bin <path>  Path to falcon binary (default: target/debug/falcon)"
-            );
-            eprintln!("  --json               Output results as JSON");
-            eprintln!();
-            eprintln!("perf-lock flags:");
-            eprintln!(
-                "  --corpus <path>      Corpus to lint (default: $JFIT_PATH or /home/jacob/Documents/Developer/jfit, subtree apps/mobile/lib)"
-            );
-            eprintln!("  --runs <N>           Timed runs to take the median of (default: 5)");
-            eprintln!("  --budget-ms <N>      Wall-clock budget in milliseconds (default: 1000)");
-            eprintln!(
-                "  --falcon-bin <path>  Path to falcon binary (default: target/release/falcon)"
-            );
-            eprintln!("  --skip-build         Don't rebuild the release binary first");
-            eprintln!("  --json               Output results as JSON");
-            std::process::exit(1);
-        }
+    match Cli::parse().task {
+        Task::Codegen {
+            target: Codegen::Rule { group, name },
+        } => codegen(group, name),
+        Task::ValidateRules(options) => validate_rules(options),
+        Task::PerfLock(options) => perf_lock(options),
+        Task::Schema { check } => schema(check),
+        Task::Docgen => docgen(),
     }
 }
 
-// ── Schema ──────────────────────────────────────────────────────────────────
-
 /// Generate `schema/falcon.schema.json` from the rule metadata, or with
 /// `--check` verify the committed file matches (CI drift guard).
-fn schema(args: &[String]) {
-    let check = args.iter().any(|a| a == "--check");
+fn schema(check: bool) {
     let path = Path::new("schema/falcon.schema.json");
     let generated = falcon_rules::schema::config_schema_string();
 
@@ -89,8 +125,6 @@ fn schema(args: &[String]) {
     fs::write(path, &generated).expect("write schema");
     println!("wrote {}", path.display());
 }
-
-// ── Codegen ─────────────────────────────────────────────────────────────────
 
 /// Convert `snake_case` to `PascalCase` for the rule struct name.
 fn pascal_case(snake: &str) -> String {
@@ -131,63 +165,13 @@ impl Rule for {struct_name} {{
     )
 }
 
-const GROUPS: [&str; 5] = [
-    "complexity",
-    "correctness",
-    "performance",
-    "style",
-    "suspicious",
-];
-
 /// Generate a rule implementation stub plus corpus fixture skeletons.
 ///
 /// `cargo xtask codegen rule --group suspicious --name avoid-foo`
 ///
 /// The rule id is taken from `--name` verbatim (no kebab/snake derivation); the
 /// module file is `lint/<group>/<name-with-dashes-as-underscores>.rs`.
-fn codegen(args: &[String]) {
-    if args.first().map(|s| s.as_str()) != Some("rule") {
-        eprintln!(
-            "Usage: cargo xtask codegen rule --group <{}> --name <rule-id>",
-            GROUPS.join("|")
-        );
-        std::process::exit(1);
-    }
-
-    let mut name: Option<String> = None;
-    let mut group: Option<String> = None;
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--name" => {
-                i += 1;
-                name = args.get(i).cloned();
-            }
-            "--group" => {
-                i += 1;
-                group = args.get(i).cloned();
-            }
-            other => {
-                eprintln!("error: unknown codegen flag: {}", other);
-                std::process::exit(1);
-            }
-        }
-        i += 1;
-    }
-
-    let Some(rule_id) = name else {
-        eprintln!("error: --name is required (the rule id, used verbatim)");
-        std::process::exit(1);
-    };
-    let Some(group) = group else {
-        eprintln!("error: --group is required");
-        std::process::exit(1);
-    };
-    if !GROUPS.contains(&group.as_str()) {
-        eprintln!("error: --group must be one of {}", GROUPS.join(", "));
-        std::process::exit(1);
-    }
-
+fn codegen(group: String, rule_id: String) {
     // The module file name is the rule id with dashes normalized to underscores.
     let module = rule_id.replace('-', "_");
 
@@ -248,17 +232,9 @@ fn codegen(args: &[String]) {
     );
 }
 
-// ── Validation harness ──────────────────────────────────────────────────────
-
 fn workspace_root() -> PathBuf {
     // When run via `cargo xtask`, CWD is the workspace root.
     std::env::current_dir().unwrap()
-}
-
-/// Convert a byte offset in `source` to a 1-indexed line number.
-fn byte_offset_to_line(source: &str, offset: usize) -> usize {
-    let clamped = offset.min(source.len());
-    source[..clamped].chars().filter(|&c| c == '\n').count() + 1
 }
 
 #[derive(Debug, Clone)]
@@ -311,19 +287,10 @@ fn parse_expectations(source: &str) -> Vec<Expectation> {
 struct DiagnosticJson {
     rule: String,
     message: String,
-    span: SpanJson,
-    #[allow(dead_code)]
-    severity: String,
-    #[allow(dead_code)]
+    line: usize,
+    col: usize,
     #[serde(default)]
     file_path: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct SpanJson {
-    start: usize,
-    #[allow(dead_code)]
-    end: usize,
 }
 
 fn run_falcon(
@@ -370,8 +337,6 @@ struct UnexpectedDiagnostic {
 
 #[derive(Debug)]
 struct FileResult {
-    #[allow(dead_code)]
-    file: PathBuf,
     expected: usize,
     matched: usize,
     missed: Vec<MissedExpectation>,
@@ -412,8 +377,7 @@ fn validate_file(
             if matched_diag_indices.contains(&idx) {
                 continue;
             }
-            let diag_line = byte_offset_to_line(source, diag.span.start);
-            if diag.rule != exp.rule || diag_line != exp.line {
+            if diag.rule != exp.rule || diag.line != exp.line {
                 continue;
             }
             // Rule + line match. If expected_msg set, do fuzzy check.
@@ -440,18 +404,14 @@ fn validate_file(
         .filter(|(i, d)| {
             !matched_diag_indices.contains(i) && rule_filter.map(|r| d.rule == r).unwrap_or(true)
         })
-        .map(|(_, d)| {
-            let line = byte_offset_to_line(source, d.span.start);
-            UnexpectedDiagnostic {
-                rule: d.rule.clone(),
-                line,
-                message: d.message.clone(),
-            }
+        .map(|(_, d)| UnexpectedDiagnostic {
+            rule: d.rule.clone(),
+            line: d.line,
+            message: d.message.clone(),
         })
         .collect();
 
     FileResult {
-        file: file.to_path_buf(),
         expected: exps.len(),
         matched,
         missed,
@@ -510,11 +470,7 @@ fn validate_cross_file_dir(
     falcon_bin: &str,
     config: Option<&Path>,
 ) -> (usize, usize, Vec<String>) {
-    // Map every readable fixture file to its source. Pubspec-backed rules emit
-    // diagnostics in YAML, and nested bad/good projects can reuse basenames.
     let fixture_files = recursive_files(cross_file_dir);
-
-    let mut sources: HashMap<String, String> = HashMap::new();
     let mut expectations: Vec<(String, usize)> = Vec::new();
     for file in &fixture_files {
         let source = match fs::read_to_string(file) {
@@ -527,7 +483,6 @@ fn validate_cross_file_dir(
                 expectations.push((key.clone(), exp.line));
             }
         }
-        sources.insert(key, source);
     }
 
     let mut failures = Vec::new();
@@ -545,14 +500,7 @@ fn validate_cross_file_dir(
     let mut diag_keys: Vec<(String, usize)> = diags
         .iter()
         .filter(|d| d.rule == rule_name)
-        .map(|d| {
-            let path = Path::new(&d.file_path).to_string_lossy().into_owned();
-            let line = sources
-                .get(&path)
-                .map(|source| byte_offset_to_line(source, d.span.start))
-                .unwrap_or(0);
-            (path, line)
-        })
+        .map(|d| (d.file_path.clone(), d.line))
         .collect();
 
     let expected = expectations.len();
@@ -577,72 +525,55 @@ fn validate_cross_file_dir(
     (expected, matched, failures)
 }
 
-fn validate_rules_falcon_bin(workspace: &Path, explicit: Option<PathBuf>) -> (PathBuf, bool) {
-    match explicit {
-        Some(path) => (path, false),
-        None => (workspace.join("target/debug/falcon"), true),
+fn build_falcon(release: bool) -> PathBuf {
+    let workspace = workspace_root();
+    eprintln!(
+        "{}",
+        if release {
+            "building release falcon binary..."
+        } else {
+            "building falcon binary (debug)..."
+        }
+    );
+    let mut command = Command::new("cargo");
+    command.args(["build", "--bin", "falcon"]);
+    if release {
+        command.arg("--release");
     }
+    let status = command
+        .current_dir(&workspace)
+        .status()
+        .expect("failed to spawn cargo build");
+    if !status.success() {
+        eprintln!(
+            "{}",
+            if release {
+                "error: release build failed"
+            } else {
+                "error: falcon build failed"
+            }
+        );
+        std::process::exit(1);
+    }
+    workspace.join(if release {
+        "target/release/falcon"
+    } else {
+        "target/debug/falcon"
+    })
 }
 
-fn validate_rules(args: &[String]) {
+fn validate_rules(options: ValidateRules) {
     let workspace = workspace_root();
-    let default_corpus = workspace.join("crates/falcon_rules/tests/corpus");
-
-    let mut corpus_path = default_corpus;
-    let mut threshold: f64 = 0.85;
-    let mut rule_filter: Option<String> = None;
-    let mut explicit_falcon_bin: Option<PathBuf> = None;
-    let mut json_output = false;
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--corpus" => {
-                i += 1;
-                if i < args.len() {
-                    corpus_path = PathBuf::from(&args[i]);
-                }
-            }
-            "--threshold" => {
-                i += 1;
-                if i < args.len() {
-                    threshold = args[i].parse().unwrap_or(0.85);
-                }
-            }
-            "--rule" => {
-                i += 1;
-                if i < args.len() {
-                    rule_filter = Some(args[i].clone());
-                }
-            }
-            "--falcon-bin" => {
-                i += 1;
-                if i < args.len() {
-                    explicit_falcon_bin = Some(PathBuf::from(&args[i]));
-                }
-            }
-            "--json" => {
-                json_output = true;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    let (falcon_bin, build_default_bin) =
-        validate_rules_falcon_bin(&workspace, explicit_falcon_bin);
-    if build_default_bin {
-        eprintln!("building falcon binary (debug)...");
-        let status = Command::new("cargo")
-            .args(["build", "--bin", "falcon"])
-            .current_dir(&workspace)
-            .status()
-            .expect("failed to spawn cargo build");
-        if !status.success() {
-            eprintln!("error: falcon build failed");
-            std::process::exit(1);
-        }
-    }
+    let ValidateRules {
+        corpus: corpus_path,
+        threshold,
+        rule: rule_filter,
+        falcon_bin,
+        json: json_output,
+    } = options;
+    let corpus_path =
+        corpus_path.unwrap_or_else(|| workspace.join("crates/falcon_rules/tests/corpus"));
+    let falcon_bin = falcon_bin.unwrap_or_else(|| build_falcon(false));
     let falcon_bin = falcon_bin.to_string_lossy().to_string();
 
     if !corpus_path.exists() {
@@ -809,54 +740,17 @@ fn validate_rules(args: &[String]) {
     }
 }
 
-// ── Perf lock ───────────────────────────────────────────────────────────────
-
-/// M6.3 performance lock: the release falcon binary must lint the jfit mobile
-/// lib in under the budget (default 1000ms, plan M6 exit criterion). Runs the
-/// binary N times and compares the median wall time against the budget.
-fn perf_lock(args: &[String]) {
-    let workspace = workspace_root();
-
-    let mut corpus: Option<PathBuf> = None;
-    let mut runs: usize = 5;
-    let mut budget_ms: u128 = 1000;
-    let mut falcon_bin = workspace.join("target/release/falcon");
-    let mut skip_build = false;
-    let mut json_output = false;
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--corpus" => {
-                i += 1;
-                if i < args.len() {
-                    corpus = Some(PathBuf::from(&args[i]));
-                }
-            }
-            "--runs" => {
-                i += 1;
-                if i < args.len() {
-                    runs = args[i].parse().unwrap_or(5).max(1);
-                }
-            }
-            "--budget-ms" => {
-                i += 1;
-                if i < args.len() {
-                    budget_ms = args[i].parse().unwrap_or(1000);
-                }
-            }
-            "--falcon-bin" => {
-                i += 1;
-                if i < args.len() {
-                    falcon_bin = PathBuf::from(&args[i]);
-                }
-            }
-            "--skip-build" => skip_build = true,
-            "--json" => json_output = true,
-            _ => {}
-        }
-        i += 1;
-    }
+fn perf_lock(options: PerfLock) {
+    let PerfLock {
+        corpus,
+        runs,
+        budget_ms,
+        falcon_bin,
+        skip_build,
+        json: json_output,
+    } = options;
+    let falcon_bin = falcon_bin.unwrap_or_else(|| workspace_root().join("target/release/falcon"));
+    let runs = runs.max(1);
 
     let corpus = corpus.unwrap_or_else(|| {
         let root = std::env::var("JFIT_PATH")
@@ -870,16 +764,7 @@ fn perf_lock(args: &[String]) {
     }
 
     if !skip_build {
-        eprintln!("building release falcon binary...");
-        let status = Command::new("cargo")
-            .args(["build", "--release", "--bin", "falcon"])
-            .current_dir(&workspace)
-            .status()
-            .expect("failed to spawn cargo build");
-        if !status.success() {
-            eprintln!("error: release build failed");
-            std::process::exit(1);
-        }
+        build_falcon(true);
     }
     if !falcon_bin.exists() {
         eprintln!("error: falcon binary not found: {}", falcon_bin.display());
@@ -952,19 +837,6 @@ fn perf_lock(args: &[String]) {
     }
 }
 
-// ── Docgen ──────────────────────────────────────────────────────────────────
-
-use falcon_rules::meta::{DOMAINS, RULE_METADATA, RuleMeta, RuleSource};
-use serde_json::{Map, Value, json};
-
-/// Convert a byte offset in `source` to a 1-indexed column (character count from
-/// the start of the line).
-fn byte_offset_to_col(source: &str, offset: usize) -> usize {
-    let clamped = offset.min(source.len());
-    let line_start = source[..clamped].rfind('\n').map(|i| i + 1).unwrap_or(0);
-    source[line_start..clamped].chars().count() + 1
-}
-
 /// Map a rule's snake_case module name from its kebab id.
 fn snake_of(name: &str) -> String {
     name.replace('-', "_")
@@ -983,51 +855,26 @@ fn rule_source_path(root: &Path, meta: &RuleMeta) -> PathBuf {
     }
 }
 
-/// Extract the lead description from a rule's `//!` module doc: the first
-/// sentence, with any trailing provenance sentence ("Ported from …", "Port of
-/// …", "Original to falcon.", "Adopted from …") dropped. Returns "" (and warns)
-/// when the file or doc is missing.
-fn extract_description(source_path: &Path, rule_name: &str) -> String {
-    let content = match fs::read_to_string(source_path) {
-        Ok(c) => c,
-        Err(_) => {
-            eprintln!(
-                "warning: {rule_name}: cannot read source {} for description",
-                source_path.display()
-            );
-            return String::new();
-        }
-    };
+const PROVENANCE: [&str; 4] = ["Ported from", "Port of", "Original to", "Adopted from"];
 
-    // Join the leading run of `//!` doc lines until the first complete sentence.
+fn extract_description(lines: &[String], rule_name: &str) -> String {
     let mut doc = String::new();
-    let mut saw_doc = false;
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("//!") {
-            saw_doc = true;
-            let seg = rest.trim();
-            if seg.is_empty() {
-                if !doc.is_empty() {
-                    break;
-                }
-                continue;
-            }
+    for line in lines {
+        let segment = line.trim();
+        if segment.is_empty() {
             if !doc.is_empty() {
-                doc.push(' ');
-            }
-            doc.push_str(seg);
-            if doc.contains(". ") {
                 break;
             }
-        } else if saw_doc {
-            break;
-        } else if !trimmed.is_empty() && !trimmed.starts_with("//") {
-            // Hit real code before any module doc — none present.
+            continue;
+        }
+        if !doc.is_empty() {
+            doc.push(' ');
+        }
+        doc.push_str(segment);
+        if doc.contains(". ") {
             break;
         }
     }
-
     if doc.is_empty() {
         eprintln!("warning: {rule_name}: no //! module doc found for description");
         return String::new();
@@ -1041,19 +888,14 @@ fn extract_description(source_path: &Path, rule_name: &str) -> String {
     };
 
     // Safety net: if the first sentence is itself a provenance note, drop it.
-    const PROVENANCE: [&str; 4] = ["Ported from", "Port of", "Original to", "Adopted from"];
     if PROVENANCE.iter().any(|p| first.starts_with(p)) {
         return String::new();
     }
     first
 }
 
-/// Extract the FULL `//!` module doc from a rule's source as markdown: every
-/// leading `//!` line with the `//! ` marker stripped, joined with newlines. A
-/// trailing provenance sentence ("Ported from …", "Port of …", "Original to …",
-/// "Adopted from …") is cut from any line that still carries one, and the block
-/// is trimmed of leading/blank framing. Returns "" when no module doc is present.
-fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
+/// Read the summary and full markdown docs, stripping provenance from the latter.
+fn extract_docs(source_path: &Path, rule_name: &str) -> (String, String) {
     let content = match fs::read_to_string(source_path) {
         Ok(c) => c,
         Err(_) => {
@@ -1061,7 +903,7 @@ fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
                 "warning: {rule_name}: cannot read source {} for docs",
                 source_path.display()
             );
-            return String::new();
+            return (String::new(), String::new());
         }
     };
 
@@ -1070,6 +912,7 @@ fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
     // block has started.
     let mut lines: Vec<String> = Vec::new();
     let mut started = false;
+    let mut description_before_code = true;
     for line in content.lines() {
         let trimmed = line.trim_start();
         if let Some(rest) = trimmed.strip_prefix("//!") {
@@ -1079,9 +922,15 @@ fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
             lines.push(text.to_string());
         } else if started {
             break;
+        } else if !trimmed.is_empty() && !trimmed.starts_with("//") {
+            description_before_code = false;
         }
         // Before the block starts, skip anything (blank lines, attributes).
     }
+    let description = extract_description(
+        if description_before_code { &lines } else { &[] },
+        rule_name,
+    );
 
     strip_provenance(&mut lines);
 
@@ -1096,15 +945,9 @@ fn extract_full_docs(source_path: &Path, rule_name: &str) -> String {
     if lines.is_empty() {
         eprintln!("warning: {rule_name}: no //! module doc found for docs");
     }
-    lines.join("\n")
+    (description, lines.join("\n"))
 }
 
-/// Cut the trailing provenance sentence ("Ported from …", "Adopted from …") from
-/// every line that carries one.
-///
-/// The sentence usually wraps, so a per-line truncation left the tail behind as a
-/// stray "`some_lint`." line in the generated docs. Consume the continuation
-/// through the period that ends the sentence, stopping at a paragraph break.
 /// Byte index of the period that ends a sentence: one followed by whitespace or
 /// the end of the text. A period inside `List.filled` or `package:lints` does not
 /// count, so a wrapped provenance sentence is cut at its real boundary.
@@ -1121,8 +964,6 @@ fn sentence_end(text: &str) -> Option<usize> {
 }
 
 fn strip_provenance(lines: &mut Vec<String>) {
-    const PROVENANCE: [&str; 4] = ["Ported from", "Port of", "Original to", "Adopted from"];
-
     let mut i = 0;
     while i < lines.len() {
         let Some(cut) = PROVENANCE.iter().filter_map(|p| lines[i].find(p)).min() else {
@@ -1261,8 +1102,6 @@ fn docgen_config_for(corpus_root: &Path, meta: &RuleMeta, temp_path: &Path) -> O
     }
 }
 
-// ── CLI reference (cli.json) ─────────────────────────────────────────────────
-
 /// One CLI argument (option or positional) rendered from its clap definition.
 fn cli_arg_json(arg: &clap::Arg) -> Value {
     // A flag (no value) carries no meaningful value name — only surface one for
@@ -1386,8 +1225,6 @@ fn cli_reference_json(mut root: clap::Command) -> Value {
         "subcommands": subcommands,
     })
 }
-
-// ── Config reference (config-reference.json) ─────────────────────────────────
 
 /// Resolve a `{"$ref": "#/definitions/X"}` node against the root schema, or
 /// return the node unchanged when it is not a local `$ref`.
@@ -1546,22 +1383,11 @@ fn config_reference_json(root: &Path) -> Value {
 /// `RULE_METADATA`, corpus fixtures, and real diagnostics from the falcon
 /// binary. These committed files are the docs website's only data source; the
 /// site build never needs cargo.
-fn docgen(_args: &[String]) {
+fn docgen() {
     let root = workspace_root();
     let corpus_root = root.join("crates/falcon_rules/tests/corpus");
 
-    // Build the debug falcon binary once, up front.
-    eprintln!("building falcon binary (debug)...");
-    let status = Command::new("cargo")
-        .args(["build", "--bin", "falcon"])
-        .current_dir(&root)
-        .status()
-        .expect("failed to spawn cargo build");
-    if !status.success() {
-        eprintln!("error: falcon build failed");
-        std::process::exit(1);
-    }
-    let falcon_bin = root.join("target/debug/falcon");
+    let falcon_bin = build_falcon(false);
     let falcon_bin = falcon_bin.to_string_lossy().to_string();
     if RULE_METADATA.is_empty() {
         eprintln!("error: RULE_METADATA is empty");
@@ -1585,12 +1411,10 @@ fn docgen(_args: &[String]) {
         let cross_file_dir = rule_dir.join("cross-file");
 
         let source_path = rule_source_path(&root, meta);
-        let description = extract_description(&source_path, meta.name);
-        let docs = extract_full_docs(&source_path, meta.name);
+        let (description, docs) = extract_docs(&source_path, meta.name);
 
         let config = docgen_config_for(&corpus_root, meta, &temp_config);
 
-        // ── examples ──
         let bad_path = rule_dir.join("bad.dart");
         let good_path = rule_dir.join("good.dart");
         let bad_example = fs::read_to_string(&bad_path)
@@ -1637,15 +1461,10 @@ fn docgen(_args: &[String]) {
             ))
         };
 
-        // ── diagnostics ── real output from the falcon binary, filtered to this rule.
         let mut diagnostics: Vec<Value> = Vec::new();
         let had_fixture;
         if meta.cross_file && !cross_file_sources.is_empty() {
             had_fixture = true;
-            let by_path: HashMap<&str, &str> = cross_file_sources
-                .iter()
-                .map(|(path, source)| (path.as_str(), source.as_str()))
-                .collect();
             for d in cross_file_project_roots(&cross_file_dir)
                 .into_iter()
                 .flat_map(|project| {
@@ -1657,17 +1476,15 @@ fn docgen(_args: &[String]) {
                     .strip_prefix(&cross_file_dir)
                     .map(|path| path.to_string_lossy().replace('\\', "/"))
                     .unwrap_or_else(|_| d.file_path.clone());
-                let source = by_path.get(relative.as_str()).copied().unwrap_or("");
                 diagnostics.push(json!({
                     "message": d.message,
-                    "line": byte_offset_to_line(source, d.span.start),
-                    "column": byte_offset_to_col(source, d.span.start),
+                    "line": d.line,
+                    "column": d.col,
                     "file": relative,
                 }));
             }
         } else if bad_path.exists() {
             had_fixture = true;
-            let src = fs::read_to_string(&bad_path).unwrap_or_default();
             for d in run_falcon(&falcon_bin, &bad_path, config.as_deref())
                 .unwrap_or_default()
                 .into_iter()
@@ -1675,8 +1492,8 @@ fn docgen(_args: &[String]) {
             {
                 diagnostics.push(json!({
                     "message": d.message,
-                    "line": byte_offset_to_line(&src, d.span.start),
-                    "column": byte_offset_to_col(&src, d.span.start),
+                    "line": d.line,
+                    "column": d.col,
                     "file": Value::Null,
                 }));
             }
@@ -1708,7 +1525,6 @@ fn docgen(_args: &[String]) {
         }));
     }
 
-    // ── domains.json ──
     let domains: Vec<Value> = DOMAINS
         .iter()
         .map(|domain| {
@@ -1722,7 +1538,6 @@ fn docgen(_args: &[String]) {
         })
         .collect();
 
-    // ── write ──
     let data_dir = root.join("website/src/data");
     if let Err(e) = fs::create_dir_all(&data_dir) {
         eprintln!("error: cannot create {}: {e}", data_dir.display());
@@ -1733,8 +1548,7 @@ fn docgen(_args: &[String]) {
     let cli_path = data_dir.join("cli.json");
     let config_ref_path = data_dir.join("config-reference.json");
 
-    let rules_json =
-        serde_json::to_string_pretty(&Value::Array(records.clone())).expect("serialize rules.json");
+    let rules_json = serde_json::to_string_pretty(&records).expect("serialize rules.json");
     let domains_json =
         serde_json::to_string_pretty(&Value::Array(domains)).expect("serialize domains.json");
     let cli_json = serde_json::to_string_pretty(&cli_reference_json(falcon_cli::args::command()))
@@ -1783,9 +1597,8 @@ fn docgen(_args: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
-
-    use super::{strip_provenance, validate_rules_falcon_bin};
+    use super::{Cli, Task, strip_provenance};
+    use clap::Parser;
 
     fn run(input: &[&str]) -> Vec<String> {
         let mut lines: Vec<String> = input.iter().map(|s| s.to_string()).collect();
@@ -1794,17 +1607,27 @@ mod tests {
     }
 
     #[test]
-    fn validate_rules_builds_only_the_default_falcon_binary() {
-        let workspace = Path::new("/workspace");
-
-        assert_eq!(
-            validate_rules_falcon_bin(workspace, None),
-            (PathBuf::from("/workspace/target/debug/falcon"), true)
-        );
-        assert_eq!(
-            validate_rules_falcon_bin(workspace, Some(PathBuf::from("/tmp/custom-falcon"))),
-            (PathBuf::from("/tmp/custom-falcon"), false)
-        );
+    fn validate_rules_binary_override_is_optional() {
+        for (args, expected) in [
+            (vec!["xtask", "validate-rules"], None),
+            (
+                vec![
+                    "xtask",
+                    "validate-rules",
+                    "--falcon-bin",
+                    "/tmp/custom-falcon",
+                ],
+                Some("/tmp/custom-falcon"),
+            ),
+        ] {
+            let Task::ValidateRules(options) = Cli::try_parse_from(args).unwrap().task else {
+                panic!("expected validate-rules");
+            };
+            assert_eq!(
+                options.falcon_bin.as_deref(),
+                expected.map(std::path::Path::new)
+            );
+        }
     }
 
     #[test]

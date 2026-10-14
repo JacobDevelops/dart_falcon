@@ -182,10 +182,7 @@ The `cargo xtask validate-rules` harness processes corpus fixtures to verify tha
 cargo xtask validate-rules
 
 # Validate a specific rule
-cargo xtask validate-rules avoid-dynamic
-
-# Verbose output
-cargo xtask validate-rules --verbose
+cargo xtask validate-rules --rule avoid-dynamic
 ```
 
 ### Exit Codes
