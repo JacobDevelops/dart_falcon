@@ -41,7 +41,12 @@ struct Candidate {
 }
 
 impl CrossFileRule for UnusedCode {
-    fn analyze_project(&self, files: &[ProjectFile], _config: &FalconConfig) -> Vec<Diagnostic> {
+    fn analyze_project(
+        &self,
+        files: &[ProjectFile],
+        _config: &FalconConfig,
+        _indexes: Option<&falcon_analyze::SemanticIndexes>,
+    ) -> Vec<Diagnostic> {
         let pkg = detect_package(files);
 
         // name → set of file indices that mention it. Usage is detected by a

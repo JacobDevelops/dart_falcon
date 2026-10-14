@@ -13,7 +13,7 @@ pub mod suppressions;
 pub use build_context_flow::BuildContextFlowAnalyzer;
 pub use constant_value::{ConstantValue, evaluate_constant, parse_int};
 pub use context::AnalyzeContext;
-pub use cross_file::{CrossFileRule, CrossFileRuleRegistry, ProjectFile};
+pub use cross_file::{CrossFileRule, CrossFileRuleRegistry, ProjectFile, SemanticIndexes};
 pub use parallel::{
     analyze_parallel, analyze_parallel_collecting, analyze_parallel_collecting_resolving,
     analyze_sequential, analyze_sequential_collecting, analyze_sequential_collecting_resolving,

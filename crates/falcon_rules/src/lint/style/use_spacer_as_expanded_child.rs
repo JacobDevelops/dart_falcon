@@ -20,7 +20,7 @@ pub struct UseSpacerAsExpandedChild;
 impl Rule for UseSpacerAsExpandedChild {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        super::traversal::for_each_expr(program, |expr| {
+        falcon_syntax::visitor::for_each_expr_in_program(program, |expr| {
             if is_unqualified_construction(expr)
                 && let Some((name, args, span)) = crate::lint::flutter::widget_construction(expr)
             {

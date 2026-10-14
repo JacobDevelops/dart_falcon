@@ -1155,13 +1155,13 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                 },
             ),
             Stmt::For(statement) => self.with_scope(|walker| {
-                if let Some(init) = &statement.init {
+                if let Some(init) = &statement.header.init {
                     walker.visit_for_init(init);
                 }
-                if let Some(condition) = &statement.condition {
+                if let Some(condition) = &statement.header.condition {
                     walker.visit_expr(condition);
                 }
-                for update in &statement.update {
+                for update in &statement.header.updates {
                     walker.visit_expr(update);
                 }
                 walker.visit_stmt(&statement.body);

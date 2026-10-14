@@ -68,7 +68,7 @@ struct ValidateRules {
 struct PerfLock {
     #[arg(
         long,
-        help = "Corpus (default: apps/mobile/lib under $JFIT_PATH or /home/jacob/Documents/Developer/jfit)"
+        help = "Corpus (default: apps/mobile/lib under required $JFIT_PATH)"
     )]
     corpus: Option<PathBuf>,
     #[arg(long, default_value_t = 5, help = "Timed runs to take the median of")]
@@ -220,7 +220,7 @@ fn codegen(group: String, rule_id: String) {
         .unwrap();
     println!(
         "  2. add RuleMeta::file::<lint::{group}::{module}::{struct_name}>(\
-         \"{rule_id}\", RuleGroup::{category:?}, domains, recommended, source) to \
+         \"{rule_id}\", RuleGroup::{category:?}, FLUTTER /* or NONE */, recommended, source) to \
          RULE_METADATA (crates/falcon_rules/src/meta.rs); use resolved for semantic rules"
     );
     println!("  3. add `{rule_id}` under linter.rules.{group} in the root falcon.json showcase");
@@ -289,6 +289,18 @@ struct DiagnosticJson {
     col: usize,
     #[serde(default)]
     file_path: String,
+}
+
+fn character_column(source: &str, line: usize, utf16_column: usize) -> usize {
+    let text = source.lines().nth(line.saturating_sub(1)).unwrap_or("");
+    let mut units = 0;
+    1 + text
+        .chars()
+        .take_while(|character| {
+            units += character.len_utf16();
+            units < utf16_column
+        })
+        .count()
 }
 
 fn run_falcon(
@@ -730,6 +742,10 @@ fn validate_rules(options: ValidateRules) {
     }
 }
 
+fn perf_corpus(corpus: Option<PathBuf>, root: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    corpus.or_else(|| root.map(|root| PathBuf::from(root).join("apps/mobile/lib")))
+}
+
 fn perf_lock(options: PerfLock) {
     let PerfLock {
         corpus,
@@ -742,11 +758,9 @@ fn perf_lock(options: PerfLock) {
     let falcon_bin = falcon_bin.unwrap_or_else(|| workspace_root().join("target/release/falcon"));
     let runs = runs.max(1);
 
-    let corpus = corpus.unwrap_or_else(|| {
-        let root = std::env::var("JFIT_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/home/jacob/Documents/Developer/jfit"));
-        root.join("apps/mobile/lib")
+    let corpus = perf_corpus(corpus, std::env::var_os("JFIT_PATH")).unwrap_or_else(|| {
+        eprintln!("error: set JFIT_PATH or pass --corpus");
+        std::process::exit(1);
     });
     if !corpus.exists() {
         eprintln!("error: corpus path does not exist: {}", corpus.display());
@@ -1472,15 +1486,20 @@ fn docgen() {
                     .strip_prefix(&cross_file_dir)
                     .map(|path| path.to_string_lossy().replace('\\', "/"))
                     .unwrap_or_else(|_| d.file_path.clone());
+                let source = cross_file_sources
+                    .iter()
+                    .find(|(path, _)| path == &relative)
+                    .map_or("", |(_, source)| source.as_str());
                 diagnostics.push(json!({
                     "message": d.message,
                     "line": d.line,
-                    "column": d.col,
+                    "column": character_column(source, d.line, d.col),
                     "file": relative,
                 }));
             }
         } else if bad_path.exists() {
             had_fixture = true;
+            let source = fs::read_to_string(&bad_path).unwrap_or_default();
             for d in run_falcon(&falcon_bin, &bad_path, config.as_deref())
                 .unwrap_or_default()
                 .into_iter()
@@ -1489,7 +1508,7 @@ fn docgen() {
                 diagnostics.push(json!({
                     "message": d.message,
                     "line": d.line,
-                    "column": d.col,
+                    "column": character_column(&source, d.line, d.col),
                     "file": Value::Null,
                 }));
             }
@@ -1526,7 +1545,7 @@ fn docgen() {
         .map(|domain| {
             let mut rules: Vec<&str> = metas
                 .iter()
-                .filter(|m| m.domains.contains(domain))
+                .filter(|m| m.domain == Some(*domain))
                 .map(|m| m.name)
                 .collect();
             rules.sort_unstable();
@@ -1595,6 +1614,27 @@ fn docgen() {
 mod tests {
     use super::{Cli, Task, strip_provenance};
     use clap::Parser;
+
+    #[test]
+    fn docgen_columns_count_characters_not_utf16_units() {
+        assert_eq!(super::character_column("x😀é target\n", 1, 6), 5);
+        assert_eq!(super::character_column("first\n😀 target\n", 2, 4), 3);
+        assert_eq!(super::character_column("plain target\n", 1, 7), 7);
+    }
+
+    #[test]
+    fn perf_lock_requires_root_unless_corpus_is_explicit() {
+        use std::path::PathBuf;
+        assert_eq!(super::perf_corpus(None, None), None);
+        assert_eq!(
+            super::perf_corpus(None, Some("/tmp/jfit".into())),
+            Some(PathBuf::from("/tmp/jfit/apps/mobile/lib")),
+        );
+        assert_eq!(
+            super::perf_corpus(Some(PathBuf::from("/tmp/corpus")), None),
+            Some(PathBuf::from("/tmp/corpus")),
+        );
+    }
 
     fn run(input: &[&str]) -> Vec<String> {
         let mut lines: Vec<String> = input.iter().map(|s| s.to_string()).collect();

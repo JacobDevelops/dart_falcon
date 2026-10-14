@@ -251,7 +251,7 @@ impl Visitor for ScopeCollector {
                 }
             }
             Stmt::For(for_stmt) => {
-                if let Some(init) = &for_stmt.init {
+                if let Some(init) = &for_stmt.header.init {
                     self.bind_for_init(init, for_stmt);
                 }
             }

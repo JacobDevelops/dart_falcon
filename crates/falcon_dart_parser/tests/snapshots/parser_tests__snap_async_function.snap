@@ -151,6 +151,8 @@ Function(
                                     StringLit(
                                         StringLitNode {
                                             raw: "'dart'",
+                                            is_adjacent: false,
+                                            has_raw_segment: false,
                                             value: "dart",
                                             span: Span {
                                                 start: 79,

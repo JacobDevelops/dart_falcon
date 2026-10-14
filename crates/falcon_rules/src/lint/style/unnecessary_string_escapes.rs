@@ -71,9 +71,6 @@ impl Visitor for Collector<'_> {
                     }
                     i += 2;
                 }
-                // An unescaped delimiter means adjacent-literal concatenation merged the
-                // segments; offsets past here are unreliable, so stop.
-                q if q == lit.quote => break,
                 _ => i += 1,
             }
         }

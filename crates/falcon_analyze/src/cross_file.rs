@@ -6,6 +6,12 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 
+/// Shared project facts; callers may retain these after per-file analysis.
+pub struct SemanticIndexes {
+    pub types: crate::TypeIndex,
+    pub identities: crate::IdentityIndex,
+    pub signatures: crate::SignatureIndex,
+}
 pub struct ProjectFile {
     pub path: PathBuf,
     pub source: String,
@@ -15,7 +21,13 @@ pub struct ProjectFile {
 }
 
 pub trait CrossFileRule: Send + Sync {
-    fn analyze_project(&self, files: &[ProjectFile], config: &FalconConfig) -> Vec<Diagnostic>;
+    /// Provided indexes must describe the same Dart files and source revisions.
+    fn analyze_project(
+        &self,
+        files: &[ProjectFile],
+        config: &FalconConfig,
+        indexes: Option<&SemanticIndexes>,
+    ) -> Vec<Diagnostic>;
 }
 
 #[derive(Default)]
@@ -41,11 +53,16 @@ impl CrossFileRuleRegistry {
     }
 
     /// Callers apply inline suppression and per-path severity resolution.
-    pub fn run_all(&self, files: &[ProjectFile], config: &FalconConfig) -> Vec<Diagnostic> {
+    pub fn run_all(
+        &self,
+        files: &[ProjectFile],
+        config: &FalconConfig,
+        indexes: Option<&SemanticIndexes>,
+    ) -> Vec<Diagnostic> {
         crate::registry::with_rules_stack(|| {
             self.rules
                 .iter()
-                .flat_map(|rule| rule.analyze_project(files, config))
+                .flat_map(|rule| rule.analyze_project(files, config, indexes))
                 .collect()
         })
     }

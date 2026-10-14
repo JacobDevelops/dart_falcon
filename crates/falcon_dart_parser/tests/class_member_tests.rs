@@ -763,9 +763,8 @@ fn test_async_sync_star_method_has_async_star_ast_marker() {
 }
 
 #[test]
-fn test_async_constructor_initializer_enables_await_expression() {
-    // The parser treats this initializer's trailing `async` as a body marker.
-    let src = "class C { var f; C(bool async) : f = async { await 1; } }";
+fn test_async_constructor_initializer_keeps_synchronous_body() {
+    let src = "class C { var f; C(bool async) : f = async { var await = 1; await; } }";
     let (prog, errors) = parse(src);
     assert_clean(&errors);
     let ClassMember::Constructor(ctor) = &only_class(&prog).members[1] else {
@@ -783,16 +782,30 @@ fn test_async_constructor_initializer_enables_await_expression() {
     let Some(FunctionBody::Block(body)) = &ctor.body else {
         panic!("expected constructor body: {:?}", ctor.body);
     };
-    assert_eq!(body.stmts.len(), 1, "{body:?}");
-    let Stmt::Expr(stmt) = &body.stmts[0] else {
-        panic!("expected await expression statement: {:?}", body.stmts);
+    assert_eq!(body.stmts.len(), 2, "{body:?}");
+    let Stmt::LocalVar(declaration) = &body.stmts[0] else {
+        panic!(
+            "expected contextual identifier declaration: {:?}",
+            body.stmts
+        );
     };
-    let Expr::Await { expr, span } = &stmt.expr else {
-        panic!("expected await expression: {stmt:?}");
-    };
-    assert_eq!((span.start, span.end), (45, 52));
-    assert!(
-        matches!(expr.as_ref(), Expr::IntLit { value, .. } if value == "1"),
-        "{expr:?}"
+    assert_eq!(declaration.declarators.len(), 1);
+    let declarator = &declaration.declarators[0];
+    assert_eq!(declarator.name.name, "await");
+    assert_eq!(
+        &src[declarator.name.span.start..declarator.name.span.end],
+        "await"
     );
+    assert!(
+        matches!(&declarator.initializer, Some(Expr::IntLit { value, .. }) if value == "1"),
+        "{declarator:?}"
+    );
+    let Stmt::Expr(statement) = &body.stmts[1] else {
+        panic!("expected contextual identifier use: {:?}", body.stmts);
+    };
+    let Expr::Ident(identifier) = &statement.expr else {
+        panic!("expected await identifier: {statement:?}");
+    };
+    assert_eq!(identifier.name, "await");
+    assert_eq!(&src[identifier.span.start..identifier.span.end], "await");
 }

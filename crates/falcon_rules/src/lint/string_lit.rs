@@ -1,7 +1,7 @@
 use falcon_syntax::ast::{StringDelimiter, StringLitNode};
 
 pub(crate) fn interpolated_literal(node: &StringLitNode) -> Option<StringDelimiter<'_>> {
-    StringLitNode::delimiter(&node.raw).filter(|lit| lit.terminated && !lit.is_raw)
+    node.delimiter().filter(|lit| lit.terminated && !lit.is_raw)
 }
 
 // Excluding `$` prevents adjacent interpolations from merging into one identifier.

@@ -16,7 +16,12 @@ pub struct PackageNames;
 const NAME: &str = "package-names";
 
 impl CrossFileRule for PackageNames {
-    fn analyze_project(&self, files: &[ProjectFile], _config: &FalconConfig) -> Vec<Diagnostic> {
+    fn analyze_project(
+        &self,
+        files: &[ProjectFile],
+        _config: &FalconConfig,
+        _indexes: Option<&falcon_analyze::SemanticIndexes>,
+    ) -> Vec<Diagnostic> {
         project_pubspecs(files)
             .into_iter()
             .filter_map(|path| check_pubspec(&path))

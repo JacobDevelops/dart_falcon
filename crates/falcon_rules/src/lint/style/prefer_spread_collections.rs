@@ -7,10 +7,10 @@
 //! list, set, or map literal that takes exactly one positional argument and no
 //! named arguments; other shapes and non-literal receivers are ignored.
 
-use super::traversal::for_each_expr;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::for_each_expr_in_program;
 
 #[derive(Default)]
 pub struct PreferSpreadCollections;
@@ -18,7 +18,7 @@ pub struct PreferSpreadCollections;
 impl Rule for PreferSpreadCollections {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for_each_expr(program, |node| {
+        for_each_expr_in_program(program, |node| {
             if let Expr::Cascade {
                 object, sections, ..
             } = node

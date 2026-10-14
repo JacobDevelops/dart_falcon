@@ -9,10 +9,10 @@
 //! a `child` parameter, it only considers constructions whose callee is
 //! PascalCase — implicit `Foo(...)` calls and explicit `new`/`const Foo(...)`.
 
-use super::traversal::for_each_expr;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::for_each_expr_in_program;
 
 #[derive(Default)]
 pub struct SortChildPropertiesLast;
@@ -20,7 +20,7 @@ pub struct SortChildPropertiesLast;
 impl Rule for SortChildPropertiesLast {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for_each_expr(program, |node| {
+        for_each_expr_in_program(program, |node| {
             if let Some((name, args, _)) = crate::lint::flutter::widget_construction(node)
                 && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
                 && !args.named.is_empty()

@@ -502,7 +502,8 @@ fn string_delimiters_preserve_content_and_escape_text() {
         ("r\"\"\"\\n\"\"\"", "\\n", b'"', true, true, 4),
         ("'\\n'", "\\n", b'\'', false, false, 1),
     ] {
-        let delimiter = StringLitNode::delimiter(raw).unwrap();
+        let node = delimiter_test_node(raw);
+        let delimiter = node.delimiter().unwrap();
         assert_eq!(delimiter.content, content);
         assert_eq!(delimiter.quote, quote);
         assert_eq!(delimiter.triple, triple);
@@ -525,11 +526,12 @@ fn string_delimiters_preserve_content_and_escape_text() {
 #[test]
 fn unterminated_string_delimiters_keep_recovery_content() {
     for raw in ["'hello", "\"hello", "'''hello", "r'''hello"] {
-        let delimiter = StringLitNode::delimiter(raw).unwrap();
+        let node = delimiter_test_node(raw);
+        let delimiter = node.delimiter().unwrap();
         assert!(!delimiter.terminated);
         assert_eq!(delimiter.content, "hello");
     }
-    assert!(StringLitNode::delimiter("identifier").is_none());
+    assert!(delimiter_test_node("identifier").delimiter().is_none());
 }
 
 #[test]
@@ -544,4 +546,128 @@ fn adjacent_string_values_concatenate_without_decoding_escapes() {
     };
     assert_eq!(literal.value, "a\\nb\\t");
     assert_eq!(literal.raw, "'a\\n'r\"b\\t\"");
+    assert!(literal.delimiter().is_none());
+}
+
+#[test]
+fn operator_markers_and_constructor_context_are_preserved() {
+    for (marker, expected) in [
+        ("", AsyncMarker::Sync),
+        ("async", AsyncMarker::Async),
+        ("async*", AsyncMarker::AsyncStar),
+        ("sync*", AsyncMarker::SyncStar),
+    ] {
+        let (program, errors) = parse(&format!("class C {{ C operator +(o) {marker} {{}} }}"));
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::Class(class) = &program.declarations[0] else {
+            panic!("class");
+        };
+        let ClassMember::Operator(operator) = &class.members[0] else {
+            panic!("operator");
+        };
+        assert_eq!(operator.async_marker, expected);
+    }
+    let (program, errors) = parse("class C { C() : m = Mode.async { var await = 1; } }");
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Class(class) = &program.declarations[0] else {
+        panic!("class");
+    };
+    let ClassMember::Constructor(constructor) = &class.members[0] else {
+        panic!("constructor");
+    };
+    let Some(FunctionBody::Block(body)) = &constructor.body else {
+        panic!("body");
+    };
+    let Stmt::LocalVar(variable) = &body.stmts[0] else {
+        panic!("variable");
+    };
+    assert_eq!(variable.declarators[0].name.name, "await");
+}
+
+#[test]
+fn annotated_local_declaration_keeps_all_declarators() {
+    let (program, errors) = parse("void f() { @a int x = 1, y = 2; }");
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Function(function) = &program.declarations[0] else {
+        panic!("function");
+    };
+    let Some(FunctionBody::Block(body)) = &function.body else {
+        panic!("body");
+    };
+    let Stmt::LocalVar(variable) = &body.stmts[0] else {
+        panic!("variable");
+    };
+    assert_eq!(variable.declarators.len(), 2);
+    for (declarator, (name, value)) in variable.declarators.iter().zip([("x", "1"), ("y", "2")]) {
+        assert_eq!(declarator.name.name, name);
+        assert!(
+            matches!(&declarator.initializer, Some(Expr::IntLit { value: actual, .. }) if actual == value)
+        );
+    }
+}
+
+fn delimiter_test_node(raw: &str) -> StringLitNode {
+    StringLitNode {
+        raw: raw.to_owned(),
+        is_adjacent: false,
+        has_raw_segment: raw.starts_with('r'),
+        value: String::new(),
+        span: Span::default(),
+        interpolations: Vec::new(),
+    }
+}
+
+#[test]
+fn adjacent_delimiters_never_mix_raw_and_interpolated_segments() {
+    for (raw, has_raw_segment) in [
+        ("'a' r'\\d'", true),
+        ("r'\\d' 'a'", true),
+        ("'a''b'", false),
+        ("'''a'''r'''\\d'''", true),
+        ("'${\"x\"}' r'\\d'", true),
+    ] {
+        let (program, errors) = parse(&format!("var s = {raw};"));
+        assert!(errors.is_empty(), "{raw}: {errors:?}");
+        let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
+            panic!("variable");
+        };
+        let Some(Expr::StringLit(literal)) = &variable.declarators[0].initializer else {
+            panic!("literal");
+        };
+        assert!(literal.is_adjacent);
+        assert_eq!(literal.has_raw_segment, has_raw_segment, "{raw}");
+        assert!(literal.delimiter().is_none(), "{raw}");
+    }
+}
+
+#[test]
+fn statement_loops_share_complete_headers() {
+    for (clause, kind, updates) in [
+        ("var i = 0; i < 3; i++, i += 1", "declaration", 2),
+        ("i = 0; i < 3; i++", "expression", 1),
+        ("final x in xs", "for-in", 0),
+        ("final (x, y) in xs", "pattern", 0),
+    ] {
+        let (program, errors) = parse(&format!("void f() {{ for ({clause}) {{}} }}"));
+        assert!(errors.is_empty(), "{clause}: {errors:?}");
+        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            panic!("function");
+        };
+        let Some(FunctionBody::Block(body)) = &function.body else {
+            panic!("body");
+        };
+        let Stmt::For(statement) = &body.stmts[0] else {
+            panic!("for");
+        };
+        let actual = match &statement.header.init {
+            Some(ForInit::VarDecl(_)) => "declaration",
+            Some(ForInit::Exprs(_)) => "expression",
+            Some(ForInit::ForIn { .. }) => "for-in",
+            Some(ForInit::PatternForIn { .. }) => "pattern",
+            None => "empty",
+        };
+        assert_eq!(actual, kind);
+        assert_eq!(statement.header.updates.len(), updates);
+        assert_eq!(statement.header.condition.is_some(), updates != 0);
+    }
 }

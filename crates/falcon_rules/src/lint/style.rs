@@ -2,7 +2,6 @@
 
 mod collection_checks;
 mod override_members;
-mod traversal;
 
 pub mod annotate_overrides;
 pub mod avoid_abbreviations_in_doc_comments;

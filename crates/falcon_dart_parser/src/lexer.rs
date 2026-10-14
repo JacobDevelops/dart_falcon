@@ -218,14 +218,14 @@ impl<'src> Lexer<'src> {
             return self.make(TokenKind::IntLit, start);
         }
 
-        self.skip_digits(true);
+        self.skip_digits();
         // A fractional dot must precede a digit, not a cascade.
         let fractional = self.cur() == Some('.') && matches!(self.peek(1), Some('0'..='9'));
         if fractional {
             self.advance();
-            self.skip_digits(true);
+            self.skip_digits();
         }
-        let exponent = self.lex_exponent(true);
+        let exponent = self.lex_exponent();
         self.make(
             if fractional || exponent {
                 TokenKind::DoubleLit
@@ -236,14 +236,13 @@ impl<'src> Lexer<'src> {
         )
     }
 
-    fn skip_digits(&mut self, allow_underscores: bool) {
-        while matches!(self.cur(), Some(c) if c.is_ascii_digit() || (allow_underscores && c == '_'))
-        {
+    fn skip_digits(&mut self) {
+        while matches!(self.cur(), Some('0'..='9' | '_')) {
             self.advance();
         }
     }
 
-    fn lex_exponent(&mut self, allow_underscores: bool) -> bool {
+    fn lex_exponent(&mut self) -> bool {
         if !matches!(self.cur(), Some('e' | 'E')) {
             return false;
         }
@@ -251,7 +250,7 @@ impl<'src> Lexer<'src> {
         if matches!(self.cur(), Some('+' | '-')) {
             self.advance();
         }
-        self.skip_digits(allow_underscores);
+        self.skip_digits();
         true
     }
 
@@ -430,9 +429,8 @@ impl<'src> Lexer<'src> {
                         TokenKind::DotDot
                     }
                 } else if matches!(self.cur(), Some('0'..='9')) {
-                    self.skip_digits(true);
-                    // Leading-dot exponents stop at underscores, unlike digit-led numbers.
-                    self.lex_exponent(false);
+                    self.skip_digits();
+                    self.lex_exponent();
                     return self.make(TokenKind::DoubleLit, start);
                 } else {
                     TokenKind::Dot

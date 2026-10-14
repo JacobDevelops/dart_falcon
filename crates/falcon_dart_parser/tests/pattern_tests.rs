@@ -341,7 +341,7 @@ fn object_pattern_for_in() {
             _ => None,
         })
         .expect("expected a for statement");
-    match for_stmt.init.as_ref() {
+    match for_stmt.header.init.as_ref() {
         Some(ForInit::PatternForIn { pattern, .. }) => match pattern.as_ref() {
             Pattern::Object(op) => {
                 let names: Vec<&str> = op.fields.iter().map(|f| f.name.name.as_str()).collect();

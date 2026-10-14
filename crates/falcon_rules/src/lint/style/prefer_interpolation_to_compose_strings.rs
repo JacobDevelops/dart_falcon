@@ -101,7 +101,7 @@ impl Visitor for Composition {
             Expr::StringLit(string) => {
                 self.has_string_literal = true;
                 self.has_non_literal_operand |= !string.interpolations.is_empty();
-                self.has_raw_string |= matches!(string.raw.as_bytes().first(), Some(b'r' | b'R'));
+                self.has_raw_string |= string.has_raw_segment;
             }
             Expr::Binary {
                 op: BinaryOp::Add, ..

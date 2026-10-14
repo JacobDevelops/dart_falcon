@@ -2,7 +2,7 @@
 //!
 //! Text changes invalidate a document's AST; config changes rerun rules over
 //! cached ASTs without reparsing.
-//! Saves refresh cached filesystem identities when new files materialize.
+//! Unresolved filesystem identities are retried before analysis when files materialize.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -12,8 +12,9 @@ use lsp_types::Uri;
 
 use falcon_analyze::{
     AnalyzeContext, CrossFileRuleRegistry, IdentityIndex, IdentitySource, LibraryGrouping,
-    LibrarySource, PackageIdentity, ProjectFile, RuleRegistry, SignatureIndex, TypeIndex,
-    canonical_or_lexical, group_libraries, import_path, library_unit, syntax_error_diagnostics,
+    LibrarySource, PackageIdentity, ProjectFile, RuleRegistry, SemanticIndexes, SignatureIndex,
+    TypeIndex, canonical_or_lexical, group_libraries, import_path, library_unit,
+    syntax_error_diagnostics,
 };
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::parse;
@@ -30,6 +31,8 @@ use walkdir::WalkDir;
 pub struct DocumentState {
     pub text: String,
     path: PathBuf,
+    /// Only unresolved paths need filesystem checks between document events.
+    unresolved_path: bool,
     pub version: Option<i32>,
     program: Program,
     /// Whether the last parse produced errors — carried so the cross-file pass
@@ -63,9 +66,8 @@ pub struct DocumentState {
 /// same facts instead of walking, parsing, and indexing the workspace repeatedly.
 struct SemanticSnapshot {
     files: Vec<ProjectFile>,
-    types: TypeIndex,
-    identities: IdentityIndex,
-    signatures: SignatureIndex,
+    indexes: SemanticIndexes,
+    packages: Vec<PackageIdentity>,
     grouping: LibraryGrouping,
     by_path: HashMap<PathBuf, usize>,
     reverse_dependencies: Vec<Vec<usize>>,
@@ -109,7 +111,7 @@ impl LspState {
         let rules = build_registry(&config);
         let cross_file_rules = build_cross_file_registry(&config);
         let workspace_root = workspace_root_for(config_path.as_deref());
-        let resolve_semantics = requires_resolution(rules.rules());
+        let resolve_semantics = requires_resolution(&rules);
         Self {
             documents: HashMap::new(),
             config,
@@ -147,7 +149,7 @@ impl LspState {
 
     /// `textDocument/didOpen`: cache and parse the document, then analyze it.
     pub fn open(&mut self, uri: &str, text: String, version: Option<i32>) -> Vec<Diagnostic> {
-        let path = canonical_or_lexical(&uri_to_path(uri));
+        let (path, unresolved_path) = document_path(uri);
         self.pending_semantic_affected.remove(uri);
         if self.resolve_semantics && !self.documents.is_empty() {
             self.ensure_semantic_snapshot();
@@ -163,6 +165,7 @@ impl LspState {
             uri.to_string(),
             DocumentState {
                 path,
+                unresolved_path,
                 text,
                 version,
                 program,
@@ -204,6 +207,7 @@ impl LspState {
         }
 
         let doc = self.documents.get_mut(uri).expect("document checked above");
+        (doc.path, doc.unresolved_path) = document_path(uri);
         let (program, parse_errors) = parse(&text);
         doc.syntax_diagnostics = syntax_error_diagnostics(&doc.path, &parse_errors);
         doc.text = text;
@@ -219,7 +223,7 @@ impl LspState {
     /// (re-parsing only when it actually differs), then analyze.
     pub fn save(&mut self, uri: &str, text: Option<String>) -> Vec<Diagnostic> {
         if let Some(doc) = self.documents.get(uri) {
-            let path = canonical_or_lexical(&uri_to_path(uri));
+            let (path, unresolved_path) = document_path(uri);
             if path != doc.path {
                 if self.resolve_semantics {
                     let affected = self.affected_open_uris(uri);
@@ -237,6 +241,10 @@ impl LspState {
                 doc.path = path;
                 self.invalidate_semantic_snapshot();
             }
+            self.documents
+                .get_mut(uri)
+                .expect("document checked above")
+                .unresolved_path = unresolved_path;
         }
         if let Some(text) = text {
             let differs = self.documents.get(uri).is_some_and(|doc| doc.text != text);
@@ -264,6 +272,8 @@ impl LspState {
         }
         if self.resolve_semantics {
             self.ensure_semantic_snapshot();
+        } else {
+            self.refresh_unresolved_paths();
         }
         let file_path = &self.documents[uri].path;
 
@@ -288,9 +298,9 @@ impl LspState {
                 .collect::<Vec<_>>();
             library = library_unit(&snapshot.grouping, &programs, file_index);
             ctx = ctx
-                .with_types(&snapshot.types)
-                .with_identities(&snapshot.identities)
-                .with_signatures(&snapshot.signatures)
+                .with_types(&snapshot.indexes.types)
+                .with_identities(&snapshot.indexes.identities)
+                .with_signatures(&snapshot.indexes.signatures)
                 .with_library(&library);
         }
         let mut diagnostics = self.rules.run_all(&doc.program, &ctx);
@@ -359,7 +369,7 @@ impl LspState {
     pub fn reload_config(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
         self.config = load_from(self.config_path.as_deref());
         self.rules = build_registry(&self.config);
-        self.resolve_semantics = requires_resolution(self.rules.rules());
+        self.resolve_semantics = requires_resolution(&self.rules);
         self.cross_file_rules = build_cross_file_registry(&self.config);
         self.pending_semantic_affected.clear();
         self.invalidate_semantic_snapshot();
@@ -394,6 +404,7 @@ impl LspState {
         if self.cross_file_rules.is_empty() {
             return Vec::new();
         }
+        self.refresh_unresolved_paths();
         // Compute the cross-file map first so its immutable borrow ends before the
         // per-document `analyze`/mutation loop below (avoids &self vs &mut self).
         let cross_file_map = self.cross_file_diagnostics();
@@ -432,7 +443,34 @@ impl LspState {
             return HashMap::new();
         }
         let files = self.collect_project_files(ProjectView::CrossFile);
-        let diags = run_cross_file(&self.cross_file_rules, &files, &self.config);
+        // Semantic views include unsaved buffers; cross-file views include manifests.
+        // Reuse facts only when Dart revisions and package identities agree exactly.
+        let indexes = self.semantic_snapshot.as_ref().and_then(|snapshot| {
+            let mut dart_files = files.iter().filter(|file| {
+                file.path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    == Some("dart")
+            });
+            let same_files = dart_files.clone().count() == snapshot.files.len()
+                && dart_files.all(|file| {
+                    snapshot.by_path.get(&file.path).is_some_and(|&index| {
+                        let cached = &snapshot.files[index];
+                        cached.source == file.source
+                            && cached.has_parse_errors == file.has_parse_errors
+                    })
+                });
+            let packages = package_identities(files.iter().map(|file| file.path.as_path()));
+            let same_packages = packages.len() == snapshot.packages.len()
+                && packages
+                    .iter()
+                    .zip(&snapshot.packages)
+                    .all(|(current, cached)| {
+                        current.name == cached.name && current.lib_root == cached.lib_root
+                    });
+            (same_files && same_packages).then_some(&snapshot.indexes)
+        });
+        let diags = run_cross_file(&self.cross_file_rules, &files, &self.config, indexes);
         let mut grouped: HashMap<String, Vec<Diagnostic>> = HashMap::new();
         for diag in diags {
             grouped
@@ -447,7 +485,54 @@ impl LspState {
         self.semantic_snapshot = None;
     }
 
+    fn refresh_unresolved_paths(&mut self) {
+        let resolved: Vec<_> = self
+            .documents
+            .iter()
+            .filter(|(_, doc)| doc.unresolved_path)
+            .filter_map(|(uri, _)| {
+                let (path, unresolved) = document_path(uri);
+                (!unresolved).then(|| (uri.clone(), path))
+            })
+            .collect();
+        let mut changed = false;
+        for (uri, path) in resolved {
+            let doc = &self.documents[&uri];
+            if path != doc.path {
+                if let Some(snapshot) = self.semantic_snapshot.as_ref() {
+                    self.pending_semantic_affected
+                        .entry(uri.clone())
+                        .or_default()
+                        .extend(affected_open_uris_in_snapshot(
+                            snapshot,
+                            &doc.path,
+                            &self.documents,
+                        ));
+                }
+                let doc = self
+                    .documents
+                    .get_mut(&uri)
+                    .expect("resolved open document");
+                let file_path = path.to_string_lossy();
+                for diagnostic in &mut doc.syntax_diagnostics {
+                    diagnostic.file_path.clear();
+                    diagnostic.file_path.push_str(&file_path);
+                }
+                doc.path = path;
+                changed = true;
+            }
+            self.documents
+                .get_mut(&uri)
+                .expect("resolved open document")
+                .unresolved_path = false;
+        }
+        if changed {
+            self.invalidate_semantic_snapshot();
+        }
+    }
+
     fn ensure_semantic_snapshot(&mut self) {
+        self.refresh_unresolved_paths();
         if self.semantic_snapshot.is_some() || !self.resolve_semantics {
             return;
         }
@@ -489,9 +574,12 @@ impl LspState {
         );
         self.semantic_snapshot = Some(SemanticSnapshot {
             files,
-            types,
-            identities,
-            signatures,
+            indexes: SemanticIndexes {
+                types,
+                identities,
+                signatures,
+            },
+            packages,
             grouping,
             by_path,
             reverse_dependencies,
@@ -504,7 +592,7 @@ impl LspState {
     /// on-disk copy. Semantic analysis also includes open buffers that do not exist
     /// on disk yet. Cross-file analysis can additionally include package manifests.
     fn collect_project_files(&self, view: ProjectView) -> Vec<ProjectFile> {
-        let filter = self.config.files.path_filter();
+        let filter = &self.config.files.includes;
         let open_by_path: HashMap<PathBuf, &DocumentState> = self
             .documents
             .values()
@@ -681,6 +769,14 @@ fn load_from(path: Option<&Path>) -> FalconConfig {
     // falcon.json files keep resolving.
     falcon_rules::meta::canonicalize_config(&mut config);
     config
+}
+
+fn document_path(uri: &str) -> (PathBuf, bool) {
+    let path = uri_to_path(uri);
+    match std::fs::canonicalize(&path) {
+        Ok(path) => (path, false),
+        Err(_) => (canonical_or_lexical(&path), true),
+    }
 }
 
 /// Best-effort conversion of a `file://` URI to a filesystem path for
@@ -886,6 +982,69 @@ mod dependency_tests {
             .expect("the same symlink URI must receive cleared diagnostics");
         assert!(!diagnostics.iter().any(|diag| diag.rule == "unused-files"));
         assert_eq!(state.document(&uri).unwrap().parse_count, 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untouched_materialized_buffer_keeps_one_canonical_project_entry() {
+        for (resolve, parent_segment) in
+            [(true, false), (false, false), (true, true), (false, true)]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let workspace = dir.path().join("workspace");
+            std::fs::create_dir_all(workspace.join("lib/deep")).unwrap();
+            let config_path = workspace.join("falcon.json");
+            let config = serde_json::json!({
+                "linter": {"rules": {"recommended": false,
+                    "suspicious": {"avoid-ignoring-return-values": if resolve { "warn" } else { "off" }}}},
+                "cross-file": {"rules": {"recommended": false,
+                    "correctness": {"unused-files": "warn"}}}
+            });
+            std::fs::write(&config_path, config.to_string()).unwrap();
+            let main = workspace.join("lib/main.dart");
+            std::fs::write(&main, "void main() {}\n").unwrap();
+            let alias = dir.path().join("alias");
+            let target = if parent_segment {
+                workspace.join("lib/deep")
+            } else {
+                workspace.clone()
+            };
+            std::os::unix::fs::symlink(target, &alias).unwrap();
+            let relative = if parent_segment {
+                "../orphan.dart"
+            } else {
+                "lib/orphan.dart"
+            };
+            let uri = format!("file://{}", alias.join(relative).display());
+            let main_uri = format!("file://{}", main.display());
+            let buffer = "int api() => 1;\n";
+            let mut state = LspState::new(Some(config_path));
+            assert_eq!(state.resolve_semantics, resolve);
+            state.open(&main_uri, "void main() {}\n".into(), Some(1));
+            state.open(&uri, buffer.into(), Some(1));
+            assert!(state.document(&uri).unwrap().unresolved_path);
+            let path = workspace.join("lib/orphan.dart");
+            std::fs::write(&path, "int diskOnly() => 2;\n").unwrap();
+            state.change(&main_uri, "void main() { print(1); }\n".into(), Some(2));
+            state.analyze(&main_uri);
+            let canonical = canonical_or_lexical(&path);
+            let doc = state.document(&uri).unwrap();
+            assert!(!doc.unresolved_path);
+            assert_eq!(doc.path, canonical);
+            assert_eq!(doc.parse_count, 1);
+            for view in [ProjectView::Semantic, ProjectView::CrossFile] {
+                let files = state.collect_project_files(view);
+                assert_eq!(files.len(), 2);
+                let file = files.iter().find(|file| file.path == canonical).unwrap();
+                assert_eq!(file.source, buffer);
+            }
+            let published = state.cross_file_pass();
+            let (_, diagnostics) = published.iter().find(|(key, _)| key == &uri).unwrap();
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.rule == "unused-files"
+                    && diagnostic.file_path == canonical.to_string_lossy()
+            }));
+        }
     }
 
     #[cfg(unix)]

@@ -140,12 +140,17 @@ pub struct BuildContextFlowAnalyzer<'a> {
     diagnostics: Vec<Span>,
     reported: HashSet<usize>,
     loop_depth: usize,
+    remaining_switch_jumps: usize,
+    switch_flow_bailed: bool,
 }
 
 /// Each loop analyzes its body twice (entry pass + backedge pass), so nesting
 /// costs 2^depth body walks. Past this depth the backedge pass is replaced by a
 /// conservative gap state instead.
 const MAX_LOOP_REANALYSIS_DEPTH: usize = 4;
+
+// Bound the whole function, including nested switches.
+const MAX_SWITCH_JUMPS: usize = 4096;
 
 impl<'a> BuildContextFlowAnalyzer<'a> {
     pub fn new(
@@ -165,6 +170,8 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             diagnostics: Vec::new(),
             reported: HashSet::new(),
             loop_depth: 0,
+            remaining_switch_jumps: MAX_SWITCH_JUMPS,
+            switch_flow_bailed: false,
         }
     }
 
@@ -191,7 +198,11 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             self.bind_param_names(params);
         }
         self.function_body(body, State::default());
-        self.diagnostics
+        if self.switch_flow_bailed {
+            Vec::new()
+        } else {
+            self.diagnostics
+        }
     }
 
     fn push_scope(&mut self) {
@@ -826,20 +837,21 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         if statement.is_await {
             state.gap();
         }
-        if let Some(init) = &statement.init {
+        if let Some(init) = &statement.header.init {
             state = self.for_init(init, state);
         }
-        let may_skip_body = statement.condition.is_some()
+        let may_skip_body = statement.header.condition.is_some()
             || matches!(
-                statement.init.as_ref(),
+                statement.header.init.as_ref(),
                 Some(ForInit::ForIn { .. } | ForInit::PatternForIn { .. })
             );
         let guards = statement
+            .header
             .condition
             .as_ref()
             .map(|condition| self.guard(condition, &state))
             .unwrap_or_default();
-        if let Some(condition) = &statement.condition {
+        if let Some(condition) = &statement.header.condition {
             self.expression(condition, &mut state);
         }
         let mut condition_exit = state.clone();
@@ -859,10 +871,10 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             if !reanalyze {
                 exits.push(gap_state(repeated_condition));
             } else {
-                for update in &statement.update {
+                for update in &statement.header.updates {
                     self.expression(update, &mut repeated_condition);
                 }
-                if let Some(condition) = &statement.condition {
+                if let Some(condition) = &statement.header.condition {
                     self.expression(condition, &mut repeated_condition);
                 }
                 let mut repeated_exit = repeated_condition.clone();
@@ -1038,6 +1050,11 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         }
         let mut processed_jumps = HashMap::<String, State>::new();
         while let Some((target, mut jump_state)) = pending_jumps.pop() {
+            if self.remaining_switch_jumps == 0 {
+                self.switch_flow_bailed = true;
+                return Outcome::normal(State::default());
+            }
+            self.remaining_switch_jumps -= 1;
             let Some(case) = statement.cases.iter().find(|case| {
                 case.labels
                     .iter()
@@ -1511,6 +1528,16 @@ void f(int value) async {
             diagnostics[0].start,
             source.find("context.toString").unwrap()
         );
+        for (budget, expected_count) in [(1, 0), (2, 1)] {
+            let mut bounded = BuildContextFlowAnalyzer::new(&model, &signatures, true);
+            bounded.remaining_switch_jumps = budget;
+            let diagnostics = bounded.analyze(
+                function.params(),
+                &function.type_params,
+                function.body.as_ref().unwrap(),
+            );
+            assert_eq!(diagnostics.len(), expected_count, "budget {budget}");
+        }
     }
 
     #[test]

@@ -360,14 +360,10 @@ impl<'src> Parser<'src> {
         if !self.is_type_start() {
             return None;
         }
-        let saved = self.pos;
-        let ty = self.parse_type();
-        if follows(self.cur().kind) {
-            Some(ty)
-        } else {
-            self.rewind_to(saved);
-            None
-        }
+        self.speculate(|parser| {
+            let ty = parser.parse_type();
+            follows(parser.cur().kind).then_some(ty)
+        })
     }
 
     pub(super) fn var_keyword(is_const: bool, is_final: bool) -> VarKeyword {
@@ -700,6 +696,23 @@ impl<'src> Parser<'src> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_type_probe_discards_only_speculative_diagnostics() {
+        let src = "Map<int, +>;";
+        let mut parser = Parser::new(Lexer::new(src).tokenize(), src);
+        parser.error("retained");
+        assert!(
+            parser
+                .try_parse_type_followed_by(TokenKind::is_identifier_like)
+                .is_none()
+        );
+        assert_eq!(parser.cur_text(), "Map");
+        assert_eq!(parser.errors.len(), 1);
+        assert_eq!(parser.errors[0].message, "retained");
+        parser.parse_type();
+        assert!(parser.errors.len() > 1);
+    }
 
     #[test]
     fn speculative_depth_limit_does_not_suppress_real_error() {

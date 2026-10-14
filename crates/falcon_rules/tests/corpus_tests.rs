@@ -786,7 +786,7 @@ fn cross_file_corpus_matches_expectations() {
             }
 
             let mut diag_keys: Vec<(String, usize)> = rule
-                .analyze_project(&files, &config)
+                .analyze_project(&files, &config, None)
                 .into_iter()
                 .filter(|d| d.rule == rule_name)
                 .map(|d| {

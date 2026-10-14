@@ -15,7 +15,12 @@ pub struct SecurePubspecUrls;
 const NAME: &str = "secure-pubspec-urls";
 
 impl CrossFileRule for SecurePubspecUrls {
-    fn analyze_project(&self, files: &[ProjectFile], _config: &FalconConfig) -> Vec<Diagnostic> {
+    fn analyze_project(
+        &self,
+        files: &[ProjectFile],
+        _config: &FalconConfig,
+        _indexes: Option<&falcon_analyze::SemanticIndexes>,
+    ) -> Vec<Diagnostic> {
         project_pubspecs(files)
             .into_iter()
             .flat_map(|path| check_pubspec(&path))

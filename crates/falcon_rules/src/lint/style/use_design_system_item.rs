@@ -33,7 +33,7 @@ impl Rule for UseDesignSystemItem {
         }
 
         let mut diags = Vec::new();
-        super::traversal::for_each_expr(program, |expr| {
+        falcon_syntax::visitor::for_each_expr_in_program(program, |expr| {
             let construction = match expr {
                 Expr::New { .. } => crate::lint::flutter::widget_construction(expr)
                     .map(|(name, _, span)| (name, span)),

@@ -6,10 +6,10 @@
 //! only targets explicit `new`; an implicit `Foo()` parses as a call and a
 //! `const Foo()` keeps its `const`, so neither is touched. Delete the `new`.
 
-use super::traversal::for_each_expr;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::for_each_expr_in_program;
 
 #[derive(Default)]
 pub struct UnnecessaryNew;
@@ -17,7 +17,7 @@ pub struct UnnecessaryNew;
 impl Rule for UnnecessaryNew {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for_each_expr(program, |node| {
+        for_each_expr_in_program(program, |node| {
             if let Expr::New {
                 is_const: false,
                 span,

@@ -49,22 +49,14 @@ fn test_double_exponent_negative() {
 }
 
 #[test]
-fn test_leading_dot_exponent_separator_boundary() {
-    let src = ".5e1_0";
-    let tokens = Lexer::new(src).tokenize();
-    assert_eq!(tokens.len(), 3);
-    assert_eq!(tokens[0].kind, TokenKind::DoubleLit);
-    assert_eq!(tokens[0].text(src), ".5e1");
-    assert_eq!(tokens[1].kind, TokenKind::Ident);
-    assert_eq!(tokens[1].text(src), "_0");
-    assert_eq!(tokens[2].kind, TokenKind::Eof);
-
-    let src = "0.5e1_0";
-    let tokens = Lexer::new(src).tokenize();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0].kind, TokenKind::DoubleLit);
-    assert_eq!(tokens[0].text(src), src);
-    assert_eq!(tokens[1].kind, TokenKind::Eof);
+fn test_exponent_digit_separators() {
+    for src in [".5e1_0", "0.5e1_0", ".5e-1_0", "1e+1_0"] {
+        let tokens = Lexer::new(src).tokenize();
+        assert_eq!(tokens.len(), 2, "{src}");
+        assert_eq!(tokens[0].kind, TokenKind::DoubleLit);
+        assert_eq!(tokens[0].text(src), src);
+        assert_eq!(tokens[1].kind, TokenKind::Eof);
+    }
 }
 
 #[test]

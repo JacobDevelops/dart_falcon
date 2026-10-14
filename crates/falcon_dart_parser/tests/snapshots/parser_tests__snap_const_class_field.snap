@@ -124,6 +124,8 @@ Class(
                                 StringLit(
                                     StringLitNode {
                                         raw: "'https://api.example.com'",
+                                        is_adjacent: false,
+                                        has_raw_segment: false,
                                         value: "https://api.example.com",
                                         span: Span {
                                             start: 78,

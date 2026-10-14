@@ -727,6 +727,7 @@ impl<'src> Parser<'src> {
             return_type,
             op,
             params,
+            async_marker: marker,
             body,
             span: self.span_from(start),
         }
@@ -829,8 +830,7 @@ impl<'src> Parser<'src> {
                     if self.at(TokenKind::LParen) {
                         let params = self.parse_formal_param_list();
                         let initializers = self.parse_constructor_initializers();
-                        let body_marker = self.ctor_body_marker();
-                        let body = self.parse_function_body(body_marker);
+                        let body = self.parse_function_body(AsyncMarker::Sync);
                         return ClassMember::Constructor(ConstructorDecl {
                             annotations,
                             is_const: true,
@@ -981,8 +981,7 @@ impl<'src> Parser<'src> {
                         });
                     }
                     let initializers = self.parse_constructor_initializers();
-                    let body_marker = self.ctor_body_marker();
-                    let body = self.parse_function_body(body_marker);
+                    let body = self.parse_function_body(AsyncMarker::Sync);
                     return ClassMember::Constructor(ConstructorDecl {
                         annotations,
                         is_const,
@@ -1144,19 +1143,6 @@ impl<'src> Parser<'src> {
             }
         }
         inits
-    }
-
-    // An initializer ending in a contextual marker also sets the constructor body's context.
-    fn ctor_body_marker(&self) -> AsyncMarker {
-        match (
-            self.pos.checked_sub(1).map(|i| self.kind_at(i)),
-            self.pos.checked_sub(2).map(|i| self.kind_at(i)),
-        ) {
-            (Some(TokenKind::Star), Some(TokenKind::Async)) => AsyncMarker::AsyncStar,
-            (Some(TokenKind::Star), Some(TokenKind::Sync)) => AsyncMarker::SyncStar,
-            (Some(TokenKind::Async), _) => AsyncMarker::Async,
-            _ => AsyncMarker::Sync,
-        }
     }
 
     fn parse_ctor_init_value(&mut self) -> Expr {
@@ -1519,9 +1505,6 @@ impl<'src> Parser<'src> {
         } else {
             self.error("expected string literal");
         }
-        let value = StringLitNode::delimiter(raw)
-            .map_or_else(|| raw.strip_prefix('r').unwrap_or(raw), |lit| lit.content)
-            .to_string();
         let interpolations = if is_string_lit {
             let (interps, interp_errors) = scan_interpolations(self.src, tok.offset, raw);
             // Surface any interpolation sub-parse diagnostics to the enclosing
@@ -1531,12 +1514,19 @@ impl<'src> Parser<'src> {
         } else {
             Vec::new()
         };
-        StringLitNode {
+        let mut node = StringLitNode {
             raw: raw.to_owned(),
-            value,
+            is_adjacent: false,
+            has_raw_segment: raw.starts_with('r'),
+            value: String::new(),
             span,
             interpolations,
-        }
+        };
+        node.value = node
+            .delimiter()
+            .map_or_else(|| raw.strip_prefix('r').unwrap_or(raw), |lit| lit.content)
+            .to_owned();
+        node
     }
 }
 

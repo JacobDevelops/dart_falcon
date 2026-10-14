@@ -528,7 +528,7 @@ fn for_init_decl(src: &str) -> LocalVarDecl {
         other => panic!("expected block body, got {other:?}"),
     };
     match &stmts[0] {
-        Stmt::For(f) => match f.init.as_ref().expect("for init") {
+        Stmt::For(f) => match f.header.init.as_ref().expect("for init") {
             ForInit::VarDecl(lv) => lv.clone(),
             other => panic!("expected var-decl init, got {other:?}"),
         },
@@ -594,7 +594,7 @@ fn test_for_in_preserves_variable_keyword() {
         let Stmt::For(statement) = &body.stmts[0] else {
             panic!("expected for statement");
         };
-        let Some(ForInit::ForIn { keyword, .. }) = &statement.init else {
+        let Some(ForInit::ForIn { keyword, .. }) = &statement.header.init else {
             panic!("expected for-in header");
         };
         assert_eq!(*keyword, expected);
@@ -617,7 +617,7 @@ fn test_pattern_for_in_preserves_variable_keyword() {
         let Stmt::For(statement) = &body.stmts[0] else {
             panic!("expected for statement");
         };
-        let Some(ForInit::PatternForIn { keyword, .. }) = &statement.init else {
+        let Some(ForInit::PatternForIn { keyword, .. }) = &statement.header.init else {
             panic!("expected pattern for-in header");
         };
         assert_eq!(*keyword, expected);

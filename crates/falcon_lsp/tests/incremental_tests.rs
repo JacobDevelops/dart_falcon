@@ -28,6 +28,32 @@ fn counts(state: &LspState, uri: &str) -> (u64, u64) {
     let doc = state.document(uri).expect("document open");
     (doc.parse_count, doc.analyze_count)
 }
+#[cfg(unix)]
+#[test]
+fn change_refreshes_path_when_file_materializes_under_symlink() {
+    let (mut state, dir) = state_with_config("{}");
+    let real = dir.path().join("real");
+    fs::create_dir(&real).unwrap();
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let path = link.join("new.dart");
+    let uri = format!("file://{}", path.display());
+    state.open(&uri, VIOLATING_SRC.to_string(), Some(1));
+    fs::write(&path, CLEAN_SRC).unwrap();
+    assert!(state.change(&uri, VIOLATING_SRC.to_string(), Some(2)));
+    let diagnostics = state.analyze(&uri);
+    assert!(!diagnostics.is_empty());
+    let canonical = fs::canonicalize(&path)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.file_path == canonical)
+    );
+    assert_eq!(counts(&state, &uri), (2, 2));
+}
 
 /// Changing one file re-parses and re-analyzes only that file; other open
 /// documents are untouched.
@@ -371,6 +397,84 @@ fn affected_documents_share_one_invalidated_semantic_snapshot() {
         5,
         "watched config/package changes invalidate semantic package identities"
     );
+}
+
+#[test]
+fn cross_file_indexes_fall_back_after_unnotified_disk_changes() {
+    let config = r#"{
+        "linter": { "rules": {
+            "recommended": false,
+            "suspicious": { "avoid-ignoring-return-values": "warn" }
+        } },
+        "cross-file": { "rules": {
+            "recommended": false,
+            "correctness": { "unnecessary-nullable": "warn" }
+        } }
+    }"#;
+    let (mut state, dir) = state_with_config(config);
+    fs::create_dir(dir.path().join("lib")).unwrap();
+    let manifest = dir.path().join("pubspec.yaml");
+    let api = dir.path().join("lib/api.dart");
+    let consumer = dir.path().join("lib/consumer.dart");
+    fs::write(&manifest, "name: workspace\n").unwrap();
+    fs::write(&api, "int value() => 1;\n").unwrap();
+    let source = "import 'package:workspace/api.dart';\nvoid _take(int? x) {}\nvoid f() { _take(value()); }\n";
+    fs::write(&consumer, source).unwrap();
+    let uri = format!("file://{}", consumer.display());
+    state.open(&uri, source.to_string(), Some(1));
+    let builds = state.semantic_snapshot_build_count();
+    assert_eq!(builds, 1);
+    state.cross_file_pass();
+    assert!(
+        state
+            .document(&uri)
+            .unwrap()
+            .last_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
+    );
+    assert_eq!(state.semantic_snapshot_build_count(), builds);
+
+    // No watched-file notification: cross-file analysis must reject stale facts.
+    fs::write(&api, "int? value() => null;\n").unwrap();
+    let published = state.cross_file_pass();
+    assert!(
+        published
+            .iter()
+            .any(|(published_uri, _)| published_uri == &uri)
+    );
+    assert!(
+        state
+            .document(&uri)
+            .unwrap()
+            .last_diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
+    );
+    assert_eq!(state.semantic_snapshot_build_count(), builds);
+
+    fs::write(&api, "int value() => 1;\n").unwrap();
+    state.cross_file_pass();
+    assert!(
+        state
+            .document(&uri)
+            .unwrap()
+            .last_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
+    );
+    // Unchanged Dart sources do not make a renamed package's old identities valid.
+    fs::write(&manifest, "name: renamed\n").unwrap();
+    state.cross_file_pass();
+    assert!(
+        state
+            .document(&uri)
+            .unwrap()
+            .last_diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
+    );
+    assert_eq!(state.semantic_snapshot_build_count(), builds);
 }
 
 /// An inline `// falcon-ignore` comment suppresses the diagnostic through the

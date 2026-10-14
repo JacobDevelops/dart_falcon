@@ -60,7 +60,7 @@ fn test_parse_full_example() {
         cfg.schema.as_deref(),
         Some("https://example.invalid/falcon-schema.json")
     );
-    let filter = cfg.files.path_filter();
+    let filter = &cfg.files.includes;
     for path in [
         ".dart_tool/cache.dart",
         "build/output.dart",
@@ -148,7 +148,7 @@ fn test_files_include_patterns_semantics() {
     let cfg = from_json(serde_json::json!({
         "files": { "includes": ["src/**", "lib/**", "!lib/gen/**"] }
     }));
-    let filter = cfg.files.path_filter();
+    let filter = &cfg.files.includes;
     assert!(filter.admits("src/main.dart"));
     assert!(filter.admits("lib/main.dart"));
     assert!(filter.excludes("lib/gen/model.dart"));
@@ -344,9 +344,9 @@ fn test_include_patterns_catch_all_star_star_slash_star() {
     let cfg = from_json(serde_json::json!({
         "files": { "includes": ["**/*", "!build/**"] }
     }));
-    assert!(cfg.files.path_filter().admits("main.dart"));
-    assert!(cfg.files.path_filter().admits("lib/main.dart"));
-    assert!(cfg.files.path_filter().excludes("build/output.dart"));
+    assert!(cfg.files.includes.admits("main.dart"));
+    assert!(cfg.files.includes.admits("lib/main.dart"));
+    assert!(cfg.files.includes.excludes("build/output.dart"));
 }
 
 // ── loading & discovery ───────────────────────────────────────────────────────
@@ -362,7 +362,7 @@ fn test_load_valid_config() {
     fs::write(&path, json).expect("write temp file");
 
     let cfg = load_config(&path).expect("load valid config");
-    assert!(cfg.files.path_filter().excludes("generated.tmp"));
+    assert!(cfg.files.includes.excludes("generated.tmp"));
     assert_eq!(cfg.max_errors, Some(100));
 
     cleanup(&path);

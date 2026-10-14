@@ -7,10 +7,10 @@
 //! adjacency cannot express that. Prefer writing the pieces side by side, which
 //! also reads naturally when splitting a long string across lines.
 
-use super::traversal::for_each_expr;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::for_each_expr_in_program;
 
 #[derive(Default)]
 pub struct PreferAdjacentStringConcatenation;
@@ -18,7 +18,7 @@ pub struct PreferAdjacentStringConcatenation;
 impl Rule for PreferAdjacentStringConcatenation {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for_each_expr(program, |node| {
+        for_each_expr_in_program(program, |node| {
             if let Expr::Binary {
                 op: BinaryOp::Add,
                 left,

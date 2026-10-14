@@ -603,7 +603,7 @@ fn test_stmt_for_in() {
             let Stmt::For(for_stmt) = &b.stmts[0] else {
                 panic!("expected for")
             };
-            assert!(matches!(for_stmt.init, Some(ForInit::ForIn { .. })));
+            assert!(matches!(for_stmt.header.init, Some(ForInit::ForIn { .. })));
         }
         _ => panic!("expected block body"),
     }
@@ -622,7 +622,7 @@ fn test_stmt_for_await_in() {
             let Stmt::For(for_stmt) = &b.stmts[0] else {
                 panic!("expected for")
             };
-            assert!(matches!(for_stmt.init, Some(ForInit::ForIn { .. })));
+            assert!(matches!(for_stmt.header.init, Some(ForInit::ForIn { .. })));
         }
         _ => panic!("expected block body"),
     }
@@ -2292,9 +2292,9 @@ fn test_for_statement_pattern_destructuring() {
     };
     let Some(ForInit::PatternForIn {
         pattern, iterable, ..
-    }) = &for_stmt.init
+    }) = &for_stmt.header.init
     else {
-        panic!("expected PatternForIn, got {:#?}", for_stmt.init);
+        panic!("expected PatternForIn, got {:#?}", for_stmt.header.init);
     };
     let Pattern::Record(rec) = &**pattern else {
         panic!("expected record pattern");

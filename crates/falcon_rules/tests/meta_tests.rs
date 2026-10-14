@@ -5,6 +5,33 @@ use std::collections::HashSet;
 use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
+fn registry_resolution_requirement_uses_registered_names() {
+    use falcon_analyze::RuleRegistry;
+    use falcon_rules::meta::RuleKind;
+    let mut registry = RuleRegistry::new();
+    assert!(!falcon_rules::requires_resolution(&registry));
+    for (name, expected) in [
+        ("avoid-dynamic", false),
+        ("avoid-ignoring-return-values", true),
+    ] {
+        let RuleKind::File { make, .. } = meta_for(name).unwrap().kind else {
+            panic!("expected file rule");
+        };
+        registry.register(name, make());
+        assert_eq!(falcon_rules::requires_resolution(&registry), expected);
+    }
+    assert!(!falcon_rules::rule_requires_resolution("unknown-rule"));
+}
+
+#[test]
+fn domain_metadata_preserves_configuration_names() {
+    for meta in RULE_METADATA {
+        let expected: Vec<_> = meta.domain.iter().map(|domain| domain.as_str()).collect();
+        assert_eq!(meta.domain_names(), expected);
+    }
+}
+
+#[test]
 fn committed_schema_matches_generator() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),

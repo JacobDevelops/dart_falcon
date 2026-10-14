@@ -347,13 +347,13 @@ impl Visitor for UsageCollector {
             },
             Stmt::For(statement) => {
                 self.push_scope();
-                if let Some(init) = &statement.init {
+                if let Some(init) = &statement.header.init {
                     self.visit_for_init(init);
                 }
-                if let Some(condition) = &statement.condition {
+                if let Some(condition) = &statement.header.condition {
                     self.visit_expr(condition);
                 }
-                for update in &statement.update {
+                for update in &statement.header.updates {
                     self.visit_expr(update);
                 }
                 self.visit_scoped_stmt(&statement.body);

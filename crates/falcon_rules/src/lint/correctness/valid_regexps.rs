@@ -72,9 +72,8 @@ fn extractable_pattern(expr: &Expr) -> Option<&str> {
     if !node.interpolations.is_empty() {
         return None;
     }
-    let literal = StringLitNode::delimiter(&node.raw)?;
-    // Adjacent literals retain inner delimiters in raw, but not in value.
-    if !literal.terminated || literal.content != node.value {
+    let literal = node.delimiter()?;
+    if !literal.terminated {
         return None;
     }
     if !literal.is_raw && literal.content.contains('\\') {

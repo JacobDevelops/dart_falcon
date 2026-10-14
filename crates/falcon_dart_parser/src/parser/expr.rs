@@ -79,6 +79,8 @@ impl<'src> Parser<'src> {
         let mut node = self.parse_string_lit();
         while self.at(TokenKind::StringLit) {
             let next = self.parse_string_lit();
+            node.is_adjacent = true;
+            node.has_raw_segment |= next.has_raw_segment;
             node.raw.push_str(&next.raw);
             node.value.push_str(&next.value);
             node.span = node.span.merge(&next.span);
@@ -205,6 +207,7 @@ impl<'src> Parser<'src> {
         }
     }
 
+    #[inline]
     fn parse_left_assoc(
         &mut self,
         next: fn(&mut Self) -> Expr,

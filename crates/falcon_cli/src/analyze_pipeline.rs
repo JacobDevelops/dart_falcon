@@ -103,9 +103,9 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
 
     let mut cli_filter;
     let filter = if options.exclude_patterns.is_empty() {
-        config.files.path_filter()
+        &config.files.includes
     } else {
-        cli_filter = config.files.path_filter().clone();
+        cli_filter = config.files.includes.clone();
         cli_filter.extend_excludes(&options.exclude_patterns);
         &cli_filter
     };
@@ -113,7 +113,7 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     let registry = build_registry(&config);
     let cross_file_registry = build_cross_file_registry(&config);
     let collect_programs = !cross_file_registry.is_empty();
-    let resolve = requires_resolution(registry.rules());
+    let resolve = requires_resolution(&registry);
     let manifests = if collect_programs || resolve {
         walk_pubspecs(&options.paths, filter)
     } else {
@@ -143,7 +143,7 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
         resolve,
         "starting check"
     );
-    let (mut diagnostics, mut project_files) = if options.parallel {
+    let (mut diagnostics, mut project_files, indexes) = if options.parallel {
         analyze_parallel_collecting_resolving(
             &registry,
             &files,
@@ -179,6 +179,7 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
             &cross_file_registry,
             &project_files,
             &config,
+            indexes.as_ref(),
         ));
     }
 

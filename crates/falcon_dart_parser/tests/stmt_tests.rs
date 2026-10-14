@@ -150,7 +150,7 @@ fn test_await_for_in() {
     match stmt {
         Stmt::For(f) => {
             assert!(f.is_await, "expected await-for");
-            match f.init {
+            match f.header.init {
                 Some(ForInit::ForIn { name, .. }) => assert_eq!(name.name, "e"),
                 other => panic!("expected for-in, got {other:?}"),
             }

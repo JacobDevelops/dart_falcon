@@ -171,13 +171,13 @@ impl Visitor for Collector<'_, '_> {
             },
             Stmt::For(statement) => {
                 self.scopes.push();
-                if let Some(init) = &statement.init {
+                if let Some(init) = &statement.header.init {
                     self.for_init(init);
                 }
-                if let Some(condition) = &statement.condition {
+                if let Some(condition) = &statement.header.condition {
                     self.visit_expr(condition);
                 }
-                for update in &statement.update {
+                for update in &statement.header.updates {
                     self.visit_expr(update);
                 }
                 self.visit_stmt(&statement.body);

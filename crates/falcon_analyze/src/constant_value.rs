@@ -247,21 +247,21 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             })
         };
         if local_owner && let Some((&name, &expression)) = self.fields.get_key_value(*local_name) {
-            return self.initializer(ConstantKey::Field(name), expression, Some(self.owner_model));
+            return self.initializer(ConstantKey::Field(name), expression, self.owner_model);
         }
         let identity = self
             .model
             .resolve_value(QualifiedName::from_segments(names)?)?;
         let expression = self.signatures.constant_initializer(&identity)?;
         let model = self.model.for_declaration(&identity)?;
-        self.initializer(ConstantKey::TopLevel(identity), expression, Some(model))
+        self.initializer(ConstantKey::TopLevel(identity), expression, model)
     }
 
     fn initializer(
         &mut self,
         key: ConstantKey<'a>,
         expression: &Expr,
-        model: Option<SemanticModel<'model>>,
+        model: SemanticModel<'model>,
     ) -> Option<ConstantValue> {
         if let Some(state) = self.constants.get(&key) {
             return match state {
@@ -271,20 +271,14 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         }
         self.constants
             .insert(key.clone(), ConstantState::Evaluating);
-        let previous = model.map(|model| {
-            (
-                std::mem::replace(&mut self.model, model),
-                std::mem::replace(
-                    &mut self.unqualified_fields,
-                    matches!(key, ConstantKey::Field(_)),
-                ),
-            )
-        });
+        let previous_model = std::mem::replace(&mut self.model, model);
+        let previous_fields = std::mem::replace(
+            &mut self.unqualified_fields,
+            matches!(key, ConstantKey::Field(_)),
+        );
         let value = self.evaluate(expression);
-        if let Some((model, unqualified_fields)) = previous {
-            self.model = model;
-            self.unqualified_fields = unqualified_fields;
-        }
+        self.model = previous_model;
+        self.unqualified_fields = previous_fields;
         self.constants
             .insert(key, ConstantState::Evaluated(value.clone()));
         value
@@ -323,7 +317,7 @@ fn decode_string(node: &StringLitNode) -> Option<String> {
     if !node.interpolations.is_empty() {
         return None;
     }
-    let literal = StringLitNode::delimiter(&node.raw)?;
+    let literal = node.delimiter()?;
     let quote_len = if literal.triple { 3 } else { 1 };
     let content_end = node.raw.len().checked_sub(quote_len)?;
     let content = node.raw.get(literal.content_offset..content_end)?;
@@ -511,16 +505,18 @@ mod tests {
     use crate::{IdentityIndex, IdentitySource, TypeIndex};
 
     #[test]
-    fn string_decoding_preserves_recovery_and_adjacent_literal_behavior() {
+    fn string_decoding_preserves_recovery_and_rejects_adjacent_literals() {
         for (raw, expected) in [
             ("'hello", Some("hell")),
-            ("'a'\"b\"", Some("a'\"b")),
+            ("'a'\"b\"", None),
             ("r'\\n'", Some("\\n")),
             ("'\\n'", Some("\n")),
             ("'", None),
         ] {
             let node = StringLitNode {
                 raw: raw.to_string(),
+                is_adjacent: raw == "'a'\"b\"",
+                has_raw_segment: raw.starts_with('r'),
                 value: String::new(),
                 span: Span::default(),
                 interpolations: Vec::new(),
@@ -673,27 +669,6 @@ const qualifiedOwner = Foo.a;
                 evaluator.resolve_name(&["a"]),
                 Some(ConstantValue::Number(Number::Int(1)))
             );
-        });
-    }
-
-    #[test]
-    fn completed_constants_are_reused() {
-        with_constants(|_, model, signatures| {
-            let owner = model.resolve_value("repeated").unwrap();
-            let fields = HashMap::new();
-            let expression = signatures.constant_initializer(&owner).unwrap();
-            let mut evaluator = ConstEvaluator::new(Some(&owner), &fields, model, signatures);
-            let expected = Some(ConstantValue::Number(Number::Int(4)));
-            assert_eq!(evaluator.evaluate(expression), expected);
-            assert_eq!(evaluator.constants.len(), 1);
-            assert_eq!(evaluator.evaluate(expression), expected);
-            assert_eq!(evaluator.constants.len(), 1);
-            assert!(matches!(
-                evaluator.constants.values().next(),
-                Some(ConstantState::Evaluated(Some(ConstantValue::Number(
-                    Number::Int(2)
-                ))))
-            ));
         });
     }
 

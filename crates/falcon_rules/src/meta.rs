@@ -5,49 +5,36 @@ use falcon_config::{FalconConfig, RuleConfiguration, RulePlainConfiguration, Rul
 
 use crate::{cross_file, lint};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RuleGroup {
-    Complexity,
-    Correctness,
-    Performance,
-    Style,
-    Suspicious,
-}
-
-impl RuleGroup {
-    pub const ALL: &'static [Self] = &[
-        Self::Complexity,
-        Self::Correctness,
-        Self::Performance,
-        Self::Style,
-        Self::Suspicious,
-    ];
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Complexity => "complexity",
-            Self::Correctness => "correctness",
-            Self::Performance => "performance",
-            Self::Style => "style",
-            Self::Suspicious => "suspicious",
+macro_rules! metadata_enum {
+    ($name:ident { $($variant:ident => $label:literal),+ $(,)? }) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum $name {
+            $($variant),+
         }
-    }
-}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Domain {
-    Flutter,
-}
+        impl $name {
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
 
-impl Domain {
-    pub const ALL: &'static [Self] = &[Self::Flutter];
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Flutter => "flutter",
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $label),+
+                }
+            }
         }
-    }
+    };
 }
+
+metadata_enum!(RuleGroup {
+    Complexity => "complexity",
+    Correctness => "correctness",
+    Performance => "performance",
+    Style => "style",
+    Suspicious => "suspicious",
+});
+
+metadata_enum!(Domain {
+    Flutter => "flutter",
+});
 
 #[derive(Clone, Copy)]
 pub enum RuleKind {
@@ -78,7 +65,7 @@ pub enum RuleSource {
 pub struct RuleMeta {
     pub name: &'static str,
     pub group: RuleGroup,
-    pub domains: &'static [Domain],
+    pub domain: Option<Domain>,
     pub recommended: bool,
     pub kind: RuleKind,
     /// Upstream provenance (biome-style): which linter the rule was ported from,
@@ -90,14 +77,14 @@ impl RuleMeta {
     const fn file<T: Rule + Default + 'static>(
         name: &'static str,
         group: RuleGroup,
-        domains: &'static [Domain],
+        domain: Option<Domain>,
         recommended: bool,
         source: RuleSource,
     ) -> Self {
         Self {
             name,
             group,
-            domains,
+            domain,
             recommended,
             source,
             kind: RuleKind::File {
@@ -110,11 +97,11 @@ impl RuleMeta {
     const fn resolved<T: Rule + Default + 'static>(
         name: &'static str,
         group: RuleGroup,
-        domains: &'static [Domain],
+        domain: Option<Domain>,
         recommended: bool,
         source: RuleSource,
     ) -> Self {
-        let mut meta = Self::file::<T>(name, group, domains, recommended, source);
+        let mut meta = Self::file::<T>(name, group, domain, recommended, source);
         meta.kind = RuleKind::File {
             make: make_rule::<T>,
             needs_resolution: true,
@@ -125,14 +112,14 @@ impl RuleMeta {
     const fn cross_file<T: CrossFileRule + Default + 'static>(
         name: &'static str,
         group: RuleGroup,
-        domains: &'static [Domain],
+        domain: Option<Domain>,
         recommended: bool,
         source: RuleSource,
     ) -> Self {
         Self {
             name,
             group,
-            domains,
+            domain,
             recommended,
             source,
             kind: RuleKind::CrossFile(make_cross_file_rule::<T>),
@@ -141,7 +128,7 @@ impl RuleMeta {
 
     pub fn domain_names(&self) -> &'static [&'static str] {
         const FLUTTER_NAMES: &[&str] = &[Domain::Flutter.as_str()];
-        match self.domains.first() {
+        match self.domain {
             None => &[],
             Some(Domain::Flutter) => FLUTTER_NAMES,
         }
@@ -160,8 +147,8 @@ fn make_cross_file_rule<T: CrossFileRule + Default + 'static>() -> Box<dyn Cross
     Box::new(T::default())
 }
 
-const FLUTTER: &[Domain] = &[Domain::Flutter];
-const NONE: &[Domain] = &[];
+const FLUTTER: Option<Domain> = Some(Domain::Flutter);
+const NONE: Option<Domain> = None;
 
 /// The sole constructor table for registered rules.
 pub const RULE_METADATA: &[RuleMeta] = &[

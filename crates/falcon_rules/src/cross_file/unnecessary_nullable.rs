@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::{
     AnalyzeContext, CrossFileRule, IdentityIndex, IdentitySource, LibrarySource, ProjectFile,
-    SignatureIndex, TypeIndex, group_libraries,
+    SemanticIndexes, SignatureIndex, TypeIndex, group_libraries,
 };
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
@@ -32,7 +32,12 @@ pub struct UnnecessaryNullable;
 const NAME: &str = "unnecessary-nullable";
 
 impl CrossFileRule for UnnecessaryNullable {
-    fn analyze_project(&self, files: &[ProjectFile], config: &FalconConfig) -> Vec<Diagnostic> {
+    fn analyze_project(
+        &self,
+        files: &[ProjectFile],
+        config: &FalconConfig,
+        indexes: Option<&SemanticIndexes>,
+    ) -> Vec<Diagnostic> {
         // Count every function/method by name project-wide so we only reason
         // about names that resolve to exactly one declaration.
         let mut decl_count: HashMap<String, usize> = HashMap::new();
@@ -45,35 +50,59 @@ impl CrossFileRule for UnnecessaryNullable {
             }
         }
 
-        let project_files: Vec<_> = files
-            .iter()
-            .map(|file| (file.path.clone(), &file.program))
-            .collect();
-        let grouping = group_libraries(&project_files);
-        let types = TypeIndex::from_library_files(files.iter().enumerate().map(|(index, file)| {
-            LibrarySource {
-                program: &file.program,
-                has_parse_errors: file.has_parse_errors,
-                has_unresolved_parts: grouping.is_unresolved(index),
+        let owned_indexes;
+        let indexes = match indexes {
+            Some(indexes) => indexes,
+            None => {
+                let project_files: Vec<_> = files
+                    .iter()
+                    .map(|file| (file.path.clone(), &file.program))
+                    .collect();
+                let grouping = group_libraries(&project_files);
+                let types =
+                    TypeIndex::from_library_files(files.iter().enumerate().map(|(index, file)| {
+                        LibrarySource {
+                            program: &file.program,
+                            has_parse_errors: file.has_parse_errors,
+                            has_unresolved_parts: grouping.is_unresolved(index),
+                        }
+                    }));
+                let sources: Vec<_> = files
+                    .iter()
+                    .map(|file| IdentitySource {
+                        path: &file.path,
+                        program: &file.program,
+                        has_parse_errors: file.has_parse_errors,
+                    })
+                    .collect();
+                let packages =
+                    crate::package_identities(files.iter().map(|file| file.path.as_path()));
+                let identities = IdentityIndex::from_project_files(&sources, &packages);
+                let signatures =
+                    SignatureIndex::from_project_files(&project_files, &identities, &types);
+                owned_indexes = SemanticIndexes {
+                    types,
+                    identities,
+                    signatures,
+                };
+                &owned_indexes
             }
-        }));
-        let sources: Vec<_> = files
-            .iter()
-            .map(|file| IdentitySource {
-                path: &file.path,
-                program: &file.program,
-                has_parse_errors: file.has_parse_errors,
-            })
-            .collect();
-        let identities = IdentityIndex::from_project_files(&sources, &[]);
-        let signatures = SignatureIndex::from_project_files(&project_files, &identities, &types);
+        };
         let mut calls = Vec::new();
         let mut tear_offs = HashSet::new();
         for file in files {
+            if file
+                .path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                != Some("dart")
+            {
+                continue;
+            }
             let ctx = AnalyzeContext::new(&file.path, &file.source, config)
-                .with_types(&types)
-                .with_identities(&identities)
-                .with_signatures(&signatures);
+                .with_types(&indexes.types)
+                .with_identities(&indexes.identities)
+                .with_signatures(&indexes.signatures);
             let mut members = MemberBindings(HashSet::new());
             members.visit_program(&file.program);
             let mut nullability = ArgumentNullability {
@@ -81,7 +110,7 @@ impl CrossFileRule for UnnecessaryNullable {
                 members: members.0,
             };
             let state = SemanticState::new(&file.program, &ctx)
-                .expect("project identities were built above");
+                .expect("project identities describe the analyzed files");
             visit_program(&mut nullability, &file.program, state);
             let mut collector = CallCollector {
                 calls: Vec::new(),
@@ -572,8 +601,72 @@ mod tests {
                     has_parse_errors: false,
                 }],
                 &FalconConfig::default(),
+                None,
             )
             .len()
+    }
+
+    #[test]
+    fn package_import_proves_nonnull_with_fallback_and_retained_indexes() {
+        let root = std::env::temp_dir().join(format!(
+            "falcon-nullable-package-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        let manifest = root.join("pubspec.yaml");
+        std::fs::write(&manifest, "name: app\n").unwrap();
+        let config = FalconConfig::default();
+        let mut registry = falcon_analyze::CrossFileRuleRegistry::new();
+        registry.register(Box::new(UnnecessaryNullable));
+        for (return_type, value, expected) in [("int", "1", 1), ("int?", "null", 0)] {
+            let sources = vec![
+                (root.join("lib/a.dart"), format!("{return_type} value() => {value};")),
+                (
+                    root.join("lib/b.dart"),
+                    "import 'package:app/a.dart'; void _take(int? x) {} void f() { _take(value()); }".into(),
+                ),
+            ];
+            for (path, source) in &sources {
+                std::fs::write(path, source).unwrap();
+            }
+            let packages =
+                crate::package_identities(sources.iter().map(|(path, _)| path.as_path()));
+            let (diagnostics, mut files, indexes) =
+                falcon_analyze::analyze_sequential_collecting_resolving(
+                    &falcon_analyze::RuleRegistry::new(),
+                    &sources,
+                    &config,
+                    true,
+                    true,
+                    &packages,
+                );
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let (program, errors) = parse("");
+            assert!(errors.is_empty());
+            files.push(ProjectFile {
+                path: manifest.clone(),
+                source: "name: app\n".into(),
+                program,
+                has_parse_errors: false,
+            });
+            for indexes in [None, indexes.as_ref()] {
+                let diagnostics = registry.run_all(&files, &config, indexes);
+                assert_eq!(
+                    diagnostics.len(),
+                    expected,
+                    "{return_type}: {diagnostics:?}"
+                );
+                if expected == 1 {
+                    assert_eq!(diagnostics[0].rule, NAME);
+                    assert_eq!(diagnostics[0].file_path, sources[1].0.to_string_lossy());
+                }
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

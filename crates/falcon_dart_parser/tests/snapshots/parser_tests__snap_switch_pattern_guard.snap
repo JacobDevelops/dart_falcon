@@ -120,6 +120,8 @@ Function(
                             body: StringLit(
                                 StringLitNode {
                                     raw: "'neg'",
+                                    is_adjacent: false,
+                                    has_raw_segment: false,
                                     value: "neg",
                                     span: Span {
                                         start: 46,
@@ -149,6 +151,8 @@ Function(
                             body: StringLit(
                                 StringLitNode {
                                     raw: "'zero'",
+                                    is_adjacent: false,
+                                    has_raw_segment: false,
                                     value: "zero",
                                     span: Span {
                                         start: 58,
@@ -174,6 +178,8 @@ Function(
                             body: StringLit(
                                 StringLitNode {
                                     raw: "'pos'",
+                                    is_adjacent: false,
+                                    has_raw_segment: false,
                                     value: "pos",
                                     span: Span {
                                         start: 71,

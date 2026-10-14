@@ -95,6 +95,8 @@ Function(
                             StringLit(
                                 StringLitNode {
                                     raw: "'Alice'",
+                                    is_adjacent: false,
+                                    has_raw_segment: false,
                                     value: "Alice",
                                     span: Span {
                                         start: 33,
@@ -108,6 +110,8 @@ Function(
                             StringLit(
                                 StringLitNode {
                                     raw: "'Bob'",
+                                    is_adjacent: false,
+                                    has_raw_segment: false,
                                     value: "Bob",
                                     span: Span {
                                         start: 42,

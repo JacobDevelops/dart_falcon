@@ -92,6 +92,8 @@ Emit machine-readable output for tooling:
 falcon check . --format json
 ```
 
+JSON diagnostics no longer include `code` (identical to `rule`; read `rule` instead), or the always-empty `suggestions` and `context_lines` fields.
+
 falcon discovers `falcon.json` automatically — the current directory, then the
 enclosing git root, then `~/.falcon.json`.
 

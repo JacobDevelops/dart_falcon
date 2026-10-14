@@ -17,13 +17,14 @@ use std::path::Path;
 
 use falcon_analyze::{
     CrossFileRule, CrossFileRuleRegistry, FileSuppressions, PackageIdentity, ProjectFile, Rule,
-    RuleRegistry, canonical_or_lexical,
+    RuleRegistry, SemanticIndexes, canonical_or_lexical,
 };
 use falcon_config::{FalconConfig, ResolvedSeverity, Rules};
 use falcon_diagnostics::{Diagnostic, Severity};
 
 use crate::meta::{RULE_METADATA, RuleKind, meta_for, suppression_lookup};
 
+/// Whether a registered file rule needs semantic resolution; unknown names return false.
 pub fn rule_requires_resolution(name: &str) -> bool {
     meta_for(name).is_some_and(|meta| {
         matches!(
@@ -36,8 +37,12 @@ pub fn rule_requires_resolution(name: &str) -> bool {
     })
 }
 
-pub fn requires_resolution(rules: &[(&'static str, Box<dyn Rule>)]) -> bool {
-    rules.iter().any(|(name, _)| rule_requires_resolution(name))
+/// Whether any enabled rule in the registry needs semantic resolution.
+pub fn requires_resolution(registry: &RuleRegistry) -> bool {
+    registry
+        .rules()
+        .iter()
+        .any(|(name, _)| rule_requires_resolution(name))
 }
 
 fn resolve_rules(
@@ -81,8 +86,9 @@ pub fn run_cross_file(
     registry: &CrossFileRuleRegistry,
     files: &[ProjectFile],
     config: &FalconConfig,
+    indexes: Option<&SemanticIndexes>,
 ) -> Vec<Diagnostic> {
-    let mut diagnostics = registry.run_all(files, config);
+    let mut diagnostics = registry.run_all(files, config, indexes);
     let sources: HashMap<_, &str> = files
         .iter()
         .map(|file| (file.path.to_string_lossy(), file.source.as_str()))
@@ -124,14 +130,23 @@ pub fn package_identities<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Vec<
 }
 
 fn package_identity(manifest: &Path) -> PackageIdentity {
-    let name = std::fs::read(manifest)
+    let name = std::fs::read_to_string(manifest)
         .ok()
-        .and_then(|source| serde_yaml::from_slice::<serde_yaml::Value>(&source).ok())
-        .and_then(|manifest| manifest.get("name")?.as_str().map(str::to_owned))
+        .and_then(|source| package_name(&source))
         .unwrap_or_default();
     PackageIdentity {
         name,
         lib_root: canonical_or_lexical(&manifest.parent().unwrap().join("lib")),
+    }
+}
+
+fn package_name(source: &str) -> Option<String> {
+    match serde_yaml::from_str::<serde_yaml::Value>(source) {
+        Ok(manifest) => manifest.get("name")?.as_str().map(str::to_owned),
+        Err(_) => source.lines().find_map(|line| {
+            let value = line.strip_prefix("name:")?.trim();
+            serde_yaml::from_str::<String>(value).ok()
+        }),
     }
 }
 
@@ -280,6 +295,16 @@ fn resolve_cross_file_rules(
 mod tests {
     use super::config_warnings;
     use falcon_config::FalconConfig;
+    #[test]
+    fn package_identity_keeps_name_when_other_yaml_is_invalid() {
+        for source in [
+            "name: app\ndependencies: [\n",
+            "name: 'app' # comment\ndependencies: [\n",
+            "name: \"app\"\nversion: 1\nversion: 2\n",
+        ] {
+            assert_eq!(super::package_name(source).as_deref(), Some("app"));
+        }
+    }
 
     #[test]
     fn config_warnings_cover_base_and_overrides() {

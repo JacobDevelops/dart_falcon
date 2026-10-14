@@ -608,15 +608,7 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
             }
         }
         Stmt::For(x) => {
-            if let Some(init) = &x.init {
-                walk_for_init(v, init);
-            }
-            if let Some(ref cond) = x.condition {
-                v.visit_expr(cond);
-            }
-            for e in &x.update {
-                v.visit_expr(e);
-            }
+            walk_for_header(v, &x.header);
             v.visit_stmt(&x.body);
         }
         Stmt::While(x) => {
@@ -1129,6 +1121,23 @@ pub fn walk_map_element<V: Visitor>(v: &mut V, element: &MapElement) {
 /// Visit `root` and every nested expression.
 pub fn for_each_expr<F: FnMut(&Expr)>(root: &Expr, f: &mut F) {
     ExprWalker { f }.visit_expr(root);
+}
+
+/// Visit every expression in `program` in depth-first, parent-before-child order.
+pub fn for_each_expr_in_program(program: &Program, mut f: impl FnMut(&Expr)) {
+    ExprWalker { f: &mut f }.visit_program(program);
+}
+
+/// Visit every statement in `program` in depth-first, parent-before-child order.
+pub fn for_each_stmt_in_program(program: &Program, f: impl FnMut(&Stmt)) {
+    struct Statements<F>(F);
+    impl<F: FnMut(&Stmt)> Visitor for Statements<F> {
+        fn visit_stmt(&mut self, node: &Stmt) {
+            (self.0)(node);
+            walk_stmt(self, node);
+        }
+    }
+    Statements(f).visit_program(program);
 }
 
 struct ExprWalker<'f, F> {

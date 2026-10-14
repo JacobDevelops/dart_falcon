@@ -13,7 +13,7 @@ use crate::resolve::{
     IdentityIndex, IdentitySource, LibrarySource, LibraryUnit, PackageIdentity, SignatureIndex,
     TypeIndex, group_libraries, library_unit,
 };
-use crate::{AnalyzeContext, ProjectFile, RuleRegistry};
+use crate::{AnalyzeContext, ProjectFile, RuleRegistry, SemanticIndexes};
 
 /// Parse `source`, run every per-file rule (with no project index), and
 /// optionally keep the parsed program for the cross-file pass. This is the fast
@@ -107,7 +107,7 @@ fn analyze_indexed(
     config: &FalconConfig,
     parallel: bool,
     packages: &[PackageIdentity],
-) -> Vec<Diagnostic> {
+) -> (Vec<Diagnostic>, SemanticIndexes) {
     // Partition files into libraries, then build the type index (each type
     // inheriting its library's unresolved-part flag) and per-file library units.
     let project_files: Vec<(PathBuf, &Program)> = parsed
@@ -151,11 +151,19 @@ fn analyze_indexed(
         info!(file = %p.path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
         diagnostics
     };
-    if parallel {
+    let diagnostics = if parallel {
         parsed.par_iter().enumerate().flat_map(run_one).collect()
     } else {
         parsed.iter().enumerate().flat_map(run_one).collect()
-    }
+    };
+    (
+        diagnostics,
+        SemanticIndexes {
+            types: type_index,
+            identities,
+            signatures,
+        },
+    )
 }
 
 /// Analyze multiple Dart files in parallel using Rayon work-stealing.
@@ -189,7 +197,15 @@ pub fn analyze_parallel_collecting(
     config: &FalconConfig,
     collect_programs: bool,
 ) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
-    analyze_parallel_collecting_resolving(registry, files, config, collect_programs, false, &[])
+    let (diagnostics, files, _) = analyze_parallel_collecting_resolving(
+        registry,
+        files,
+        config,
+        collect_programs,
+        false,
+        &[],
+    );
+    (diagnostics, files)
 }
 
 /// Sequential counterpart of [`analyze_parallel_collecting`].
@@ -199,11 +215,20 @@ pub fn analyze_sequential_collecting(
     config: &FalconConfig,
     collect_programs: bool,
 ) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
-    analyze_sequential_collecting_resolving(registry, files, config, collect_programs, false, &[])
+    let (diagnostics, files, _) = analyze_sequential_collecting_resolving(
+        registry,
+        files,
+        config,
+        collect_programs,
+        false,
+        &[],
+    );
+    (diagnostics, files)
 }
 
 /// Like [`analyze_parallel_collecting`], but optionally builds shared semantic
 /// indexes before the per-file pass. Without resolution, uses the per-file fast path.
+/// Returns the built indexes for reuse by the cross-file pass when resolution is enabled.
 pub fn analyze_parallel_collecting_resolving(
     registry: &RuleRegistry,
     files: &[(PathBuf, String)],
@@ -211,7 +236,7 @@ pub fn analyze_parallel_collecting_resolving(
     collect_programs: bool,
     resolve: bool,
     packages: &[PackageIdentity],
-) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
+) -> (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>) {
     if !resolve {
         let (diagnostics, retained): (Vec<Vec<Diagnostic>>, Vec<Option<ProjectFile>>) = files
             .par_iter()
@@ -220,14 +245,15 @@ pub fn analyze_parallel_collecting_resolving(
         return (
             diagnostics.into_iter().flatten().collect(),
             retained.into_iter().flatten().collect(),
+            None,
         );
     }
     let parsed: Vec<Parsed> = files
         .par_iter()
         .map(|(path, source)| parse_one(path, source))
         .collect();
-    let diagnostics = analyze_indexed(registry, &parsed, config, true, packages);
-    (diagnostics, retain(parsed, collect_programs))
+    let (diagnostics, indexes) = analyze_indexed(registry, &parsed, config, true, packages);
+    (diagnostics, retain(parsed, collect_programs), Some(indexes))
 }
 
 /// Sequential counterpart of [`analyze_parallel_collecting_resolving`].
@@ -238,7 +264,7 @@ pub fn analyze_sequential_collecting_resolving(
     collect_programs: bool,
     resolve: bool,
     packages: &[PackageIdentity],
-) -> (Vec<Diagnostic>, Vec<ProjectFile>) {
+) -> (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>) {
     if !resolve {
         let mut diagnostics = Vec::new();
         let mut retained = Vec::new();
@@ -247,9 +273,9 @@ pub fn analyze_sequential_collecting_resolving(
             diagnostics.extend(diags);
             retained.extend(file);
         }
-        return (diagnostics, retained);
+        return (diagnostics, retained, None);
     }
     let parsed: Vec<Parsed> = files.iter().map(|(p, s)| parse_one(p, s)).collect();
-    let diagnostics = analyze_indexed(registry, &parsed, config, false, packages);
-    (diagnostics, retain(parsed, collect_programs))
+    let (diagnostics, indexes) = analyze_indexed(registry, &parsed, config, false, packages);
+    (diagnostics, retain(parsed, collect_programs), Some(indexes))
 }

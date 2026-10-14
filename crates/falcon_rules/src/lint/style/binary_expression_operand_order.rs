@@ -19,7 +19,7 @@ pub struct BinaryExpressionOperandOrder;
 impl Rule for BinaryExpressionOperandOrder {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        super::traversal::for_each_expr(program, |expr| {
+        falcon_syntax::visitor::for_each_expr_in_program(program, |expr| {
             if let Expr::Binary {
                 op,
                 left,

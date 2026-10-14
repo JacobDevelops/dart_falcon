@@ -180,12 +180,6 @@ pub struct FilesConfig {
     pub includes: PathFilter,
 }
 
-impl FilesConfig {
-    pub fn path_filter(&self) -> &PathFilter {
-        &self.includes
-    }
-}
-
 /// `linter`: master switch, rule levels, and domain gating.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]

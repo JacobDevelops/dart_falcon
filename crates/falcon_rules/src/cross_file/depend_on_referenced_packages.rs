@@ -27,7 +27,12 @@ struct PackageManifest {
 }
 
 impl CrossFileRule for DependOnReferencedPackages {
-    fn analyze_project(&self, files: &[ProjectFile], _config: &FalconConfig) -> Vec<Diagnostic> {
+    fn analyze_project(
+        &self,
+        files: &[ProjectFile],
+        _config: &FalconConfig,
+        _indexes: Option<&falcon_analyze::SemanticIndexes>,
+    ) -> Vec<Diagnostic> {
         let mut manifests: HashMap<PathBuf, Option<PackageManifest>> = HashMap::new();
         let mut diagnostics = Vec::new();
 
@@ -180,7 +185,7 @@ mod tests {
             .collect();
         assert_eq!(
             DependOnReferencedPackages
-                .analyze_project(&files, &FalconConfig::default())
+                .analyze_project(&files, &FalconConfig::default(), None)
                 .len(),
             2
         );

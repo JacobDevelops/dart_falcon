@@ -172,7 +172,7 @@ fn local_var_hook_borrows_statement_and_loop_declarations() {
     let Stmt::For(loop_statement) = &body.stmts[1] else {
         panic!("expected statement loop");
     };
-    let Some(ForInit::VarDecl(counter)) = &loop_statement.init else {
+    let Some(ForInit::VarDecl(counter)) = &loop_statement.header.init else {
         panic!("expected loop declaration");
     };
     let Stmt::LocalVar(collection) = &body.stmts[2] else {
@@ -503,4 +503,49 @@ fn test_visitor_multiple_declarations() {
 
     assert_eq!(visitor.class_count, 2);
     assert_eq!(visitor.function_count, 1);
+}
+
+#[test]
+fn program_callbacks_preserve_traversal_order_and_coverage() {
+    let (program, errors) = parse(
+        "@tag(1 + 2) int top = 3; \
+         class C { \
+           int field = 4; \
+           C([int value = 5]) : field = 6; \
+           Object f([int value = 7]) { \
+             for (var i = 8; i < 9; i += 10) { (() { return 11; })(); } \
+             return [for (var j = 12; j < 13; j += 14) 15, \
+                     for (final x in [16]) 17]; \
+           } \
+         }",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let mut expressions = Vec::new();
+    for_each_expr_in_program(&program, |expr| match expr {
+        Expr::Binary {
+            op: BinaryOp::Add, ..
+        } => expressions.push("+".to_owned()),
+        Expr::IntLit { value, .. } => expressions.push(value.clone()),
+        _ => {}
+    });
+    assert_eq!(
+        expressions,
+        [
+            "+", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+            "16", "17",
+        ]
+    );
+
+    let mut statements = Vec::new();
+    for_each_stmt_in_program(&program, |stmt| {
+        statements.push(match stmt {
+            Stmt::For(_) => "for",
+            Stmt::Block(_) => "block",
+            Stmt::Expr(_) => "expr",
+            Stmt::Return(_) => "return",
+            _ => "other",
+        });
+    });
+    assert_eq!(statements, ["for", "block", "expr", "return", "return"]);
 }

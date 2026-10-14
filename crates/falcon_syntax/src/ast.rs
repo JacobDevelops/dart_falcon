@@ -60,6 +60,10 @@ impl Identifier {
 pub struct StringLitNode {
     /// Raw literal text including quotes, concatenated for adjacent literals.
     pub raw: String,
+    /// Whether multiple source literals contributed to this node.
+    pub is_adjacent: bool,
+    /// Whether any contributing source literal uses a raw prefix.
+    pub has_raw_segment: bool,
     /// The content without delimiters; escape sequences remain unresolved.
     pub value: String,
     pub span: Span,
@@ -70,6 +74,8 @@ pub struct StringLitNode {
     pub interpolations: Vec<StringInterpolation>,
 }
 
+/// Delimiter and undecoded content of one string literal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StringDelimiter<'a> {
     pub is_raw: bool,
     pub quote: u8,
@@ -80,8 +86,12 @@ pub struct StringDelimiter<'a> {
 }
 
 impl StringLitNode {
-    /// Reads the stored text's outer delimiter; adjacent segments remain concatenated.
-    pub fn delimiter(raw: &str) -> Option<StringDelimiter<'_>> {
+    /// Returns no delimiter for concatenated segments, which may use different quoting.
+    pub fn delimiter(&self) -> Option<StringDelimiter<'_>> {
+        if self.is_adjacent {
+            return None;
+        }
+        let raw = self.raw.as_str();
         let is_raw = raw.starts_with('r');
         let prefix = usize::from(is_raw);
         let rest = &raw[prefix..];
@@ -305,6 +315,7 @@ impl ClassMember {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VarKeyword {
+    /// Mutable declarations and bindings, with or without an explicit `var`.
     Var,
     Final,
     Const,
@@ -445,6 +456,7 @@ pub struct OperatorDecl {
     pub return_type: Option<DartType>,
     pub op: String,
     pub params: FormalParamList,
+    pub async_marker: AsyncMarker,
     pub body: Option<FunctionBody>,
     pub span: Span,
 }
@@ -822,9 +834,7 @@ pub enum IfCondition {
 #[derive(Debug, Clone)]
 pub struct ForStmt {
     pub is_await: bool,
-    pub init: Option<ForInit>,
-    pub condition: Option<Expr>,
-    pub update: Vec<Expr>,
+    pub header: ForHeader,
     pub body: Box<Stmt>,
     pub span: Span,
 }

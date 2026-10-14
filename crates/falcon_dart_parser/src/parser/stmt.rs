@@ -160,9 +160,11 @@ impl<'src> Parser<'src> {
         let body = self.parse_stmt();
         Stmt::For(ForStmt {
             is_await,
-            init,
-            condition,
-            update,
+            header: ForHeader {
+                init,
+                condition,
+                updates: update,
+            },
             body: Box::new(body),
             span: self.span_from(start),
         })
@@ -829,17 +831,7 @@ impl<'src> Parser<'src> {
     fn parse_local_var_or_func_after_annotations(&mut self, start: usize) -> Stmt {
         if let Some(ty) = self.try_parse_type_followed_by(TokenKind::is_identifier_like) {
             let name = self.expect_ident();
-            let ds = name.span.start;
-            let init = if self.eat(TokenKind::Eq).is_some() {
-                Some(self.parse_expr())
-            } else {
-                None
-            };
-            let declarators = vec![VarDeclarator {
-                name,
-                initializer: init,
-                span: self.span_from(ds),
-            }];
+            let declarators = self.parse_declarators(name);
             self.eat(TokenKind::Semicolon);
             return Stmt::LocalVar(LocalVarDecl {
                 keyword: VarKeyword::Var,

@@ -123,6 +123,7 @@ impl ResolvedType {
                 named: named.clone(),
                 nullable,
             },
+            Self::Never if nullable => Self::Null,
             other => other.clone(),
         }
     }
@@ -228,14 +229,14 @@ impl<'a> SemanticModel<'a> {
         &self,
         identity: &DeclarationIdentity,
     ) -> Option<SemanticModel<'a>> {
-        let DeclarationIdentity::Project { library, .. } = identity else {
+        let DeclarationIdentity::Project { library, name } = identity else {
             return None;
         };
         Some(Self {
-            file: None,
+            file: self.identities.declaration_file(*library, name),
             library: Some(*library),
             identities: self.identities,
-            types: None,
+            types: self.types,
         })
     }
 
@@ -317,6 +318,13 @@ impl<'a> SemanticModel<'a> {
                 };
                 if identity.is_sdk("dart:core", "Null") {
                     return ResolvedType::Null;
+                }
+                if identity.is_sdk("dart:core", "Never") {
+                    return if named.is_nullable {
+                        ResolvedType::Null
+                    } else {
+                        ResolvedType::Never
+                    };
                 }
                 let extension_type = matches!(&identity, DeclarationIdentity::Project { name, .. }
                     if self.types.is_some_and(|types| matches!(types.type_kind(name), Some(super::TypeKind::ExtensionType))));
@@ -2835,7 +2843,6 @@ impl TypeEnvironment {
                 | BinaryOp::And
                 | BinaryOp::Or => model.core_type("bool", false),
                 BinaryOp::NullCoalesce => ResolvedType::Unknown,
-                BinaryOp::Div => model.core_type("double", false),
                 _ => {
                     let left = infer(left);
                     let right = infer(right);
@@ -2847,8 +2854,13 @@ impl TypeEnvironment {
                     {
                         model.core_type("String", false)
                     } else if numeric(&left) && numeric(&right) {
-                        let name = if left.interface("dart:core", "double")
-                            || right.interface("dart:core", "double")
+                        let name = if *op == BinaryOp::Div {
+                            "double"
+                        } else if *op == BinaryOp::IntDiv {
+                            "int"
+                        } else if left.interface("dart:core", "double")
+                            || (left.interface("dart:core", "int")
+                                && right.interface("dart:core", "double"))
                         {
                             "double"
                         } else if left.interface("dart:core", "int")
@@ -2945,6 +2957,222 @@ mod tests {
         let types = TypeIndex::from_program(&program);
         let model = SemanticModel::new(&path, &identities, Some(&types));
         test(&program, &model);
+    }
+
+    #[test]
+    fn expression_inference_regression_table() {
+        let cases = [
+            ("Box.named()", Some("Box")),
+            ("box?.field", Some("int?")),
+            ("box?.method()", Some("int?")),
+            ("box?.fail()", Some("Null")),
+            ("x as int?", Some("int?")),
+            ("x as int", Some("int")),
+            ("x is int", Some("bool")),
+            ("x is! int", Some("bool")),
+            ("!flag", Some("bool")),
+            ("-n", Some("num")),
+            ("++n", Some("num")),
+            ("--n", Some("num")),
+            ("n++", Some("num")),
+            ("n--", Some("num")),
+            ("i + d", Some("double")),
+            ("n + d", Some("num")),
+            ("n * d", Some("num")),
+            ("n % d", Some("num")),
+            ("d + n", Some("double")),
+            ("i + n", Some("num")),
+            ("i + i", Some("int")),
+            ("s + s", Some("String")),
+            ("x ?? i", None),
+            ("i / i", Some("double")),
+            ("d / n", Some("double")),
+            ("n / i", Some("double")),
+            ("d ~/ n", Some("int")),
+            ("n ~/ i", Some("int")),
+            ("i ~/ d", Some("int")),
+            ("box / i", None),
+            ("box ~/ i", None),
+            ("x / i", None),
+            ("i / x", None),
+            ("x ~/ i", None),
+            ("missing / i", None),
+        ];
+        let mut source = String::from(
+            "class Box { Box.named(); int field = 0; int method() => 0; Never fail() => throw 0; Box operator /(num s) => this; }",
+        );
+        for (index, (expression, expected)) in cases.iter().enumerate() {
+            source.push_str(&format!(
+                "{} f{index}(Box? box, dynamic x, int i, double d, num n, String s, bool flag) => {expression};",
+                expected.unwrap_or("dynamic"),
+            ));
+        }
+        with_model(&source, |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let scope = TypeParameterScope::default();
+            for ((expression, expected), declaration) in
+                cases.iter().zip(&program.declarations[1..])
+            {
+                let TopLevelDecl::Function(function) = declaration else {
+                    panic!()
+                };
+                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                    panic!()
+                };
+                let mut environment = TypeEnvironment::new();
+                environment.bind_params(function.params().unwrap(), model, &scope);
+                let expected = expected.map_or(ResolvedType::Unknown, |_| {
+                    model.resolve_type(function.return_type.as_ref().unwrap())
+                });
+                assert_eq!(
+                    environment.infer_with_signatures(body, model, &signatures, &scope),
+                    expected,
+                    "{expression}",
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn never_returning_calls_are_acceptable_in_void_contexts() {
+        with_model(
+            "Never stop() => throw 0; void use() => stop();",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                    panic!()
+                };
+                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    panic!()
+                };
+                let actual = TypeEnvironment::new().infer_with_signatures(
+                    expression,
+                    model,
+                    &signatures,
+                    &TypeParameterScope::default(),
+                );
+                assert_eq!(actual, ResolvedType::Never);
+                assert_eq!(
+                    model.acceptable_for_void_context(&ResolvedType::Void, &actual),
+                    Truth::Yes,
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn core_never_resolves_as_bottom_but_project_never_does_not() {
+        with_model(
+            "Never stop() => throw 0; Never? nullable() => null;",
+            |program, model| {
+                for (index, declaration) in program.declarations.iter().enumerate() {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        panic!()
+                    };
+                    let ty = model.resolve_type(function.return_type.as_ref().unwrap());
+                    assert_eq!(
+                        ty,
+                        if index == 0 {
+                            ResolvedType::Never
+                        } else {
+                            ResolvedType::Null
+                        }
+                    );
+                    assert_eq!(
+                        model.acceptable_for_void_context(&ResolvedType::Void, &ty),
+                        Truth::Yes
+                    );
+                }
+            },
+        );
+        with_model(
+            "class Never {} Never value() => Never();",
+            |program, model| {
+                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                    panic!()
+                };
+                assert!(matches!(
+                    model.resolve_type(function.return_type.as_ref().unwrap()),
+                    ResolvedType::Interface {
+                        identity: DeclarationIdentity::Project { .. },
+                        ..
+                    }
+                ));
+            },
+        );
+    }
+
+    #[test]
+    fn declaration_model_preserves_extension_types_and_parameter_owners() {
+        with_model(
+            "extension type Id(int value) {} Id f<T>() => Id(0);",
+            |program, model| {
+                let owner = model.resolve_value("f").unwrap();
+                let declaration_model = model.for_declaration(&owner).unwrap();
+                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                    panic!()
+                };
+                assert!(matches!(
+                    declaration_model.resolve_type(function.return_type.as_ref().unwrap()),
+                    ResolvedType::Interface {
+                        extension_type: true,
+                        ..
+                    }
+                ));
+                let mut original = TypeParameterScope::default();
+                original.push(&function.type_params, model);
+                let mut declaration = TypeParameterScope::default();
+                declaration.push(&function.type_params, &declaration_model);
+                assert_eq!(original.lookup("T"), declaration.lookup("T"));
+            },
+        );
+    }
+
+    #[test]
+    fn imported_declaration_parameters_use_their_source_file() {
+        let inputs = [
+            (
+                PathBuf::from("/project/lib/main.dart"),
+                "import 'origin.dart'; void local<T>() {}",
+            ),
+            (
+                PathBuf::from("/project/lib/origin.dart"),
+                "void remote<T>() {}",
+            ),
+        ];
+        let programs: Vec<_> = inputs
+            .iter()
+            .map(|(_, source)| {
+                let (program, errors) = parse(source);
+                assert!(errors.is_empty(), "{errors:?}");
+                program
+            })
+            .collect();
+        let sources: Vec<_> = inputs
+            .iter()
+            .zip(&programs)
+            .map(|((path, _), program)| IdentitySource {
+                path,
+                program,
+                has_parse_errors: false,
+            })
+            .collect();
+        let identities = IdentityIndex::from_project_files(&sources, &[]);
+        let caller = SemanticModel::new(&inputs[0].0, &identities, None);
+        let origin = SemanticModel::new(&inputs[1].0, &identities, None);
+        let owner = caller.resolve_value("remote").unwrap();
+        let imported = caller.for_declaration(&owner).unwrap();
+        let TopLevelDecl::Function(function) = &programs[1].declarations[0] else {
+            panic!()
+        };
+        let mut direct_scope = TypeParameterScope::default();
+        direct_scope.push(&function.type_params, &origin);
+        let mut imported_scope = TypeParameterScope::default();
+        imported_scope.push(&function.type_params, &imported);
+        let mut caller_scope = TypeParameterScope::default();
+        caller_scope.push(&function.type_params, &caller);
+        assert_eq!(direct_scope.lookup("T"), imported_scope.lookup("T"));
+        assert_ne!(caller_scope.lookup("T"), imported_scope.lookup("T"));
     }
 
     #[test]

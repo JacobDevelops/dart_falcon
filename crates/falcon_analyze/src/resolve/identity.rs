@@ -88,6 +88,7 @@ impl<'a> From<&'a String> for QualifiedName<'a> {
 #[derive(Debug, Clone)]
 struct Library {
     declarations: HashMap<String, NameIdentity>,
+    declaration_files: HashMap<String, FileId>,
     imports: Vec<Import>,
     exports: Vec<Export>,
     incomplete: bool,
@@ -107,8 +108,7 @@ struct Export {
     combinators: Vec<ImportCombinator>,
 }
 
-/// SDK and package identities come from closed allowlists, so their names are
-/// the allowlists' own `'static` strings.
+/// SDK and package identities use static names; index resolution uses allowlists.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DeclarationIdentity {
     Project {
@@ -188,6 +188,7 @@ impl IdentityIndex {
                 *root_to_library.entry(root).or_insert_with(|| {
                     libraries.push(Library {
                         declarations: HashMap::new(),
+                        declaration_files: HashMap::new(),
                         imports: Vec::new(),
                         exports: Vec::new(),
                         incomplete: grouping.is_unresolved(i),
@@ -206,6 +207,9 @@ impl IdentityIndex {
             for declaration in &file.program.declarations {
                 for (name, identity) in declaration_identities(declaration) {
                     merge(&mut library.declarations, name, identity);
+                    library
+                        .declaration_files
+                        .insert(name.to_string(), FileId(index));
                 }
             }
         }
@@ -256,6 +260,10 @@ impl IdentityIndex {
 
     pub fn library(&self, file: FileId) -> LibraryId {
         self.file_library[file.0]
+    }
+
+    pub(crate) fn declaration_file(&self, library: LibraryId, name: &str) -> Option<FileId> {
+        self.get(library).declaration_files.get(name).copied()
     }
 
     fn get(&self, library: LibraryId) -> &Library {
