@@ -51,7 +51,7 @@ pub struct Override {
     /// as `files.includes`: plain entries are positive includes, `!`-prefixed
     /// entries are exclusions. Paths are matched as walked (see
     /// [`FilesConfig::include_patterns`] for the relative-path caveat).
-    pub includes: Vec<String>,
+    pub includes: PathFilter,
     /// Partial linter (file-rule) configuration applied to matching files. Rule
     /// levels, per-rule `options`, and an optional `enabled` master switch are
     /// honored. Options replace the base rule's options for matching files (see
@@ -85,25 +85,61 @@ pub struct OverrideRules {
 }
 
 impl Override {
-    /// Whether this override applies to `path` (walked-path form, matching the
-    /// diagnostic's `file_path`). A file matches when it is not excluded by any
-    /// `!`-pattern and either matches a positive pattern or none are given.
+    /// Match walked paths; invalid globs are ignored.
     pub fn matches(&self, path: &str) -> bool {
-        let mut positives = Vec::new();
-        let mut negatives = Vec::new();
-        for pat in &self.includes {
-            if let Some(neg) = pat.strip_prefix('!') {
-                if let Ok(p) = Pattern::new(neg) {
-                    negatives.push(p);
-                }
-            } else if let Ok(p) = Pattern::new(pat) {
-                positives.push(p);
+        self.includes.admits(path)
+    }
+}
+
+/// Immutable override globs, compiled once. Invalid globs are ignored;
+/// exclusions win, and no valid positive globs means every path is included.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(from = "Vec<String>")]
+pub struct PathFilter {
+    patterns: Vec<String>,
+    include: Vec<Pattern>,
+    exclude: Vec<Pattern>,
+}
+
+impl From<Vec<String>> for PathFilter {
+    fn from(patterns: Vec<String>) -> Self {
+        let negatives = patterns
+            .iter()
+            .filter(|pattern| pattern.starts_with('!'))
+            .count();
+        let mut include = Vec::with_capacity(patterns.len() - negatives);
+        let mut exclude = Vec::with_capacity(negatives);
+        for pattern in &patterns {
+            let (target, raw) = match pattern.strip_prefix('!') {
+                Some(raw) => (&mut exclude, raw),
+                None => (&mut include, pattern.as_str()),
+            };
+            if let Ok(pattern) = Pattern::new(raw) {
+                target.push(pattern);
             }
         }
-        if negatives.iter().any(|p| p.matches(path)) {
-            return false;
+        Self {
+            patterns,
+            include,
+            exclude,
         }
-        positives.is_empty() || positives.iter().any(|p| p.matches(path))
+    }
+}
+
+impl Serialize for PathFilter {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.patterns.serialize(serializer)
+    }
+}
+
+impl PathFilter {
+    pub fn patterns(&self) -> &[String] {
+        &self.patterns
+    }
+
+    pub fn admits(&self, path: &str) -> bool {
+        !self.exclude.iter().any(|pattern| pattern.matches(path))
+            && (self.include.is_empty() || self.include.iter().any(|pattern| pattern.matches(path)))
     }
 }
 
@@ -194,31 +230,20 @@ impl Default for CrossFileConfig {
 
 impl CrossFileConfig {
     /// Resolve a cross-file rule's effective severity, or `None` if disabled.
-    ///
-    /// Priority (mirrors [`LinterConfig::resolve_rule`] minus domains):
-    /// 1. `enabled == false` → disabled.
-    /// 2. Explicit per-rule level under its group wins: `off` → disabled;
-    ///    `on` → Warn; `info`/`warn`/`error` → that.
-    /// 3. Otherwise enabled iff the recommended preset is active.
     pub fn resolve_rule(
         &self,
         group: &str,
         name: &str,
         recommended: bool,
     ) -> Option<ResolvedSeverity> {
-        if !self.enabled {
-            return None;
-        }
-        if let Some(cfg) = self.rules.groups.get(group).and_then(|g| g.get(name)) {
-            return level_to_severity(cfg.level());
-        }
-        let recommended_on = recommended && self.rules.recommended != Some(false);
-        recommended_on.then_some(ResolvedSeverity::Warn)
+        self.rules.resolve_rule(self.enabled, group, name, || {
+            recommended && self.rules.recommended != Some(false)
+        })
     }
 }
 
 /// Map an explicit rule level to a resolved severity (`off` → disabled).
-fn level_to_severity(level: RulePlainConfiguration) -> Option<ResolvedSeverity> {
+pub fn level_to_severity(level: RulePlainConfiguration) -> Option<ResolvedSeverity> {
     match level {
         RulePlainConfiguration::Off => None,
         RulePlainConfiguration::On | RulePlainConfiguration::Warn => Some(ResolvedSeverity::Warn),
@@ -237,6 +262,24 @@ pub struct Rules {
     /// Group name → (rule name → configuration).
     #[serde(flatten)]
     pub groups: BTreeMap<String, BTreeMap<String, RuleConfiguration>>,
+}
+
+impl Rules {
+    fn resolve_rule(
+        &self,
+        enabled: bool,
+        group: &str,
+        name: &str,
+        preset_enabled: impl FnOnce() -> bool,
+    ) -> Option<ResolvedSeverity> {
+        if !enabled {
+            return None;
+        }
+        if let Some(config) = self.groups.get(group).and_then(|rules| rules.get(name)) {
+            return level_to_severity(config.level());
+        }
+        preset_enabled().then_some(ResolvedSeverity::Warn)
+    }
 }
 
 /// A single rule's configuration: either a bare level or a level with options.
@@ -276,7 +319,7 @@ impl RuleConfiguration {
 }
 
 /// Parse a rule level string, naming the offending value on failure.
-fn level_from_str<E: de::Error>(value: &str) -> Result<RulePlainConfiguration, E> {
+pub fn level_from_str<E: de::Error>(value: &str) -> Result<RulePlainConfiguration, E> {
     match value {
         "off" => Ok(RulePlainConfiguration::Off),
         "on" => Ok(RulePlainConfiguration::On),
@@ -362,7 +405,7 @@ pub enum DomainValue {
 /// Resolved severity for an enabled rule. `On` maps to `Warn`. Kept
 /// independent of `falcon_diagnostics` so this crate has no dependency on it;
 /// `falcon_rules` converts to `falcon_diagnostics::Severity`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ResolvedSeverity {
     Info,
     Warn,
@@ -430,11 +473,7 @@ impl FalconConfig {
         result
     }
 
-    /// Resolve a rule's effective severity for a specific `path`: the base
-    /// resolution ([`Self::resolve_rule`]) patched by every override whose
-    /// `includes` match, applied in order (later wins). An override's explicit
-    /// rule entry replaces the base result — turning the rule off, or on at a
-    /// severity. `None` means the rule is disabled for this file.
+    /// Resolve file-rule severity, applying matching overrides in order (later wins).
     pub fn resolve_rule_for(
         &self,
         path: &str,
@@ -443,27 +482,12 @@ impl FalconConfig {
         recommended: bool,
         domains: &[&str],
     ) -> Option<ResolvedSeverity> {
-        // A globally-disabled linter cannot be resurrected by an override.
-        if !self.linter.enabled {
-            return None;
-        }
-        let mut result = self.linter.resolve_rule(group, name, recommended, domains);
-        for ov in &self.overrides {
-            if !ov.matches(path) {
-                continue;
-            }
-            let Some(linter) = &ov.linter else {
-                continue;
-            };
-            if linter.enabled == Some(false) {
-                result = None;
-                continue;
-            }
-            if let Some(cfg) = linter.rules.groups.get(group).and_then(|g| g.get(name)) {
-                result = level_to_severity(cfg.level());
-            }
-        }
-        result
+        self.resolve_for(
+            path,
+            (group, name),
+            Section::Linter,
+            self.linter.resolve_rule(group, name, recommended, domains),
+        )
     }
 
     /// Resolve a **cross-file** rule's effective severity for a specific `path`:
@@ -478,27 +502,12 @@ impl FalconConfig {
         name: &str,
         recommended: bool,
     ) -> Option<ResolvedSeverity> {
-        // A globally-disabled cross-file feature cannot be resurrected by an override.
-        if !self.cross_file.enabled {
-            return None;
-        }
-        let mut result = self.cross_file.resolve_rule(group, name, recommended);
-        for ov in &self.overrides {
-            if !ov.matches(path) {
-                continue;
-            }
-            let Some(cross_file) = &ov.cross_file else {
-                continue;
-            };
-            if cross_file.enabled == Some(false) {
-                result = None;
-                continue;
-            }
-            if let Some(cfg) = cross_file.rules.groups.get(group).and_then(|g| g.get(name)) {
-                result = level_to_severity(cfg.level());
-            }
-        }
-        result
+        self.resolve_for(
+            path,
+            (group, name),
+            Section::CrossFile,
+            self.cross_file.resolve_rule(group, name, recommended),
+        )
     }
 
     /// Whether a **cross-file** rule is enabled for any path — the base cross-file
@@ -510,32 +519,15 @@ impl FalconConfig {
         name: &str,
         recommended: bool,
     ) -> bool {
-        if !self.cross_file.enabled {
-            return false;
-        }
-        if self
-            .cross_file
-            .resolve_rule(group, name, recommended)
-            .is_some()
-        {
-            return true;
-        }
-        self.overrides.iter().any(|ov| {
-            ov.cross_file.as_ref().is_some_and(|p| {
-                p.enabled != Some(false)
-                    && p.rules
-                        .groups
-                        .get(group)
-                        .and_then(|g| g.get(name))
-                        .is_some_and(|c| c.level() != RulePlainConfiguration::Off)
-            })
-        })
+        self.enabled_anywhere(
+            group,
+            name,
+            Section::CrossFile,
+            self.cross_file.resolve_rule(group, name, recommended),
+        )
     }
 
-    /// Whether a rule is enabled for **any** path — the base config or any
-    /// override turns it on. Drives rule registration: a rule must be registered
-    /// (and thus run) if it could fire for some file, even when the base config
-    /// disables it and only an override re-enables it.
+    /// Whether the base config or an override enables this rule for any path.
     pub fn is_rule_enabled_anywhere(
         &self,
         group: &str,
@@ -543,32 +535,84 @@ impl FalconConfig {
         recommended: bool,
         domains: &[&str],
     ) -> bool {
-        if !self.linter.enabled {
-            return false;
+        self.enabled_anywhere(
+            group,
+            name,
+            Section::Linter,
+            self.linter.resolve_rule(group, name, recommended, domains),
+        )
+    }
+
+    fn section_enabled(&self, section: Section) -> bool {
+        match section {
+            Section::Linter => self.linter.enabled,
+            Section::CrossFile => self.cross_file.enabled,
         }
-        if self
-            .resolve_rule(group, name, recommended, domains)
-            .is_some()
-        {
-            return true;
+    }
+
+    fn resolve_for(
+        &self,
+        path: &str,
+        (group, name): (&str, &str),
+        section: Section,
+        mut result: Option<ResolvedSeverity>,
+    ) -> Option<ResolvedSeverity> {
+        if !self.section_enabled(section) {
+            return None;
         }
-        self.overrides.iter().any(|ov| {
-            ov.linter.as_ref().is_some_and(|l| {
-                l.enabled != Some(false)
-                    && l.rules
-                        .groups
-                        .get(group)
-                        .and_then(|g| g.get(name))
-                        .is_some_and(|c| c.level() != RulePlainConfiguration::Off)
-            })
-        })
+        for ov in self.overrides.iter().filter(|ov| ov.matches(path)) {
+            let Some(block) = section.override_rules(ov) else {
+                continue;
+            };
+            if block.enabled == Some(false) {
+                result = None;
+            } else if let Some(cfg) = block.rules.groups.get(group).and_then(|g| g.get(name)) {
+                result = level_to_severity(cfg.level());
+            }
+        }
+        result
+    }
+
+    fn enabled_anywhere(
+        &self,
+        group: &str,
+        name: &str,
+        section: Section,
+        base: Option<ResolvedSeverity>,
+    ) -> bool {
+        self.section_enabled(section)
+            && (base.is_some()
+                || self.overrides.iter().any(|ov| {
+                    section.override_rules(ov).is_some_and(|block| {
+                        block.enabled != Some(false)
+                            && block
+                                .rules
+                                .groups
+                                .get(group)
+                                .and_then(|g| g.get(name))
+                                .is_some_and(|cfg| level_to_severity(cfg.level()).is_some())
+                    })
+                }))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Section {
+    Linter,
+    CrossFile,
+}
+
+impl Section {
+    fn override_rules(self, ov: &Override) -> Option<&OverrideRules> {
+        match self {
+            Self::Linter => ov.linter.as_ref(),
+            Self::CrossFile => ov.cross_file.as_ref(),
+        }
     }
 }
 
 impl LinterConfig {
     /// Resolve a rule's effective severity, or `None` if disabled.
-    ///
-    /// Priority:
     /// 1. `enabled == false` → disabled.
     /// 2. Explicit per-rule level under its group wins (and bypasses domain
     ///    gating): `off` → disabled; `on` → Warn; `info`/`warn`/`error` → that.
@@ -582,33 +626,28 @@ impl LinterConfig {
         recommended: bool,
         domains: &[&str],
     ) -> Option<ResolvedSeverity> {
-        if !self.enabled {
-            return None;
-        }
-
-        if let Some(cfg) = self.rules.groups.get(group).and_then(|g| g.get(name)) {
-            return level_to_severity(cfg.level());
-        }
-
         let recommended_on = recommended && self.rules.recommended != Some(false);
 
-        if !domains.is_empty() {
-            let enabled = domains.iter().any(|d| {
-                match self
-                    .domains
-                    .get(*d)
-                    .copied()
-                    .unwrap_or(DomainValue::Recommended)
-                {
-                    DomainValue::All => true,
-                    DomainValue::Recommended => recommended_on,
-                    DomainValue::None => false,
-                }
-            });
-            return enabled.then_some(ResolvedSeverity::Warn);
-        }
-
-        recommended_on.then_some(ResolvedSeverity::Warn)
+        let preset_enabled = || {
+            if domains.is_empty() {
+                recommended_on
+            } else {
+                domains.iter().any(|domain| {
+                    match self
+                        .domains
+                        .get(*domain)
+                        .copied()
+                        .unwrap_or(DomainValue::Recommended)
+                    {
+                        DomainValue::All => true,
+                        DomainValue::Recommended => recommended_on,
+                        DomainValue::None => false,
+                    }
+                })
+            }
+        };
+        self.rules
+            .resolve_rule(self.enabled, group, name, preset_enabled)
     }
 }
 
@@ -625,7 +664,7 @@ impl std::fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 /// Canonical top-level keys of a falcon.json.
-const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
+pub const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "$schema",
     "files",
     "linter",
@@ -637,7 +676,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
 /// Legacy top-level spellings still accepted, each mapped to its canonical key.
 /// Recognized so a pre-rename config keeps loading, but warned on so the user
 /// knows to run `falcon migrate`.
-const LEGACY_TOP_LEVEL_KEYS: &[(&str, &str)] = &[
+pub const LEGACY_TOP_LEVEL_KEYS: &[(&str, &str)] = &[
     ("project", "cross-file"),
     ("cross_file", "cross-file"),
     ("max_errors", "max-errors"),
@@ -678,7 +717,10 @@ fn top_level_key_warnings(value: &serde_json::Value) -> Vec<String> {
             let Some(entry) = entry.as_object() else {
                 continue;
             };
-            for legacy in ["project", "cross_file"] {
+            for &(legacy, _) in LEGACY_TOP_LEVEL_KEYS
+                .iter()
+                .filter(|(_, canonical)| *canonical == "cross-file")
+            {
                 if entry.contains_key(legacy) {
                     warnings.push(format!(
                         "warning: falcon.json `overrides[{i}]` uses the deprecated key \
@@ -779,17 +821,7 @@ pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Load config from its discovered location, or the default when none is found.
-///
-/// A discovered config that fails to load is a hard **error**, not a silent
-/// fall-back to defaults: a typo (invalid JSON, a wrong-typed value, the legacy
-/// flat schema) must not quietly re-enable every rule. Only the genuine
-/// no-config-found case yields `Ok(FalconConfig::default())`.
-///
-/// # Errors
-///
-/// Propagates any [`load_config`] error for a config that was found but could
-/// not be loaded.
+/// Load discovered config or defaults; errors in a discovered config propagate.
 pub fn load_or_default(start_dir: &Path) -> Result<FalconConfig, ConfigError> {
     match find_config(start_dir) {
         Some(path) => load_config(&path),

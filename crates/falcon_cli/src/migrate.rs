@@ -9,6 +9,10 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use falcon_config::{
+    KNOWN_TOP_LEVEL_KEYS, LEGACY_TOP_LEVEL_KEYS, ResolvedSeverity, RulePlainConfiguration,
+    level_from_str, level_to_severity,
+};
 use falcon_rules::meta::{RULE_METADATA, RuleMeta, RuleSource, canonical_rule_name, meta_for};
 use falcon_rules::schema::SCHEMA_URL;
 use serde_json::{Map, Value, json};
@@ -40,6 +44,16 @@ pub struct MigrationResult {
 enum RuleConfig {
     Disabled,
     Enabled(Option<Value>),
+}
+
+impl From<&Value> for RuleConfig {
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::Bool(false) => Self::Disabled,
+            Value::Object(_) => Self::Enabled(Some(value.clone())),
+            _ => Self::Enabled(None),
+        }
+    }
 }
 
 /// An upstream-id → falcon-metadata lookup for one source linter.
@@ -83,13 +97,7 @@ fn parse_entry(entry: &Value) -> Option<(String, RuleConfig)> {
         Value::Object(map) => {
             // Single-key map keyed by the rule id; take the first key.
             let (id, val) = map.iter().next()?;
-            let cfg = match val {
-                Value::Bool(false) => RuleConfig::Disabled,
-                Value::Object(opts) => RuleConfig::Enabled(Some(Value::Object(opts.clone()))),
-                // Bare `- id:`, `- id: true`, or an unexpected scalar: enable it.
-                _ => RuleConfig::Enabled(None),
-            };
-            Some((id.clone(), cfg))
+            Some((id.clone(), RuleConfig::from(val)))
         }
         _ => None,
     }
@@ -103,45 +111,37 @@ fn parse_linter_rules(rules: &Value) -> Vec<(String, RuleConfig)> {
         Value::Array(entries) => entries.iter().filter_map(parse_entry).collect(),
         Value::Object(map) => map
             .iter()
-            .map(|(id, val)| {
-                let cfg = match val {
-                    Value::Bool(false) => RuleConfig::Disabled,
-                    Value::Object(opts) => RuleConfig::Enabled(Some(Value::Object(opts.clone()))),
-                    _ => RuleConfig::Enabled(None),
-                };
-                (id.clone(), cfg)
-            })
+            .map(|(id, val)| (id.clone(), RuleConfig::from(val)))
             .collect(),
         _ => Vec::new(),
     }
 }
 
-/// Route one upstream (id, config) into its falcon slot via `lookup`, appending
-/// to the linter/cross-file groups or recording the id as unrecognized.
-#[allow(clippy::too_many_arguments)]
-fn place_rule(
-    id: String,
-    cfg: RuleConfig,
-    lookup: &RuleLookup,
-    linter_groups: &mut BTreeMap<String, Map<String, Value>>,
-    cross_file_groups: &mut BTreeMap<String, Map<String, Value>>,
-    unrecognized: &mut Vec<String>,
-    migrated_count: &mut usize,
-) {
-    let Some(meta) = lookup.get(id.as_str()) else {
-        unrecognized.push(id);
-        return;
-    };
-    let target = if meta.cross_file {
-        cross_file_groups
-    } else {
-        linter_groups
-    };
-    target
-        .entry(meta.group.to_string())
-        .or_default()
-        .insert(meta.name.to_string(), config_to_json(cfg));
-    *migrated_count += 1;
+#[derive(Default)]
+struct Migration {
+    linter_groups: BTreeMap<String, Map<String, Value>>,
+    cross_file_groups: BTreeMap<String, Map<String, Value>>,
+    unrecognized: Vec<String>,
+    migrated_count: usize,
+}
+
+impl Migration {
+    fn place(&mut self, id: String, cfg: RuleConfig, lookup: &RuleLookup) {
+        let Some(meta) = lookup.get(id.as_str()) else {
+            self.unrecognized.push(id);
+            return;
+        };
+        let target = if meta.cross_file {
+            &mut self.cross_file_groups
+        } else {
+            &mut self.linter_groups
+        };
+        target
+            .entry(meta.group.to_string())
+            .or_default()
+            .insert(meta.name.to_string(), config_to_json(cfg));
+        self.migrated_count += 1;
+    }
 }
 
 /// Serialize a [`RuleConfig`] to its falcon.json value: `"off"`, `"warn"`, or
@@ -149,9 +149,11 @@ fn place_rule(
 /// verbatim from the upstream config.
 fn config_to_json(cfg: RuleConfig) -> Value {
     match cfg {
-        RuleConfig::Disabled => json!("off"),
-        RuleConfig::Enabled(None) => json!("warn"),
-        RuleConfig::Enabled(Some(options)) => json!({ "level": "warn", "options": options }),
+        RuleConfig::Disabled => json!(RulePlainConfiguration::Off),
+        RuleConfig::Enabled(None) => json!(RulePlainConfiguration::Warn),
+        RuleConfig::Enabled(Some(options)) => {
+            json!({ "level": RulePlainConfiguration::Warn, "options": options })
+        }
     }
 }
 
@@ -179,10 +181,7 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
         serde_yaml::from_str(yaml).map_err(|e| format!("failed to parse YAML: {e}"))?;
     let (dcl, pyramid, lints) = build_lookups();
 
-    let mut linter_groups: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
-    let mut cross_file_groups: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
-    let mut unrecognized = Vec::new();
-    let mut migrated_count = 0usize;
+    let mut migration = Migration::default();
 
     // dart_code_linter rules live under `dart_code_linter.rules`; pyramid_lint is
     // a custom_lint plugin, so its rules live under `custom_lint.rules`. Both use
@@ -200,15 +199,7 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
             let Some((id, cfg)) = parse_entry(entry) else {
                 continue;
             };
-            place_rule(
-                id,
-                cfg,
-                lookup,
-                &mut linter_groups,
-                &mut cross_file_groups,
-                &mut unrecognized,
-                &mut migrated_count,
-            );
+            migration.place(id, cfg, lookup);
         }
     }
 
@@ -216,24 +207,19 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
     // top-level `linter.rules` key (list or map form).
     if let Some(rules) = doc.get("linter").and_then(|s| s.get("rules")) {
         for (id, cfg) in parse_linter_rules(rules) {
-            place_rule(
-                id,
-                cfg,
-                &lints,
-                &mut linter_groups,
-                &mut cross_file_groups,
-                &mut unrecognized,
-                &mut migrated_count,
-            );
+            migration.place(id, cfg, &lints);
         }
     }
 
     let mut root = Map::new();
     root.insert("$schema".into(), json!(SCHEMA_URL));
-    root.insert("linter".into(), build_rules_object(linter_groups));
+    root.insert("linter".into(), build_rules_object(migration.linter_groups));
     // Only emit the cross-file block when a cross-file rule was actually migrated.
-    if !cross_file_groups.is_empty() {
-        root.insert("cross-file".into(), build_rules_object(cross_file_groups));
+    if !migration.cross_file_groups.is_empty() {
+        root.insert(
+            "cross-file".into(),
+            build_rules_object(migration.cross_file_groups),
+        );
     }
 
     let mut json = serde_json::to_string_pretty(&Value::Object(root))
@@ -242,8 +228,8 @@ pub fn migrate_yaml_to_config(yaml: &str) -> Result<MigrationResult, String> {
 
     Ok(MigrationResult {
         json,
-        unrecognized,
-        migrated_count,
+        unrecognized: migration.unrecognized,
+        migrated_count: migration.migrated_count,
     })
 }
 
@@ -256,20 +242,12 @@ fn looks_like_falcon_json(content: &str) -> bool {
         .as_ref()
         .and_then(Value::as_object)
         .is_some_and(|obj| {
-            // `project` and the underscore `cross_file` are legacy spellings of
-            // `cross-file`; all flag a falcon.json so a pre-rename config is still
-            // detected for upgrade.
-            [
-                "linter",
-                "cross-file",
-                "cross_file",
-                "project",
-                "files",
-                "overrides",
-                "$schema",
-            ]
-            .iter()
-            .any(|k| obj.contains_key(*k))
+            KNOWN_TOP_LEVEL_KEYS
+                .iter()
+                .copied()
+                .chain(LEGACY_TOP_LEVEL_KEYS.iter().map(|(legacy, _)| *legacy))
+                .filter(|key| !matches!(*key, "max-errors" | "max_errors"))
+                .any(|key| obj.contains_key(key))
         })
 }
 
@@ -292,11 +270,9 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     let mut renamed = 0usize;
     let mut unrecognized = Vec::new();
 
-    // Canonicalize legacy top-level key spellings to kebab-case: the
-    // cross-file section (`project`/`cross_file` → `cross-file`) at the root and
-    // in every override, and `max_errors` → `max-errors`.
-    rename_cross_file_section(&mut root);
-    rename_key(&mut root, "max_errors", "max-errors");
+    for &(legacy, canonical) in LEGACY_TOP_LEVEL_KEYS {
+        rename_key(&mut root, legacy, canonical);
+    }
     if let Some(Value::Array(overrides)) = root.get_mut("overrides") {
         for ov in overrides.iter_mut() {
             rename_cross_file_section(ov);
@@ -328,22 +304,11 @@ pub fn migrate_existing_config(json: &str) -> Result<MigrationResult, String> {
     })
 }
 
-/// Canonicalize the cross-file section key on a JSON object to `cross-file`,
-/// accepting the legacy `project` and underscore `cross_file` spellings. If the
-/// canonical key is already present it wins; otherwise the first legacy spelling
-/// found (checked `project`, then `cross_file`) is moved to `cross-file`. No-op
-/// for non-objects.
 fn rename_cross_file_section(value: &mut Value) {
-    let Some(obj) = value.as_object_mut() else {
-        return;
-    };
-    if obj.contains_key("cross-file") {
-        obj.remove("project");
-        obj.remove("cross_file");
-        return;
-    }
-    if let Some(section) = obj.remove("project").or_else(|| obj.remove("cross_file")) {
-        obj.insert("cross-file".to_string(), section);
+    for &(legacy, canonical) in LEGACY_TOP_LEVEL_KEYS {
+        if canonical == "cross-file" {
+            rename_key(value, legacy, canonical);
+        }
     }
 }
 
@@ -411,19 +376,10 @@ fn canonicalize_group(
 }
 
 /// Severity ordering for merging duplicate twin entries: higher wins.
-fn level_rank(value: &Value) -> u8 {
-    let level = match value {
-        Value::String(s) => s.as_str(),
-        Value::Object(o) => o.get("level").and_then(Value::as_str).unwrap_or(""),
-        _ => "",
-    };
-    match level {
-        "error" => 4,
-        "warn" | "on" => 3,
-        "info" => 2,
-        "off" => 1,
-        _ => 0,
-    }
+fn level_rank(value: &Value) -> Option<Option<ResolvedSeverity>> {
+    level_from_str::<serde_json::Error>(value.get("level").unwrap_or(value).as_str()?)
+        .ok()
+        .map(level_to_severity)
 }
 
 /// Read `input`, migrate it, print a summary to stderr, and either print the
@@ -466,26 +422,21 @@ pub fn run_migrate(input: Option<PathBuf>, write: bool, output: Option<PathBuf>)
             "upgraded {} legacy rule id(s) to canonical form",
             result.migrated_count
         );
-        if !result.unrecognized.is_empty() {
-            eprintln!(
-                "warning: {} rule id(s) matched no known rule (left unchanged):",
-                result.unrecognized.len()
-            );
-            for id in &result.unrecognized {
-                eprintln!("  - {id}");
-            }
-        }
     } else {
         eprintln!("migrated {} rule(s)", result.migrated_count);
-        if !result.unrecognized.is_empty() {
-            eprintln!(
-                "warning: {} unrecognized upstream rule(s) skipped:",
-                result.unrecognized.len()
-            );
-            for id in &result.unrecognized {
-                eprintln!("  - {id}");
-            }
+    }
+    if !result.unrecognized.is_empty() {
+        let description = if upgrade {
+            "rule id(s) matched no known rule (left unchanged)"
+        } else {
+            "unrecognized upstream rule(s) skipped"
+        };
+        eprintln!("warning: {} {description}:", result.unrecognized.len());
+        for id in &result.unrecognized {
+            eprintln!("  - {id}");
         }
+    }
+    if !upgrade {
         eprintln!("note: rule option keys are passed through verbatim and may need manual review");
     }
 

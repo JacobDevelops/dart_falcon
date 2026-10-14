@@ -292,3 +292,74 @@ fn upgrade_leaves_canonical_config_unchanged() {
         Value::String("warn".into())
     );
 }
+
+#[test]
+fn upgrade_legacy_section_collisions_keep_first_and_remove_all_aliases() {
+    for canonical in [false, true] {
+        let mut input = serde_json::json!({
+            "project": {"enabled": false},
+            "cross_file": {"enabled": true},
+            "max_errors": 3,
+            "overrides": [{"project": {"enabled": false}, "cross_file": {"enabled": true}}]
+        });
+        if canonical {
+            input["cross-file"] = serde_json::json!({"enabled": true});
+            input["max-errors"] = serde_json::json!(5);
+            input["overrides"][0]["cross-file"] = serde_json::json!({"enabled": true});
+        }
+        let result = migrate_existing_config(&input.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert!(value.get("project").is_none());
+        assert!(value.get("cross_file").is_none());
+        assert!(value.get("max_errors").is_none());
+        assert_eq!(value["cross-file"]["enabled"], canonical);
+        assert_eq!(value["max-errors"], if canonical { 5 } else { 3 });
+        assert!(value["overrides"][0].get("project").is_none());
+        assert!(value["overrides"][0].get("cross_file").is_none());
+        assert_eq!(value["overrides"][0]["cross-file"]["enabled"], canonical);
+        let _: falcon_config::FalconConfig = serde_json::from_str(&result.json).unwrap();
+    }
+}
+
+#[test]
+fn upgrade_collision_levels_preserve_unknown_off_and_tied_options() {
+    for (legacy, canonical, expected) in [
+        (
+            serde_json::json!("off"),
+            serde_json::json!("invalid"),
+            serde_json::json!("off"),
+        ),
+        (
+            serde_json::json!("info"),
+            serde_json::json!("off"),
+            serde_json::json!("info"),
+        ),
+        (
+            serde_json::json!("on"),
+            serde_json::json!("info"),
+            serde_json::json!("on"),
+        ),
+        (
+            serde_json::json!("error"),
+            serde_json::json!("warn"),
+            serde_json::json!("error"),
+        ),
+        (
+            serde_json::json!({"level":"on","options":{"a":1}}),
+            serde_json::json!("warn"),
+            serde_json::json!("warn"),
+        ),
+    ] {
+        let input = serde_json::json!({
+            "linter": {"rules": {"suspicious": {
+                "no_empty_block": legacy, "no-empty-block": canonical
+            }}}
+        });
+        let result = migrate_existing_config(&input.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&result.json).unwrap();
+        assert_eq!(
+            value["linter"]["rules"]["suspicious"]["no-empty-block"],
+            expected
+        );
+    }
+}

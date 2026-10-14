@@ -477,9 +477,7 @@ fn test_load_or_default_with_file() {
     let _ = fs::remove_dir(&dir);
 }
 
-/// Finding 1: a discovered falcon.json that fails to load is a hard error, not
-/// a silent fall-back to `FalconConfig::default()` (which would re-enable every
-/// rule). Both a malformed value and the legacy flat schema must propagate.
+/// Malformed discovered configuration must not silently re-enable rules.
 #[test]
 fn test_load_or_default_errors_on_malformed_discovered_config() {
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -508,8 +506,7 @@ fn test_load_or_default_errors_on_malformed_discovered_config() {
     let _ = fs::remove_dir(&dir);
 }
 
-/// Finding 5: `max-errors: 0` is rejected (minimum 1) — a cap of 0 would suppress
-/// every diagnostic and pass a CI gate green with violations present.
+/// A zero error cap would silently pass CI with violations present.
 #[test]
 fn test_load_config_rejects_max_errors_zero() {
     let path = temp_file_path("max_errors_zero.json");
@@ -531,9 +528,6 @@ fn test_load_config_rejects_max_errors_zero() {
     cleanup(&ok);
 }
 
-/// Finding 4: the underscore `cross_file` top-level spelling is honored by the
-/// loader (deserialization alias), resolving identically to `cross-file` — it is
-/// no longer silently dropped.
 #[test]
 fn test_legacy_underscore_cross_file_alias_resolves_identically() {
     let legacy = from_json(serde_json::json!({
@@ -585,7 +579,7 @@ fn test_overrides_serde_round_trip() {
     }));
     assert_eq!(cfg.overrides.len(), 1);
     assert_eq!(
-        cfg.overrides[0].includes,
+        cfg.overrides[0].includes.patterns(),
         vec!["test/**".to_string(), "!test/fixtures/**".to_string()]
     );
 
@@ -593,7 +587,10 @@ fn test_overrides_serde_round_trip() {
     let json = serde_json::to_value(&cfg).expect("serialize");
     let back: FalconConfig = serde_json::from_value(json).expect("reparse");
     assert_eq!(back.overrides.len(), 1);
-    assert_eq!(back.overrides[0].includes, cfg.overrides[0].includes);
+    assert_eq!(
+        back.overrides[0].includes.patterns(),
+        cfg.overrides[0].includes.patterns()
+    );
 }
 
 #[test]
@@ -615,6 +612,23 @@ fn test_override_matches_positive_and_negation() {
     assert!(!ov.matches("lib/foo.dart"), "non-matching path excluded");
 }
 
+#[test]
+fn test_override_invalid_patterns_and_clone_preserve_matching() {
+    let ov = override_from(serde_json::json!({
+        "includes": ["[", "!["]
+    }));
+    assert!(ov.matches("lib/a.dart"));
+    assert!(ov.clone().matches("lib/a.dart"));
+    assert_eq!(
+        serde_json::to_value(&ov).unwrap()["includes"],
+        serde_json::json!(["[", "!["])
+    );
+    let negated = override_from(serde_json::json!({
+        "includes": ["[", "!test/**"]
+    }));
+    assert!(negated.matches("lib/a.dart"));
+    assert!(!negated.matches("test/a.dart"));
+}
 #[test]
 fn test_resolve_rule_for_base_on_override_off() {
     let cfg = from_json(serde_json::json!({
