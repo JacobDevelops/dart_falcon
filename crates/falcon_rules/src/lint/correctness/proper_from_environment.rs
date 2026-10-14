@@ -11,7 +11,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt, walk_top_level_decl};
+use falcon_syntax::visitor::{Visitor, walk_expr, walk_top_level_decl};
 
 pub struct ProperFromEnvironment;
 
@@ -82,21 +82,26 @@ impl Visitor for Collector {
         self.in_const = prev;
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalVar(lv) = node {
-            self.visit_initializers(&lv.declarators, lv.is_const);
-            return;
-        }
-        walk_stmt(self, node);
+    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
+        self.visit_initializers(
+            &lv.declarators,
+            lv.keyword == falcon_syntax::ast::VarKeyword::Const,
+        );
     }
 
     fn visit_field_decl(&mut self, node: &FieldDecl) {
-        self.visit_initializers(&node.declarators, node.is_const);
+        self.visit_initializers(
+            &node.declarators,
+            node.keyword == falcon_syntax::ast::VarKeyword::Const,
+        );
     }
 
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(v) = node {
-            self.visit_initializers(&v.declarators, v.is_const);
+            self.visit_initializers(
+                &v.declarators,
+                v.keyword == falcon_syntax::ast::VarKeyword::Const,
+            );
             return;
         }
         walk_top_level_decl(self, node);

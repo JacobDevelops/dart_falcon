@@ -166,8 +166,10 @@ mod dcl {
 
         fn visit_formal_param(&mut self, _node: &FormalParam) {}
 
+        fn visit_local_var(&mut self, _node: &LocalVarDecl) {}
+
         fn visit_stmt(&mut self, node: &Stmt) {
-            if !matches!(node, Stmt::LocalVar(_) | Stmt::PatternDecl(_)) {
+            if !matches!(node, Stmt::PatternDecl(_)) {
                 walk_stmt(self, node);
             }
         }
@@ -212,7 +214,7 @@ mod dcl {
                 Expr::Cascade { sections, .. } => {
                     let spans = sections.iter().flat_map(|section| {
                         section.ops.iter().filter_map(|op| match op {
-                            CascadeOp::Index(index, _) => direct_literal_span(index),
+                            CascadeOp::Index { index, .. } => direct_literal_span(index),
                             _ => None,
                         })
                     });

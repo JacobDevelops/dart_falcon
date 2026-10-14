@@ -135,7 +135,9 @@ fn test_param_named_when() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &prog.declarations[0] {
         TopLevelDecl::Function(fun) => {
-            assert_eq!(fun.params.positional[0].name.name, "when");
+            let param = &fun.params().unwrap().params[0];
+            assert_eq!(param.kind, ParamKind::Positional);
+            assert_eq!(param.name.name, "when");
         }
         other => panic!("expected function, got {other:?}"),
     }
@@ -201,7 +203,7 @@ fn test_async_body_marker_still_parses() {
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
             assert_eq!(m.name.name, "foo");
-            assert!(m.is_async, "async marker lost");
+            assert_eq!(m.async_marker, AsyncMarker::Async, "async marker lost");
         }
         other => panic!("expected method, got {other:?}"),
     }

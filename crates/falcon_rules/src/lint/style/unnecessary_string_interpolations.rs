@@ -46,32 +46,6 @@ impl Rule for UnnecessaryStringInterpolations {
     }
 }
 
-struct StrLit<'a> {
-    is_raw: bool,
-    content: &'a str,
-}
-
-fn parse_str_lit(raw: &str) -> Option<StrLit<'_>> {
-    let is_raw = raw.as_bytes().first() == Some(&b'r');
-    let prefix = usize::from(is_raw);
-    let rest = &raw[prefix..];
-    let dlen = if rest.starts_with("'''") || rest.starts_with("\"\"\"") {
-        3
-    } else if rest.starts_with('\'') || rest.starts_with('"') {
-        1
-    } else {
-        return None;
-    };
-    let closing = &rest[..dlen];
-    if rest.len() < 2 * dlen || !rest[dlen..].ends_with(closing) {
-        return None;
-    }
-    Some(StrLit {
-        is_raw,
-        content: &raw[prefix + dlen..raw.len() - dlen],
-    })
-}
-
 fn is_ident_start(c: u8) -> bool {
     c.is_ascii_alphabetic() || c == b'_'
 }
@@ -183,7 +157,9 @@ impl Visitor for Collector<'_> {
 
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
-        self.lt.bind_params(&node.params);
+        if let Some(params) = node.params() {
+            self.lt.bind_params(params);
+        }
         if let Some(body) = &node.body {
             self.walk_body(body);
         }
@@ -230,16 +206,17 @@ impl Visitor for Collector<'_> {
         self.lt = saved;
     }
 
+    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
+        for d in &lv.declarators {
+            if let Some(init) = &d.initializer {
+                self.visit_expr(init);
+            }
+        }
+        self.lt.declare_local(lv);
+    }
+
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
-            Stmt::LocalVar(lv) => {
-                for d in &lv.declarators {
-                    if let Some(init) = &d.initializer {
-                        self.visit_expr(init);
-                    }
-                }
-                self.lt.declare_local(lv);
-            }
             Stmt::PatternDecl(pd) => {
                 self.visit_expr(&pd.init);
                 self.lt.bind_pattern(&pd.pattern);
@@ -320,12 +297,16 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_string_lit(&mut self, node: &StringLitNode) {
-        let Some(lit) = parse_str_lit(&node.raw) else {
+        let Some(lit) = StringLitNode::delimiter(&node.raw) else {
             return;
         };
         // The whole literal must be exactly one interpolation, and that
         // interpolation must have parsed cleanly to a single expression.
-        if lit.is_raw || !is_whole_interpolation(lit.content) || node.interpolations.len() != 1 {
+        if !lit.terminated
+            || lit.is_raw
+            || !is_whole_interpolation(lit.content)
+            || node.interpolations.len() != 1
+        {
             return;
         }
         // Fire only when the interpolated expression is provably a non-nullable

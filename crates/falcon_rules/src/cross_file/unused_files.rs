@@ -135,7 +135,7 @@ fn is_root(program: &Program, canon: &Path, pkg: Option<&PackageInfo>) -> bool {
 /// Whether the program declares a top-level `main` function.
 fn has_main(program: &Program) -> bool {
     program.declarations.iter().any(|d| {
-        matches!(d, TopLevelDecl::Function(f) if f.name.name == "main" && !f.is_getter && !f.is_setter)
+        matches!(d, TopLevelDecl::Function(f) if f.name.name == "main" && matches!(f.kind, falcon_syntax::ast::FunctionKind::Function(_)))
     })
 }
 

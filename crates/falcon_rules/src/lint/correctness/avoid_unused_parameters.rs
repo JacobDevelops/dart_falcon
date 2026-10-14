@@ -44,15 +44,9 @@ mod dcl {
         }
 
         fn report(&mut self, params: &FormalParamList, used: &std::collections::HashSet<usize>) {
-            for param in params
-                .positional
-                .iter()
-                .chain(&params.optional_positional)
-                .chain(&params.named)
-            {
+            for param in params.params.iter() {
                 let name = &param.name.name;
-                if param.is_field
-                    || param.is_super
+                if param.initializing.is_some()
                     || (!name.is_empty() && name.bytes().all(|byte| byte == b'_'))
                     || used.contains(&param.name.span.start)
                 {
@@ -74,7 +68,9 @@ mod dcl {
 
     impl Visitor for Collector<'_, '_> {
         fn visit_function_decl(&mut self, node: &FunctionDecl) {
-            self.check(&node.params, node.body.as_ref(), false);
+            if let Some(params) = node.params() {
+                self.check(params, node.body.as_ref(), false);
+            }
             walk_function_decl(self, node);
         }
 

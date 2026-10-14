@@ -44,7 +44,7 @@ fn is_where_is_not_empty(expr: &Expr) -> Option<Span> {
         } = &**callee
         && where_field.name == "where"
     {
-        return Some(span.clone());
+        return Some(*span);
     }
     None
 }

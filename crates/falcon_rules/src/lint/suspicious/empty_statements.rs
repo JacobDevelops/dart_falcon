@@ -6,7 +6,7 @@
 //! almost always an accidental extra semicolon or a loop body that should have
 //! been a block. Remove it, or replace it with the block that was intended. The
 //! semicolons in a `for (;;)` header are loop syntax, not statements, and are
-//! never reported.
+//! never reported. A real `null;` expression statement is not an empty statement.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
@@ -28,17 +28,6 @@ impl Rule for EmptyStatements {
     }
 }
 
-/// An empty statement is parsed as an `Expr` statement wrapping a `NullLit`
-/// whose span begins at the `;` token; a real `null;` starts at `null`.
-fn is_empty_semicolon(stmt: &Stmt, ctx: &AnalyzeContext) -> bool {
-    if let Stmt::Expr(e) = stmt
-        && let Expr::NullLit { span } = &e.expr
-    {
-        return ctx.source.as_bytes().get(span.start) == Some(&b';');
-    }
-    false
-}
-
 fn walk_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     match body {
         FunctionBody::Block(b) => walk_stmts(&b.stmts, diags, ctx),
@@ -54,8 +43,7 @@ fn walk_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext)
 }
 
 fn walk_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if is_empty_semicolon(stmt, ctx) {
-        let span = stmt.span();
+    if let Stmt::Empty(span) = stmt {
         diags.push(Diagnostic::new(
             "empty-statements",
             Severity::Warning,

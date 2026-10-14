@@ -112,25 +112,18 @@ fn check_ctor(
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let positional: Vec<&FormalParam> = ctor
-        .params
-        .positional
-        .iter()
-        .chain(&ctor.params.optional_positional)
-        .collect();
-
     // A positional `super.x` maps to the super constructor's positional
     // parameter at the same index *among super formals only* — preceding plain
     // parameters of this constructor are not forwarded.
     let mut super_index = 0;
-    for param in &positional {
+    for param in ctor.params.positional() {
         let index = super_index;
-        if param.is_super {
+        if param.initializing == Some(InitializingFormal::Super) {
             super_index += 1;
         }
         check_param(classes, class, ctor, param, Some(index), ctx, diags);
     }
-    for param in &ctor.params.named {
+    for param in ctor.params.named() {
         check_param(classes, class, ctor, param, None, ctx, diags);
     }
 }
@@ -149,9 +142,9 @@ fn check_param(
     let Some(annotation) = &param.param_type else {
         return;
     };
-    let target = if param.is_field {
+    let target = if param.initializing == Some(InitializingFormal::This) {
         field_type(class, &param.name.name)
-    } else if param.is_super {
+    } else if param.initializing == Some(InitializingFormal::Super) {
         super_param_type(classes, class, ctor, param, super_index, MAX_SUPER_DEPTH)
     } else {
         return;
@@ -205,34 +198,26 @@ fn super_param_type<'a>(
     let super_ctor = find_ctor(super_class, super_ctor_name(ctor))?;
 
     let target = match super_index {
-        Some(i) => super_ctor
-            .params
-            .positional
-            .iter()
-            .chain(&super_ctor.params.optional_positional)
-            .nth(i)?,
+        Some(i) => super_ctor.params.positional().nth(i)?,
         None => super_ctor
             .params
-            .named
-            .iter()
+            .named()
             .find(|p| p.name.name == param.name.name)?,
     };
 
     if let Some(ty) = &target.param_type {
         return Some(ty);
     }
-    if target.is_field {
+    if target.initializing == Some(InitializingFormal::This) {
         return field_type(super_class, &target.name.name);
     }
-    if target.is_super {
-        let index = super_index.map(|_| {
+    if target.initializing == Some(InitializingFormal::Super) {
+        let index = super_index.map(|position| {
             super_ctor
                 .params
-                .positional
-                .iter()
-                .chain(&super_ctor.params.optional_positional)
-                .take_while(|p| !std::ptr::eq(*p, target))
-                .filter(|p| p.is_super)
+                .positional()
+                .take(position)
+                .filter(|p| p.initializing == Some(InitializingFormal::Super))
                 .count()
         });
         return super_param_type(classes, super_class, super_ctor, target, index, depth - 1);

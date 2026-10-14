@@ -75,13 +75,13 @@ const ORDER_MESSAGE: &str = "Class member is out of the configured order";
 fn member_category(member: &ClassMember) -> u8 {
     match member {
         ClassMember::Field(f) => {
-            if f.is_static && f.is_const {
+            if f.is_static && f.keyword == falcon_syntax::ast::VarKeyword::Const {
                 0
-            } else if f.is_static && f.is_final {
+            } else if f.is_static && f.keyword == falcon_syntax::ast::VarKeyword::Final {
                 1
             } else if f.is_static {
                 2
-            } else if f.is_final {
+            } else if f.keyword == falcon_syntax::ast::VarKeyword::Final {
                 3
             } else {
                 4

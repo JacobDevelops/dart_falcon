@@ -750,7 +750,7 @@ fn only_kind(src: &str) -> TokenKind {
         1,
         "expected exactly one token in {src:?}, got {toks:?}"
     );
-    toks[0].kind.clone()
+    toks[0].kind
 }
 
 // ── (a) Doc comments: /** ... */ vs /* ... */ vs /**/ ──────────────────────────

@@ -738,7 +738,7 @@ fn collect_constructors(members: &[ClassMember]) -> HashMap<String, bool> {
 
 fn all_instance_fields_final(members: &[ClassMember]) -> bool {
     members.iter().all(|member| {
-        !matches!(member, ClassMember::Field(field) if !field.is_static && !field.is_final && !field.is_const)
+        !matches!(member, ClassMember::Field(field) if !field.is_static && field.keyword == falcon_syntax::ast::VarKeyword::Var)
     })
 }
 
@@ -765,9 +765,7 @@ fn collect_member_parameters(members: &[ClassMember]) -> HashMap<String, Vec<Str
 
 fn parameter_names(params: &FormalParamList) -> Vec<String> {
     params
-        .positional
-        .iter()
-        .chain(&params.optional_positional)
+        .positional()
         .map(|param| param.name.name.clone())
         .collect()
 }

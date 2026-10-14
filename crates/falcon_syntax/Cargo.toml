@@ -5,5 +5,4 @@ edition.workspace = true
 description = "Dart AST node types and syntax tree definitions for falcon"
 
 [dev-dependencies]
-insta = { workspace = true }
 falcon_dart_parser = { path = "../falcon_dart_parser" }

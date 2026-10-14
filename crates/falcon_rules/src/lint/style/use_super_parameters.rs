@@ -14,7 +14,7 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::Visitor;
+use falcon_syntax::visitor::{Visitor, walk_expr};
 use std::collections::HashMap;
 
 pub struct UseSuperParameters;
@@ -55,8 +55,12 @@ struct Counter {
 }
 
 impl Visitor for Counter {
-    fn visit_identifier(&mut self, node: &Identifier) {
-        *self.counts.entry(node.name.clone()).or_insert(0) += 1;
+    fn visit_expr(&mut self, node: &Expr) {
+        if let Expr::Ident(identifier) = node {
+            *self.counts.entry(identifier.name.clone()).or_insert(0) += 1;
+        } else {
+            walk_expr(self, node);
+        }
     }
 }
 
@@ -105,14 +109,9 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
 
     // Positional params forward verbatim only when the super call passes the
     // same identifier at the same positional index (order-preserving).
-    let positional: Vec<&FormalParam> = ctor
-        .params
-        .positional
-        .iter()
-        .chain(&ctor.params.optional_positional)
-        .collect();
+    let positional: Vec<&FormalParam> = ctor.params.positional().collect();
     for (i, param) in positional.iter().enumerate() {
-        if param.is_field || param.is_super {
+        if param.initializing.is_some() {
             continue;
         }
         if let Some(Expr::Ident(id)) = super_args.positional.get(i)
@@ -124,8 +123,8 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
     }
 
     // Named params forward verbatim only via `super(name: name)`.
-    for param in &ctor.params.named {
-        if param.is_field || param.is_super {
+    for param in ctor.params.named() {
+        if param.initializing.is_some() {
             continue;
         }
         let forwarded = super_args.named.iter().any(|n| {

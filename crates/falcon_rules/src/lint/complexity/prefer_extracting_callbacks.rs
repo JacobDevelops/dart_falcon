@@ -150,11 +150,7 @@ impl CallbackCollector<'_, '_> {
         if !body_returns_widget(body, self.model, self.signatures, self.widget) {
             return false;
         }
-        let first = params
-            .positional
-            .first()
-            .or_else(|| params.optional_positional.first())
-            .or_else(|| params.named.first());
+        let first = params.params.first();
         let Some(first) = first else {
             return true;
         };

@@ -1,16 +1,84 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
-assertion_line: 1766
 expression: "prog.declarations[0]"
 ---
 Function(
     FunctionDecl {
         annotations: [],
         is_external: false,
-        is_async: false,
-        is_generator: false,
-        is_getter: false,
-        is_setter: false,
+        async_marker: Sync,
+        kind: Function(
+            FormalParamList {
+                params: [
+                    FormalParam {
+                        annotations: [],
+                        kind: Positional,
+                        is_covariant: false,
+                        is_final: false,
+                        initializing: None,
+                        param_type: Some(
+                            Named(
+                                NamedType {
+                                    segments: [
+                                        Identifier {
+                                            name: "List",
+                                            span: Span {
+                                                start: 18,
+                                                end: 22,
+                                            },
+                                        },
+                                    ],
+                                    type_args: [
+                                        Named(
+                                            NamedType {
+                                                segments: [
+                                                    Identifier {
+                                                        name: "int",
+                                                        span: Span {
+                                                            start: 23,
+                                                            end: 26,
+                                                        },
+                                                    },
+                                                ],
+                                                type_args: [],
+                                                is_nullable: false,
+                                                span: Span {
+                                                    start: 23,
+                                                    end: 26,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_nullable: false,
+                                    span: Span {
+                                        start: 18,
+                                        end: 28,
+                                    },
+                                },
+                            ),
+                        ),
+                        name: Identifier {
+                            name: "xs",
+                            span: Span {
+                                start: 28,
+                                end: 30,
+                            },
+                        },
+                        default_value: None,
+                        type_params: [],
+                        function_params: None,
+                        span: Span {
+                            start: 18,
+                            end: 30,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 17,
+                    end: 32,
+                },
+            },
+        ),
         return_type: Some(
             Named(
                 NamedType {
@@ -60,79 +128,6 @@ Function(
             },
         },
         type_params: [],
-        params: FormalParamList {
-            positional: [
-                FormalParam {
-                    annotations: [],
-                    is_required: true,
-                    is_covariant: false,
-                    is_final: false,
-                    is_field: false,
-                    is_super: false,
-                    param_type: Some(
-                        Named(
-                            NamedType {
-                                segments: [
-                                    Identifier {
-                                        name: "List",
-                                        span: Span {
-                                            start: 18,
-                                            end: 22,
-                                        },
-                                    },
-                                ],
-                                type_args: [
-                                    Named(
-                                        NamedType {
-                                            segments: [
-                                                Identifier {
-                                                    name: "int",
-                                                    span: Span {
-                                                        start: 23,
-                                                        end: 26,
-                                                    },
-                                                },
-                                            ],
-                                            type_args: [],
-                                            is_nullable: false,
-                                            span: Span {
-                                                start: 23,
-                                                end: 26,
-                                            },
-                                        },
-                                    ),
-                                ],
-                                is_nullable: false,
-                                span: Span {
-                                    start: 18,
-                                    end: 28,
-                                },
-                            },
-                        ),
-                    ),
-                    name: Identifier {
-                        name: "xs",
-                        span: Span {
-                            start: 28,
-                            end: 30,
-                        },
-                    },
-                    default_value: None,
-                    type_params: [],
-                    function_params: None,
-                    span: Span {
-                        start: 18,
-                        end: 30,
-                    },
-                },
-            ],
-            optional_positional: [],
-            named: [],
-            span: Span {
-                start: 17,
-                end: 32,
-            },
-        },
         body: Some(
             Arrow(
                 List {
@@ -141,26 +136,32 @@ Function(
                     elements: [
                         For {
                             is_await: false,
-                            variable: Some(
-                                Identifier {
-                                    name: "x",
-                                    span: Span {
-                                        start: 47,
-                                        end: 48,
+                            header: ForHeader {
+                                init: Some(
+                                    ForIn {
+                                        keyword: Final,
+                                        var_type: None,
+                                        name: Identifier {
+                                            name: "x",
+                                            span: Span {
+                                                start: 47,
+                                                end: 48,
+                                            },
+                                        },
+                                        iterable: Ident(
+                                            Identifier {
+                                                name: "xs",
+                                                span: Span {
+                                                    start: 52,
+                                                    end: 54,
+                                                },
+                                            },
+                                        ),
                                     },
-                                },
-                            ),
-                            var_type: None,
-                            pattern: None,
-                            iterable: Ident(
-                                Identifier {
-                                    name: "xs",
-                                    span: Span {
-                                        start: 52,
-                                        end: 54,
-                                    },
-                                },
-                            ),
+                                ),
+                                condition: None,
+                                updates: [],
+                            },
                             element: Expr(
                                 Binary {
                                     op: Mul,

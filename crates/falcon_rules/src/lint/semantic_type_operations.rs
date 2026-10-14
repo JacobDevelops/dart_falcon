@@ -87,13 +87,15 @@ impl Collector<'_> {
     fn function(
         &mut self,
         type_params: &[TypeParam],
-        params: &FormalParamList,
+        params: Option<&FormalParamList>,
         body: Option<&FunctionBody>,
     ) {
         let saved = self.environment.clone();
         self.environment.push_scope();
         self.type_parameters.push(type_params, &self.model);
-        self.bind_params(params, None);
+        if let Some(params) = params {
+            self.bind_params(params, None);
+        }
         if let Some(body) = body {
             self.body(body);
         }
@@ -102,15 +104,10 @@ impl Collector<'_> {
     }
 
     fn bind_params(&mut self, params: &FormalParamList, super_constructor: Option<&str>) {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             let mut ty = resolved_param_type(param, &self.model, &self.type_parameters);
             if param.param_type.is_none() && param.function_params.is_none() {
-                if param.is_super {
+                if param.initializing == Some(InitializingFormal::Super) {
                     ty = super_constructor
                         .and_then(|constructor| {
                             self.superclass.as_ref().and_then(|superclass| {
@@ -124,7 +121,7 @@ impl Collector<'_> {
                             })
                         })
                         .unwrap_or(ResolvedType::Unknown);
-                } else if param.is_field {
+                } else if param.initializing == Some(InitializingFormal::This) {
                     ty = self.environment.lookup(&param.name.name);
                     if matches!(ty, ResolvedType::Unknown) {
                         ty = self
@@ -390,7 +387,7 @@ impl Collector<'_> {
 
     fn for_init(&mut self, init: &ForInit) {
         match init {
-            ForInit::VarDecl(declaration) => self.declare_local(declaration),
+            ForInit::VarDecl(declaration) => self.visit_local_var(declaration),
             ForInit::ForIn {
                 var_type,
                 name,
@@ -404,7 +401,9 @@ impl Collector<'_> {
                     .unwrap_or_else(|| self.iterable_element_type(iterable));
                 self.environment.declare(name.name.clone(), ty);
             }
-            ForInit::PatternForIn { pattern, iterable } => {
+            ForInit::PatternForIn {
+                pattern, iterable, ..
+            } => {
                 self.visit_expr(iterable);
                 walk_pattern(self, pattern);
                 let matched = self.iterable_element_type(iterable);
@@ -475,13 +474,17 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.function(&node.type_params, &node.params, node.body.as_ref());
+        self.function(&node.type_params, node.params(), node.body.as_ref());
     }
     fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.function(&node.type_params, &node.params, node.body.as_ref());
+        self.function(&node.type_params, Some(&node.params), node.body.as_ref());
     }
     fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
         self.constructor(node);
+    }
+
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        self.declare_local(node);
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {
@@ -493,7 +496,7 @@ impl Visitor for Collector<'_> {
                 }
                 self.environment.pop_scope();
             }
-            Stmt::LocalVar(declaration) => self.declare_local(declaration),
+            Stmt::LocalVar(declaration) => self.visit_local_var(declaration),
             Stmt::PatternDecl(declaration) => {
                 self.visit_expr(&declaration.init);
                 walk_pattern(self, &declaration.pattern);
@@ -573,7 +576,7 @@ impl Visitor for Collector<'_> {
             }
             Stmt::LocalFunc(function) => self.function(
                 &function.type_params,
-                &function.params,
+                Some(&function.params),
                 Some(&function.body),
             ),
             _ => walk_stmt(self, node),
@@ -591,7 +594,7 @@ impl Visitor for Collector<'_> {
                 kind: TypeOperationKind::Is { negated: *negated },
                 operand: self.infer(expr),
                 target: self.model.resolve_type_in(dart_type, &self.type_parameters),
-                span: span.clone(),
+                span: *span,
             }),
             Expr::As {
                 expr,
@@ -601,7 +604,7 @@ impl Visitor for Collector<'_> {
                 kind: TypeOperationKind::As,
                 operand: self.infer(expr),
                 target: self.model.resolve_type_in(dart_type, &self.type_parameters),
-                span: span.clone(),
+                span: *span,
             }),
             Expr::FuncExpr {
                 type_params,
@@ -609,7 +612,7 @@ impl Visitor for Collector<'_> {
                 body,
                 ..
             } => {
-                self.function(type_params, params, Some(body));
+                self.function(type_params, Some(params), Some(body));
                 return;
             }
             _ => {}

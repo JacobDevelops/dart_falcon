@@ -112,7 +112,7 @@ fn constant_value(
             op, left, right, ..
         } => {
             let left = constant_value(left, owner, fields, model, signatures, visiting)?;
-            if matches!(op, BinaryOp::NullCoalesce | BinaryOp::IfNull) {
+            if matches!(op, BinaryOp::NullCoalesce) {
                 return if left == ConstantValue::Null {
                     constant_value(right, owner, fields, model, signatures, visiting)
                 } else {
@@ -186,12 +186,13 @@ fn constant_value(
             values.dedup();
             Some(ConstantValue::Set(values))
         }
-        Expr::Map {
-            entries, elements, ..
-        } if elements.is_empty() => {
-            let mut values = entries
+        Expr::Map { elements, .. } => {
+            let mut values = elements
                 .iter()
-                .map(|entry| {
+                .map(|element| {
+                    let MapElement::Entry(entry) = element else {
+                        return None;
+                    };
                     Some((
                         constant_value(&entry.key, owner, fields, model, signatures, visiting)?,
                         constant_value(&entry.value, owner, fields, model, signatures, visiting)?,
@@ -234,8 +235,7 @@ fn constant_value(
         | Expr::Switch { .. }
         | Expr::SymbolLit { .. }
         | Expr::GenericInstantiation { .. }
-        | Expr::Error { .. }
-        | Expr::Map { .. } => None,
+        | Expr::Error { .. } => None,
     }
 }
 
@@ -243,21 +243,11 @@ fn decode_string(node: &StringLitNode) -> Option<String> {
     if !node.interpolations.is_empty() {
         return None;
     }
-    let mut raw = node.raw.as_str();
-    let is_raw = raw.starts_with('r');
-    if is_raw {
-        raw = &raw[1..];
-    }
-    let quote_len = if raw.starts_with("'''") || raw.starts_with("\"\"\"") {
-        3
-    } else {
-        1
-    };
-    if raw.len() < quote_len * 2 {
-        return None;
-    }
-    let content = &raw[quote_len..raw.len() - quote_len];
-    if is_raw {
+    let literal = StringLitNode::delimiter(&node.raw)?;
+    let quote_len = if literal.triple { 3 } else { 1 };
+    let content_end = node.raw.len().checked_sub(quote_len)?;
+    let content = node.raw.get(literal.content_offset..content_end)?;
+    if literal.is_raw {
         return Some(content.to_string());
     }
     let mut output = String::with_capacity(content.len());
@@ -560,6 +550,25 @@ mod tests {
 
     use super::*;
     use crate::{IdentityIndex, IdentitySource, TypeIndex};
+
+    #[test]
+    fn string_decoding_preserves_recovery_and_adjacent_literal_behavior() {
+        for (raw, expected) in [
+            ("'hello", Some("hell")),
+            ("'a'\"b\"", Some("a'\"b")),
+            ("r'\\n'", Some("\\n")),
+            ("'\\n'", Some("\n")),
+            ("'", None),
+        ] {
+            let node = StringLitNode {
+                raw: raw.to_string(),
+                value: String::new(),
+                span: Span::default(),
+                interpolations: Vec::new(),
+            };
+            assert_eq!(decode_string(&node).as_deref(), expected, "{raw}");
+        }
+    }
 
     fn with_constants(test: impl FnOnce(&Program, &SemanticModel<'_>, &SignatureIndex)) {
         let source = r#"

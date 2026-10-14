@@ -189,10 +189,7 @@ impl<'src> Parser<'src> {
 
         // Collect class-level modifiers
         let mut is_abstract = false;
-        let mut is_interface = false;
-        let mut is_base = false;
-        let mut is_final = false;
-        let mut is_sealed = false;
+        let mut restriction = None;
 
         loop {
             match self.cur().kind {
@@ -201,19 +198,19 @@ impl<'src> Parser<'src> {
                     self.advance();
                 }
                 TokenKind::Interface => {
-                    is_interface = true;
+                    restriction = Some(ClassRestriction::Interface);
                     self.advance();
                 }
                 TokenKind::Base => {
-                    is_base = true;
+                    restriction = Some(ClassRestriction::Base);
                     self.advance();
                 }
                 TokenKind::Final => {
-                    is_final = true;
+                    restriction = Some(ClassRestriction::Final);
                     self.advance();
                 }
                 TokenKind::Sealed => {
-                    is_sealed = true;
+                    restriction = Some(ClassRestriction::Sealed);
                     self.advance();
                 }
                 // `static` is only legal on class members. At top level it is an
@@ -232,11 +229,10 @@ impl<'src> Parser<'src> {
 
         let modifiers = ClassModifiers {
             is_abstract,
-            is_interface,
-            is_base,
-            is_final,
-            is_sealed,
+            restriction,
         };
+        let is_base = restriction == Some(ClassRestriction::Base);
+        let is_final = restriction == Some(ClassRestriction::Final);
 
         match self.cur().kind {
             TokenKind::Class => Some(self.parse_class_or_type_alias(annotations, modifiers, start)),
@@ -783,14 +779,14 @@ impl<'src> Parser<'src> {
         self.advance(); // get
         let name = self.expect_ident();
         // A getter body may carry an `async` marker (`get x async { ... }`).
-        let (is_async, _is_generator) = self.parse_async_marker();
+        let async_marker = self.parse_async_marker();
         let body = self.parse_function_body();
         GetterDecl {
             annotations,
             is_static,
             is_abstract,
             is_external,
-            is_async,
+            async_marker,
             return_type,
             name,
             body,
@@ -836,7 +832,6 @@ impl<'src> Parser<'src> {
             is_static,
             is_abstract,
             is_external,
-            is_async: false,
             param_type,
             name,
             param,
@@ -964,7 +959,7 @@ impl<'src> Parser<'src> {
             // is a const field and falls through below.
             if is_const && self.is_ident_like() && self.enclosing_allows_ctor() {
                 let name_text = self.cur_text().to_string();
-                let p1 = self.peek(1).kind.clone();
+                let p1 = self.peek(1).kind;
                 let dotted = p1 == TokenKind::Dot && self.is_ctor_name_at_offset(2);
                 // Both the dotted (`C.named(`) and parenthesized (`C(`) forms name a
                 // constructor only when the leading name is the enclosing type.
@@ -972,7 +967,7 @@ impl<'src> Parser<'src> {
                     self.name_is_enclosing_type(&name_text) && (dotted || p1 == TokenKind::LParen);
                 if is_ctor {
                     let ctor_saved = self.pos;
-                    let name_tok = self.cur().clone();
+                    let name_tok = *self.cur();
                     self.advance();
                     let name = Identifier::new(
                         self.tok_text(&name_tok).to_string(),
@@ -1067,7 +1062,7 @@ impl<'src> Parser<'src> {
             }
 
             if self.is_ident_like() {
-                let name_tok = self.cur().clone();
+                let name_tok = *self.cur();
                 self.advance();
                 // Method
                 if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
@@ -1077,8 +1072,11 @@ impl<'src> Parser<'src> {
                     );
                     let type_params = self.parse_type_params();
                     let params = self.parse_formal_param_list();
-                    let (async_from_marker, is_generator) = self.parse_async_marker();
-                    let is_method_async = outer_is_async || async_from_marker;
+                    let async_marker = match (outer_is_async, self.parse_async_marker()) {
+                        (true, AsyncMarker::Sync) => AsyncMarker::Async,
+                        (true, AsyncMarker::SyncStar) => AsyncMarker::AsyncStar,
+                        (_, marker) => marker,
+                    };
                     let body = self.parse_function_body();
                     let is_method_abstract = is_abstract || body.is_none();
                     return ClassMember::Method(MethodDecl {
@@ -1086,8 +1084,7 @@ impl<'src> Parser<'src> {
                         is_static,
                         is_abstract: is_method_abstract,
                         is_external,
-                        is_async: is_method_async,
-                        is_generator,
+                        async_marker,
                         return_type: Some(ty),
                         name,
                         type_params,
@@ -1133,8 +1130,13 @@ impl<'src> Parser<'src> {
                     is_external,
                     is_covariant,
                     is_late,
-                    is_final,
-                    is_const,
+                    keyword: if is_const {
+                        VarKeyword::Const
+                    } else if is_final {
+                        VarKeyword::Final
+                    } else {
+                        VarKeyword::Var
+                    },
                     field_type: Some(ty),
                     declarators,
                     span: self.span_from(start),
@@ -1150,7 +1152,7 @@ impl<'src> Parser<'src> {
         // a constructor may not have) also force a method. Everything else — e.g.
         // `foo() {}` in `class C` — is an untyped method with no return type.
         if self.is_ident_like() {
-            let name_tok = self.cur().clone();
+            let name_tok = *self.cur();
             let name_text = self.tok_text(&name_tok).to_string();
             self.advance();
             let has_ctor_dot = self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1);
@@ -1174,7 +1176,11 @@ impl<'src> Parser<'src> {
                         && !has_marker
                         && self.name_is_enclosing_type(&name_text);
                     if !is_constructor {
-                        let (async_from_marker, is_generator) = self.parse_async_marker();
+                        let async_marker = match (outer_is_async, self.parse_async_marker()) {
+                            (true, AsyncMarker::Sync) => AsyncMarker::Async,
+                            (true, AsyncMarker::SyncStar) => AsyncMarker::AsyncStar,
+                            (_, marker) => marker,
+                        };
                         let body = self.parse_function_body();
                         let is_method_abstract = is_abstract || body.is_none();
                         return ClassMember::Method(MethodDecl {
@@ -1182,8 +1188,7 @@ impl<'src> Parser<'src> {
                             is_static,
                             is_abstract: is_method_abstract,
                             is_external,
-                            is_async: outer_is_async || async_from_marker,
-                            is_generator,
+                            async_marker,
                             return_type: None,
                             name,
                             type_params,
@@ -1270,27 +1275,38 @@ impl<'src> Parser<'src> {
             is_external,
             is_covariant,
             is_late,
-            is_final,
-            is_const,
+            keyword: if is_const {
+                VarKeyword::Const
+            } else if is_final {
+                VarKeyword::Final
+            } else {
+                VarKeyword::Var
+            },
             field_type,
             declarators,
             span: self.span_from(start),
         }
     }
 
-    pub(super) fn parse_async_marker(&mut self) -> (bool, bool) {
+    pub(super) fn parse_async_marker(&mut self) -> AsyncMarker {
         match self.cur().kind {
             TokenKind::Async => {
                 self.advance();
-                let is_gen = self.eat(TokenKind::Star).is_some();
-                (true, is_gen)
+                if self.eat(TokenKind::Star).is_some() {
+                    AsyncMarker::AsyncStar
+                } else {
+                    AsyncMarker::Async
+                }
             }
             TokenKind::Sync => {
                 self.advance();
-                let is_gen = self.eat(TokenKind::Star).is_some();
-                (false, is_gen)
+                if self.eat(TokenKind::Star).is_some() {
+                    AsyncMarker::SyncStar
+                } else {
+                    AsyncMarker::Sync
+                }
             }
-            _ => (false, false),
+            _ => AsyncMarker::Sync,
         }
     }
 
@@ -1619,23 +1635,23 @@ impl<'src> Parser<'src> {
     fn named_type_to_alias_head(ty: DartType) -> (Identifier, Vec<TypeParam>) {
         match ty {
             DartType::Named(n) => {
-                let span = n.span.clone();
+                let span = n.span;
                 let name = n
                     .segments
                     .into_iter()
                     .next_back()
-                    .unwrap_or_else(|| Identifier::new("<error>", span.clone()));
+                    .unwrap_or_else(|| Identifier::new("<error>", span));
                 let type_params = n
                     .type_args
                     .into_iter()
                     .map(|arg| {
-                        let sp = arg.span().clone();
+                        let sp = *arg.span();
                         let tp_name = match arg {
                             DartType::Named(mut a) => a
                                 .segments
                                 .pop()
-                                .unwrap_or_else(|| Identifier::new("<error>", sp.clone())),
-                            other => Identifier::new("<error>", other.span().clone()),
+                                .unwrap_or_else(|| Identifier::new("<error>", sp)),
+                            other => Identifier::new("<error>", *other.span()),
                         };
                         TypeParam {
                             annotations: Vec::new(),
@@ -1647,7 +1663,7 @@ impl<'src> Parser<'src> {
                     .collect();
                 (name, type_params)
             }
-            other => (Identifier::new("<error>", other.span().clone()), Vec::new()),
+            other => (Identifier::new("<error>", *other.span()), Vec::new()),
         }
     }
 
@@ -1656,37 +1672,15 @@ impl<'src> Parser<'src> {
     fn formals_to_function_type_params(params: &FormalParamList) -> Vec<FunctionTypeParam> {
         let mut out = Vec::new();
         let dynamic_type = |sp: Span| DartType::Dynamic { span: sp };
-        for p in &params.positional {
+        for p in &params.params {
             out.push(FunctionTypeParam {
                 name: Some(p.name.clone()),
-                param_type: p
-                    .param_type
-                    .clone()
-                    .unwrap_or_else(|| dynamic_type(p.span.clone())),
-                is_required: true,
-                is_named: false,
-            });
-        }
-        for p in &params.optional_positional {
-            out.push(FunctionTypeParam {
-                name: Some(p.name.clone()),
-                param_type: p
-                    .param_type
-                    .clone()
-                    .unwrap_or_else(|| dynamic_type(p.span.clone())),
-                is_required: false,
-                is_named: false,
-            });
-        }
-        for p in &params.named {
-            out.push(FunctionTypeParam {
-                name: Some(p.name.clone()),
-                param_type: p
-                    .param_type
-                    .clone()
-                    .unwrap_or_else(|| dynamic_type(p.span.clone())),
-                is_required: p.is_required,
-                is_named: true,
+                param_type: p.param_type.clone().unwrap_or_else(|| dynamic_type(p.span)),
+                is_required: matches!(
+                    p.kind,
+                    ParamKind::Positional | ParamKind::Named { required: true }
+                ),
+                is_named: matches!(p.kind, ParamKind::Named { .. }),
             });
         }
         out
@@ -1736,25 +1730,16 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::Get) && self.is_ident_like_at_offset(1) {
             self.advance(); // get
             let name = self.expect_ident();
-            let (is_async, is_generator) = self.parse_async_marker();
+            let async_marker = self.parse_async_marker();
             let body = self.parse_function_body();
-            let empty_params = FormalParamList {
-                positional: vec![],
-                optional_positional: vec![],
-                named: vec![],
-                span: Span::default(),
-            };
             return Some(TopLevelDecl::Function(FunctionDecl {
                 annotations,
                 is_external,
-                is_async,
-                is_generator,
-                is_getter: true,
-                is_setter: false,
+                async_marker,
+                kind: FunctionKind::Getter,
                 return_type,
                 name,
                 type_params: vec![],
-                params: empty_params,
                 body,
                 span: self.span_from(start),
             }));
@@ -1765,19 +1750,16 @@ impl<'src> Parser<'src> {
             self.advance(); // set
             let name = self.expect_ident();
             let params = self.parse_formal_param_list();
-            let (is_async, is_generator) = self.parse_async_marker();
+            let async_marker = self.parse_async_marker();
             let body = self.parse_function_body();
             return Some(TopLevelDecl::Function(FunctionDecl {
                 annotations,
                 is_external,
-                is_async,
-                is_generator,
-                is_getter: false,
-                is_setter: true,
+                async_marker,
+                kind: FunctionKind::Setter(params),
                 return_type,
                 name,
                 type_params: vec![],
-                params,
                 body,
                 span: self.span_from(start),
             }));
@@ -1794,19 +1776,16 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
             let type_params = self.parse_type_params();
             let params = self.parse_formal_param_list();
-            let (is_async, is_generator) = self.parse_async_marker();
+            let async_marker = self.parse_async_marker();
             let body = self.parse_function_body();
             return Some(TopLevelDecl::Function(FunctionDecl {
                 annotations,
                 is_external,
-                is_async,
-                is_generator,
-                is_getter: false,
-                is_setter: false,
+                async_marker,
+                kind: FunctionKind::Function(params),
                 return_type,
                 name,
                 type_params,
-                params,
                 body,
                 span: self.span_from(start),
             }));
@@ -1841,8 +1820,13 @@ impl<'src> Parser<'src> {
         Some(TopLevelDecl::Variable(TopLevelVarDecl {
             annotations,
             is_external,
-            is_final,
-            is_const,
+            keyword: if is_const {
+                VarKeyword::Const
+            } else if is_final {
+                VarKeyword::Final
+            } else {
+                VarKeyword::Var
+            },
             is_late,
             var_type: return_type,
             declarators,
@@ -1871,7 +1855,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_string_lit(&mut self) -> StringLitNode {
-        let tok = self.cur().clone();
+        let tok = *self.cur();
         let raw = self.tok_text(&tok).to_string();
         let span = Self::tok_span(&tok);
         let is_string_lit = matches!(tok.kind, TokenKind::StringLit);
@@ -1880,8 +1864,9 @@ impl<'src> Parser<'src> {
         } else {
             self.error("expected string literal");
         }
-        // Simple value extraction: strip outer quotes
-        let value = strip_quotes(&raw);
+        let value = StringLitNode::delimiter(&raw)
+            .map_or_else(|| raw.strip_prefix('r').unwrap_or(&raw), |lit| lit.content)
+            .to_string();
         let interpolations = if is_string_lit {
             let (interps, interp_errors) = scan_interpolations(self.src, tok.offset, &raw);
             // Surface any interpolation sub-parse diagnostics to the enclosing
@@ -1959,7 +1944,7 @@ fn scan_interpolations(
                 }
                 let span = Span::new(lit_start + id_start, lit_start + k);
                 out.push(StringInterpolation {
-                    expr: Expr::Ident(Identifier::new(raw[id_start..k].to_string(), span.clone())),
+                    expr: Expr::Ident(Identifier::new(raw[id_start..k].to_string(), span)),
                     span,
                 });
                 i = k;
@@ -2088,7 +2073,7 @@ fn parse_interp_expr(
     if !sub.errors.is_empty() || !sub.at(TokenKind::Eof) || matches!(expr, Expr::Error { .. }) {
         return (None, sub.errors);
     }
-    let span = expr.span().clone();
+    let span = *expr.span();
     (Some(StringInterpolation { expr, span }), Vec::new())
 }
 
@@ -2100,23 +2085,4 @@ fn is_interp_ident_start(c: u8) -> bool {
 
 fn is_interp_ident_continue(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
-}
-
-// Minimal quote-stripping for string literal values (not full escape handling).
-fn strip_quotes(raw: &str) -> String {
-    let raw = raw.strip_prefix('r').unwrap_or(raw);
-    let (triple, q) = if raw.starts_with("\"\"\"") || raw.starts_with("'''") {
-        (true, &raw[..3])
-    } else if raw.starts_with('"') || raw.starts_with('\'') {
-        (false, &raw[..1])
-    } else {
-        return raw.to_string();
-    };
-    let inner_start = if triple { 3 } else { 1 };
-    let inner_end = if raw.ends_with(q) {
-        raw.len() - q.len()
-    } else {
-        raw.len()
-    };
-    raw[inner_start..inner_end.max(inner_start)].to_string()
 }

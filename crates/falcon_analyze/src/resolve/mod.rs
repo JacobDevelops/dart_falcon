@@ -142,7 +142,6 @@ impl StaticType {
         match ty {
             DartType::Void { .. } => StaticType::Void,
             DartType::Dynamic { .. } => StaticType::Dynamic,
-            DartType::Never { .. } => StaticType::Unknown,
             DartType::Function(f) => StaticType::Other {
                 name: "Function".to_string(),
                 nullable: f.is_nullable,
@@ -161,8 +160,6 @@ impl StaticType {
                     "double" => StaticType::Double { nullable },
                     "num" => StaticType::Num { nullable },
                     "String" => StaticType::String { nullable },
-                    "void" => StaticType::Void,
-                    "dynamic" => StaticType::Dynamic,
                     "Never" => StaticType::Unknown,
                     "" => StaticType::Unknown,
                     other => StaticType::Other {

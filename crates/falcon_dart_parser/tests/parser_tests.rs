@@ -197,6 +197,25 @@ fn test_class_abstract() {
 }
 
 #[test]
+fn test_class_abstract_base_modifiers_are_independent() {
+    let (prog, errors) = parse("abstract base class Foo {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
+        panic!("expected class");
+    };
+    let modifiers = cls.modifiers;
+    assert_eq!(
+        modifiers,
+        ClassModifiers {
+            is_abstract: true,
+            restriction: Some(ClassRestriction::Base),
+        }
+    );
+    assert_eq!(cls.modifiers, modifiers);
+    assert_eq!(ClassModifiers::default().restriction, None);
+}
+
+#[test]
 fn test_class_interface() {
     let src = "interface class Foo {}";
     let (prog, errors) = parse(src);
@@ -204,7 +223,7 @@ fn test_class_interface() {
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
         panic!("expected class")
     };
-    assert!(cls.modifiers.is_interface);
+    assert_eq!(cls.modifiers.restriction, Some(ClassRestriction::Interface));
 }
 
 #[test]
@@ -215,7 +234,7 @@ fn test_class_final() {
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
         panic!("expected class")
     };
-    assert!(cls.modifiers.is_final);
+    assert_eq!(cls.modifiers.restriction, Some(ClassRestriction::Final));
 }
 
 #[test]
@@ -226,7 +245,7 @@ fn test_class_sealed() {
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
         panic!("expected class")
     };
-    assert!(cls.modifiers.is_sealed);
+    assert_eq!(cls.modifiers.restriction, Some(ClassRestriction::Sealed));
 }
 
 #[test]
@@ -358,7 +377,7 @@ fn test_function_async() {
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
         panic!("expected function")
     };
-    assert!(fun.is_async);
+    assert_eq!(fun.async_marker, AsyncMarker::Async);
 }
 
 #[test]
@@ -369,7 +388,7 @@ fn test_function_generator() {
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
         panic!("expected function")
     };
-    assert!(fun.is_generator);
+    assert_eq!(fun.async_marker, AsyncMarker::SyncStar);
 }
 
 #[test]
@@ -401,7 +420,7 @@ fn test_top_level_final() {
     let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
         panic!("expected var")
     };
-    assert!(v.is_final, "field should be final");
+    assert_eq!(v.keyword, VarKeyword::Final, "field should be final");
 }
 
 #[test]
@@ -412,7 +431,7 @@ fn test_top_level_const() {
     let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
         panic!("expected var")
     };
-    assert!(v.is_const);
+    assert_eq!(v.keyword, VarKeyword::Const);
 }
 
 #[test]
@@ -436,7 +455,7 @@ fn test_top_level_late_final_typed() {
         panic!("expected var")
     };
     assert!(v.is_late);
-    assert!(v.is_final);
+    assert_eq!(v.keyword, VarKeyword::Final);
     assert!(v.var_type.is_some());
 }
 
@@ -449,7 +468,7 @@ fn test_top_level_late_final_untyped() {
         panic!("expected var")
     };
     assert!(v.is_late);
-    assert!(v.is_final);
+    assert_eq!(v.keyword, VarKeyword::Final);
 }
 
 #[test]
@@ -465,7 +484,7 @@ fn test_static_late_final_field() {
     };
     assert!(f.is_static);
     assert!(f.is_late);
-    assert!(f.is_final);
+    assert_eq!(f.keyword, VarKeyword::Final);
 }
 
 // ── Typedef ───────────────────────────────────────────────────────────────────
@@ -1546,7 +1565,13 @@ fn test_named_parameter() {
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
         panic!("expected function")
     };
-    assert!(!fun.params.named.is_empty());
+    assert!(
+        fun.params()
+            .unwrap()
+            .params
+            .iter()
+            .any(|param| matches!(param.kind, ParamKind::Named { .. }))
+    );
 }
 
 #[test]
@@ -1557,7 +1582,13 @@ fn test_optional_positional_parameter() {
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
         panic!("expected function")
     };
-    assert!(!fun.params.optional_positional.is_empty());
+    assert!(
+        fun.params()
+            .unwrap()
+            .params
+            .iter()
+            .any(|param| param.kind == ParamKind::OptionalPositional)
+    );
 }
 
 // ── Null-safety ───────────────────────────────────────────────────────────────
@@ -1968,12 +1999,13 @@ fn test_closure_final_param() {
     // Drill to the closure argument and confirm it is a function expression.
     let arg = first_call_first_arg(&prog);
     assert!(
-        matches!(arg, Expr::FuncExpr { params, .. } if params.positional.len() == 1),
+        matches!(arg, Expr::FuncExpr { params, .. } if params.params.len() == 1
+            && params.params[0].kind == ParamKind::Positional),
         "expected FuncExpr with one positional param, got {arg:#?}"
     );
     if let Expr::FuncExpr { params, .. } = arg {
-        assert!(params.positional[0].is_final, "param should be final");
-        assert_eq!(params.positional[0].name.name, "x");
+        assert!(params.params[0].is_final, "param should be final");
+        assert_eq!(params.params[0].name.name, "x");
     }
 }
 
@@ -1986,8 +2018,9 @@ fn test_closure_var_param() {
         first_call_first_arg(&prog).clone()
     };
     assert!(
-        matches!(&arg, Expr::FuncExpr { params, .. } if params.positional.len() == 1
-            && params.positional[0].param_type.is_none()),
+        matches!(&arg, Expr::FuncExpr { params, .. } if params.params.len() == 1
+            && params.params[0].kind == ParamKind::Positional
+            && params.params[0].param_type.is_none()),
         "expected untyped var param, got {arg:#?}"
     );
 }
@@ -2001,8 +2034,9 @@ fn test_closure_final_typed_param() {
         first_call_first_arg(&prog).clone()
     };
     assert!(
-        matches!(&arg, Expr::FuncExpr { params, .. } if params.positional[0].is_final
-            && params.positional[0].param_type.is_some()),
+        matches!(&arg, Expr::FuncExpr { params, .. } if params.params[0].kind == ParamKind::Positional
+            && params.params[0].is_final
+            && params.params[0].param_type.is_some()),
         "expected final typed param, got {arg:#?}"
     );
 }
@@ -2077,8 +2111,17 @@ fn test_c_style_for_in_list_literal() {
         panic!("expected list literal")
     };
     assert!(
-        matches!(elements.first(), Some(CollectionElement::CFor { .. })),
-        "expected CFor element, got {elements:#?}"
+        matches!(
+            elements.first(),
+            Some(CollectionElement::For {
+                header: ForHeader {
+                    init: Some(ForInit::VarDecl(_)),
+                    ..
+                },
+                ..
+            })
+        ),
+        "expected C-style For element, got {elements:#?}"
     );
 }
 
@@ -2108,7 +2151,11 @@ fn test_async_getter() {
             _ => None,
         })
         .expect("getter");
-    assert!(getter.is_async, "getter should be async");
+    assert_eq!(
+        getter.async_marker,
+        AsyncMarker::Async,
+        "getter should be async"
+    );
 }
 
 #[test]
@@ -2280,7 +2327,7 @@ fn test_pattern_decl_record_final() {
             first_fn_body_stmts(&prog)[0]
         );
     };
-    assert!(decl.is_final);
+    assert_eq!(decl.keyword, VarKeyword::Final);
     let Pattern::Record(rec) = &decl.pattern else {
         panic!("expected record pattern, got {:#?}", decl.pattern);
     };
@@ -2305,7 +2352,7 @@ fn test_pattern_decl_var_named_shorthand() {
     let Stmt::PatternDecl(decl) = &first_fn_body_stmts(&prog)[0] else {
         panic!("expected PatternDecl");
     };
-    assert!(!decl.is_final);
+    assert_eq!(decl.keyword, VarKeyword::Var);
     let Pattern::Record(rec) = &decl.pattern else {
         panic!("expected record pattern");
     };
@@ -2353,7 +2400,10 @@ fn test_for_statement_pattern_destructuring() {
     let Stmt::For(for_stmt) = &first_fn_body_stmts(&prog)[0] else {
         panic!("expected For, got {:#?}", first_fn_body_stmts(&prog)[0]);
     };
-    let Some(ForInit::PatternForIn { pattern, iterable }) = &for_stmt.init else {
+    let Some(ForInit::PatternForIn {
+        pattern, iterable, ..
+    }) = &for_stmt.init
+    else {
         panic!("expected PatternForIn, got {:#?}", for_stmt.init);
     };
     let Pattern::Record(rec) = &**pattern else {
@@ -2411,15 +2461,21 @@ fn test_null_aware_map_key_and_value() {
     let src = "f(k, v) => {?k: v, a: ?v};";
     let (prog, errors) = parse(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let Expr::Map { entries, .. } = first_fn_arrow_or_block_expr(&prog) else {
+    let Expr::Map { elements, .. } = first_fn_arrow_or_block_expr(&prog) else {
         panic!(
             "expected map, got {:#?}",
             first_fn_arrow_or_block_expr(&prog)
         );
     };
-    assert_eq!(entries.len(), 2);
-    assert!(entries[0].key_null_aware);
-    assert!(!entries[0].value_null_aware);
-    assert!(!entries[1].key_null_aware);
-    assert!(entries[1].value_null_aware);
+    assert_eq!(elements.len(), 2);
+    let MapElement::Entry(first) = &elements[0] else {
+        panic!("expected entry")
+    };
+    let MapElement::Entry(second) = &elements[1] else {
+        panic!("expected entry")
+    };
+    assert!(first.key_null_aware);
+    assert!(!first.value_null_aware);
+    assert!(!second.key_null_aware);
+    assert!(second.value_null_aware);
 }

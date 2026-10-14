@@ -6,10 +6,16 @@ Function(
     FunctionDecl {
         annotations: [],
         is_external: false,
-        is_async: false,
-        is_generator: false,
-        is_getter: false,
-        is_setter: false,
+        async_marker: Sync,
+        kind: Function(
+            FormalParamList {
+                params: [],
+                span: Span {
+                    start: 18,
+                    end: 21,
+                },
+            },
+        ),
         return_type: Some(
             Record(
                 RecordType {
@@ -70,15 +76,6 @@ Function(
             },
         },
         type_params: [],
-        params: FormalParamList {
-            positional: [],
-            optional_positional: [],
-            named: [],
-            span: Span {
-                start: 18,
-                end: 21,
-            },
-        },
         body: Some(
             Arrow(
                 Record {

@@ -64,7 +64,6 @@ fn is_known_bool(expr: &Expr) -> bool {
 
 enum StmtAction<'a> {
     Block,
-    LocalVar(&'a LocalVarDecl),
     PatternDecl(&'a PatternDeclaration),
     For(&'a ForStmt),
     IfCase(&'a IfStmt),
@@ -76,7 +75,6 @@ enum StmtAction<'a> {
 fn classify_stmt(stmt: &Stmt) -> StmtAction<'_> {
     match stmt {
         Stmt::Block(_) => StmtAction::Block,
-        Stmt::LocalVar(local) => StmtAction::LocalVar(local),
         Stmt::PatternDecl(pattern) => StmtAction::PatternDecl(pattern),
         Stmt::For(for_stmt) => StmtAction::For(for_stmt),
         Stmt::If(if_stmt) if matches!(if_stmt.condition, IfCondition::Case(..)) => {
@@ -158,7 +156,11 @@ impl Collector<'_, '_> {
 impl Visitor for Collector<'_, '_> {
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         self.with_fresh_locals(
-            |locals| locals.bind_params(&node.params),
+            |locals| {
+                if let Some(params) = node.params() {
+                    locals.bind_params(params);
+                }
+            },
             |this| walk_function_decl(this, node),
         );
     }
@@ -206,16 +208,17 @@ impl Visitor for Collector<'_, '_> {
         }
     }
 
+    fn visit_local_var(&mut self, local: &LocalVarDecl) {
+        falcon_syntax::visitor::walk_local_var(self, local);
+        self.locals.declare_local(local);
+    }
+
     fn visit_stmt(&mut self, node: &Stmt) {
         match classify_stmt(node) {
             StmtAction::Block => {
                 self.locals.push_scope();
                 walk_stmt(self, node);
                 self.locals.pop_scope();
-            }
-            StmtAction::LocalVar(local) => {
-                walk_stmt(self, node);
-                self.locals.declare_local(local);
             }
             StmtAction::PatternDecl(pattern) => {
                 walk_stmt(self, node);

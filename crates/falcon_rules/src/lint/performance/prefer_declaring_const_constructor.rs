@@ -48,7 +48,7 @@ fn check_class(
     }
     if class.members.iter().any(|member| {
         matches!(member, ClassMember::Field(field)
-            if !field.is_static && (!field.is_final || field.is_late))
+            if !field.is_static && (field.keyword != VarKeyword::Final || field.is_late))
     }) {
         return;
     }
@@ -56,7 +56,9 @@ fn check_class(
         .members
         .iter()
         .filter_map(|member| match member {
-            ClassMember::Field(field) if field.is_const => Some(field),
+            ClassMember::Field(field) if field.keyword == falcon_syntax::ast::VarKeyword::Const => {
+                Some(field)
+            }
             _ => None,
         })
         .flat_map(|field| {
@@ -163,10 +165,8 @@ fn constructor_candidate(
     }
     let parameters = constructor
         .params
-        .positional
+        .params
         .iter()
-        .chain(&constructor.params.optional_positional)
-        .chain(&constructor.params.named)
         .map(|parameter| parameter.name.name.clone())
         .collect::<HashSet<_>>();
     let mut has_super_call = false;

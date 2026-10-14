@@ -24,7 +24,10 @@ impl Rule for AvoidReturnTypesOnSetters {
         for decl in &program.declarations {
             match decl {
                 // Top-level setters keep their return type in the AST directly.
-                TopLevelDecl::Function(func) if func.is_setter && func.return_type.is_some() => {
+                TopLevelDecl::Function(func)
+                    if matches!(func.kind, falcon_syntax::ast::FunctionKind::Setter(_))
+                        && func.return_type.is_some() =>
+                {
                     push(&mut diags, ctx, &func.name.span);
                 }
                 TopLevelDecl::Class(c) => check_members(&c.members, ctx, &mut diags),

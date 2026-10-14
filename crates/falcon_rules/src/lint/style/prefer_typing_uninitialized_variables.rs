@@ -73,10 +73,8 @@ impl Visitor for Collector<'_, '_> {
         visitor::walk_field_decl(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalVar(local) = node {
-            self.check(local.var_type.is_some(), &local.declarators);
-        }
-        visitor::walk_stmt(self, node);
+    fn visit_local_var(&mut self, local: &LocalVarDecl) {
+        self.check(local.var_type.is_some(), &local.declarators);
+        visitor::walk_local_var(self, local);
     }
 }

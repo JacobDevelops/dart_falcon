@@ -33,6 +33,56 @@ fn only_stmt(src: &str) -> Stmt {
     stmts.into_iter().next().unwrap()
 }
 
+#[test]
+fn test_empty_and_rethrow_have_no_expression_children() {
+    use falcon_syntax::visitor::{Visitor, walk_stmt};
+
+    let source = "; null; try {} catch (e) { rethrow; throw e; }";
+    let (stmts, errors) = body_stmts(source);
+    assert_eq!(errors, 0);
+    let Stmt::Empty(span) = &stmts[0] else {
+        panic!("expected empty statement, got {:?}", stmts[0]);
+    };
+    assert_eq!(span.end - span.start, 1);
+    assert!(matches!(
+        &stmts[1],
+        Stmt::Expr(ExprStmt {
+            expr: Expr::NullLit { .. },
+            ..
+        })
+    ));
+    let Stmt::TryCatch(statement) = &stmts[2] else {
+        panic!("expected try statement, got {:?}", stmts[2]);
+    };
+    let catch = &statement.catches[0].body;
+    let Stmt::Rethrow(span) = &catch.stmts[0] else {
+        panic!("expected rethrow statement, got {:?}", catch.stmts[0]);
+    };
+    assert_eq!(span.end - span.start, "rethrow;".len());
+    assert!(matches!(
+        &catch.stmts[1],
+        Stmt::Throw(ThrowStmt {
+            value: Expr::Ident(identifier),
+            ..
+        }) if identifier.name == "e"
+    ));
+
+    #[derive(Default)]
+    struct Expressions(usize);
+
+    impl Visitor for Expressions {
+        fn visit_expr(&mut self, _: &Expr) {
+            self.0 += 1;
+        }
+    }
+
+    let mut expressions = Expressions::default();
+    for statement in &stmts {
+        walk_stmt(&mut expressions, statement);
+    }
+    assert_eq!(expressions.0, 2);
+}
+
 // ── Item (a): labeled statements ──────────────────────────────────────────────
 
 #[test]
@@ -180,7 +230,8 @@ fn test_untyped_local_func_with_params() {
         Stmt::LocalFunc(f) => {
             assert_eq!(f.name.name, "greet");
             assert!(f.return_type.is_none());
-            assert_eq!(f.params.positional.len(), 1);
+            assert_eq!(f.params.params.len(), 1);
+            assert_eq!(f.params.params[0].kind, ParamKind::Positional);
         }
         other => panic!("expected local func, got {other:?}"),
     }
@@ -204,8 +255,7 @@ fn test_untyped_async_local_func() {
     let stmt = only_stmt("load() async {}");
     match stmt {
         Stmt::LocalFunc(f) => {
-            assert!(f.is_async);
-            assert!(!f.is_generator);
+            assert_eq!(f.async_marker, AsyncMarker::Async);
             assert!(f.return_type.is_none());
         }
         other => panic!("expected local func, got {other:?}"),
@@ -272,9 +322,7 @@ fn test_list_pattern_assignment() {
 
 #[test]
 fn test_record_pattern_assign_targets_are_variables() {
-    // Bare-identifier assignment targets must bind as `Pattern::Variable` (which
-    // the visitor walks) rather than `Pattern::Const{expr:None}` (walked as
-    // nothing), matching the declaration twin `var (a, b) = e;`.
+    // Assignment targets bind variables, matching `var (a, b) = e;`.
     let stmt = only_stmt("(a, b) = e;");
     match stmt {
         Stmt::PatternAssign(p) => match p.pattern {
@@ -367,8 +415,11 @@ fn test_if_case_guard_dotted_pattern() {
         Stmt::If(i) => match i.condition {
             IfCondition::Case(_, pattern, guard) => {
                 match *pattern {
-                    Pattern::Const(c) => {
-                        let segs: Vec<_> = c.name.iter().map(|s| s.name.as_str()).collect();
+                    Pattern::Const(ConstPattern {
+                        value: ConstPatternValue::Name(name),
+                        ..
+                    }) => {
+                        let segs: Vec<_> = name.iter().map(|s| s.name.as_str()).collect();
                         assert_eq!(segs, ["State", "a"]);
                     }
                     other => panic!("expected const pattern, got {other:?}"),

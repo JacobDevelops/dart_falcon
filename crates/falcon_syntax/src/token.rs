@@ -1,5 +1,5 @@
 /// A lexical token produced by the Dart lexer.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Token {
     pub kind: TokenKind,
     /// Byte offset of the first character in the source string.
@@ -30,17 +30,14 @@ impl Token {
 }
 
 /// Dart 3.x token kinds.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
-    // ── Literals ──────────────────────────────────────────────────────────────
     IntLit,
     DoubleLit,
     StringLit,
 
-    // ── Identifier ────────────────────────────────────────────────────────────
     Ident,
 
-    // ── Reserved words ────────────────────────────────────────────────────────
     Assert,
     Break,
     Case,
@@ -75,7 +72,6 @@ pub enum TokenKind {
     While,
     With,
 
-    // ── Built-in identifiers (contextually reserved) ──────────────────────────
     Abstract,
     As,
     Base,
@@ -105,20 +101,16 @@ pub enum TokenKind {
     Type,
     Typedef,
 
-    // ── Async / generator keywords (contextual) ───────────────────────────────
     Async,
     Await,
     Sync,
     Yield,
 
-    // ── Dart 3.x pattern keyword ──────────────────────────────────────────────
     When,
 
-    // ── Additional contextual keywords ───────────────────────────────────────
     On,       // `on` in mixin on-clause and try/catch
     Override, // `override` built-in identifier
 
-    // ── Arithmetic ────────────────────────────────────────────────────────────
     Plus,
     Minus,
     Star,
@@ -126,7 +118,6 @@ pub enum TokenKind {
     Percent,
     TildeSlash, // ~/
 
-    // ── Comparison ────────────────────────────────────────────────────────────
     EqEq,
     BangEq,
     Lt,
@@ -134,12 +125,10 @@ pub enum TokenKind {
     LtEq,
     GtEq,
 
-    // ── Logical ───────────────────────────────────────────────────────────────
     AmpAmp,
     PipePipe,
     Bang,
 
-    // ── Bitwise ───────────────────────────────────────────────────────────────
     Amp,
     Pipe,
     Caret,
@@ -148,7 +137,6 @@ pub enum TokenKind {
     GtGt,
     GtGtGt,
 
-    // ── Assignment ────────────────────────────────────────────────────────────
     Eq,
     PlusEq,
     MinusEq,
@@ -164,17 +152,14 @@ pub enum TokenKind {
     GtGtGtEq,
     QmarkQmarkEq, // ??=
 
-    // ── Null / conditional ────────────────────────────────────────────────────
     Qmark,         // ?
     QmarkQmark,    // ??
     QmarkDot,      // ?.
     QmarkLBracket, // ?[
 
-    // ── Increment / decrement ─────────────────────────────────────────────────
     PlusPlus,
     MinusMinus,
 
-    // ── Punctuation ───────────────────────────────────────────────────────────
     LParen,
     RParen,
     LBrace,
@@ -187,24 +172,20 @@ pub enum TokenKind {
     At,
     Hash, // #  (symbol-literal introducer)
 
-    // ── Dot family ────────────────────────────────────────────────────────────
     Dot,
     DotDot,         // ..  cascade
     DotDotQmark,    // ?.. null-safe cascade
     DotDotDot,      // ... spread
     DotDotDotQmark, // ...? null-aware spread
 
-    // ── Arrow ─────────────────────────────────────────────────────────────────
     Arrow, // =>
 
-    // ── Trivia ────────────────────────────────────────────────────────────────
     Whitespace,
     Newline,
     LineComment,
     BlockComment,
     DocComment,
 
-    // ── Special ───────────────────────────────────────────────────────────────
     Eof,
     Error,
 }
@@ -288,84 +269,5 @@ impl TokenKind {
             _ => return None,
         };
         Some(kind)
-    }
-
-    /// True if this token kind is a keyword or built-in identifier.
-    pub fn is_keyword(&self) -> bool {
-        !matches!(
-            self,
-            TokenKind::Ident
-                | TokenKind::IntLit
-                | TokenKind::DoubleLit
-                | TokenKind::StringLit
-                | TokenKind::Whitespace
-                | TokenKind::Newline
-                | TokenKind::LineComment
-                | TokenKind::BlockComment
-                | TokenKind::DocComment
-                | TokenKind::Eof
-                | TokenKind::Error
-                | TokenKind::Plus
-                | TokenKind::Minus
-                | TokenKind::Star
-                | TokenKind::Slash
-                | TokenKind::Percent
-                | TokenKind::TildeSlash
-                | TokenKind::EqEq
-                | TokenKind::BangEq
-                | TokenKind::Lt
-                | TokenKind::Gt
-                | TokenKind::LtEq
-                | TokenKind::GtEq
-                | TokenKind::AmpAmp
-                | TokenKind::PipePipe
-                | TokenKind::Bang
-                | TokenKind::Amp
-                | TokenKind::Pipe
-                | TokenKind::Caret
-                | TokenKind::Tilde
-                | TokenKind::LtLt
-                | TokenKind::GtGt
-                | TokenKind::GtGtGt
-                | TokenKind::Eq
-                | TokenKind::PlusEq
-                | TokenKind::MinusEq
-                | TokenKind::StarEq
-                | TokenKind::SlashEq
-                | TokenKind::PercentEq
-                | TokenKind::TildeSlashEq
-                | TokenKind::AmpEq
-                | TokenKind::PipeEq
-                | TokenKind::CaretEq
-                | TokenKind::LtLtEq
-                | TokenKind::GtGtEq
-                | TokenKind::GtGtGtEq
-                | TokenKind::QmarkQmarkEq
-                | TokenKind::Qmark
-                | TokenKind::QmarkQmark
-                | TokenKind::QmarkDot
-                | TokenKind::QmarkLBracket
-                | TokenKind::PlusPlus
-                | TokenKind::MinusMinus
-                | TokenKind::LParen
-                | TokenKind::RParen
-                | TokenKind::LBrace
-                | TokenKind::RBrace
-                | TokenKind::LBracket
-                | TokenKind::RBracket
-                | TokenKind::Comma
-                | TokenKind::Semicolon
-                | TokenKind::Colon
-                | TokenKind::At
-                | TokenKind::Hash
-                | TokenKind::Dot
-                | TokenKind::DotDot
-                | TokenKind::DotDotQmark
-                | TokenKind::DotDotDot
-                | TokenKind::DotDotDotQmark
-                | TokenKind::Arrow
-                | TokenKind::On
-                | TokenKind::Override
-        )
     }
 }

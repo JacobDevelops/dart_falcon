@@ -1,16 +1,64 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
-assertion_line: 1662
 expression: "prog.declarations[0]"
 ---
 Function(
     FunctionDecl {
         annotations: [],
         is_external: false,
-        is_async: false,
-        is_generator: false,
-        is_getter: false,
-        is_setter: false,
+        async_marker: Sync,
+        kind: Function(
+            FormalParamList {
+                params: [
+                    FormalParam {
+                        annotations: [],
+                        kind: Positional,
+                        is_covariant: false,
+                        is_final: false,
+                        initializing: None,
+                        param_type: Some(
+                            Named(
+                                NamedType {
+                                    segments: [
+                                        Identifier {
+                                            name: "int",
+                                            span: Span {
+                                                start: 9,
+                                                end: 12,
+                                            },
+                                        },
+                                    ],
+                                    type_args: [],
+                                    is_nullable: false,
+                                    span: Span {
+                                        start: 9,
+                                        end: 13,
+                                    },
+                                },
+                            ),
+                        ),
+                        name: Identifier {
+                            name: "x",
+                            span: Span {
+                                start: 13,
+                                end: 14,
+                            },
+                        },
+                        default_value: None,
+                        type_params: [],
+                        function_params: None,
+                        span: Span {
+                            start: 9,
+                            end: 14,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 8,
+                    end: 16,
+                },
+            },
+        ),
         return_type: Some(
             Named(
                 NamedType {
@@ -40,59 +88,6 @@ Function(
             },
         },
         type_params: [],
-        params: FormalParamList {
-            positional: [
-                FormalParam {
-                    annotations: [],
-                    is_required: true,
-                    is_covariant: false,
-                    is_final: false,
-                    is_field: false,
-                    is_super: false,
-                    param_type: Some(
-                        Named(
-                            NamedType {
-                                segments: [
-                                    Identifier {
-                                        name: "int",
-                                        span: Span {
-                                            start: 9,
-                                            end: 12,
-                                        },
-                                    },
-                                ],
-                                type_args: [],
-                                is_nullable: false,
-                                span: Span {
-                                    start: 9,
-                                    end: 13,
-                                },
-                            },
-                        ),
-                    ),
-                    name: Identifier {
-                        name: "x",
-                        span: Span {
-                            start: 13,
-                            end: 14,
-                        },
-                    },
-                    default_value: None,
-                    type_params: [],
-                    function_params: None,
-                    span: Span {
-                        start: 9,
-                        end: 14,
-                    },
-                },
-            ],
-            optional_positional: [],
-            named: [],
-            span: Span {
-                start: 8,
-                end: 16,
-            },
-        },
         body: Some(
             Arrow(
                 Switch {

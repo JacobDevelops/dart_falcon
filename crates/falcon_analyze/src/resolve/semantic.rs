@@ -7,8 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use falcon_syntax::ast::{
-    BinaryOp, ClassMember, DartType, Expr, FormalParam, FormalParamList, FunctionBody, Program,
-    TopLevelDecl, TypeParam,
+    BinaryOp, ClassMember, DartType, Expr, FormalParam, FormalParamList, FunctionBody,
+    InitializingFormal, Program, TopLevelDecl, TypeParam,
 };
 
 use super::{DeclarationIdentity, IdentityIndex, SubtypeResult, TypeIndex};
@@ -248,7 +248,6 @@ impl<'a> SemanticModel<'a> {
         match ty {
             DartType::Void { .. } => ResolvedType::Void,
             DartType::Dynamic { .. } => ResolvedType::Dynamic,
-            DartType::Never { .. } => ResolvedType::Never,
             DartType::Named(named) => {
                 if named.segments.len() == 1
                     && let Some(parameter) = parameters.lookup(&named.segments[0].name)
@@ -840,7 +839,7 @@ impl SignatureIndex {
                                 &parameters,
                                 &[],
                                 &function.type_params,
-                                &function.params,
+                                function.params(),
                                 function.return_type.as_ref(),
                                 None,
                                 model,
@@ -848,7 +847,9 @@ impl SignatureIndex {
                         );
                     }
                 }
-                TopLevelDecl::Variable(variable) if variable.is_const => {
+                TopLevelDecl::Variable(variable)
+                    if variable.keyword == falcon_syntax::ast::VarKeyword::Const =>
+                {
                     for declarator in &variable.declarators {
                         if let Some(initializer) = &declarator.initializer
                             && let Some(identity) =
@@ -1045,14 +1046,10 @@ impl SignatureIndex {
                             _ => None,
                         })
                         .unwrap_or_else(|| "new".to_string());
-                    for parameter in constructor
-                        .params
-                        .positional
-                        .iter()
-                        .chain(&constructor.params.optional_positional)
-                        .chain(&constructor.params.named)
-                        .filter(|parameter| parameter.is_super && parameter.param_type.is_none())
-                    {
+                    for parameter in constructor.params.params.iter().filter(|parameter| {
+                        parameter.initializing == Some(InitializingFormal::Super)
+                            && parameter.param_type.is_none()
+                    }) {
                         let Some(ty) = self.resolved_constructor_parameter_type(
                             &superclass,
                             &super_constructor,
@@ -1136,11 +1133,7 @@ impl SignatureIndex {
             .constructors
             .get_mut(&(identity.clone(), constructor_name.to_string()))
         {
-            if params
-                .named
-                .iter()
-                .any(|named| std::ptr::eq(named, parameter))
-            {
+            if matches!(parameter.kind, falcon_syntax::ast::ParamKind::Named { .. }) {
                 if signature.named.get(&parameter.name.name) != Some(&ty) {
                     signature
                         .named
@@ -1148,10 +1141,8 @@ impl SignatureIndex {
                     changed = true;
                 }
             } else if let Some(index) = params
-                .positional
-                .iter()
-                .chain(&params.optional_positional)
-                .position(|candidate| std::ptr::eq(candidate, parameter))
+                .positional()
+                .position(|candidate| candidate.name.span == parameter.name.span)
                 && signature.positional.get(index) != Some(&ty)
             {
                 signature.positional[index] = ty.clone();
@@ -1221,10 +1212,8 @@ impl SignatureIndex {
                         .is_some_and(|name| name.name.starts_with('_')),
                     parameters: constructor
                         .params
-                        .positional
+                        .params
                         .iter()
-                        .chain(&constructor.params.optional_positional)
-                        .chain(&constructor.params.named)
                         .map(|parameter| ParameterFacts {
                             name: parameter.name.name.clone(),
                             ty: parameter
@@ -1232,28 +1221,30 @@ impl SignatureIndex {
                                 .as_ref()
                                 .map(|ty| model.resolve_type_in(ty, &scope))
                                 .or_else(|| {
-                                    parameter.is_field.then(|| {
-                                        let key = (identity.clone(), parameter.name.name.clone());
-                                        self.member_facts
-                                            .get(&key)
-                                            .filter(|facts| {
-                                                facts.iter().any(|fact| {
-                                                    fact.kind == SemanticMemberKind::Field
-                                                        && !fact.is_static
+                                    (parameter.initializing == Some(InitializingFormal::This)).then(
+                                        || {
+                                            let key =
+                                                (identity.clone(), parameter.name.name.clone());
+                                            self.member_facts
+                                                .get(&key)
+                                                .filter(|facts| {
+                                                    facts.iter().any(|fact| {
+                                                        fact.kind == SemanticMemberKind::Field
+                                                            && !fact.is_static
+                                                    })
                                                 })
-                                            })
-                                            .and_then(|_| self.fields.get(&key))
-                                            .map(|(_, ty)| ty.clone())
-                                            .unwrap_or(ResolvedType::Unknown)
-                                    })
+                                                .and_then(|_| self.fields.get(&key))
+                                                .map(|(_, ty)| ty.clone())
+                                                .unwrap_or(ResolvedType::Unknown)
+                                        },
+                                    )
                                 })
                                 .unwrap_or(ResolvedType::Unknown),
-                            is_named: constructor
-                                .params
-                                .named
-                                .iter()
-                                .any(|named| std::ptr::eq(named, parameter)),
-                            is_super: parameter.is_super,
+                            is_named: matches!(
+                                parameter.kind,
+                                falcon_syntax::ast::ParamKind::Named { .. }
+                            ),
+                            is_super: parameter.initializing == Some(InitializingFormal::Super),
                         })
                         .collect(),
                 }),
@@ -1263,7 +1254,12 @@ impl SignatureIndex {
         let static_consts = members
             .iter()
             .filter_map(|member| match member {
-                ClassMember::Field(field) if field.is_static && field.is_const => Some(field),
+                ClassMember::Field(field)
+                    if field.is_static
+                        && field.keyword == falcon_syntax::ast::VarKeyword::Const =>
+                {
+                    Some(field)
+                }
                 _ => None,
             })
             .flat_map(|field| {
@@ -1725,7 +1721,7 @@ impl SignatureIndex {
                             &scope,
                             &owner_parameters,
                             &method.type_params,
-                            &method.params,
+                            Some(&method.params),
                             method.return_type.as_ref(),
                             None,
                             model,
@@ -1747,7 +1743,7 @@ impl SignatureIndex {
                             &scope,
                             &owner_parameters,
                             &[],
-                            &constructor.params,
+                            Some(&constructor.params),
                             None,
                             Some(&field_types),
                             model,
@@ -1766,7 +1762,7 @@ impl SignatureIndex {
                                 is_abstract: field.is_abstract,
                                 is_covariant: field.is_covariant,
                                 has_getter: true,
-                                has_setter: !field.is_final && !field.is_const,
+                                has_setter: field.keyword == falcon_syntax::ast::VarKeyword::Var,
                                 positional_parameter_names: Vec::new(),
                             });
                     }
@@ -1782,7 +1778,7 @@ impl SignatureIndex {
                         if !field.is_static {
                             self.instance_reads
                                 .insert(key.clone(), indexed_type.clone());
-                            if !field.is_final && !field.is_const {
+                            if field.keyword == falcon_syntax::ast::VarKeyword::Var {
                                 self.instance_writes.insert(key, indexed_type);
                             }
                         }
@@ -2484,9 +2480,7 @@ fn expression_name(expression: &Expr) -> Option<Vec<String>> {
 
 fn positional_parameter_names(params: &FormalParamList) -> Vec<String> {
     params
-        .positional
-        .iter()
-        .chain(&params.optional_positional)
+        .positional()
         .map(|parameter| parameter.name.name.clone())
         .collect()
 }
@@ -2517,7 +2511,7 @@ fn signature(
     scope: &TypeParameterScope,
     owner_parameters: &[TypeParameterId],
     call_parameters: &[TypeParam],
-    params: &FormalParamList,
+    params: Option<&FormalParamList>,
     return_type: Option<&DartType>,
     field_types: Option<&HashMap<String, ResolvedType>>,
     model: &SemanticModel<'_>,
@@ -2528,12 +2522,12 @@ fn signature(
             .as_ref()
             .map(|ty| model.resolve_type_in(ty, scope))
             .unwrap_or_else(|| {
-                if param.is_field {
+                if param.initializing == Some(InitializingFormal::This) {
                     field_types
                         .and_then(|fields| fields.get(&param.name.name))
                         .cloned()
                         .unwrap_or(ResolvedType::Unknown)
-                } else if param.is_super {
+                } else if param.initializing == Some(InitializingFormal::Super) {
                     ResolvedType::Unknown
                 } else {
                     ResolvedType::Dynamic
@@ -2544,14 +2538,13 @@ fn signature(
         owner_parameters: owner_parameters.to_vec(),
         call_parameters: parameter_ids(scope, call_parameters),
         positional: params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
+            .into_iter()
+            .flat_map(|params| params.positional())
             .map(&parameter_type)
             .collect(),
         named: params
-            .named
-            .iter()
+            .into_iter()
+            .flat_map(|params| params.named())
             .map(|param| (param.name.name.clone(), parameter_type(param)))
             .collect(),
         return_type: return_type
@@ -2618,12 +2611,7 @@ impl TypeEnvironment {
         model: &SemanticModel<'_>,
         type_params: &TypeParameterScope,
     ) {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             let ty = param
                 .param_type
                 .as_ref()
@@ -2797,9 +2785,7 @@ impl TypeEnvironment {
                 let mut function_parameters = type_parameters.clone();
                 function_parameters.push(type_params, model);
                 let positional = params
-                    .positional
-                    .iter()
-                    .chain(&params.optional_positional)
+                    .positional()
                     .map(|param| {
                         param
                             .param_type
@@ -2809,8 +2795,7 @@ impl TypeEnvironment {
                     })
                     .collect();
                 let named = params
-                    .named
-                    .iter()
+                    .named()
                     .map(|param| {
                         (
                             param.name.name.clone(),
@@ -2993,8 +2978,12 @@ mod tests {
                 let TopLevelDecl::Function(function) = &program.declarations[1] else {
                     panic!()
                 };
-                let box_type =
-                    model.resolve_type(function.params.positional[0].param_type.as_ref().unwrap());
+                let box_type = model.resolve_type(
+                    function.params().unwrap().params[0]
+                        .param_type
+                        .as_ref()
+                        .unwrap(),
+                );
                 let ResolvedType::Interface {
                     identity,
                     arguments,
@@ -3008,8 +2997,12 @@ mod tests {
                 );
                 assert!(arguments[0].nullable());
 
-                let future =
-                    model.resolve_type(function.params.positional[1].param_type.as_ref().unwrap());
+                let future = model.resolve_type(
+                    function.params().unwrap().params[1]
+                        .param_type
+                        .as_ref()
+                        .unwrap(),
+                );
                 assert!(model.void_context(&future));
             },
         );
@@ -3024,8 +3017,9 @@ mod tests {
                     panic!()
                 };
                 let types: Vec<_> = function
+                    .params()
+                    .unwrap()
                     .params
-                    .positional
                     .iter()
                     .map(|param| model.resolve_type(param.param_type.as_ref().unwrap()))
                     .collect();
@@ -3096,7 +3090,7 @@ mod tests {
                     };
                     let type_parameters = TypeParameterScope::default();
                     let mut environment = TypeEnvironment::new();
-                    environment.bind_params(&function.params, model, &type_parameters);
+                    environment.bind_params(function.params().unwrap(), model, &type_parameters);
 
                     let inferred = environment.infer_with_signatures(
                         expression.as_ref(),
@@ -3425,8 +3419,12 @@ mod tests {
             let TopLevelDecl::Function(function) = &program.declarations[0] else {
                 panic!()
             };
-            let receiver =
-                model.resolve_type(function.params.positional[0].param_type.as_ref().unwrap());
+            let receiver = model.resolve_type(
+                function.params().unwrap().params[0]
+                    .param_type
+                    .as_ref()
+                    .unwrap(),
+            );
             let (signature, _) = signatures.resolved_member(&receiver, "add", model).unwrap();
             assert!(signature.return_type.interface("dart:core", "bool"));
         });
@@ -3464,7 +3462,7 @@ mod tests {
                 };
                 let type_parameters = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
-                environment.bind_params(&function.params, model, &type_parameters);
+                environment.bind_params(function.params().unwrap(), model, &type_parameters);
                 let inferred = environment.infer_with_signatures(
                     expression,
                     model,

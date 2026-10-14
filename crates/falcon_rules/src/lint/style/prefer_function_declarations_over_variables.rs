@@ -38,10 +38,8 @@ struct Collector<'a, 'c> {
 }
 
 impl Visitor for Collector<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalVar(local) = node
-            && (local.is_final || local.is_const)
-        {
+    fn visit_local_var(&mut self, local: &LocalVarDecl) {
+        if local.keyword != falcon_syntax::ast::VarKeyword::Var {
             for decl in &local.declarators {
                 if let Some(Expr::FuncExpr { .. }) = &decl.initializer {
                     self.diags.push(Diagnostic::new(
@@ -57,6 +55,6 @@ impl Visitor for Collector<'_, '_> {
                 }
             }
         }
-        visitor::walk_stmt(self, node);
+        visitor::walk_local_var(self, local);
     }
 }

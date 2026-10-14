@@ -60,7 +60,7 @@ impl UsageCollector {
             scopes: vec![HashMap::new()],
             used: HashSet::new(),
         };
-        for param in all_params(params) {
+        for param in &params.params {
             collector.declare(&param.name.name, Binding::Target(param.name.span.start));
         }
         collector
@@ -93,7 +93,7 @@ impl UsageCollector {
     }
 
     fn bind_params(&mut self, params: &FormalParamList) {
-        for param in all_params(params) {
+        for param in &params.params {
             self.declare(&param.name.name, Binding::Other);
         }
     }
@@ -145,7 +145,9 @@ impl UsageCollector {
                 self.visit_expr(iterable);
                 self.declare(&name.name, Binding::Other);
             }
-            ForInit::PatternForIn { pattern, iterable } => {
+            ForInit::PatternForIn {
+                pattern, iterable, ..
+            } => {
                 self.visit_expr(iterable);
                 walk_pattern(self, pattern);
                 self.bind_pattern(pattern);
@@ -155,6 +157,18 @@ impl UsageCollector {
                     self.visit_expr(expression);
                 }
             }
+        }
+    }
+
+    fn visit_for_header(&mut self, header: &ForHeader) {
+        if let Some(init) = &header.init {
+            self.visit_for_init(init);
+        }
+        if let Some(condition) = &header.condition {
+            self.visit_expr(condition);
+        }
+        for update in &header.updates {
+            self.visit_expr(update);
         }
     }
 
@@ -197,37 +211,10 @@ impl UsageCollector {
                 }
             }
             CollectionElement::For {
-                pattern,
-                iterable,
-                element,
-                ..
-            } => {
-                self.visit_expr(iterable);
-                self.push_scope();
-                if let Some(pattern) = pattern {
-                    walk_pattern(self, pattern);
-                    self.bind_pattern(pattern);
-                }
-                self.visit_collection_element(element);
-                self.pop_scope();
-            }
-            CollectionElement::CFor {
-                init,
-                condition,
-                updates,
-                element,
-                ..
+                header, element, ..
             } => {
                 self.push_scope();
-                if let Some(init) = init {
-                    self.visit_for_init(init);
-                }
-                if let Some(condition) = condition {
-                    self.visit_expr(condition);
-                }
-                for update in updates {
-                    self.visit_expr(update);
-                }
+                self.visit_for_header(header);
                 self.visit_collection_element(element);
                 self.pop_scope();
             }
@@ -270,38 +257,9 @@ impl UsageCollector {
                     self.visit_map_element(else_entry);
                 }
             }
-            MapElement::For {
-                pattern,
-                iterable,
-                entry,
-                ..
-            } => {
-                self.visit_expr(iterable);
+            MapElement::For { header, entry, .. } => {
                 self.push_scope();
-                if let Some(pattern) = pattern {
-                    walk_pattern(self, pattern);
-                    self.bind_pattern(pattern);
-                }
-                self.visit_map_element(entry);
-                self.pop_scope();
-            }
-            MapElement::CFor {
-                init,
-                condition,
-                updates,
-                entry,
-                ..
-            } => {
-                self.push_scope();
-                if let Some(init) = init {
-                    self.visit_for_init(init);
-                }
-                if let Some(condition) = condition {
-                    self.visit_expr(condition);
-                }
-                for update in updates {
-                    self.visit_expr(update);
-                }
+                self.visit_for_header(header);
                 self.visit_map_element(entry);
                 self.pop_scope();
             }
@@ -445,7 +403,11 @@ impl Visitor for UsageCollector {
             }
             Stmt::Yield(statement) => self.visit_expr(&statement.value),
             Stmt::Expr(statement) => self.visit_expr(&statement.expr),
-            Stmt::Break(_) | Stmt::Continue(_) | Stmt::Error(_) => {}
+            Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Rethrow(_)
+            | Stmt::Empty(_)
+            | Stmt::Error(_) => {}
         }
     }
 
@@ -458,13 +420,7 @@ impl Visitor for UsageCollector {
                     self.visit_collection_element(element);
                 }
             }
-            Expr::Map {
-                entries, elements, ..
-            } => {
-                for entry in entries {
-                    self.visit_expr(&entry.key);
-                    self.visit_expr(&entry.value);
-                }
+            Expr::Map { elements, .. } => {
                 for element in elements {
                     self.visit_map_element(element);
                 }
@@ -487,14 +443,6 @@ impl Visitor for UsageCollector {
     }
 }
 
-fn all_params(params: &FormalParamList) -> impl Iterator<Item = &FormalParam> {
-    params
-        .positional
-        .iter()
-        .chain(&params.optional_positional)
-        .chain(&params.named)
-}
-
 #[cfg(test)]
 mod tests {
     use falcon_dart_parser::parse;
@@ -508,11 +456,11 @@ mod tests {
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!()
         };
-        let used = used_parameters(&function.params, function.body.as_ref().unwrap());
+        let used = used_parameters(function.params().unwrap(), function.body.as_ref().unwrap());
         assert!(
             used.is_empty(),
             "used: {used:?}, target: {}",
-            function.params.positional[0].name.span.start
+            function.params().unwrap().params[0].name.span.start
         );
     }
 
@@ -524,9 +472,9 @@ mod tests {
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!()
         };
-        let used = used_parameters(&function.params, function.body.as_ref().unwrap());
+        let used = used_parameters(function.params().unwrap(), function.body.as_ref().unwrap());
         assert!(
-            !used.contains(&function.params.positional[0].name.span.start),
+            !used.contains(&function.params().unwrap().params[0].name.span.start),
             "source: {source}, used: {used:?}"
         );
     }
@@ -542,9 +490,9 @@ mod tests {
             let TopLevelDecl::Function(function) = &program.declarations[0] else {
                 panic!()
             };
-            let used = used_parameters(&function.params, function.body.as_ref().unwrap());
+            let used = used_parameters(function.params().unwrap(), function.body.as_ref().unwrap());
             assert!(
-                used.contains(&function.params.positional[0].name.span.start),
+                used.contains(&function.params().unwrap().params[0].name.span.start),
                 "source: {source}, used: {used:?}"
             );
         }
@@ -564,9 +512,9 @@ mod tests {
             let TopLevelDecl::Function(function) = &program.declarations[0] else {
                 panic!()
             };
-            let used = used_parameters(&function.params, function.body.as_ref().unwrap());
+            let used = used_parameters(function.params().unwrap(), function.body.as_ref().unwrap());
             assert!(
-                used.contains(&function.params.positional[0].name.span.start),
+                used.contains(&function.params().unwrap().params[0].name.span.start),
                 "source: {source}, used: {used:?}"
             );
         }

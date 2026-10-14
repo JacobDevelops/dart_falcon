@@ -10,7 +10,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_stmt, walk_top_level_decl};
+use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_local_var, walk_top_level_decl};
 
 pub struct AvoidInitToNull;
 
@@ -40,13 +40,12 @@ impl Collector {
     /// the `= null` is redundant and can be dropped without changing behaviour.
     fn check(
         &mut self,
-        is_final: bool,
-        is_const: bool,
+        keyword: VarKeyword,
         is_late: bool,
         var_type: &Option<DartType>,
         declarators: &[VarDeclarator],
     ) {
-        if is_final || is_const || is_late || !defaults_to_null(var_type) {
+        if keyword != VarKeyword::Var || is_late || !defaults_to_null(var_type) {
             return;
         }
         for d in declarators {
@@ -76,21 +75,14 @@ fn defaults_to_null(var_type: &Option<DartType>) -> bool {
 impl Visitor for Collector {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(v) = node {
-            self.check(
-                v.is_final,
-                v.is_const,
-                v.is_late,
-                &v.var_type,
-                &v.declarators,
-            );
+            self.check(v.keyword, v.is_late, &v.var_type, &v.declarators);
         }
         walk_top_level_decl(self, node);
     }
 
     fn visit_field_decl(&mut self, node: &FieldDecl) {
         self.check(
-            node.is_final,
-            node.is_const,
+            node.keyword,
             node.is_late,
             &node.field_type,
             &node.declarators,
@@ -98,16 +90,8 @@ impl Visitor for Collector {
         walk_field_decl(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalVar(lv) = node {
-            self.check(
-                lv.is_final,
-                lv.is_const,
-                lv.is_late,
-                &lv.var_type,
-                &lv.declarators,
-            );
-        }
-        walk_stmt(self, node);
+    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
+        self.check(lv.keyword, lv.is_late, &lv.var_type, &lv.declarators);
+        walk_local_var(self, lv);
     }
 }

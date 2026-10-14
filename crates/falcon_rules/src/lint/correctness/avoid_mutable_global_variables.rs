@@ -25,7 +25,7 @@ impl Rule for AvoidMutableGlobalVariables {
             if let TopLevelDecl::Variable(var_decl) = decl {
                 // pyramid_lint only flags top-level variables that are neither
                 // `const` nor `final` (`isConstOrFinal` skips the declaration).
-                if !var_decl.is_const && !var_decl.is_final {
+                if var_decl.keyword == falcon_syntax::ast::VarKeyword::Var {
                     diags.push(Diagnostic::new(
                         "avoid-mutable-global-variables",
                         Severity::Warning,

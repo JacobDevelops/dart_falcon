@@ -6,10 +6,16 @@ Function(
     FunctionDecl {
         annotations: [],
         is_external: false,
-        is_async: true,
-        is_generator: false,
-        is_getter: false,
-        is_setter: false,
+        async_marker: Async,
+        kind: Function(
+            FormalParamList {
+                params: [],
+                span: Span {
+                    start: 24,
+                    end: 27,
+                },
+            },
+        ),
         return_type: Some(
             Named(
                 NamedType {
@@ -59,15 +65,6 @@ Function(
             },
         },
         type_params: [],
-        params: FormalParamList {
-            positional: [],
-            optional_positional: [],
-            named: [],
-            span: Span {
-                start: 24,
-                end: 27,
-            },
-        },
         body: Some(
             Block(
                 Block {

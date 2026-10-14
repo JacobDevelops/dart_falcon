@@ -8,7 +8,7 @@
 //! whole class of false positives and missed detections reached a release.
 //!
 //! `falcon_syntax::visitor` already provides an exhaustive walker plus the
-//! `for_each_expr` / `for_each_stmt_in_stmts` / `bound_names` helpers. A rule
+//! `for_each_expr` / `bound_names` helpers. A rule
 //! built on those cannot go blind, because the shared walker matches every AST
 //! variant with no catch-all.
 //!
@@ -170,7 +170,7 @@ fn no_new_hand_rolled_ast_walkers() {
         problems.push_str(
             "\nNew hand-rolled AST walker(s). These go blind on new Dart syntax —\n\
              build on falcon_syntax::visitor instead (walk_expr / for_each_expr /\n\
-             for_each_stmt_in_stmts / bound_names), which is exhaustive:\n",
+             bound_names), which is exhaustive:\n",
         );
         for entry in added {
             problems.push_str(&format!("  + {entry}\n"));

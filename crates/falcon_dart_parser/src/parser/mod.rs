@@ -254,7 +254,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn advance(&mut self) -> Token {
-        let tok = self.cur().clone();
+        let tok = *self.cur();
         if self.pos + 1 < self.tokens.len() {
             self.pos += 1;
         }
@@ -270,11 +270,11 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn expect(&mut self, kind: TokenKind) -> Token {
-        if self.at(kind.clone()) {
+        if self.at(kind) {
             self.advance()
         } else {
             self.error(format!("expected {:?}, got {:?}", kind, self.cur().kind));
-            self.cur().clone()
+            *self.cur()
         }
     }
 
@@ -584,10 +584,7 @@ impl<'src> Parser<'src> {
     /// whose keyword is hidden behind metadata the directive parser re-consumes.
     pub(super) fn peek_kind_after_annotations(&self) -> TokenKind {
         let i = self.index_after_annotations(self.pos);
-        self.tokens
-            .get(i)
-            .map(|t| t.kind.clone())
-            .unwrap_or(TokenKind::Eof)
+        self.tokens.get(i).map(|t| t.kind).unwrap_or(TokenKind::Eof)
     }
 
     /// Token index after skipping any run of annotations starting at `i`. A pure

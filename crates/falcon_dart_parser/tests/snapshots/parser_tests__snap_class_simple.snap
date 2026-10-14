@@ -7,10 +7,7 @@ Class(
         annotations: [],
         modifiers: ClassModifiers {
             is_abstract: false,
-            is_interface: false,
-            is_base: false,
-            is_final: false,
-            is_sealed: false,
+            restriction: None,
         },
         name: Identifier {
             name: "Foo",

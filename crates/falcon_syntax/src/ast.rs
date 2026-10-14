@@ -1,5 +1,5 @@
 /// Byte-range span for source attribution.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -15,6 +15,27 @@ impl Span {
             start: self.start.min(other.start),
             end: self.end.max(other.end),
         }
+    }
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::Span;
+
+    #[test]
+    fn merge_disjoint() {
+        assert_eq!(Span::new(0, 10).merge(&Span::new(15, 25)), Span::new(0, 25));
+    }
+
+    #[test]
+    fn merge_overlapping() {
+        assert_eq!(Span::new(0, 15).merge(&Span::new(10, 20)), Span::new(0, 20));
+    }
+
+    #[test]
+    fn merge_same() {
+        let span = Span::new(5, 10);
+        assert_eq!(span.merge(&span), span);
     }
 }
 
@@ -37,9 +58,9 @@ impl Identifier {
 /// A raw string literal value with its source location.
 #[derive(Debug, Clone)]
 pub struct StringLitNode {
-    /// The raw source text (including quotes).
+    /// Raw literal text including quotes, concatenated for adjacent literals.
     pub raw: String,
-    /// The decoded string value (without surrounding quotes, escapes resolved).
+    /// The content without delimiters; escape sequences remain unresolved.
     pub value: String,
     pub span: Span,
     /// The parsed interpolated expressions (`$id` / `${expr}`) embedded in the
@@ -47,6 +68,46 @@ pub struct StringLitNode {
     /// literals, and any interpolation whose inner expression failed to parse
     /// cleanly (recorded conservatively as absent).
     pub interpolations: Vec<StringInterpolation>,
+}
+
+pub struct StringDelimiter<'a> {
+    pub is_raw: bool,
+    pub quote: u8,
+    pub triple: bool,
+    pub content: &'a str,
+    pub content_offset: usize,
+    pub terminated: bool,
+}
+
+impl StringLitNode {
+    /// Reads the stored text's outer delimiter; adjacent segments remain concatenated.
+    pub fn delimiter(raw: &str) -> Option<StringDelimiter<'_>> {
+        let is_raw = raw.starts_with('r');
+        let prefix = usize::from(is_raw);
+        let rest = &raw[prefix..];
+        let quote = *rest.as_bytes().first()?;
+        if !matches!(quote, b'\'' | b'"') {
+            return None;
+        }
+        let triple = rest.as_bytes().get(..3) == Some(&[quote; 3]);
+        let len = if triple { 3 } else { 1 };
+        let closing = &rest[..len];
+        let terminated = rest.len() >= 2 * len && rest[len..].ends_with(closing);
+        let content_offset = prefix + len;
+        let content_end = if rest.ends_with(closing) {
+            (raw.len() - len).max(content_offset)
+        } else {
+            raw.len()
+        };
+        Some(StringDelimiter {
+            is_raw,
+            quote,
+            triple,
+            content: &raw[content_offset..content_end],
+            content_offset,
+            terminated,
+        })
+    }
 }
 
 /// A single interpolation embedded in a [`StringLitNode`].
@@ -59,8 +120,6 @@ pub struct StringInterpolation {
     /// range of `ident`.
     pub span: Span,
 }
-
-// ── Top-level compilation unit ────────────────────────────────────────────────
 
 /// A parsed Dart compilation unit (one `.dart` file).
 #[derive(Debug, Clone)]
@@ -141,8 +200,6 @@ pub enum ImportCombinator {
     Hide(Vec<Identifier>, Span),
 }
 
-// ── Top-level declarations ─────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub enum TopLevelDecl {
     Class(ClassDecl),
@@ -177,15 +234,18 @@ impl TopLevelDecl {
     }
 }
 
-// ── Class ─────────────────────────────────────────────────────────────────────
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassRestriction {
+    Base,
+    Interface,
+    Final,
+    Sealed,
+}
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ClassModifiers {
     pub is_abstract: bool,
-    pub is_interface: bool,
-    pub is_base: bool,
-    pub is_final: bool,
-    pub is_sealed: bool,
+    pub restriction: Option<ClassRestriction>,
 }
 
 /// `[modifiers] class Name<T> [extends S] [with M] [implements I] { ... }`
@@ -243,6 +303,31 @@ impl ClassMember {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VarKeyword {
+    Var,
+    Final,
+    Const,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AsyncMarker {
+    Sync,
+    SyncStar,
+    Async,
+    AsyncStar,
+}
+
+impl AsyncMarker {
+    pub const fn is_async(self) -> bool {
+        matches!(self, Self::Async | Self::AsyncStar)
+    }
+
+    pub const fn is_generator(self) -> bool {
+        matches!(self, Self::SyncStar | Self::AsyncStar)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FieldDecl {
     pub annotations: Vec<Annotation>,
@@ -251,8 +336,7 @@ pub struct FieldDecl {
     pub is_external: bool,
     pub is_covariant: bool,
     pub is_late: bool,
-    pub is_final: bool,
-    pub is_const: bool,
+    pub keyword: VarKeyword,
     pub field_type: Option<DartType>,
     pub declarators: Vec<VarDeclarator>,
     pub span: Span,
@@ -319,8 +403,7 @@ pub struct MethodDecl {
     pub is_static: bool,
     pub is_abstract: bool,
     pub is_external: bool,
-    pub is_async: bool,
-    pub is_generator: bool,
+    pub async_marker: AsyncMarker,
     pub return_type: Option<DartType>,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,
@@ -335,7 +418,7 @@ pub struct GetterDecl {
     pub is_static: bool,
     pub is_abstract: bool,
     pub is_external: bool,
-    pub is_async: bool,
+    pub async_marker: AsyncMarker,
     pub return_type: Option<DartType>,
     pub name: Identifier,
     pub body: Option<FunctionBody>,
@@ -348,7 +431,6 @@ pub struct SetterDecl {
     pub is_static: bool,
     pub is_abstract: bool,
     pub is_external: bool,
-    pub is_async: bool,
     pub param_type: Option<DartType>,
     pub name: Identifier,
     pub param: Identifier,
@@ -366,8 +448,6 @@ pub struct OperatorDecl {
     pub body: Option<FunctionBody>,
     pub span: Span,
 }
-
-// ── Mixin ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct MixinDecl {
@@ -395,8 +475,6 @@ pub struct MixinClassDecl {
     pub span: Span,
 }
 
-// ── Enum ──────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct EnumDecl {
     pub annotations: Vec<Annotation>,
@@ -420,8 +498,6 @@ pub struct EnumVariant {
     pub args: Option<ArgList>,
     pub span: Span,
 }
-
-// ── Extension ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct ExtensionDecl {
@@ -455,32 +531,40 @@ pub struct ExtensionTypeRepresentation {
     pub span: Span,
 }
 
-// ── Top-level functions and variables ─────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct FunctionDecl {
     pub annotations: Vec<Annotation>,
     pub is_external: bool,
-    pub is_async: bool,
-    pub is_generator: bool,
-    /// True when declared with `get` keyword (a top-level getter).
-    pub is_getter: bool,
-    /// True when declared with `set` keyword (a top-level setter).
-    pub is_setter: bool,
+    pub async_marker: AsyncMarker,
+    pub kind: FunctionKind,
     pub return_type: Option<DartType>,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,
-    pub params: FormalParamList,
     pub body: Option<FunctionBody>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum FunctionKind {
+    Function(FormalParamList),
+    Getter,
+    Setter(FormalParamList),
+}
+
+impl FunctionDecl {
+    pub fn params(&self) -> Option<&FormalParamList> {
+        match &self.kind {
+            FunctionKind::Function(params) | FunctionKind::Setter(params) => Some(params),
+            FunctionKind::Getter => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct TopLevelVarDecl {
     pub annotations: Vec<Annotation>,
     pub is_external: bool,
-    pub is_final: bool,
-    pub is_const: bool,
+    pub keyword: VarKeyword,
     pub is_late: bool,
     pub var_type: Option<DartType>,
     pub declarators: Vec<VarDeclarator>,
@@ -496,8 +580,6 @@ pub struct TypeAliasDecl {
     pub span: Span,
 }
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub enum DartType {
     Named(NamedType),
@@ -505,7 +587,6 @@ pub enum DartType {
     Record(RecordType),
     Void { span: Span },
     Dynamic { span: Span },
-    Never { span: Span },
 }
 
 impl DartType {
@@ -516,7 +597,6 @@ impl DartType {
             DartType::Record(x) => &x.span,
             DartType::Void { span } => span,
             DartType::Dynamic { span } => span,
-            DartType::Never { span } => span,
         }
     }
 
@@ -578,24 +658,46 @@ pub struct TypeParam {
     pub span: Span,
 }
 
-// ── Formal parameters ─────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct FormalParamList {
-    pub positional: Vec<FormalParam>,
-    pub optional_positional: Vec<FormalParam>,
-    pub named: Vec<FormalParam>,
+    pub params: Vec<FormalParam>,
     pub span: Span,
+}
+
+impl FormalParamList {
+    pub fn positional(&self) -> impl Iterator<Item = &FormalParam> {
+        self.params
+            .iter()
+            .filter(|param| !matches!(param.kind, ParamKind::Named { .. }))
+    }
+
+    pub fn named(&self) -> impl Iterator<Item = &FormalParam> {
+        self.params
+            .iter()
+            .filter(|param| matches!(param.kind, ParamKind::Named { .. }))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamKind {
+    Positional,
+    OptionalPositional,
+    Named { required: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InitializingFormal {
+    This,
+    Super,
 }
 
 #[derive(Debug, Clone)]
 pub struct FormalParam {
     pub annotations: Vec<Annotation>,
-    pub is_required: bool,
+    pub kind: ParamKind,
     pub is_covariant: bool,
     pub is_final: bool,
-    pub is_field: bool,
-    pub is_super: bool,
+    pub initializing: Option<InitializingFormal>,
     pub param_type: Option<DartType>,
     pub name: Identifier,
     pub default_value: Option<Expr>,
@@ -605,8 +707,6 @@ pub struct FormalParam {
     pub function_params: Option<FormalParamList>,
     pub span: Span,
 }
-
-// ── Function body ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub enum FunctionBody {
@@ -625,8 +725,6 @@ impl FunctionBody {
     }
 }
 
-// ── Annotations ───────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct Annotation {
     pub name: Vec<Identifier>,
@@ -636,8 +734,6 @@ pub struct Annotation {
     pub args: Option<ArgList>,
     pub span: Span,
 }
-
-// ── Statements ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct Block {
@@ -656,6 +752,8 @@ pub enum Stmt {
     TryCatch(TryCatchStmt),
     Return(ReturnStmt),
     Throw(ThrowStmt),
+    Rethrow(Span),
+    Empty(Span),
     Break(BreakStmt),
     Continue(ContinueStmt),
     LocalVar(LocalVarDecl),
@@ -689,6 +787,7 @@ impl Stmt {
             Stmt::TryCatch(x) => &x.span,
             Stmt::Return(x) => &x.span,
             Stmt::Throw(x) => &x.span,
+            Stmt::Rethrow(span) | Stmt::Empty(span) => span,
             Stmt::Break(x) => &x.span,
             Stmt::Continue(x) => &x.span,
             Stmt::LocalVar(x) => &x.span,
@@ -734,7 +833,7 @@ pub struct ForStmt {
 pub enum ForInit {
     VarDecl(LocalVarDecl),
     ForIn {
-        is_final: bool,
+        keyword: VarKeyword,
         var_type: Option<DartType>,
         name: Identifier,
         iterable: Box<Expr>,
@@ -743,10 +842,18 @@ pub enum ForInit {
     /// identifiers in `pattern` (modeled as [`Pattern::Variable`]) are the loop
     /// bindings.
     PatternForIn {
+        keyword: VarKeyword,
         pattern: Box<Pattern>,
         iterable: Box<Expr>,
     },
     Exprs(Vec<Expr>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ForHeader {
+    pub init: Option<ForInit>,
+    pub condition: Option<Expr>,
+    pub updates: Vec<Expr>,
 }
 
 #[derive(Debug, Clone)]
@@ -784,7 +891,7 @@ pub struct SwitchCase {
 #[derive(Debug, Clone)]
 pub enum SwitchCaseKind {
     /// `case <pattern> [when <guard>]:`
-    Pattern(Box<Pattern>, Box<Option<Expr>>),
+    Pattern(Box<Pattern>, Option<Box<Expr>>),
     /// `default:`
     Default,
 }
@@ -815,7 +922,6 @@ pub struct ReturnStmt {
 #[derive(Debug, Clone)]
 pub struct ThrowStmt {
     pub value: Expr,
-    pub is_rethrow: bool,
     pub span: Span,
 }
 
@@ -833,8 +939,7 @@ pub struct ContinueStmt {
 
 #[derive(Debug, Clone)]
 pub struct LocalVarDecl {
-    pub is_final: bool,
-    pub is_const: bool,
+    pub keyword: VarKeyword,
     pub is_late: bool,
     pub var_type: Option<DartType>,
     pub declarators: Vec<VarDeclarator>,
@@ -844,8 +949,7 @@ pub struct LocalVarDecl {
 /// Dart 3 pattern-variable declaration: `(var|final) <pattern> = <init>`.
 #[derive(Debug, Clone)]
 pub struct PatternDeclaration {
-    /// `final` keyword present (otherwise `var`).
-    pub is_final: bool,
+    pub keyword: VarKeyword,
     pub pattern: Pattern,
     pub init: Expr,
     pub span: Span,
@@ -869,8 +973,7 @@ pub struct LabeledStmt {
 
 #[derive(Debug, Clone)]
 pub struct LocalFuncDecl {
-    pub is_async: bool,
-    pub is_generator: bool,
+    pub async_marker: AsyncMarker,
     pub return_type: Option<DartType>,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,
@@ -899,8 +1002,6 @@ pub struct ExprStmt {
     pub span: Span,
 }
 
-// ── Expressions ───────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub enum Expr {
     IntLit {
@@ -927,40 +1028,34 @@ pub enum Expr {
         span: Span,
     },
 
-    // Prefix unary
     Unary {
         op: UnaryOp,
         operand: Box<Expr>,
         span: Span,
     },
-    // Postfix (++ / --)
     PostfixIncDec {
         op: PostfixIncDec,
         operand: Box<Expr>,
         span: Span,
     },
-    // Binary
     Binary {
         op: BinaryOp,
         left: Box<Expr>,
         right: Box<Expr>,
         span: Span,
     },
-    // Assignment
     Assign {
         target: Box<Expr>,
         op: AssignOp,
         value: Box<Expr>,
         span: Span,
     },
-    // Conditional ternary
     Conditional {
         condition: Box<Expr>,
         then_expr: Box<Expr>,
         else_expr: Box<Expr>,
         span: Span,
     },
-    // Type tests
     Is {
         expr: Box<Expr>,
         dart_type: DartType,
@@ -973,28 +1068,24 @@ pub enum Expr {
         span: Span,
     },
 
-    // Member access
     Field {
         object: Box<Expr>,
         field: Identifier,
         is_null_safe: bool,
         span: Span,
     },
-    // Index access
     Index {
         object: Box<Expr>,
         index: Box<Expr>,
         is_null_safe: bool,
         span: Span,
     },
-    // Function / method call
     Call {
         callee: Box<Expr>,
         type_args: Vec<DartType>,
         args: ArgList,
         span: Span,
     },
-    // Cascade
     Cascade {
         object: Box<Expr>,
         sections: Vec<CascadeSection>,
@@ -1003,7 +1094,6 @@ pub enum Expr {
         span: Span,
     },
 
-    // Collections
     List {
         is_const: bool,
         type_arg: Option<DartType>,
@@ -1013,10 +1103,6 @@ pub enum Expr {
     Map {
         is_const: bool,
         type_args: Vec<DartType>,
-        entries: Vec<MapEntry>,
-        /// Comprehension form of a map literal (`{ for (..) k: v }`). A plain map
-        /// uses `entries` and leaves this empty; a map containing any `for`/`if`/
-        /// spread element puts *all* of its elements here (with `entries` empty).
         elements: Vec<MapElement>,
         span: Span,
     },
@@ -1027,7 +1113,6 @@ pub enum Expr {
         span: Span,
     },
 
-    // Records
     Record {
         /// `const ('', X)` — a const record literal.
         is_const: bool,
@@ -1035,17 +1120,14 @@ pub enum Expr {
         span: Span,
     },
 
-    // Function expressions
     FuncExpr {
         type_params: Vec<TypeParam>,
         params: FormalParamList,
-        is_async: bool,
-        is_generator: bool,
+        async_marker: AsyncMarker,
         body: Box<FunctionBody>,
         span: Span,
     },
 
-    // Instantiation / new
     New {
         is_const: bool,
         dart_type: DartType,
@@ -1054,46 +1136,40 @@ pub enum Expr {
         span: Span,
     },
 
-    // Static access shorthand (Dart 3.9):  `.name` / `const .name` / `.new`.
-    // Only the head is captured here; any invocation or selector that follows
-    // is represented by the wrapping `Call`/`Field`/etc. node.
+    /// Static access shorthand (Dart 3.9); subsequent selectors wrap this node.
     DotShorthand {
         is_const: bool,
         name: Identifier,
         span: Span,
     },
 
-    // Await
     Await {
         expr: Box<Expr>,
         span: Span,
     },
-    // Throw expression
     Throw {
         expr: Box<Expr>,
         span: Span,
     },
 
-    // Switch expression (Dart 3.x)
     Switch {
         subject: Box<Expr>,
         arms: Vec<SwitchExprArm>,
         span: Span,
     },
 
-    // Postfix null-assertion  expr!
     NullAssert {
         operand: Box<Expr>,
         span: Span,
     },
 
-    // Symbol literal: `#name`, `#foo.bar`, `#+`. `raw` includes the leading `#`.
+    /// Symbol literal; `raw` includes the leading `#`.
     SymbolLit {
         raw: String,
         span: Span,
     },
 
-    // Bare generic tear-off instantiation: `identity<int>` (no call follows).
+    /// Bare generic tear-off instantiation: `identity<int>` (no call follows).
     GenericInstantiation {
         target: Box<Expr>,
         type_args: Vec<DartType>,
@@ -1145,7 +1221,7 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Minus,
     Bang,
@@ -1154,13 +1230,13 @@ pub enum UnaryOp {
     MinusMinus,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PostfixIncDec {
     Increment,
     Decrement,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -1183,10 +1259,9 @@ pub enum BinaryOp {
     Shr,
     UShr,
     NullCoalesce,
-    IfNull, // alias for NullCoalesce; same thing
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssignOp {
     Eq,
     PlusEq,
@@ -1216,8 +1291,14 @@ pub struct CascadeSection {
 
 #[derive(Debug, Clone)]
 pub enum CascadeOp {
-    Field(Identifier, bool),
-    Index(Box<Expr>, bool),
+    Field {
+        name: Identifier,
+        is_null_aware: bool,
+    },
+    Index {
+        index: Box<Expr>,
+        is_null_aware: bool,
+    },
     Call(Identifier, Vec<DartType>, ArgList),
     Assign(Box<Expr>, AssignOp, Box<Expr>),
 }
@@ -1246,21 +1327,7 @@ pub enum CollectionElement {
     For {
         /// `await for (...)` — an asynchronous for-in element in an async context.
         is_await: bool,
-        /// Simple loop variable (`for (final x in xs)`). `None` when the header
-        /// uses a Dart 3 pattern instead, in which case `pattern` is set.
-        variable: Option<Identifier>,
-        var_type: Option<DartType>,
-        /// Dart 3 pattern-for header (`for (final (a, b) in xs)`).
-        pattern: Option<Box<Pattern>>,
-        iterable: Expr,
-        element: Box<CollectionElement>,
-        span: Span,
-    },
-    /// C-style comprehension header (`[for (var i = 0; i < n; i++) x]`).
-    CFor {
-        init: Option<ForInit>,
-        condition: Option<Expr>,
-        updates: Vec<Expr>,
+        header: ForHeader,
         element: Box<CollectionElement>,
         span: Span,
     },
@@ -1296,107 +1363,10 @@ pub enum MapElement {
     For {
         /// `await for (...)` — an asynchronous for-in entry in an async context.
         is_await: bool,
-        variable: Option<Identifier>,
-        var_type: Option<DartType>,
-        pattern: Option<Box<Pattern>>,
-        iterable: Expr,
+        header: ForHeader,
         entry: Box<MapElement>,
         span: Span,
     },
-    /// C-style comprehension header (`{ for (var i = 0; i < n; i++) k: v }`).
-    CFor {
-        init: Option<ForInit>,
-        condition: Option<Expr>,
-        updates: Vec<Expr>,
-        entry: Box<MapElement>,
-        span: Span,
-    },
-}
-
-/// Flatten every expression reachable from a comprehension map's `elements`
-/// (`{ for (..) k: v }`, `{ if (c) k: v }`, `{ ...spread }`): entry keys and
-/// values, spread expressions, `if` conditions, and `for` iterables, recursing
-/// through nested `if`/`for` bodies.
-///
-/// Hand-rolled rule walkers that traverse `Expr::Map { entries }` should also
-/// feed each expression this yields to the same walker, so a value hidden inside
-/// a map comprehension is analyzed exactly like one in a plain entry. Walkers
-/// built on [`crate::visitor::Visitor`] already descend into `elements` and do
-/// not need this.
-pub fn map_element_exprs(elements: &[MapElement]) -> Vec<&Expr> {
-    let mut out = Vec::new();
-    for element in elements {
-        push_map_element_exprs(element, &mut out);
-    }
-    out
-}
-
-fn push_map_element_exprs<'a>(element: &'a MapElement, out: &mut Vec<&'a Expr>) {
-    match element {
-        MapElement::Entry(entry) => {
-            out.push(&entry.key);
-            out.push(&entry.value);
-        }
-        MapElement::Spread { expr, .. } => out.push(expr),
-        MapElement::If {
-            condition,
-            then_entry,
-            else_entry,
-            ..
-        } => {
-            match condition {
-                IfCondition::Expr(e) => out.push(e),
-                IfCondition::Case(e, _, guard) => {
-                    out.push(e);
-                    if let Some(g) = guard {
-                        out.push(g);
-                    }
-                }
-            }
-            push_map_element_exprs(then_entry, out);
-            if let Some(else_entry) = else_entry {
-                push_map_element_exprs(else_entry, out);
-            }
-        }
-        MapElement::For {
-            iterable, entry, ..
-        } => {
-            out.push(iterable);
-            push_map_element_exprs(entry, out);
-        }
-        MapElement::CFor {
-            init,
-            condition,
-            updates,
-            entry,
-            ..
-        } => {
-            push_for_init_exprs(init, out);
-            if let Some(cond) = condition {
-                out.push(cond);
-            }
-            for e in updates {
-                out.push(e);
-            }
-            push_map_element_exprs(entry, out);
-        }
-    }
-}
-
-fn push_for_init_exprs<'a>(init: &'a Option<ForInit>, out: &mut Vec<&'a Expr>) {
-    match init {
-        Some(ForInit::VarDecl(d)) => {
-            for decl in &d.declarators {
-                if let Some(init) = &decl.initializer {
-                    out.push(init);
-                }
-            }
-        }
-        Some(ForInit::ForIn { iterable, .. }) => out.push(iterable),
-        Some(ForInit::PatternForIn { iterable, .. }) => out.push(iterable),
-        Some(ForInit::Exprs(exprs)) => out.extend(exprs.iter()),
-        None => {}
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -1526,12 +1496,14 @@ pub enum LiteralPatternValue {
 
 #[derive(Debug, Clone)]
 pub struct ConstPattern {
-    pub name: Vec<Identifier>,
-    /// `None` for the dotted-name form (`const Foo.bar`); `Some` for a const
-    /// constructor / collection / parenthesized expression form
-    /// (`const Foo(1)`, `const [1, 2]`, `const (1 + 2)`).
-    pub expr: Option<Box<Expr>>,
+    pub value: ConstPatternValue,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ConstPatternValue {
+    Name(Vec<Identifier>),
+    Expr(Box<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -1590,7 +1562,7 @@ pub struct ObjectPatternField {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelationalPatternOp {
     Eq,
     NotEq,

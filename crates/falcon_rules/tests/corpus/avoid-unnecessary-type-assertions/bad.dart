@@ -76,3 +76,13 @@ void tryScopeRegression() {
     print(known is int); /* expect: avoid-unnecessary-type-assertions */
   }
 }
+
+void typedCollectionForAssertionRegression() {
+  final list = [
+    for (int i = 0; i < 2; i++) i is int, /* expect: avoid-unnecessary-type-assertions */
+  ];
+  final map = {
+    for (int j = 0; j < 2; j++) j: j is int, /* expect: avoid-unnecessary-type-assertions */
+  };
+  print([list, map]);
+}

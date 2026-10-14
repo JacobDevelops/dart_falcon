@@ -97,7 +97,10 @@ impl Collector {
 impl Visitor for Collector {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(v) = node {
-            self.check_declarators(&v.declarators, v.is_const);
+            self.check_declarators(
+                &v.declarators,
+                v.keyword == falcon_syntax::ast::VarKeyword::Const,
+            );
         }
         walk_top_level_decl(self, node);
     }
@@ -135,7 +138,10 @@ impl Visitor for Collector {
     }
 
     fn visit_field_decl(&mut self, node: &FieldDecl) {
-        self.check_declarators(&node.declarators, node.is_const);
+        self.check_declarators(
+            &node.declarators,
+            node.keyword == falcon_syntax::ast::VarKeyword::Const,
+        );
         walk_field_decl(self, node);
     }
 
@@ -144,12 +150,18 @@ impl Visitor for Collector {
         walk_formal_param(self, node);
     }
 
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        self.check_declarators(
+            &node.declarators,
+            node.keyword == falcon_syntax::ast::VarKeyword::Const,
+        );
+        falcon_syntax::visitor::walk_local_var(self, node);
+    }
+
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
-            Stmt::LocalVar(lv) => self.check_declarators(&lv.declarators, lv.is_const),
             Stmt::LocalFunc(lf) => self.check(&lf.name),
-            // `ForInit::VarDecl` re-enters as `Stmt::LocalVar` and `PatternForIn`
-            // as a pattern, so only the `for-in` binding needs handling here.
+            // Local declarations and pattern bindings use their dedicated hooks.
             Stmt::For(f) => {
                 if let Some(ForInit::ForIn { name, .. }) = &f.init {
                     self.check(name);

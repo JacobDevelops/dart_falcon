@@ -63,9 +63,7 @@ impl Visitor for Collector {
             && let Expr::FuncExpr { params, .. } = &args.positional[0]
             // A single-parameter callback marks an Iterable.forEach; Map.forEach
             // takes two parameters and is intentionally left alone.
-            && params.positional.len() == 1
-            && params.optional_positional.is_empty()
-            && params.named.is_empty()
+            && matches!(params.params.as_slice(), [param] if param.kind == falcon_syntax::ast::ParamKind::Positional)
         {
             self.push(&field.span);
         }

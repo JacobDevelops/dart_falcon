@@ -76,12 +76,7 @@ fn check_type(ty: Option<&DartType>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
 }
 
 fn check_params(params: &FormalParamList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    for p in params
-        .positional
-        .iter()
-        .chain(&params.optional_positional)
-        .chain(&params.named)
-    {
+    for p in params.params.iter() {
         check_type(p.param_type.as_ref(), diags, ctx);
     }
 }
@@ -114,7 +109,9 @@ fn scan_top(decl: &TopLevelDecl, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
     match decl {
         TopLevelDecl::Function(f) => {
             check_type(f.return_type.as_ref(), diags, ctx);
-            check_params(&f.params, diags, ctx);
+            if let Some(params) = f.params() {
+                check_params(params, diags, ctx);
+            }
             if let Some(body) = &f.body {
                 scan_body(body, diags, ctx);
             }
@@ -176,14 +173,22 @@ fn scan_member(member: &ClassMember, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeC
 
 fn scan_body(body: &FunctionBody, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     if let FunctionBody::Block(b) = body {
-        // Exhaustive traversal: a declaration nested in any statement form — a
-        // labeled block, a closure body, a switch case — must still be checked.
-        // A hand-rolled walk with a `_ => {}` arm silently skipped those.
-        falcon_syntax::visitor::for_each_stmt_in_stmts(&b.stmts, &mut |s| {
-            if let Stmt::LocalVar(lv) = s {
-                check_type(lv.var_type.as_ref(), diags, ctx);
-                check_declarators(&lv.declarators, lv.var_type.is_some(), diags, ctx);
+        struct Locals<'a, 'ctx> {
+            diags: &'a mut Vec<Diagnostic>,
+            ctx: &'a AnalyzeContext<'ctx>,
+        }
+
+        impl falcon_syntax::visitor::Visitor for Locals<'_, '_> {
+            fn visit_local_var(&mut self, lv: &LocalVarDecl) {
+                check_type(lv.var_type.as_ref(), self.diags, self.ctx);
+                check_declarators(&lv.declarators, lv.var_type.is_some(), self.diags, self.ctx);
+                falcon_syntax::visitor::walk_local_var(self, lv);
             }
-        });
+        }
+
+        let mut visitor = Locals { diags, ctx };
+        for stmt in &b.stmts {
+            falcon_syntax::visitor::Visitor::visit_stmt(&mut visitor, stmt);
+        }
     }
 }

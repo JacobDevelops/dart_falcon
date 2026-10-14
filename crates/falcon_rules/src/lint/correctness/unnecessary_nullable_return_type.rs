@@ -75,20 +75,11 @@ fn check(
     ctx: &AnalyzeContext,
 ) {
     if let Some(return_type) = return_type
-        && is_outer_nullable(return_type)
+        && return_type.is_nullable()
         && let Some(body) = body
         && all_returns_provably_non_null(body)
     {
         flag_return_type(return_type, diags, ctx);
-    }
-}
-
-fn is_outer_nullable(ty: &DartType) -> bool {
-    match ty {
-        DartType::Named(nt) => nt.is_nullable,
-        DartType::Function(ft) => ft.is_nullable,
-        DartType::Record(rt) => rt.is_nullable,
-        _ => false,
     }
 }
 

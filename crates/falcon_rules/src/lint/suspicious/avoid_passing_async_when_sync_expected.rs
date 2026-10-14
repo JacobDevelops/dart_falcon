@@ -99,17 +99,12 @@ impl Collector<'_> {
     fn function(
         &mut self,
         type_params: &[TypeParam],
-        params: &FormalParamList,
+        params: Option<&FormalParamList>,
         body: Option<&FunctionBody>,
     ) {
         self.push();
         self.type_parameters.push(type_params, &self.model);
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.into_iter().flat_map(|params| &params.params) {
             let ty = param
                 .param_type
                 .as_ref()
@@ -158,7 +153,9 @@ impl Collector<'_> {
                 self.visit_expr(iterable);
                 self.declare(&name.name, ResolvedType::Unknown);
             }
-            ForInit::PatternForIn { pattern, iterable } => {
+            ForInit::PatternForIn {
+                pattern, iterable, ..
+            } => {
                 self.visit_expr(iterable);
                 self.pattern(pattern);
             }
@@ -236,7 +233,7 @@ impl Collector<'_> {
 
     fn check_argument(&mut self, argument: &Expr, expected: &ResolvedType) {
         let Expr::FuncExpr {
-            is_async: true,
+            async_marker: AsyncMarker::Async | AsyncMarker::AsyncStar,
             span,
             ..
         } = argument
@@ -277,6 +274,10 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        self.local(node);
+    }
+
     fn visit_class_decl(&mut self, node: &ClassDecl) {
         let saved_type = self.current_type.clone();
         self.type_parameters.push(&node.type_params, &self.model);
@@ -301,15 +302,15 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.function(&node.type_params, &node.params, node.body.as_ref());
+        self.function(&node.type_params, node.params(), node.body.as_ref());
     }
 
     fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.function(&node.type_params, &node.params, node.body.as_ref());
+        self.function(&node.type_params, Some(&node.params), node.body.as_ref());
     }
 
     fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.function(&[], &node.params, node.body.as_ref());
+        self.function(&[], Some(&node.params), node.body.as_ref());
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {
@@ -321,12 +322,12 @@ impl Visitor for Collector<'_> {
                 }
                 self.pop();
             }
-            Stmt::LocalVar(declaration) => self.local(declaration),
+            Stmt::LocalVar(declaration) => self.visit_local_var(declaration),
             Stmt::LocalFunc(function) => {
                 self.declare(&function.name.name, ResolvedType::Unknown);
                 self.function(
                     &function.type_params,
-                    &function.params,
+                    Some(&function.params),
                     Some(&function.body),
                 );
             }
@@ -415,7 +416,7 @@ impl Visitor for Collector<'_> {
                 body,
                 ..
             } => {
-                self.function(type_params, params, Some(body));
+                self.function(type_params, Some(params), Some(body));
                 return;
             }
             _ => {}

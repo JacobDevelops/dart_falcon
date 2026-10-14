@@ -29,17 +29,6 @@ impl Rule for AvoidEmptyElse {
     }
 }
 
-/// An empty statement is parsed as an `Expr` statement wrapping a `NullLit`
-/// whose span begins at the `;` token; a real `null;` starts at `null`.
-fn is_empty_semicolon(stmt: &Stmt, ctx: &AnalyzeContext) -> bool {
-    if let Stmt::Expr(e) = stmt
-        && let Expr::NullLit { span } = &e.expr
-    {
-        return ctx.source.as_bytes().get(span.start) == Some(&b';');
-    }
-    false
-}
-
 struct Collector<'a, 'ctx> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'ctx>,
@@ -49,7 +38,7 @@ impl Visitor for Collector<'_, '_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         if let Stmt::If(if_stmt) = node
             && let Some(else_branch) = &if_stmt.else_branch
-            && is_empty_semicolon(else_branch, self.ctx)
+            && matches!(else_branch.as_ref(), Stmt::Empty(_))
         {
             let span = else_branch.span();
             self.diags.push(Diagnostic::new(

@@ -129,7 +129,9 @@ fn scan_top(
     match decl {
         TopLevelDecl::Function(f) => {
             // A top-level function/getter whose return type is `bool`.
-            if !f.is_setter && is_bool_type(f.return_type.as_ref()) {
+            if !matches!(f.kind, falcon_syntax::ast::FunctionKind::Setter(_))
+                && is_bool_type(f.return_type.as_ref())
+            {
                 check_name(&f.name, diags, ctx, prefixes);
             }
             if let Some(body) = &f.body {

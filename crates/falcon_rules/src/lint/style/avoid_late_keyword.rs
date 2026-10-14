@@ -10,7 +10,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_stmt, walk_top_level_decl};
+use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_local_var, walk_top_level_decl};
 
 pub struct AvoidLateKeyword;
 
@@ -51,13 +51,11 @@ impl Visitor for Collector<'_, '_> {
         walk_field_decl(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalVar(local) = node
-            && local.is_late
-        {
+    fn visit_local_var(&mut self, local: &LocalVarDecl) {
+        if local.is_late {
             self.diags.push(make_diag(self.ctx, &local.span));
         }
-        walk_stmt(self, node);
+        walk_local_var(self, local);
     }
 }
 

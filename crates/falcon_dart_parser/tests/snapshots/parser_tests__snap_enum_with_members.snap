@@ -75,7 +75,7 @@ Enum(
                     is_static: false,
                     is_abstract: false,
                     is_external: false,
-                    is_async: false,
+                    async_marker: Sync,
                     return_type: Some(
                         Named(
                             NamedType {

@@ -61,17 +61,16 @@ struct Signature {
 }
 
 impl Signature {
-    fn from_params(params: &FormalParamList, return_type: Option<&DartType>) -> Self {
+    fn from_params(params: Option<&FormalParamList>, return_type: Option<&DartType>) -> Self {
         Self {
             positional: params
-                .positional
-                .iter()
-                .chain(&params.optional_positional)
+                .into_iter()
+                .flat_map(|params| params.positional())
                 .map(formal_expects_function)
                 .collect(),
             named: params
-                .named
-                .iter()
+                .into_iter()
+                .flat_map(|params| params.named())
                 .map(|param| (param.name.name.clone(), formal_expects_function(param)))
                 .collect(),
             returns_function: return_type.is_some_and(is_function_type),
@@ -103,7 +102,7 @@ impl Signature {
 
     fn from_formal(param: &FormalParam) -> Option<Self> {
         if let Some(params) = &param.function_params {
-            return Some(Self::from_params(params, param.param_type.as_ref()));
+            return Some(Self::from_params(Some(params), param.param_type.as_ref()));
         }
         signature_from_type(param.param_type.as_ref()?)
     }
@@ -169,18 +168,26 @@ impl ProgramFacts {
         let mut facts = Self::default();
         for declaration in &program.declarations {
             match declaration {
-                TopLevelDecl::Function(function) if function.is_setter => {
-                    if let Some(param) = function.params.positional.first() {
+                TopLevelDecl::Function(function)
+                    if matches!(function.kind, falcon_syntax::ast::FunctionKind::Setter(_)) =>
+                {
+                    if let Some(param) = function.params().and_then(|params| {
+                        params.params.iter().find(|param| {
+                            matches!(param.kind, falcon_syntax::ast::ParamKind::Positional)
+                        })
+                    }) {
                         facts.setters.insert(
                             function.name.name.clone(),
                             ValueFact::from_type(param.param_type.as_ref(), true),
                         );
                     }
                 }
-                TopLevelDecl::Function(function) if !function.is_getter => {
+                TopLevelDecl::Function(function)
+                    if !matches!(function.kind, falcon_syntax::ast::FunctionKind::Getter) =>
+                {
                     facts.functions.insert(
                         function.name.name.clone(),
-                        Signature::from_params(&function.params, function.return_type.as_ref()),
+                        Signature::from_params(function.params(), function.return_type.as_ref()),
                     );
                 }
                 TopLevelDecl::Variable(variable) => {
@@ -234,7 +241,7 @@ impl ProgramFacts {
                             .constructor_name
                             .as_ref()
                             .map(|name| name.name.clone()),
-                        Signature::from_params(&constructor.params, None),
+                        Signature::from_params(Some(&constructor.params), None),
                     );
                 }
                 ClassMember::Method(method) => {
@@ -242,7 +249,7 @@ impl ProgramFacts {
                         method.name.name.clone(),
                         MethodFact {
                             signature: Signature::from_params(
-                                &method.params,
+                                Some(&method.params),
                                 method.return_type.as_ref(),
                             ),
                             is_static: method.is_static,
@@ -620,7 +627,7 @@ impl Collector<'_> {
             Expr::Ident(identifier) => self.unqualified_signature(&identifier.name),
             Expr::Field { object, field, .. } => self.field_signature(object, &field.name),
             Expr::GenericInstantiation { target, .. } => self.value_signature(target),
-            Expr::FuncExpr { params, .. } => Some(Signature::from_params(params, None)),
+            Expr::FuncExpr { params, .. } => Some(Signature::from_params(Some(params), None)),
             other => {
                 let _ = other;
                 None
@@ -629,12 +636,7 @@ impl Collector<'_> {
     }
 
     fn visit_params(&mut self, params: &FormalParamList) {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             if formal_expects_function(param)
                 && let Some(default) = &param.default_value
             {
@@ -652,7 +654,7 @@ impl Collector<'_> {
 
     fn function(
         &mut self,
-        params: &FormalParamList,
+        params: Option<&FormalParamList>,
         body: Option<&FunctionBody>,
         signature: &Signature,
         fresh: bool,
@@ -665,7 +667,9 @@ impl Collector<'_> {
         }
         let previous_return =
             std::mem::replace(&mut self.returns_function, signature.returns_function);
-        self.visit_params(params);
+        if let Some(params) = params {
+            self.visit_params(params);
+        }
         if let Some(body) = body {
             self.body(body);
         }
@@ -703,7 +707,8 @@ impl Collector<'_> {
     }
 
     fn declare_local_function(&mut self, function: &LocalFuncDecl) {
-        let signature = Signature::from_params(&function.params, function.return_type.as_ref());
+        let signature =
+            Signature::from_params(Some(&function.params), function.return_type.as_ref());
         self.locals
             .declare(function.name.name.clone(), StaticType::Unknown);
         self.local_values.declare(
@@ -845,34 +850,40 @@ impl Collector<'_> {
         }
     }
 
+    fn for_init(&mut self, init: &ForInit) {
+        match init {
+            ForInit::VarDecl(declaration) => self.local_var(declaration),
+            ForInit::ForIn {
+                var_type,
+                name,
+                iterable,
+                ..
+            } => {
+                self.visit_expr(iterable);
+                let fact = ValueFact::from_type(var_type.as_ref(), false);
+                self.locals
+                    .declare(name.name.clone(), fact.static_type.clone());
+                self.local_values.declare(name.name.clone(), fact);
+            }
+            ForInit::PatternForIn {
+                pattern, iterable, ..
+            } => {
+                self.visit_expr(iterable);
+                self.visit_pattern(pattern);
+                self.bind_pattern_values(pattern);
+            }
+            ForInit::Exprs(expressions) => {
+                for expression in expressions {
+                    self.visit_expr(expression);
+                }
+            }
+        }
+    }
+
     fn for_stmt(&mut self, node: &ForStmt) {
         self.push_scope();
         if let Some(init) = &node.init {
-            match init {
-                ForInit::VarDecl(declaration) => self.local_var(declaration),
-                ForInit::ForIn {
-                    var_type,
-                    name,
-                    iterable,
-                    ..
-                } => {
-                    self.visit_expr(iterable);
-                    let fact = ValueFact::from_type(var_type.as_ref(), false);
-                    self.locals
-                        .declare(name.name.clone(), fact.static_type.clone());
-                    self.local_values.declare(name.name.clone(), fact);
-                }
-                ForInit::PatternForIn { pattern, iterable } => {
-                    self.visit_expr(iterable);
-                    self.visit_pattern(pattern);
-                    self.bind_pattern_values(pattern);
-                }
-                ForInit::Exprs(expressions) => {
-                    for expression in expressions {
-                        self.visit_expr(expression);
-                    }
-                }
-            }
+            self.for_init(init);
         }
         if let Some(condition) = &node.condition {
             self.visit_expr(condition);
@@ -962,6 +973,10 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        self.local_var(node);
+    }
+
     fn visit_program(&mut self, node: &Program) {
         for declaration in &node.declarations {
             self.visit_top_level_decl(declaration);
@@ -1028,8 +1043,8 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        let signature = Signature::from_params(&node.params, node.return_type.as_ref());
-        self.function(&node.params, node.body.as_ref(), &signature, true);
+        let signature = Signature::from_params(node.params(), node.return_type.as_ref());
+        self.function(node.params(), node.body.as_ref(), &signature, true);
     }
 
     fn visit_class_member(&mut self, node: &ClassMember) {
@@ -1041,9 +1056,14 @@ impl Visitor for Collector<'_> {
             ClassMember::Setter(setter) => self.visit_setter_decl(setter),
             ClassMember::Operator(operator) => {
                 let signature =
-                    Signature::from_params(&operator.params, operator.return_type.as_ref());
+                    Signature::from_params(Some(&operator.params), operator.return_type.as_ref());
                 let previous_static = std::mem::replace(&mut self.current_static, false);
-                self.function(&operator.params, operator.body.as_ref(), &signature, true);
+                self.function(
+                    Some(&operator.params),
+                    operator.body.as_ref(),
+                    &signature,
+                    true,
+                );
                 self.current_static = previous_static;
             }
             ClassMember::Error(_) => {}
@@ -1066,9 +1086,9 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_method_decl(&mut self, node: &MethodDecl) {
-        let signature = Signature::from_params(&node.params, node.return_type.as_ref());
+        let signature = Signature::from_params(Some(&node.params), node.return_type.as_ref());
         let previous_static = std::mem::replace(&mut self.current_static, node.is_static);
-        self.function(&node.params, node.body.as_ref(), &signature, true);
+        self.function(Some(&node.params), node.body.as_ref(), &signature, true);
         self.current_static = previous_static;
     }
 
@@ -1125,7 +1145,7 @@ impl Visitor for Collector<'_> {
 
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
-            Stmt::LocalVar(declaration) => self.local_var(declaration),
+            Stmt::LocalVar(declaration) => self.visit_local_var(declaration),
             Stmt::PatternDecl(declaration) => {
                 self.visit_expr(&declaration.init);
                 self.visit_pattern(&declaration.pattern);
@@ -1176,8 +1196,13 @@ impl Visitor for Collector<'_> {
             Stmt::TryCatch(try_catch) => self.try_catch(try_catch),
             Stmt::LocalFunc(function) => {
                 let signature =
-                    Signature::from_params(&function.params, function.return_type.as_ref());
-                self.function(&function.params, Some(&function.body), &signature, false);
+                    Signature::from_params(Some(&function.params), function.return_type.as_ref());
+                self.function(
+                    Some(&function.params),
+                    Some(&function.body),
+                    &signature,
+                    false,
+                );
             }
             Stmt::Return(return_statement) => {
                 if let Some(value) = &return_statement.value {
@@ -1239,8 +1264,8 @@ impl Visitor for Collector<'_> {
                 }
             }
             Expr::FuncExpr { params, body, .. } => {
-                let signature = Signature::from_params(params, None);
-                self.function(params, Some(body), &signature, false);
+                let signature = Signature::from_params(Some(params), None);
+                self.function(Some(params), Some(body), &signature, false);
             }
             other => walk_expr(self, other),
         }

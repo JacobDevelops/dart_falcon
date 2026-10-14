@@ -54,12 +54,10 @@ fn members_of(decl: &TopLevelDecl) -> Option<&[ClassMember]> {
 }
 
 fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    let plain = |p: &&FormalParam| !p.is_field && !p.is_super;
+    let plain = |p: &&FormalParam| p.initializing.is_none();
     let positional: HashSet<&str> = ctor
         .params
-        .positional
-        .iter()
-        .chain(&ctor.params.optional_positional)
+        .positional()
         .filter(plain)
         .map(|p| p.name.name.as_str())
         .collect();
@@ -67,8 +65,7 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
     // an initializing formal is only non-breaking when it already matches the field.
     let named: HashSet<&str> = ctor
         .params
-        .named
-        .iter()
+        .named()
         .filter(plain)
         .map(|p| p.name.name.as_str())
         .collect();

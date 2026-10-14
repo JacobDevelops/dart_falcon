@@ -197,7 +197,7 @@ impl Collector<'_> {
         if is_flutter_key(&argument_type) {
             return true;
         }
-        let named_key = constructor.params.named.iter().any(|parameter| {
+        let named_key = constructor.params.named().any(|parameter| {
             parameter.name.name == "key"
                 && parameter
                     .param_type
@@ -240,11 +240,10 @@ impl Collector<'_> {
             return false;
         };
         target_defines_key(&signature, &substitutions, &self.model)
-            && constructor
-                .params
-                .named
-                .iter()
-                .any(|parameter| parameter.is_super && parameter.name.name == "key")
+            && constructor.params.named().any(|parameter| {
+                parameter.initializing == Some(InitializingFormal::Super)
+                    && parameter.name.name == "key"
+            })
     }
 
     fn report(&mut self, span: &Span, message: &str) {

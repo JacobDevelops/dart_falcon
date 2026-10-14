@@ -36,7 +36,8 @@ fn sole_param_type(param: &str) -> DartType {
         TopLevelDecl::Function(f) => f,
         other => panic!("expected function, got {other:?}"),
     };
-    func.params.positional[0]
+    assert_eq!(func.params().unwrap().params[0].kind, ParamKind::Positional);
+    func.params().unwrap().params[0]
         .param_type
         .clone()
         .expect("param should carry a type")
@@ -253,8 +254,9 @@ fn only_function(prog: &Program) -> &FunctionDecl {
 fn generic_inline_function_typed_positional_formal() {
     let (prog, errors) = parse("void f(int cb<T>(T x)) {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let params = &only_function(&prog).params;
-    let p = &params.positional[0];
+    let params = only_function(&prog).params().unwrap();
+    let p = &params.params[0];
+    assert_eq!(p.kind, ParamKind::Positional);
     assert_eq!(p.name.name, "cb");
     assert!(
         p.function_params.is_some(),
@@ -266,7 +268,8 @@ fn generic_inline_function_typed_positional_formal() {
 fn generic_inline_function_typed_named_formal() {
     let (prog, errors) = parse("void f({int cb<T>(T x)?}) {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let p = &only_function(&prog).params.named[0];
+    let p = &only_function(&prog).params().unwrap().params[0];
+    assert_eq!(p.kind, ParamKind::Named { required: false });
     assert_eq!(p.name.name, "cb");
     assert!(p.function_params.is_some());
 }
@@ -275,7 +278,8 @@ fn generic_inline_function_typed_named_formal() {
 fn generic_inline_function_typed_type_param_return() {
     let (prog, errors) = parse("void f(T select<T>(List<T> xs)) {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
-    let p = &only_function(&prog).params.positional[0];
+    let p = &only_function(&prog).params().unwrap().params[0];
+    assert_eq!(p.kind, ParamKind::Positional);
     assert_eq!(p.name.name, "select");
     assert!(p.function_params.is_some());
 }
@@ -300,7 +304,8 @@ fn test_generic_function_typed_formal_retains_type_params() {
         TopLevelDecl::Function(f) => f,
         other => panic!("got {other:?}"),
     };
-    let param = &func.params.positional[0];
+    let param = &func.params().unwrap().params[0];
+    assert_eq!(param.kind, ParamKind::Positional);
     assert!(param.function_params.is_some());
     assert_eq!(param.type_params.len(), 1, "generic <T> must be retained");
     assert_eq!(param.type_params[0].name.name, "T");
@@ -311,5 +316,9 @@ fn test_generic_function_typed_formal_retains_type_params() {
         TopLevelDecl::Function(f) => f,
         other => panic!("got {other:?}"),
     };
-    assert!(func2.params.positional[0].type_params.is_empty());
+    assert_eq!(
+        func2.params().unwrap().params[0].kind,
+        ParamKind::Positional
+    );
+    assert!(func2.params().unwrap().params[0].type_params.is_empty());
 }

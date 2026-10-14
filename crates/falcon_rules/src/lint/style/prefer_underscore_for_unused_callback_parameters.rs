@@ -36,18 +36,12 @@ impl Visitor for Collector {
         } = node
         {
             let used = used_parameters(params, body);
-            if params
-                .positional
-                .iter()
-                .chain(&params.optional_positional)
-                .chain(&params.named)
-                .any(|param| {
-                    let name = &param.name.name;
-                    !(name.is_empty()
-                        || name.bytes().all(|byte| byte == b'_')
-                        || used.contains(&param.name.span.start))
-                })
-            {
+            if params.params.iter().any(|param| {
+                let name = &param.name.name;
+                !(name.is_empty()
+                    || name.bytes().all(|byte| byte == b'_')
+                    || used.contains(&param.name.span.start))
+            }) {
                 self.diagnostics.push(Diagnostic::new(
                     "prefer-underscore-for-unused-callback-parameters",
                     Severity::Warning,

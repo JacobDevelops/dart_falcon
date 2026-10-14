@@ -436,7 +436,6 @@ name = "falcon_syntax"
 version = "0.3.0"
 dependencies = [
  "falcon_dart_parser",
- "insta",
 ]
 
 [[package]]

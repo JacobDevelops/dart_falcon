@@ -7,10 +7,7 @@ Class(
         annotations: [],
         modifiers: ClassModifiers {
             is_abstract: true,
-            is_interface: false,
-            is_base: false,
-            is_final: false,
-            is_sealed: false,
+            restriction: None,
         },
         name: Identifier {
             name: "Shape",
@@ -30,7 +27,7 @@ Class(
                     is_static: false,
                     is_abstract: false,
                     is_external: false,
-                    is_async: false,
+                    async_marker: Sync,
                     return_type: Some(
                         Named(
                             NamedType {

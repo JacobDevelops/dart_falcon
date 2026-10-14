@@ -383,10 +383,12 @@ impl Collector<'_> {
         ));
     }
 
-    fn function(&mut self, params: &FormalParamList, body: Option<&FunctionBody>) {
+    fn function(&mut self, params: Option<&FormalParamList>, body: Option<&FunctionBody>) {
         let saved = std::mem::replace(&mut self.environment, TypeEnvironment::new());
-        self.environment
-            .bind_params(params, &self.model, &self.type_parameters);
+        if let Some(params) = params {
+            self.environment
+                .bind_params(params, &self.model, &self.type_parameters);
+        }
         if let Some(body) = body {
             match body {
                 FunctionBody::Block(block) => block
@@ -418,18 +420,18 @@ impl Visitor for Collector<'_> {
 
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         self.type_parameters.push(&node.type_params, &self.model);
-        self.function(&node.params, node.body.as_ref());
+        self.function(node.params(), node.body.as_ref());
         self.type_parameters.pop();
     }
 
     fn visit_method_decl(&mut self, node: &MethodDecl) {
         self.type_parameters.push(&node.type_params, &self.model);
-        self.function(&node.params, node.body.as_ref());
+        self.function(Some(&node.params), node.body.as_ref());
         self.type_parameters.pop();
     }
 
     fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.function(&node.params, node.body.as_ref());
+        self.function(Some(&node.params), node.body.as_ref());
     }
 
     fn visit_expr(&mut self, node: &Expr) {
@@ -450,20 +452,21 @@ impl Visitor for Collector<'_> {
         walk_expr(self, node);
     }
 
+    fn visit_local_var(&mut self, declaration: &LocalVarDecl) {
+        falcon_syntax::visitor::walk_local_var(self, declaration);
+        let ty = declaration
+            .var_type
+            .as_ref()
+            .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
+            .unwrap_or(ResolvedType::Unknown);
+        for declarator in &declaration.declarators {
+            self.environment
+                .declare(declarator.name.name.clone(), ty.clone());
+        }
+    }
+
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
-            Stmt::LocalVar(declaration) => {
-                walk_stmt(self, node);
-                let ty = declaration
-                    .var_type
-                    .as_ref()
-                    .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
-                    .unwrap_or(ResolvedType::Unknown);
-                for declarator in &declaration.declarators {
-                    self.environment
-                        .declare(declarator.name.name.clone(), ty.clone());
-                }
-            }
             Stmt::Block(block) => {
                 self.environment.push_scope();
                 for statement in &block.stmts {
@@ -513,7 +516,7 @@ impl Visitor for Collector<'_> {
             Stmt::LocalFunc(function) => {
                 self.type_parameters
                     .push(&function.type_params, &self.model);
-                self.function(&function.params, Some(&function.body));
+                self.function(Some(&function.params), Some(&function.body));
                 self.type_parameters.pop();
             }
             _ => walk_stmt(self, node),

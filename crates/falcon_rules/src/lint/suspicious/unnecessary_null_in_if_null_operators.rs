@@ -36,7 +36,7 @@ struct Collector {
 impl Visitor for Collector {
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Binary {
-            op: BinaryOp::NullCoalesce | BinaryOp::IfNull,
+            op: BinaryOp::NullCoalesce,
             left,
             right,
             span,

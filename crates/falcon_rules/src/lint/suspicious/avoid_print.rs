@@ -56,12 +56,7 @@ impl Collector {
         self.scopes.iter().rev().any(|scope| scope.contains(name))
     }
     fn params(&mut self, params: &FormalParamList) {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             self.declare(&param.name.name);
         }
     }
@@ -84,9 +79,33 @@ impl Collector {
             self.declare(&declarator.name.name);
         }
     }
-    fn function(&mut self, params: &FormalParamList, body: Option<&FunctionBody>) {
+    fn for_init(&mut self, init: &ForInit) {
+        match init {
+            ForInit::VarDecl(declaration) => self.visit_local_var(declaration),
+            ForInit::ForIn { name, iterable, .. } => {
+                self.visit_expr(iterable);
+                self.declare(&name.name);
+            }
+            ForInit::PatternForIn {
+                pattern, iterable, ..
+            } => {
+                self.visit_expr(iterable);
+                for name in falcon_syntax::visitor::bound_names(pattern) {
+                    self.declare(&name.name);
+                }
+            }
+            ForInit::Exprs(expressions) => {
+                for expression in expressions {
+                    self.visit_expr(expression);
+                }
+            }
+        }
+    }
+    fn function(&mut self, params: Option<&FormalParamList>, body: Option<&FunctionBody>) {
         self.push();
-        self.params(params);
+        if let Some(params) = params {
+            self.params(params);
+        }
         if let Some(body) = body {
             self.body(body);
         }
@@ -108,13 +127,13 @@ impl Visitor for Collector {
         self.pop();
     }
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.function(&node.params, node.body.as_ref());
+        self.function(node.params(), node.body.as_ref());
     }
     fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.function(&node.params, node.body.as_ref());
+        self.function(Some(&node.params), node.body.as_ref());
     }
     fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.function(&node.params, node.body.as_ref());
+        self.function(Some(&node.params), node.body.as_ref());
     }
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Call { callee, span, .. } = node
@@ -133,11 +152,15 @@ impl Visitor for Collector {
             ));
         }
         if let Expr::FuncExpr { params, body, .. } = node {
-            self.function(params, Some(body));
+            self.function(Some(params), Some(body));
         } else {
             walk_expr(self, node);
         }
     }
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        self.local(node);
+    }
+
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
             Stmt::Block(block) => {
@@ -147,32 +170,14 @@ impl Visitor for Collector {
                 }
                 self.pop();
             }
-            Stmt::LocalVar(declaration) => self.local(declaration),
             Stmt::LocalFunc(function) => {
                 self.declare(&function.name.name);
-                self.function(&function.params, Some(&function.body));
+                self.function(Some(&function.params), Some(&function.body));
             }
             Stmt::For(statement) => {
                 self.push();
                 if let Some(init) = &statement.init {
-                    match init {
-                        ForInit::VarDecl(declaration) => self.local(declaration),
-                        ForInit::ForIn { name, iterable, .. } => {
-                            self.visit_expr(iterable);
-                            self.declare(&name.name);
-                        }
-                        ForInit::PatternForIn { pattern, iterable } => {
-                            self.visit_expr(iterable);
-                            for name in falcon_syntax::visitor::bound_names(pattern) {
-                                self.declare(&name.name);
-                            }
-                        }
-                        ForInit::Exprs(expressions) => {
-                            for expression in expressions {
-                                self.visit_expr(expression);
-                            }
-                        }
-                    }
+                    self.for_init(init);
                 }
                 if let Some(condition) = &statement.condition {
                     self.visit_expr(condition);

@@ -114,7 +114,7 @@ fn library_annotation_names(program: &Program, ctx: &AnalyzeContext) -> HashSet<
             let TopLevelDecl::Variable(variable) = decl else {
                 continue;
             };
-            if !variable.is_const {
+            if variable.keyword != falcon_syntax::ast::VarKeyword::Const {
                 continue;
             }
             for declarator in &variable.declarators {

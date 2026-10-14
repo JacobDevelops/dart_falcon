@@ -21,8 +21,7 @@ fn test_untyped_async_method() {
     match &c.members[0] {
         ClassMember::Method(m) => {
             assert_eq!(m.name.name, "foo");
-            assert!(m.is_async);
-            assert!(!m.is_generator);
+            assert_eq!(m.async_marker, AsyncMarker::Async);
             assert!(m.return_type.is_none());
         }
         other => panic!("expected method, got {other:?}"),
@@ -35,8 +34,7 @@ fn test_untyped_async_star_method() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
-            assert!(m.is_async);
-            assert!(m.is_generator);
+            assert_eq!(m.async_marker, AsyncMarker::AsyncStar);
         }
         other => panic!("expected method, got {other:?}"),
     }
@@ -48,8 +46,7 @@ fn test_untyped_sync_star_method() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
-            assert!(!m.is_async);
-            assert!(m.is_generator);
+            assert_eq!(m.async_marker, AsyncMarker::SyncStar);
         }
         other => panic!("expected method, got {other:?}"),
     }
@@ -62,7 +59,7 @@ fn test_untyped_generic_async_method() {
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
             assert_eq!(m.type_params.len(), 1);
-            assert!(m.is_async);
+            assert_eq!(m.async_marker, AsyncMarker::Async);
         }
         other => panic!("expected method, got {other:?}"),
     }
@@ -194,8 +191,9 @@ fn test_typed_super_parameter() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &only_class(&prog).members[0] {
         ClassMember::Constructor(c) => {
-            let p = &c.params.positional[0];
-            assert!(p.is_super);
+            let p = &c.params.params[0];
+            assert_eq!(p.kind, ParamKind::Positional);
+            assert_eq!(p.initializing, Some(InitializingFormal::Super));
             assert_eq!(p.name.name, "x");
             assert!(p.param_type.is_some());
         }
@@ -252,8 +250,9 @@ fn test_typed_field_formal() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &only_class(&prog).members[1] {
         ClassMember::Constructor(c) => {
-            let p = &c.params.positional[0];
-            assert!(p.is_field);
+            let p = &c.params.params[0];
+            assert_eq!(p.kind, ParamKind::Positional);
+            assert_eq!(p.initializing, Some(InitializingFormal::This));
             assert_eq!(p.name.name, "x");
             assert!(p.param_type.is_some());
         }
@@ -339,7 +338,8 @@ fn test_nullable_function_typed_formal() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &prog.declarations[0] {
         TopLevelDecl::Function(func) => {
-            let p = &func.params.named[0];
+            let p = &func.params().unwrap().params[0];
+            assert_eq!(p.kind, ParamKind::Named { required: false });
             assert_eq!(p.name.name, "orElse");
             assert!(p.function_params.is_some());
         }
@@ -428,7 +428,8 @@ fn test_curried_function_type_param() {
         TopLevelDecl::Function(f) => f,
         other => panic!("expected function, got {other:?}"),
     };
-    let param = &func.params.positional[0];
+    let param = &func.params().unwrap().params[0];
+    assert_eq!(param.kind, ParamKind::Positional);
     assert_eq!(param.name.name, "x");
     match param.param_type.as_ref().unwrap() {
         DartType::Function(outer) => {
@@ -473,7 +474,8 @@ fn test_top_level_untyped_getter_arrow() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &prog.declarations[0] {
         TopLevelDecl::Function(f) => {
-            assert!(f.is_getter);
+            assert!(matches!(f.kind, falcon_syntax::ast::FunctionKind::Getter));
+            assert!(f.params().is_none());
             assert_eq!(f.name.name, "foo");
             assert!(f.return_type.is_none());
             assert!(matches!(f.body, Some(FunctionBody::Arrow(..))));
@@ -488,7 +490,8 @@ fn test_top_level_untyped_getter_block() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &prog.declarations[0] {
         TopLevelDecl::Function(f) => {
-            assert!(f.is_getter);
+            assert!(matches!(f.kind, falcon_syntax::ast::FunctionKind::Getter));
+            assert!(f.params().is_none());
             assert_eq!(f.name.name, "foo");
             assert!(f.return_type.is_none());
             assert!(matches!(f.body, Some(FunctionBody::Block(_))));
@@ -504,7 +507,8 @@ fn test_top_level_typed_getter_still_parses() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &prog.declarations[0] {
         TopLevelDecl::Function(f) => {
-            assert!(f.is_getter);
+            assert!(matches!(f.kind, falcon_syntax::ast::FunctionKind::Getter));
+            assert!(f.params().is_none());
             assert!(matches!(f.return_type, Some(DartType::Named(_))));
         }
         other => panic!("expected getter function, got {other:?}"),
@@ -576,30 +580,91 @@ fn for_init_decl(src: &str) -> LocalVarDecl {
 }
 
 #[test]
-fn test_const_in_c_style_for_initializer_keeps_is_const() {
-    // The parser used to fold `const` into `is_final` and hardcode
-    // `is_const: false`, so no rule could see the constness.
+fn test_const_in_c_style_for_initializer_keeps_keyword() {
     let decl = for_init_decl("void f() { for (const kX = 1; kX < 2;) {} }");
-    assert!(decl.is_const, "const for-init must set is_const");
-    assert!(
-        !decl.is_final,
-        "const and final are mutually exclusive (matches parse_local_var_decl)"
-    );
+    assert_eq!(decl.keyword, VarKeyword::Const);
     assert_eq!(decl.declarators[0].name.name, "kX");
 }
 
 #[test]
-fn test_final_in_c_style_for_initializer_keeps_is_final() {
+fn test_final_in_c_style_for_initializer_keeps_keyword() {
     let decl = for_init_decl("void f() { for (final x = 1; x < 2;) {} }");
-    assert!(decl.is_final, "final for-init must set is_final");
-    assert!(!decl.is_const);
+    assert_eq!(decl.keyword, VarKeyword::Final);
 }
 
 #[test]
-fn test_var_in_c_style_for_initializer_sets_neither() {
+fn test_var_in_c_style_for_initializer_keeps_keyword() {
     let decl = for_init_decl("void f() { for (var i = 0; i < 2; i++) {} }");
-    assert!(!decl.is_final);
-    assert!(!decl.is_const);
+    assert_eq!(decl.keyword, VarKeyword::Var);
+}
+
+#[test]
+fn test_getter_preserves_all_body_markers() {
+    for (source_marker, expected) in [
+        ("", AsyncMarker::Sync),
+        ("sync*", AsyncMarker::SyncStar),
+        ("async", AsyncMarker::Async),
+        ("async*", AsyncMarker::AsyncStar),
+    ] {
+        let (prog, errors) = parse(&format!("class C {{ get values {source_marker} {{}} }}"));
+        assert!(errors.is_empty(), "errors: {errors:?}");
+        let ClassMember::Getter(getter) = &only_class(&prog).members[0] else {
+            panic!("expected getter");
+        };
+        assert_eq!(getter.async_marker, expected);
+        assert_eq!(expected.is_async(), source_marker.starts_with("async"));
+        assert_eq!(expected.is_generator(), source_marker.ends_with('*'));
+    }
+}
+
+#[test]
+fn test_for_in_preserves_variable_keyword() {
+    for (source_keyword, expected) in [
+        ("var", VarKeyword::Var),
+        ("final", VarKeyword::Final),
+        ("const", VarKeyword::Const),
+    ] {
+        let (prog, errors) = parse(&format!(
+            "void f() {{ for ({source_keyword} x in xs) {{}} }}"
+        ));
+        assert!(errors.is_empty(), "errors: {errors:?}");
+        let TopLevelDecl::Function(function) = &prog.declarations[0] else {
+            panic!("expected function");
+        };
+        let Some(FunctionBody::Block(body)) = &function.body else {
+            panic!("expected function body");
+        };
+        let Stmt::For(statement) = &body.stmts[0] else {
+            panic!("expected for statement");
+        };
+        let Some(ForInit::ForIn { keyword, .. }) = &statement.init else {
+            panic!("expected for-in header");
+        };
+        assert_eq!(*keyword, expected);
+    }
+}
+
+#[test]
+fn test_pattern_for_in_preserves_variable_keyword() {
+    for (source_keyword, expected) in [("var", VarKeyword::Var), ("final", VarKeyword::Final)] {
+        let (prog, errors) = parse(&format!(
+            "void f() {{ for ({source_keyword} (x, y) in pairs) {{}} }}"
+        ));
+        assert!(errors.is_empty(), "errors: {errors:?}");
+        let TopLevelDecl::Function(function) = &prog.declarations[0] else {
+            panic!("expected function");
+        };
+        let Some(FunctionBody::Block(body)) = &function.body else {
+            panic!("expected function body");
+        };
+        let Stmt::For(statement) = &body.stmts[0] else {
+            panic!("expected for statement");
+        };
+        let Some(ForInit::PatternForIn { keyword, .. }) = &statement.init else {
+            panic!("expected pattern for-in header");
+        };
+        assert_eq!(*keyword, expected);
+    }
 }
 
 // ── Metadata annotations on record-type fields ─────────────────────────────────

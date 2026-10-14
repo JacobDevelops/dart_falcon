@@ -76,6 +76,10 @@ pub trait Visitor: Sized {
         walk_stmt(self, node);
     }
 
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        walk_local_var(self, node);
+    }
+
     fn visit_expr(&mut self, node: &Expr) {
         walk_expr(self, node);
     }
@@ -385,13 +389,7 @@ pub fn walk_function_decl<V: Visitor>(v: &mut V, node: &FunctionDecl) {
     }
     v.visit_identifier(&node.name);
     walk_type_params(v, &node.type_params);
-    for param in node
-        .params
-        .positional
-        .iter()
-        .chain(&node.params.optional_positional)
-        .chain(&node.params.named)
-    {
+    for param in node.params().into_iter().flat_map(|params| &params.params) {
         v.visit_formal_param(param);
     }
     if let Some(ref body) = node.body {
@@ -455,13 +453,7 @@ pub fn walk_constructor_decl<V: Visitor>(v: &mut V, node: &ConstructorDecl) {
         v.visit_annotation(ann);
     }
     v.visit_identifier(&node.name);
-    for param in node
-        .params
-        .positional
-        .iter()
-        .chain(&node.params.optional_positional)
-        .chain(&node.params.named)
-    {
+    for param in node.params.params.iter() {
         v.visit_formal_param(param);
     }
     for init in &node.initializers {
@@ -515,13 +507,7 @@ pub fn walk_method_decl<V: Visitor>(v: &mut V, node: &MethodDecl) {
     }
     v.visit_identifier(&node.name);
     walk_type_params(v, &node.type_params);
-    for param in node
-        .params
-        .positional
-        .iter()
-        .chain(&node.params.optional_positional)
-        .chain(&node.params.named)
-    {
+    for param in node.params.params.iter() {
         v.visit_formal_param(param);
     }
     if let Some(ref body) = node.body {
@@ -562,13 +548,7 @@ fn walk_operator_decl<V: Visitor>(v: &mut V, node: &OperatorDecl) {
     if let Some(ref ret) = node.return_type {
         v.visit_dart_type(ret);
     }
-    for param in node
-        .params
-        .positional
-        .iter()
-        .chain(&node.params.optional_positional)
-        .chain(&node.params.named)
-    {
+    for param in node.params.params.iter() {
         v.visit_formal_param(param);
     }
     if let Some(ref body) = node.body {
@@ -600,7 +580,7 @@ pub fn walk_dart_type<V: Visitor>(v: &mut V, node: &DartType) {
                 v.visit_dart_type(&f.field_type);
             }
         }
-        DartType::Void { .. } | DartType::Dynamic { .. } | DartType::Never { .. } => {}
+        DartType::Void { .. } | DartType::Dynamic { .. } => {}
     }
 }
 
@@ -628,31 +608,8 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
             }
         }
         Stmt::For(x) => {
-            if let Some(ref init) = x.init {
-                match init {
-                    ForInit::VarDecl(d) => v.visit_stmt(&Stmt::LocalVar(d.clone())),
-                    ForInit::ForIn {
-                        var_type,
-                        name,
-                        iterable,
-                        ..
-                    } => {
-                        if let Some(t) = var_type {
-                            v.visit_dart_type(t);
-                        }
-                        v.visit_identifier(name);
-                        v.visit_expr(iterable);
-                    }
-                    ForInit::PatternForIn { pattern, iterable } => {
-                        v.visit_pattern(pattern);
-                        v.visit_expr(iterable);
-                    }
-                    ForInit::Exprs(exprs) => {
-                        for e in exprs {
-                            v.visit_expr(e);
-                        }
-                    }
-                }
+            if let Some(init) = &x.init {
+                walk_for_init(v, init);
             }
             if let Some(ref cond) = x.condition {
                 v.visit_expr(cond);
@@ -680,7 +637,7 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
                     match kind {
                         SwitchCaseKind::Pattern(p, guard) => {
                             v.visit_pattern(p);
-                            if let Some(g) = &**guard {
+                            if let Some(g) = guard {
                                 v.visit_expr(g);
                             }
                         }
@@ -697,6 +654,15 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
                 v.visit_stmt(s);
             }
             for catch in &x.catches {
+                if let Some(t) = &catch.exception_type {
+                    v.visit_dart_type(t);
+                }
+                if let Some(name) = &catch.exception_var {
+                    v.visit_identifier(name);
+                }
+                if let Some(name) = &catch.stack_trace_var {
+                    v.visit_identifier(name);
+                }
                 for s in &catch.body.stmts {
                     v.visit_stmt(s);
                 }
@@ -713,17 +679,7 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
             }
         }
         Stmt::Throw(x) => v.visit_expr(&x.value),
-        Stmt::LocalVar(x) => {
-            if let Some(ref t) = x.var_type {
-                v.visit_dart_type(t);
-            }
-            for decl in &x.declarators {
-                v.visit_identifier(&decl.name);
-                if let Some(ref init) = decl.initializer {
-                    v.visit_expr(init);
-                }
-            }
-        }
+        Stmt::LocalVar(x) => v.visit_local_var(x),
         Stmt::PatternDecl(x) => {
             v.visit_pattern(&x.pattern);
             v.visit_expr(&x.init);
@@ -742,13 +698,7 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
             }
             v.visit_identifier(&x.name);
             walk_type_params(v, &x.type_params);
-            for param in x
-                .params
-                .positional
-                .iter()
-                .chain(&x.params.optional_positional)
-                .chain(&x.params.named)
-            {
+            for param in x.params.params.iter() {
                 v.visit_formal_param(param);
             }
             walk_function_body(v, &x.body);
@@ -761,7 +711,8 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, node: &Stmt) {
         }
         Stmt::Yield(x) => v.visit_expr(&x.value),
         Stmt::Expr(x) => v.visit_expr(&x.expr),
-        Stmt::Break(_) | Stmt::Continue(_) | Stmt::Error(_) => {}
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::Rethrow(_) | Stmt::Empty(_) | Stmt::Error(_) => {
+        }
     }
 }
 
@@ -840,17 +791,26 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
                 walk_cascade_section(v, section);
             }
         }
-        Expr::List { elements, .. } | Expr::Set { elements, .. } => {
+        Expr::List {
+            type_arg, elements, ..
+        }
+        | Expr::Set {
+            type_arg, elements, ..
+        } => {
+            if let Some(t) = type_arg {
+                v.visit_dart_type(t);
+            }
             for elem in elements {
                 walk_collection_element(v, elem);
             }
         }
         Expr::Map {
-            entries, elements, ..
+            type_args,
+            elements,
+            ..
         } => {
-            for entry in entries {
-                v.visit_expr(&entry.key);
-                v.visit_expr(&entry.value);
+            for t in type_args {
+                v.visit_dart_type(t);
             }
             for element in elements {
                 walk_map_element(v, element);
@@ -868,12 +828,7 @@ pub fn walk_expr<V: Visitor>(v: &mut V, node: &Expr) {
             ..
         } => {
             walk_type_params(v, type_params);
-            for param in params
-                .positional
-                .iter()
-                .chain(&params.optional_positional)
-                .chain(&params.named)
-            {
+            for param in params.params.iter() {
                 v.visit_formal_param(param);
             }
             walk_function_body(v, body);
@@ -926,13 +881,19 @@ pub fn walk_pattern<V: Visitor>(v: &mut V, node: &Pattern) {
                 v.visit_string_lit(s);
             }
         }
-        Pattern::Const(x) => {
-            if let Some(ref e) = x.expr {
-                v.visit_expr(e);
+        Pattern::Const(x) => match &x.value {
+            ConstPatternValue::Name(name) => {
+                for segment in name {
+                    v.visit_identifier(segment);
+                }
             }
-        }
+            ConstPatternValue::Expr(e) => v.visit_expr(e),
+        },
         Pattern::Error { .. } => {}
         Pattern::List(x) => {
+            if let Some(t) = &x.type_arg {
+                v.visit_dart_type(t);
+            }
             for elem in &x.elements {
                 match elem {
                     ListPatternElement::Pattern(p) => v.visit_pattern(p),
@@ -947,6 +908,9 @@ pub fn walk_pattern<V: Visitor>(v: &mut V, node: &Pattern) {
             }
         }
         Pattern::Map(x) => {
+            for t in &x.type_args {
+                v.visit_dart_type(t);
+            }
             for entry in &x.entries {
                 v.visit_expr(&entry.key);
                 v.visit_pattern(&entry.pattern);
@@ -988,12 +952,7 @@ pub fn walk_formal_param<V: Visitor>(v: &mut V, node: &FormalParam) {
     }
     v.visit_identifier(&node.name);
     if let Some(ref params) = node.function_params {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             v.visit_formal_param(param);
         }
     }
@@ -1026,8 +985,8 @@ fn walk_arg_list<V: Visitor>(v: &mut V, node: &ArgList) {
 fn walk_cascade_section<V: Visitor>(v: &mut V, section: &CascadeSection) {
     for op in &section.ops {
         match op {
-            CascadeOp::Field(ident, _) => v.visit_identifier(ident),
-            CascadeOp::Index(expr, _) => v.visit_expr(expr),
+            CascadeOp::Field { name, .. } => v.visit_identifier(name),
+            CascadeOp::Index { index, .. } => v.visit_expr(index),
             CascadeOp::Call(ident, type_args, args) => {
                 v.visit_identifier(ident);
                 for t in type_args {
@@ -1070,40 +1029,29 @@ fn walk_collection_element<V: Visitor>(v: &mut V, elem: &CollectionElement) {
             }
         }
         CollectionElement::For {
-            pattern,
-            iterable,
-            element,
-            ..
+            header, element, ..
         } => {
-            if let Some(p) = pattern {
-                v.visit_pattern(p);
-            }
-            v.visit_expr(iterable);
-            walk_collection_element(v, element);
-        }
-        CollectionElement::CFor {
-            init,
-            condition,
-            updates,
-            element,
-            ..
-        } => {
-            walk_for_init(v, init);
-            if let Some(cond) = condition {
-                v.visit_expr(cond);
-            }
-            for e in updates {
-                v.visit_expr(e);
-            }
+            walk_for_header(v, header);
             walk_collection_element(v, element);
         }
     }
 }
 
-fn walk_for_init<V: Visitor>(v: &mut V, init: &Option<ForInit>) {
-    let Some(init) = init else { return };
+pub fn walk_local_var<V: Visitor>(v: &mut V, node: &LocalVarDecl) {
+    if let Some(t) = &node.var_type {
+        v.visit_dart_type(t);
+    }
+    for decl in &node.declarators {
+        v.visit_identifier(&decl.name);
+        if let Some(init) = &decl.initializer {
+            v.visit_expr(init);
+        }
+    }
+}
+
+pub fn walk_for_init<V: Visitor>(v: &mut V, init: &ForInit) {
     match init {
-        ForInit::VarDecl(d) => v.visit_stmt(&Stmt::LocalVar(d.clone())),
+        ForInit::VarDecl(d) => v.visit_local_var(d),
         ForInit::ForIn {
             var_type,
             name,
@@ -1116,7 +1064,9 @@ fn walk_for_init<V: Visitor>(v: &mut V, init: &Option<ForInit>) {
             v.visit_identifier(name);
             v.visit_expr(iterable);
         }
-        ForInit::PatternForIn { pattern, iterable } => {
+        ForInit::PatternForIn {
+            pattern, iterable, ..
+        } => {
             v.visit_pattern(pattern);
             v.visit_expr(iterable);
         }
@@ -1128,7 +1078,19 @@ fn walk_for_init<V: Visitor>(v: &mut V, init: &Option<ForInit>) {
     }
 }
 
-fn walk_map_element<V: Visitor>(v: &mut V, element: &MapElement) {
+pub fn walk_for_header<V: Visitor>(v: &mut V, header: &ForHeader) {
+    if let Some(init) = &header.init {
+        walk_for_init(v, init);
+    }
+    if let Some(condition) = &header.condition {
+        v.visit_expr(condition);
+    }
+    for update in &header.updates {
+        v.visit_expr(update);
+    }
+}
+
+pub fn walk_map_element<V: Visitor>(v: &mut V, element: &MapElement) {
     match element {
         MapElement::Entry(entry) => {
             v.visit_expr(&entry.key);
@@ -1156,63 +1118,18 @@ fn walk_map_element<V: Visitor>(v: &mut V, element: &MapElement) {
                 walk_map_element(v, else_e);
             }
         }
-        MapElement::For {
-            pattern,
-            iterable,
-            entry,
-            ..
-        } => {
-            if let Some(p) = pattern {
-                v.visit_pattern(p);
-            }
-            v.visit_expr(iterable);
-            walk_map_element(v, entry);
-        }
-        MapElement::CFor {
-            init,
-            condition,
-            updates,
-            entry,
-            ..
-        } => {
-            walk_for_init(v, init);
-            if let Some(cond) = condition {
-                v.visit_expr(cond);
-            }
-            for e in updates {
-                v.visit_expr(e);
-            }
+        MapElement::For { header, entry, .. } => {
+            walk_for_header(v, header);
             walk_map_element(v, entry);
         }
     }
 }
 
-/// Call `f` on `root` and every expression nested anywhere beneath it.
-///
-/// Rules that only need "find expressions matching a shape" should use this
-/// instead of hand-rolling a recursive match: the walk below is exhaustive over
-/// the AST, so a new expression or statement kind cannot silently hide a
-/// violation the way a `_ => {}` arm does.
+/// Visit `root` and every nested expression.
 pub fn for_each_expr<F: FnMut(&Expr)>(root: &Expr, f: &mut F) {
     ExprWalker { f }.visit_expr(root);
 }
 
-/// Call `f` on every expression in the program, wherever it appears.
-pub fn for_each_expr_in_program<F: FnMut(&Expr)>(program: &Program, f: &mut F) {
-    ExprWalker { f }.visit_program(program);
-}
-
-/// Call `f` on every expression appearing anywhere in `stmts`, including inside
-/// nested statements, closures, patterns' initializers and collection elements.
-pub fn for_each_expr_in_stmts<F: FnMut(&Expr)>(stmts: &[Stmt], f: &mut F) {
-    let mut w = ExprWalker { f };
-    for stmt in stmts {
-        w.visit_stmt(stmt);
-    }
-}
-
-/// Backs the three `for_each_expr*` helpers: every expression the default walk
-/// reaches, handed to `f` before descending into it.
 struct ExprWalker<'f, F> {
     f: &'f mut F,
 }
@@ -1221,26 +1138,6 @@ impl<F: FnMut(&Expr)> Visitor for ExprWalker<'_, F> {
     fn visit_expr(&mut self, node: &Expr) {
         (self.f)(node);
         walk_expr(self, node);
-    }
-}
-
-/// Call `f` on every statement in `stmts` and every statement nested beneath
-/// them (inside blocks, labeled statements, loops, closures, switch cases).
-pub fn for_each_stmt_in_stmts<F: FnMut(&Stmt)>(stmts: &[Stmt], f: &mut F) {
-    struct StmtWalker<'f, F> {
-        f: &'f mut F,
-    }
-
-    impl<F: FnMut(&Stmt)> Visitor for StmtWalker<'_, F> {
-        fn visit_stmt(&mut self, node: &Stmt) {
-            (self.f)(node);
-            walk_stmt(self, node);
-        }
-    }
-
-    let mut w = StmtWalker { f };
-    for stmt in stmts {
-        w.visit_stmt(stmt);
     }
 }
 

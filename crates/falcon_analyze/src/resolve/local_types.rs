@@ -108,12 +108,7 @@ impl LocalTypes {
     /// type comes from its written type; untyped parameters (including field/
     /// super formals without a written type) bind as [`StaticType::Unknown`].
     pub fn bind_params(&mut self, params: &FormalParamList) {
-        for p in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for p in params.params.iter() {
             let ty = p
                 .param_type
                 .as_ref()
@@ -294,7 +289,7 @@ impl LocalTypes {
                 BinaryOp::Div => StaticType::Double { nullable: false },
                 // `a ?? b` is only sound to type when both sides agree; keep it
                 // conservative rather than model the null-elimination.
-                BinaryOp::NullCoalesce | BinaryOp::IfNull => StaticType::Unknown,
+                BinaryOp::NullCoalesce => StaticType::Unknown,
             },
 
             Expr::As { dart_type, .. } => StaticType::from_dart_type(dart_type),
@@ -449,7 +444,7 @@ mod tests {
             panic!()
         };
         let mut lt = LocalTypes::new();
-        lt.bind_params(&f.params);
+        lt.bind_params(f.params().unwrap());
         assert_eq!(lt.lookup("ok"), StaticType::Bool { nullable: false });
         assert_eq!(lt.lookup("maybe"), StaticType::Bool { nullable: true });
         assert!(lt.lookup("ok").is_non_nullable_bool());
@@ -571,7 +566,7 @@ mod tests {
         let TopLevelDecl::Function(func) = &program.declarations[0] else {
             panic!()
         };
-        lt.bind_params(&func.params);
+        lt.bind_params(func.params().unwrap());
         for s in &stmts {
             if let Stmt::LocalVar(lv) = s {
                 lt.declare_local(lv);

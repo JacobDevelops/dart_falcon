@@ -40,7 +40,7 @@ fn parse_switch(cases: &str) -> (SwitchStmt, usize) {
 }
 
 /// Pattern + guard of the first `case` label in the first case group.
-fn first_case(sw: &SwitchStmt) -> (&Pattern, &Option<Expr>) {
+fn first_case(sw: &SwitchStmt) -> (&Pattern, &Option<Box<Expr>>) {
     match &sw.cases[0].cases[0] {
         SwitchCaseKind::Pattern(p, g) => (p, g),
         other => panic!("expected a pattern case, got {other:?}"),
@@ -55,10 +55,12 @@ fn guard_after_dotted_constant_pattern() {
     assert_eq!(errs, 0, "switch: {sw:?}");
     let (pat, guard) = first_case(&sw);
     match pat {
-        Pattern::Const(cp) => {
-            let segs: Vec<&str> = cp.name.iter().map(|i| i.name.as_str()).collect();
+        Pattern::Const(ConstPattern {
+            value: ConstPatternValue::Name(name),
+            ..
+        }) => {
+            let segs: Vec<&str> = name.iter().map(|i| i.name.as_str()).collect();
             assert_eq!(segs, ["State", "a"]);
-            assert!(cp.expr.is_none(), "dotted reference must not carry an expr");
         }
         other => panic!("expected Const pattern, got {other:?}"),
     }
@@ -100,12 +102,14 @@ fn const_constructor_pattern() {
     assert_eq!(errs, 0, "switch: {sw:?}");
     let (pat, _) = first_case(&sw);
     match pat {
-        Pattern::Const(cp) => {
-            assert!(cp.name.is_empty());
+        Pattern::Const(ConstPattern {
+            value: ConstPatternValue::Expr(expr),
+            ..
+        }) => {
             assert!(
-                matches!(cp.expr.as_deref(), Some(Expr::New { is_const: true, .. })),
+                matches!(expr.as_ref(), Expr::New { is_const: true, .. }),
                 "expected a const-constructor expr, got {:?}",
-                cp.expr
+                expr
             );
         }
         other => panic!("expected Const pattern, got {other:?}"),
@@ -118,7 +122,13 @@ fn const_named_constructor_pattern() {
     assert_eq!(errs, 0, "switch: {sw:?}");
     let (pat, _) = first_case(&sw);
     assert!(
-        matches!(pat, Pattern::Const(cp) if cp.name.is_empty() && cp.expr.is_some()),
+        matches!(
+            pat,
+            Pattern::Const(ConstPattern {
+                value: ConstPatternValue::Expr(_),
+                ..
+            })
+        ),
         "got {pat:?}"
     );
 }
@@ -129,12 +139,14 @@ fn const_parenthesized_expression_pattern() {
     assert_eq!(errs, 0, "switch: {sw:?}");
     let (pat, _) = first_case(&sw);
     match pat {
-        Pattern::Const(cp) => {
-            assert!(cp.name.is_empty());
+        Pattern::Const(ConstPattern {
+            value: ConstPatternValue::Expr(expr),
+            ..
+        }) => {
             assert!(
-                matches!(cp.expr.as_deref(), Some(Expr::Binary { .. })),
+                matches!(expr.as_ref(), Expr::Binary { .. }),
                 "expected a binary expr, got {:?}",
-                cp.expr
+                expr
             );
         }
         other => panic!("expected Const pattern, got {other:?}"),
@@ -147,7 +159,13 @@ fn const_list_pattern() {
     assert_eq!(errs, 0, "switch: {sw:?}");
     let (pat, _) = first_case(&sw);
     assert!(
-        matches!(pat, Pattern::Const(cp) if cp.name.is_empty() && cp.expr.is_some()),
+        matches!(
+            pat,
+            Pattern::Const(ConstPattern {
+                value: ConstPatternValue::Expr(_),
+                ..
+            })
+        ),
         "got {pat:?}"
     );
 }
@@ -158,22 +176,30 @@ fn const_set_pattern() {
     assert_eq!(errs, 0, "switch: {sw:?}");
     let (pat, _) = first_case(&sw);
     assert!(
-        matches!(pat, Pattern::Const(cp) if cp.name.is_empty() && cp.expr.is_some()),
+        matches!(
+            pat,
+            Pattern::Const(ConstPattern {
+                value: ConstPatternValue::Expr(_),
+                ..
+            })
+        ),
         "got {pat:?}"
     );
 }
 
 #[test]
 fn dotted_constant_reference_stays_name_form() {
-    // Regression guard for (b): a bare dotted reference keeps `expr: None`.
+    // A bare dotted reference keeps the name form.
     let (sw, errs) = parse_switch("case Color.red: break;");
     assert_eq!(errs, 0, "switch: {sw:?}");
     let (pat, _) = first_case(&sw);
     match pat {
-        Pattern::Const(cp) => {
-            let segs: Vec<&str> = cp.name.iter().map(|i| i.name.as_str()).collect();
+        Pattern::Const(ConstPattern {
+            value: ConstPatternValue::Name(name),
+            ..
+        }) => {
+            let segs: Vec<&str> = name.iter().map(|i| i.name.as_str()).collect();
             assert_eq!(segs, ["Color", "red"]);
-            assert!(cp.expr.is_none());
         }
         other => panic!("expected Const pattern, got {other:?}"),
     }
@@ -500,10 +526,13 @@ fn const_record_pattern() {
     assert_eq!(errs, 0, "switch: {sw:?}");
     let (pat, _) = first_case(&sw);
     match pat {
-        Pattern::Const(cp) => match cp.expr.as_deref() {
-            Some(Expr::Record {
+        Pattern::Const(ConstPattern {
+            value: ConstPatternValue::Expr(expr),
+            ..
+        }) => match expr.as_ref() {
+            Expr::Record {
                 fields, is_const, ..
-            }) => {
+            } => {
                 assert!(is_const);
                 assert_eq!(fields.len(), 2);
             }
@@ -522,10 +551,13 @@ fn symbol_literal_constant_pattern() {
     assert_eq!(errs, 0, "switch: {sw:?}");
     let (pat, _) = first_case(&sw);
     match pat {
-        Pattern::Const(cp) => assert!(
-            matches!(cp.expr.as_deref(), Some(Expr::SymbolLit { raw, .. }) if raw == "#add"),
+        Pattern::Const(ConstPattern {
+            value: ConstPatternValue::Expr(expr),
+            ..
+        }) => assert!(
+            matches!(expr.as_ref(), Expr::SymbolLit { raw, .. } if raw == "#add"),
             "expected symbol-literal const pattern, got {:?}",
-            cp.expr
+            expr
         ),
         other => panic!("expected const pattern, got {other:?}"),
     }
@@ -538,10 +570,13 @@ fn const_parenthesised_expr_pattern_still_single() {
     assert_eq!(errs, 0, "switch: {sw:?}");
     let (pat, _) = first_case(&sw);
     match pat {
-        Pattern::Const(cp) => assert!(
-            matches!(cp.expr.as_deref(), Some(Expr::Binary { .. })),
+        Pattern::Const(ConstPattern {
+            value: ConstPatternValue::Expr(expr),
+            ..
+        }) => assert!(
+            matches!(expr.as_ref(), Expr::Binary { .. }),
             "expected single binary expr, got {:?}",
-            cp.expr
+            expr
         ),
         other => panic!("expected const pattern, got {other:?}"),
     }

@@ -73,9 +73,7 @@ impl Visitor for CatchScan<'_, '_> {
             }
             return;
         }
-        if let Stmt::Throw(throw_stmt) = node
-            && !throw_stmt.is_rethrow
-        {
+        if let Stmt::Throw(throw_stmt) = node {
             self.diags.push(Diagnostic::new(
                 "avoid-throw-in-catch-block",
                 Severity::Warning,

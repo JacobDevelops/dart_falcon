@@ -28,6 +28,15 @@ fn fires_without_suppression() {
 }
 
 #[test]
+fn nullable_dynamic_and_nested_type_arguments_are_reported() {
+    assert_eq!(
+        run("dynamic? x; Map<String, dynamic?> y; Map<String, List<dynamic?>> z;"),
+        vec!["avoid-dynamic", "avoid-dynamic"]
+    );
+    assert!(run("Map<String, dynamic?> y;").is_empty());
+}
+
+#[test]
 fn same_line_suppresses() {
     assert!(
         run("dynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic: legacy\n").is_empty()

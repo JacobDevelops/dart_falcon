@@ -64,7 +64,11 @@ impl Visitor for Collector<'_> {
             .members
             .iter()
             .filter_map(|member| match member {
-                ClassMember::Field(field) if field.is_const => Some(field),
+                ClassMember::Field(field)
+                    if field.keyword == falcon_syntax::ast::VarKeyword::Const =>
+                {
+                    Some(field)
+                }
                 _ => None,
             })
             .flat_map(|field| {
@@ -159,19 +163,18 @@ fn pattern_constants(
     match pattern {
         Pattern::Literal(literal) => literal_expression(literal)
             .and_then(|expression| evaluate_constant(&expression, owner, fields, model, signatures))
-            .map(|value| vec![(value, literal.span.clone())])
+            .map(|value| vec![(value, literal.span)])
             .unwrap_or_default(),
         Pattern::Const(constant) => {
-            let expression = constant
-                .expr
-                .as_deref()
-                .cloned()
-                .or_else(|| name_expression(&constant.name, &constant.span));
+            let expression = match &constant.value {
+                ConstPatternValue::Expr(expression) => Some((**expression).clone()),
+                ConstPatternValue::Name(name) => name_expression(name, &constant.span),
+            };
             expression
                 .and_then(|expression| {
                     evaluate_constant(&expression, owner, fields, model, signatures)
                 })
-                .map(|value| vec![(value, constant.span.clone())])
+                .map(|value| vec![(value, constant.span)])
                 .unwrap_or_default()
         }
         Pattern::LogicalOr { left, right, .. } => {
@@ -187,7 +190,7 @@ fn pattern_constants(
 }
 
 fn literal_expression(literal: &LiteralPattern) -> Option<Expr> {
-    let span = literal.span.clone();
+    let span = literal.span;
     Some(match &literal.value {
         LiteralPatternValue::Null => Expr::NullLit { span },
         LiteralPatternValue::Bool(value) => Expr::BoolLit {
@@ -207,7 +210,7 @@ fn literal_expression(literal: &LiteralPattern) -> Option<Expr> {
             op: UnaryOp::Minus,
             operand: Box::new(Expr::IntLit {
                 value: value.clone(),
-                span: span.clone(),
+                span,
             }),
             span,
         },
@@ -215,7 +218,7 @@ fn literal_expression(literal: &LiteralPattern) -> Option<Expr> {
             op: UnaryOp::Minus,
             operand: Box::new(Expr::DoubleLit {
                 value: value.clone(),
-                span: span.clone(),
+                span,
             }),
             span,
         },
@@ -230,7 +233,7 @@ fn name_expression(names: &[Identifier], span: &Span) -> Option<Expr> {
             object: Box::new(expression),
             field: name.clone(),
             is_null_safe: false,
-            span: span.clone(),
+            span: *span,
         };
     }
     Some(expression)

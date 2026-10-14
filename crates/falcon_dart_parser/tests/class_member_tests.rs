@@ -37,8 +37,7 @@ fn test_untyped_member_is_method_not_constructor() {
         ClassMember::Method(m) => {
             assert_eq!(m.name.name, "foo");
             assert!(m.return_type.is_none());
-            assert!(!m.is_async);
-            assert!(!m.is_generator);
+            assert_eq!(m.async_marker, AsyncMarker::Sync);
             assert!(m.type_params.is_empty());
             assert!(m.body.is_some());
         }
@@ -68,7 +67,13 @@ fn test_untyped_member_with_body_and_params_is_method() {
         ClassMember::Method(m) => {
             assert_eq!(m.name.name, "doWork");
             assert!(m.return_type.is_none());
-            assert_eq!(m.params.positional.len(), 2);
+            assert_eq!(m.params.params.len(), 2);
+            assert!(
+                m.params
+                    .params
+                    .iter()
+                    .all(|param| param.kind == ParamKind::Positional)
+            );
         }
         other => panic!("expected method, got {other:?}"),
     }
@@ -186,7 +191,7 @@ fn test_async_untyped_member_named_like_type_is_method() {
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
             assert_eq!(m.name.name, "C");
-            assert!(m.is_async);
+            assert_eq!(m.async_marker, AsyncMarker::Async);
             assert!(m.return_type.is_none());
         }
         other => panic!("expected async method, got {other:?}"),
@@ -457,7 +462,7 @@ fn builtin_override_identifier_as_field_name() {
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Field(f) => {
-            assert!(f.is_const);
+            assert_eq!(f.keyword, VarKeyword::Const);
             assert_eq!(f.declarators[0].name.name, "override");
         }
         other => panic!("expected field, got {other:?}"),
@@ -478,8 +483,7 @@ fn test_member_named_external_with_async_body() {
         ClassMember::Method(m) => {
             assert_eq!(m.name.name, "external");
             assert!(!m.is_external, "keyword is the name, not a modifier");
-            assert!(m.is_async);
-            assert!(!m.is_generator);
+            assert_eq!(m.async_marker, AsyncMarker::Async);
             assert!(m.return_type.is_none());
         }
         other => panic!("expected method `external`, got {other:?}"),
@@ -493,7 +497,7 @@ fn test_member_named_late_with_async_body() {
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
             assert_eq!(m.name.name, "late");
-            assert!(m.is_async);
+            assert_eq!(m.async_marker, AsyncMarker::Async);
             assert!(m.return_type.is_none());
         }
         other => panic!("expected method `late`, got {other:?}"),
@@ -507,8 +511,7 @@ fn test_member_named_covariant_with_sync_star_body() {
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
             assert_eq!(m.name.name, "covariant");
-            assert!(m.is_generator);
-            assert!(!m.is_async);
+            assert_eq!(m.async_marker, AsyncMarker::SyncStar);
         }
         other => panic!("expected method `covariant`, got {other:?}"),
     }
@@ -544,7 +547,7 @@ fn test_static_record_return_method_named_async() {
             assert_eq!(m.name.name, "async");
             assert!(m.is_static, "`static` stays a modifier");
             assert!(
-                !m.is_async,
+                !m.async_marker.is_async(),
                 "trailing keyword is the name, not a body marker"
             );
             assert!(matches!(m.return_type, Some(DartType::Record(_))));
@@ -561,7 +564,7 @@ fn test_external_record_return_method_named_sync() {
         ClassMember::Method(m) => {
             assert_eq!(m.name.name, "sync");
             assert!(m.is_external, "`external` stays a modifier");
-            assert!(!m.is_generator);
+            assert_eq!(m.async_marker, AsyncMarker::Sync);
             assert!(matches!(m.return_type, Some(DartType::Record(_))));
         }
         other => panic!("expected external method `sync`, got {other:?}"),
@@ -594,7 +597,7 @@ fn test_factory_is_field_name() {
         ClassMember::Field(f) => {
             assert_eq!(f.declarators[0].name.name, "factory");
             assert!(f.is_late);
-            assert!(f.is_final);
+            assert_eq!(f.keyword, VarKeyword::Final);
         }
         other => panic!("expected field named `factory`, got {other:?}"),
     }

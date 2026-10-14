@@ -47,7 +47,7 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn function(
         &mut self,
-        params: &FormalParamList,
+        params: Option<&FormalParamList>,
         type_params: &[TypeParam],
         body: Option<&FunctionBody>,
     ) {
@@ -104,42 +104,39 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.function(&node.params, &node.type_params, node.body.as_ref());
+        self.function(node.params(), &node.type_params, node.body.as_ref());
     }
 
     fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.function(&node.params, &node.type_params, node.body.as_ref());
+        self.function(Some(&node.params), &node.type_params, node.body.as_ref());
     }
 
     fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.function(&node.params, &[], node.body.as_ref());
+        self.function(Some(&node.params), &[], node.body.as_ref());
     }
 
     fn visit_getter_decl(&mut self, node: &GetterDecl) {
-        self.function(&empty_params(), &[], node.body.as_ref());
+        self.function(None, &[], node.body.as_ref());
     }
 
     fn visit_setter_decl(&mut self, node: &SetterDecl) {
         let params = FormalParamList {
-            positional: vec![FormalParam {
+            params: vec![FormalParam {
                 annotations: node.annotations.clone(),
-                is_required: true,
+                kind: ParamKind::Positional,
                 is_covariant: false,
                 is_final: false,
-                is_field: false,
-                is_super: false,
+                initializing: None,
                 param_type: node.param_type.clone(),
                 name: node.param.clone(),
                 default_value: None,
                 type_params: Vec::new(),
                 function_params: None,
-                span: node.param.span.clone(),
+                span: node.param.span,
             }],
-            optional_positional: Vec::new(),
-            named: Vec::new(),
-            span: node.span.clone(),
+            span: node.span,
         };
-        self.function(&params, &[], node.body.as_ref());
+        self.function(Some(&params), &[], node.body.as_ref());
     }
 }
 
@@ -165,13 +162,4 @@ fn is_test_file(path: &std::path::Path) -> bool {
     canonical
         .strip_prefix(root)
         .is_ok_and(|relative| relative.components().any(|c| c.as_os_str() == "test"))
-}
-
-fn empty_params() -> FormalParamList {
-    FormalParamList {
-        positional: Vec::new(),
-        optional_positional: Vec::new(),
-        named: Vec::new(),
-        span: Span::default(),
-    }
 }

@@ -186,26 +186,17 @@ fn scan_expr(expr: &Expr, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
             scan_expr(target, diags, ctx);
             scan_expr(value, diags, ctx);
         }
-        Expr::List { elements, .. } => {
-            for elem in elements {
-                scan_collection_elem(elem, diags, ctx);
+        Expr::List { .. } | Expr::Set { .. } | Expr::Map { .. } => {
+            struct Children<'a, 'ctx> {
+                diags: &'a mut Vec<Diagnostic>,
+                ctx: &'a AnalyzeContext<'ctx>,
             }
-        }
-        Expr::Set { elements, .. } => {
-            for elem in elements {
-                scan_collection_elem(elem, diags, ctx);
+            impl falcon_syntax::visitor::Visitor for Children<'_, '_> {
+                fn visit_expr(&mut self, node: &Expr) {
+                    scan_expr(node, self.diags, self.ctx);
+                }
             }
-        }
-        Expr::Map {
-            entries, elements, ..
-        } => {
-            for entry in entries {
-                scan_expr(&entry.key, diags, ctx);
-                scan_expr(&entry.value, diags, ctx);
-            }
-            for e in map_element_exprs(elements) {
-                scan_expr(e, diags, ctx);
-            }
+            falcon_syntax::visitor::walk_expr(&mut Children { diags, ctx }, expr);
         }
         _ => {}
     }
@@ -217,74 +208,6 @@ fn scan_args(args: &ArgList, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
     }
     for named in &args.named {
         scan_expr(&named.value, diags, ctx);
-    }
-}
-
-fn scan_collection_elem(
-    elem: &CollectionElement,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
-    match elem {
-        CollectionElement::Expr(e) => scan_expr(e, diags, ctx),
-        CollectionElement::NullAware { expr, .. } => scan_expr(expr, diags, ctx),
-        CollectionElement::Spread { expr, .. } => scan_expr(expr, diags, ctx),
-        CollectionElement::If {
-            condition,
-            then_elem,
-            else_elem,
-            ..
-        } => {
-            if let IfCondition::Expr(e) = condition {
-                scan_expr(e, diags, ctx);
-            }
-            scan_collection_elem(then_elem, diags, ctx);
-            if let Some(ee) = else_elem {
-                scan_collection_elem(ee, diags, ctx);
-            }
-        }
-        CollectionElement::For {
-            iterable, element, ..
-        } => {
-            scan_expr(iterable, diags, ctx);
-            scan_collection_elem(element, diags, ctx);
-        }
-        CollectionElement::CFor {
-            init,
-            condition,
-            updates,
-            element,
-            ..
-        } => {
-            match init {
-                Some(ForInit::VarDecl(d)) => {
-                    for decl in &d.declarators {
-                        if let Some(e) = &decl.initializer {
-                            scan_expr(e, diags, ctx);
-                        }
-                    }
-                }
-                Some(ForInit::ForIn { iterable, .. }) => {
-                    scan_expr(iterable, diags, ctx);
-                }
-                Some(ForInit::PatternForIn { iterable, .. }) => {
-                    scan_expr(iterable, diags, ctx);
-                }
-                Some(ForInit::Exprs(es)) => {
-                    for e in es {
-                        scan_expr(e, diags, ctx);
-                    }
-                }
-                None => {}
-            }
-            if let Some(c) = condition {
-                scan_expr(c, diags, ctx);
-            }
-            for u in updates {
-                scan_expr(u, diags, ctx);
-            }
-            scan_collection_elem(element, diags, ctx);
-        }
     }
 }
 

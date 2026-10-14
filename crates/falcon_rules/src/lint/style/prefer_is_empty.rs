@@ -119,7 +119,9 @@ impl Visitor for Collector<'_> {
 
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         let saved = std::mem::replace(&mut self.lt, LocalTypes::new());
-        self.lt.bind_params(&node.params);
+        if let Some(params) = node.params() {
+            self.lt.bind_params(params);
+        }
         if let Some(body) = &node.body {
             self.walk_body(body);
         }
@@ -166,16 +168,17 @@ impl Visitor for Collector<'_> {
         self.lt = saved;
     }
 
+    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
+        for d in &lv.declarators {
+            if let Some(init) = &d.initializer {
+                self.visit_expr(init);
+            }
+        }
+        self.lt.declare_local(lv);
+    }
+
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
-            Stmt::LocalVar(lv) => {
-                for d in &lv.declarators {
-                    if let Some(init) = &d.initializer {
-                        self.visit_expr(init);
-                    }
-                }
-                self.lt.declare_local(lv);
-            }
             Stmt::PatternDecl(pd) => {
                 self.visit_expr(&pd.init);
                 self.lt.bind_pattern(&pd.pattern);

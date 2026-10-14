@@ -1,6 +1,5 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
-assertion_line: 1701
 expression: "prog.declarations[0]"
 ---
 Class(
@@ -8,10 +7,7 @@ Class(
         annotations: [],
         modifiers: ClassModifiers {
             is_abstract: false,
-            is_interface: false,
-            is_base: false,
-            is_final: false,
-            is_sealed: false,
+            restriction: None,
         },
         name: Identifier {
             name: "Vec2",
@@ -33,8 +29,7 @@ Class(
                     is_external: false,
                     is_covariant: false,
                     is_late: false,
-                    is_final: true,
-                    is_const: false,
+                    keyword: Final,
                     field_type: Some(
                         Named(
                             NamedType {
@@ -86,8 +81,7 @@ Class(
                     is_external: false,
                     is_covariant: false,
                     is_late: false,
-                    is_final: true,
-                    is_const: false,
+                    keyword: Final,
                     field_type: Some(
                         Named(
                             NamedType {
@@ -146,14 +140,15 @@ Class(
                     },
                     constructor_name: None,
                     params: FormalParamList {
-                        positional: [
+                        params: [
                             FormalParam {
                                 annotations: [],
-                                is_required: true,
+                                kind: Positional,
                                 is_covariant: false,
                                 is_final: false,
-                                is_field: true,
-                                is_super: false,
+                                initializing: Some(
+                                    This,
+                                ),
                                 param_type: None,
                                 name: Identifier {
                                     name: "x",
@@ -172,11 +167,12 @@ Class(
                             },
                             FormalParam {
                                 annotations: [],
-                                is_required: true,
+                                kind: Positional,
                                 is_covariant: false,
                                 is_final: false,
-                                is_field: true,
-                                is_super: false,
+                                initializing: Some(
+                                    This,
+                                ),
                                 param_type: None,
                                 name: Identifier {
                                     name: "y",
@@ -194,8 +190,6 @@ Class(
                                 },
                             },
                         ],
-                        optional_positional: [],
-                        named: [],
                         span: Span {
                             start: 49,
                             end: 65,
@@ -233,9 +227,7 @@ Class(
                         },
                     ),
                     params: FormalParamList {
-                        positional: [],
-                        optional_positional: [],
-                        named: [],
+                        params: [],
                         span: Span {
                             start: 76,
                             end: 79,

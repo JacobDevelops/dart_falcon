@@ -147,14 +147,16 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
 
     pub fn analyze(
         mut self,
-        params: &FormalParamList,
+        params: Option<&FormalParamList>,
         type_params: &[TypeParam],
         body: &FunctionBody,
     ) -> Vec<Span> {
         self.type_parameters.push(type_params, self.model);
-        self.environment
-            .bind_params(params, self.model, &self.type_parameters);
-        self.bind_param_names(params);
+        if let Some(params) = params {
+            self.environment
+                .bind_params(params, self.model, &self.type_parameters);
+            self.bind_param_names(params);
+        }
         self.function_body(body, State::default());
         self.diagnostics
     }
@@ -207,12 +209,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
     }
 
     fn bind_param_names(&mut self, params: &FormalParamList) {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             self.bind_name(&param.name.name);
         }
     }
@@ -485,6 +482,33 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         outcome
     }
 
+    fn local_declaration(&mut self, declaration: &LocalVarDecl, state: &mut State) {
+        let declared = declaration
+            .var_type
+            .as_ref()
+            .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
+            .unwrap_or(ResolvedType::Unknown);
+        for declarator in &declaration.declarators {
+            if let Some(initializer) = &declarator.initializer {
+                self.expression(initializer, state);
+            }
+            let ty = if matches!(declared, ResolvedType::Unknown) {
+                declarator
+                    .initializer
+                    .as_ref()
+                    .map(|expression| self.infer_type(expression, state))
+                    .unwrap_or(ResolvedType::Unknown)
+            } else {
+                declared.clone()
+            };
+            if declaration.var_type.is_none() {
+                self.declare_inferred(declarator.name.name.clone(), ty, state);
+            } else {
+                self.declare(declarator.name.name.clone(), ty);
+            }
+        }
+    }
+
     fn statement(&mut self, statement: &Stmt, mut state: State) -> Outcome {
         match statement {
             Stmt::Block(block) => {
@@ -498,30 +522,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                 Outcome::normal(state)
             }
             Stmt::LocalVar(declaration) => {
-                let declared = declaration
-                    .var_type
-                    .as_ref()
-                    .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
-                    .unwrap_or(ResolvedType::Unknown);
-                for declarator in &declaration.declarators {
-                    if let Some(initializer) = &declarator.initializer {
-                        self.expression(initializer, &mut state);
-                    }
-                    let ty = if matches!(declared, ResolvedType::Unknown) {
-                        declarator
-                            .initializer
-                            .as_ref()
-                            .map(|expression| self.infer_type(expression, &state))
-                            .unwrap_or(ResolvedType::Unknown)
-                    } else {
-                        declared.clone()
-                    };
-                    if declaration.var_type.is_none() {
-                        self.declare_inferred(declarator.name.name.clone(), ty, &mut state);
-                    } else {
-                        self.declare(declarator.name.name.clone(), ty);
-                    }
-                }
+                self.local_declaration(declaration, &mut state);
                 Outcome::normal(state)
             }
             Stmt::If(statement) => self.if_statement(statement, state),
@@ -535,6 +536,8 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
                 self.expression(&statement.value, &mut state);
                 Outcome::abrupt(Exit::Throw, state)
             }
+            Stmt::Rethrow(_) => Outcome::abrupt(Exit::Throw, state),
+            Stmt::Empty(_) => Outcome::normal(state),
             Stmt::Break(statement) => Outcome::abrupt(
                 Exit::Break(statement.label.as_ref().map(|label| label.name.clone())),
                 state,
@@ -750,6 +753,42 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         outcome
     }
 
+    fn for_init(&mut self, init: &ForInit, mut state: State) -> State {
+        match init {
+            ForInit::VarDecl(declaration) => self.local_declaration(declaration, &mut state),
+            ForInit::ForIn {
+                var_type,
+                name,
+                iterable,
+                ..
+            } => {
+                self.expression(iterable, &mut state);
+                let ty = var_type
+                    .as_ref()
+                    .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
+                    .unwrap_or_else(|| self.iterable_element_type(iterable, &state));
+                if var_type.is_none() {
+                    self.declare_inferred(name.name.clone(), ty, &mut state);
+                } else {
+                    self.declare(name.name.clone(), ty);
+                }
+            }
+            ForInit::PatternForIn {
+                pattern, iterable, ..
+            } => {
+                self.expression(iterable, &mut state);
+                let matched = self.iterable_element_type(iterable, &state);
+                self.bind_pattern(pattern, matched, &mut state);
+            }
+            ForInit::Exprs(expressions) => {
+                for expression in expressions {
+                    self.expression(expression, &mut state);
+                }
+            }
+        }
+        state
+    }
+
     fn for_loop(&mut self, statement: &ForStmt, mut state: State, label: Option<&str>) -> Outcome {
         self.push_scope();
         let reanalyze = self.enter_loop();
@@ -758,41 +797,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
             state.mounted.clear();
         }
         if let Some(init) = &statement.init {
-            match init {
-                ForInit::VarDecl(declaration) => {
-                    let outcome = self.statement(&Stmt::LocalVar(declaration.clone()), state);
-                    state = outcome
-                        .normal
-                        .expect("local variable declaration completes");
-                }
-                ForInit::ForIn {
-                    var_type,
-                    name,
-                    iterable,
-                    ..
-                } => {
-                    self.expression(iterable, &mut state);
-                    let ty = var_type
-                        .as_ref()
-                        .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
-                        .unwrap_or_else(|| self.iterable_element_type(iterable, &state));
-                    if var_type.is_none() {
-                        self.declare_inferred(name.name.clone(), ty, &mut state);
-                    } else {
-                        self.declare(name.name.clone(), ty);
-                    }
-                }
-                ForInit::PatternForIn { pattern, iterable } => {
-                    self.expression(iterable, &mut state);
-                    let matched = self.iterable_element_type(iterable, &state);
-                    self.bind_pattern(pattern, matched, &mut state);
-                }
-                ForInit::Exprs(expressions) => {
-                    for expression in expressions {
-                        self.expression(expression, &mut state);
-                    }
-                }
-            }
+            state = self.for_init(init, state);
         }
         let may_skip_body = statement.condition.is_some()
             || matches!(
@@ -1225,7 +1230,7 @@ impl<'a> BuildContextFlowAnalyzer<'a> {
         };
         let span = expression.span();
         if !state.mounted.contains(&token) && self.reported.insert(span.start) {
-            self.diagnostics.push(span.clone());
+            self.diagnostics.push(*span);
         }
     }
 }

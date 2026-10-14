@@ -115,8 +115,8 @@ impl CrossFileRule for UnnecessaryNullable {
 
 /// Where a nullable parameter sits in a call's argument list.
 enum ParamSlot {
-    /// Positional index within `positional ++ optional_positional`; `optional`
-    /// marks the optional-positional tail (which a call may legally omit).
+    /// Index among positional parameters; `optional` marks an optional
+    /// positional parameter, which a call may legally omit.
     Positional { index: usize, optional: bool },
     /// Named parameter; `optional` when it is not `required`.
     Named { optional: bool },
@@ -146,9 +146,12 @@ fn private_targets(program: &Program) -> Vec<Target<'_>> {
     for decl in &program.declarations {
         match decl {
             TopLevelDecl::Function(f)
-                if is_private(&f.name.name) && !f.is_getter && !f.is_setter =>
+                if is_private(&f.name.name)
+                    && matches!(f.kind, falcon_syntax::ast::FunctionKind::Function(_)) =>
             {
-                push_target(&mut out, &f.name.name, &f.params, f.body.as_ref());
+                if let Some(params) = f.params() {
+                    push_target(&mut out, &f.name.name, params, f.body.as_ref());
+                }
             }
             TopLevelDecl::Class(c) => collect_method_targets(&mut out, &c.members),
             TopLevelDecl::Mixin(m) => collect_method_targets(&mut out, &m.members),
@@ -192,28 +195,25 @@ fn push_target<'a>(
 /// Extract the nullable parameters of a formal list with their call-site slots.
 fn nullable_params(params: &FormalParamList) -> Vec<NullableParam> {
     let mut out = Vec::new();
-    let positional_len = params.positional.len();
-    for (i, p) in params
-        .positional
-        .iter()
-        .chain(&params.optional_positional)
-        .enumerate()
-    {
+    for (i, p) in params.positional().enumerate() {
         if let Some(np) = make_param(
             p,
             ParamSlot::Positional {
                 index: i,
-                optional: i >= positional_len,
+                optional: matches!(p.kind, falcon_syntax::ast::ParamKind::OptionalPositional),
             },
         ) {
             out.push(np);
         }
     }
-    for p in &params.named {
+    for p in params.named() {
         if let Some(np) = make_param(
             p,
             ParamSlot::Named {
-                optional: !p.is_required,
+                optional: matches!(
+                    p.kind,
+                    falcon_syntax::ast::ParamKind::Named { required: false }
+                ),
             },
         ) {
             out.push(np);
@@ -225,7 +225,7 @@ fn nullable_params(params: &FormalParamList) -> Vec<NullableParam> {
 fn make_param(p: &FormalParam, slot: ParamSlot) -> Option<NullableParam> {
     // Skip constructor field/super params and function-typed params — out of
     // scope; only a written nullable type qualifies.
-    if p.is_field || p.is_super || p.function_params.is_some() {
+    if p.initializing.is_some() || p.function_params.is_some() {
         return None;
     }
     let ty = p.param_type.as_ref()?;
@@ -239,7 +239,7 @@ fn make_param(p: &FormalParam, slot: ParamSlot) -> Option<NullableParam> {
     };
     Some(NullableParam {
         name: p.name.name.clone(),
-        span: p.name.span.clone(),
+        span: p.name.span,
         slot,
         default_is_null,
     })
@@ -254,7 +254,10 @@ fn decl_names(program: &Program) -> Vec<String> {
     let mut out = Vec::new();
     for decl in &program.declarations {
         match decl {
-            TopLevelDecl::Function(f) if !f.is_getter && !f.is_setter => {
+            TopLevelDecl::Function(f)
+                if !matches!(f.kind, falcon_syntax::ast::FunctionKind::Getter)
+                    && !matches!(f.kind, falcon_syntax::ast::FunctionKind::Setter(_)) =>
+            {
                 out.push(f.name.name.clone())
             }
             TopLevelDecl::Class(c) => method_names(&mut out, &c.members),
@@ -432,14 +435,14 @@ impl Visitor for CallCollector<'_> {
                                     self.visit_expr(&a.value);
                                 }
                             }
-                            CascadeOp::Index(index, _) => {
+                            CascadeOp::Index { index, .. } => {
                                 self.visit_expr(index);
                             }
                             CascadeOp::Assign(target, _, value) => {
                                 self.visit_expr(target);
                                 self.visit_expr(value);
                             }
-                            CascadeOp::Field(..) => {}
+                            CascadeOp::Field { .. } => {}
                         }
                     }
                 }

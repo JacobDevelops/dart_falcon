@@ -45,7 +45,7 @@ impl Rule for AvoidRedundantAsync {
 }
 
 fn check_function_async(func_decl: &FunctionDecl, ctx: &AnalyzeContext) -> Option<Diagnostic> {
-    if !func_decl.is_async {
+    if !func_decl.async_marker.is_async() {
         return None;
     }
 
@@ -66,7 +66,7 @@ fn check_function_async(func_decl: &FunctionDecl, ctx: &AnalyzeContext) -> Optio
 }
 
 fn check_method_async(method_decl: &MethodDecl, ctx: &AnalyzeContext) -> Option<Diagnostic> {
-    if !method_decl.is_async {
+    if !method_decl.async_marker.is_async() {
         return None;
     }
 

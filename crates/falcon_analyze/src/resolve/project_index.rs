@@ -105,7 +105,7 @@ impl ProjectIndex {
         for decl in &program.declarations {
             match decl {
                 TopLevelDecl::Function(f) => {
-                    let ty = if f.is_setter {
+                    let ty = if matches!(f.kind, falcon_syntax::ast::FunctionKind::Setter(_)) {
                         StaticType::Void
                     } else {
                         return_of(f.return_type.as_ref())

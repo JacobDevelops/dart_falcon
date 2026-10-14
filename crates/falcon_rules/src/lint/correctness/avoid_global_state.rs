@@ -24,9 +24,7 @@ impl Rule for AvoidGlobalState {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             match decl {
-                TopLevelDecl::Variable(var)
-                    if is_mutable(var.is_const, var.is_final, var.is_late) =>
-                {
+                TopLevelDecl::Variable(var) if is_mutable(var.keyword, var.is_late) => {
                     diags.push(make_diag(ctx, &var.span));
                 }
                 TopLevelDecl::Class(class) => check_static_fields(&class.members, &mut diags, ctx),
@@ -39,15 +37,15 @@ impl Rule for AvoidGlobalState {
     }
 }
 
-fn is_mutable(is_const: bool, is_final: bool, is_late: bool) -> bool {
-    !is_const && (!is_final || is_late)
+fn is_mutable(keyword: VarKeyword, is_late: bool) -> bool {
+    keyword == VarKeyword::Var || (keyword == VarKeyword::Final && is_late)
 }
 
 fn check_static_fields(members: &[ClassMember], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     for member in members {
         if let ClassMember::Field(field) = member
             && field.is_static
-            && is_mutable(field.is_const, field.is_final, field.is_late)
+            && is_mutable(field.keyword, field.is_late)
         {
             diags.push(make_diag(ctx, &field.span));
         }

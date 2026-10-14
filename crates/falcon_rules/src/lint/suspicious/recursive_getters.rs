@@ -23,7 +23,9 @@ impl Rule for RecursiveGetters {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             match decl {
-                TopLevelDecl::Function(f) if f.is_getter => {
+                TopLevelDecl::Function(f)
+                    if matches!(f.kind, falcon_syntax::ast::FunctionKind::Getter) =>
+                {
                     check(&f.body, &f.name.name, &mut diags, ctx);
                 }
                 TopLevelDecl::Class(c) => members(&c.members, &mut diags, ctx),

@@ -33,7 +33,7 @@ use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_expr, walk_field_decl, walk_function_decl, walk_getter_decl, walk_method_decl,
-    walk_stmt, walk_top_level_decl,
+    walk_top_level_decl,
 };
 
 pub struct PreferCollectionLiterals;
@@ -208,11 +208,9 @@ impl Visitor for ContextScan {
         walk_field_decl(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalVar(lv) = node {
-            self.record_decls(&lv.var_type, &lv.declarators);
-        }
-        walk_stmt(self, node);
+    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
+        self.record_decls(&lv.var_type, &lv.declarators);
+        falcon_syntax::visitor::walk_local_var(self, lv);
     }
 
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {

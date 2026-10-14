@@ -91,7 +91,7 @@ impl CatchScan<'_> {
 impl Visitor for CatchScan<'_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
-            Stmt::Throw(t) if !t.is_rethrow && is_target(&t.value, self.target) => {
+            Stmt::Throw(t) if is_target(&t.value, self.target) => {
                 self.flag(&t.span);
             }
             // Do not descend: a different exception binding / rethrow not valid here.

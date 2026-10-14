@@ -113,12 +113,7 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
     }
 
     fn params(&mut self, params: &FormalParamList) {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             self.declare(&param.name.name);
         }
     }
@@ -165,7 +160,9 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
                 self.visit_expr(iterable);
                 self.declare(&name.name);
             }
-            ForInit::PatternForIn { pattern, iterable } => {
+            ForInit::PatternForIn {
+                pattern, iterable, ..
+            } => {
                 self.visit_expr(iterable);
                 self.pattern(pattern);
             }
@@ -179,6 +176,10 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
 }
 
 impl Visitor for Collector<'_, '_> {
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        self.local(node);
+    }
+
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
             Stmt::Block(block) => {
@@ -188,7 +189,7 @@ impl Visitor for Collector<'_, '_> {
                 }
                 self.pop();
             }
-            Stmt::LocalVar(declaration) => self.local(declaration),
+            Stmt::LocalVar(declaration) => self.visit_local_var(declaration),
             Stmt::LocalFunc(function) => {
                 self.declare(&function.name.name);
                 self.nested_function(&function.params, &function.body);

@@ -89,6 +89,84 @@ fn test_multiple_spreads_default_to_set() {
     assert!(matches!(expr, Expr::Set { .. }), "got {expr:?}");
 }
 
+#[test]
+fn map_entries_and_control_elements_share_source_order() {
+    let Expr::Map { elements, .. } = parse_ok("{'a': 1, ...other, if (ready) 'b': 2, 'c': 3}")
+    else {
+        panic!("expected map");
+    };
+    assert!(matches!(
+        &elements[..],
+        [
+            MapElement::Entry(_),
+            MapElement::Spread { .. },
+            MapElement::If { .. },
+            MapElement::Entry(_)
+        ]
+    ));
+    let Expr::Map { elements, .. } = parse_ok("{'a': 1, 'b': 2}") else {
+        panic!("expected map");
+    };
+    assert!(matches!(
+        &elements[..],
+        [MapElement::Entry(_), MapElement::Entry(_)]
+    ));
+}
+
+#[test]
+fn collection_for_headers_preserve_declarations_and_clauses() {
+    let Expr::List { elements, .. } = parse_ok("[for (final int item in items) item]") else {
+        panic!("expected list");
+    };
+    assert!(matches!(
+        &elements[0],
+        CollectionElement::For {
+            header: ForHeader {
+                init: Some(ForInit::ForIn {
+                    keyword: VarKeyword::Final,
+                    var_type: Some(_),
+                    ..
+                }),
+                ..
+            },
+            ..
+        }
+    ));
+    let Expr::List { elements, .. } = parse_ok("[for (final (key, value) in pairs) value]") else {
+        panic!("expected list");
+    };
+    assert!(matches!(
+        &elements[0],
+        CollectionElement::For {
+            header: ForHeader {
+                init: Some(ForInit::PatternForIn {
+                    keyword: VarKeyword::Final,
+                    ..
+                }),
+                ..
+            },
+            ..
+        }
+    ));
+    let Expr::Map { elements, .. } = parse_ok("{for (var i = 0; i < n; i++) i: i}") else {
+        panic!("expected map");
+    };
+    let MapElement::For {
+        header: ForHeader {
+            init,
+            condition,
+            updates,
+        },
+        ..
+    } = &elements[0]
+    else {
+        panic!("expected C-style map for");
+    };
+    assert!(matches!(init.as_ref(), Some(ForInit::VarDecl(_))));
+    assert!(condition.is_some());
+    assert_eq!(updates.len(), 1);
+}
+
 // ── Item (b): `<T>{}` empty-brace arity ───────────────────────────────────────
 
 #[test]
@@ -104,10 +182,8 @@ fn test_single_type_arg_empty_braces_is_set() {
 fn test_two_type_args_empty_braces_is_map() {
     let expr = parse_ok("<K, V>{}");
     match expr {
-        Expr::Map {
-            entries, elements, ..
-        } => {
-            assert!(entries.is_empty() && elements.is_empty());
+        Expr::Map { elements, .. } => {
+            assert!(elements.is_empty());
         }
         other => panic!("expected empty Map, got {other:?}"),
     }
@@ -252,11 +328,15 @@ fn test_null_aware_cascade_marks_first_section_only() {
             assert!(is_null_aware);
             assert_eq!(sections.len(), 2);
             match &sections[0].ops[0] {
-                CascadeOp::Field(_, na) => assert!(*na, "first section should be null-aware"),
+                CascadeOp::Field { is_null_aware, .. } => {
+                    assert!(*is_null_aware, "first section should be null-aware")
+                }
                 other => panic!("expected Field, got {other:?}"),
             }
             match &sections[1].ops[0] {
-                CascadeOp::Field(_, na) => assert!(!*na, "second section is plain `..`"),
+                CascadeOp::Field { is_null_aware, .. } => {
+                    assert!(!*is_null_aware, "second section is plain `..`")
+                }
                 other => panic!("expected Field, got {other:?}"),
             }
         }
@@ -269,7 +349,9 @@ fn test_null_aware_cascade_index_section() {
     let expr = parse_ok("a?..[0]");
     match expr {
         Expr::Cascade { sections, .. } => match &sections[0].ops[0] {
-            CascadeOp::Index(_, na) => assert!(*na, "index section should be null-aware"),
+            CascadeOp::Index { is_null_aware, .. } => {
+                assert!(*is_null_aware, "index section should be null-aware")
+            }
             other => panic!("expected Index, got {other:?}"),
         },
         other => panic!("expected Cascade, got {other:?}"),
@@ -281,7 +363,7 @@ fn test_plain_cascade_index_section_not_null_aware() {
     let expr = parse_ok("a..[0]");
     match expr {
         Expr::Cascade { sections, .. } => match &sections[0].ops[0] {
-            CascadeOp::Index(_, na) => assert!(!*na),
+            CascadeOp::Index { is_null_aware, .. } => assert!(!*is_null_aware),
             other => panic!("expected Index, got {other:?}"),
         },
         other => panic!("expected Cascade, got {other:?}"),
@@ -294,7 +376,9 @@ fn test_null_aware_index_selector_cascade_section() {
     let expr = parse_ok("a..?[0]");
     match expr {
         Expr::Cascade { sections, .. } => match &sections[0].ops[0] {
-            CascadeOp::Index(_, na) => assert!(*na, "`?[` index should be null-aware"),
+            CascadeOp::Index { is_null_aware, .. } => {
+                assert!(*is_null_aware, "`?[` index should be null-aware")
+            }
             other => panic!("expected Index, got {other:?}"),
         },
         other => panic!("expected Cascade, got {other:?}"),
@@ -567,7 +651,7 @@ fn const_generic_typed_local_decl_still_parses() {
     // Regression guard: `const List<int> xs = []` stays a const var declaration.
     let (stmts, e) = parse_body("const List<int> xs = [];");
     assert_eq!(e, 0);
-    assert!(matches!(&stmts[0], Stmt::LocalVar(v) if v.is_const));
+    assert!(matches!(&stmts[0], Stmt::LocalVar(v) if v.keyword == VarKeyword::Const));
 }
 
 // ── Residual parse gaps: cascade selector chains and paren-vs-lambda ───────────
@@ -585,7 +669,7 @@ fn cascade_section_parses_full_selector_chain() {
             assert!(
                 matches!(
                     sections[0].ops.as_slice(),
-                    [CascadeOp::Field(f, _), CascadeOp::Call(c, _, _)]
+                    [CascadeOp::Field { name: f, .. }, CascadeOp::Call(c, _, _)]
                         if f.name == "b" && c.name == "c"
                 ),
                 "ops: {:?}",
@@ -618,7 +702,7 @@ fn cascade_null_aware_selector_within_chain() {
         Expr::Cascade { sections, .. } => assert!(
             matches!(
                 sections[0].ops.as_slice(),
-                [CascadeOp::Field(b, false), CascadeOp::Field(c, true)]
+                [CascadeOp::Field { name: b, is_null_aware: false }, CascadeOp::Field { name: c, is_null_aware: true }]
                     if b.name == "b" && c.name == "c"
             ),
             "ops: {:?}",

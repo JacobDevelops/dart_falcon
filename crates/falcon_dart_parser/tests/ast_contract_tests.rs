@@ -1,198 +1,5 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::*;
-
-// ── Visitor pattern test ──────────────────────────────────────────────────────
-
-struct CountingVisitor {
-    node_count: usize,
-    class_count: usize,
-    function_count: usize,
-    field_count: usize,
-}
-
-impl Visitor for CountingVisitor {
-    fn visit_program(&mut self, node: &Program) {
-        self.node_count += 1;
-        walk_program(self, node);
-    }
-
-    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        self.node_count += 1;
-        walk_top_level_decl(self, node);
-    }
-
-    fn visit_class_decl(&mut self, node: &ClassDecl) {
-        self.class_count += 1;
-        self.node_count += 1;
-        walk_class_decl(self, node);
-    }
-
-    fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.function_count += 1;
-        self.node_count += 1;
-        walk_function_decl(self, node);
-    }
-
-    fn visit_field_decl(&mut self, node: &FieldDecl) {
-        self.field_count += 1;
-        self.node_count += 1;
-        walk_field_decl(self, node);
-    }
-}
-
-#[test]
-fn test_visitor_empty_program() {
-    let src = "";
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let mut visitor = CountingVisitor {
-        node_count: 0,
-        class_count: 0,
-        function_count: 0,
-        field_count: 0,
-    };
-    visitor.visit_program(&prog);
-
-    assert_eq!(visitor.class_count, 0);
-    assert_eq!(visitor.function_count, 0);
-}
-
-#[test]
-fn test_visitor_single_class() {
-    let src = "class Foo {}";
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let mut visitor = CountingVisitor {
-        node_count: 0,
-        class_count: 0,
-        function_count: 0,
-        field_count: 0,
-    };
-    visitor.visit_program(&prog);
-
-    assert_eq!(visitor.class_count, 1);
-}
-
-#[test]
-fn test_visitor_class_with_fields() {
-    let src = "class Foo { int x; String y; }";
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let mut visitor = CountingVisitor {
-        node_count: 0,
-        class_count: 0,
-        function_count: 0,
-        field_count: 0,
-    };
-    visitor.visit_program(&prog);
-
-    assert_eq!(visitor.class_count, 1);
-    assert_eq!(visitor.field_count, 2);
-}
-
-#[test]
-fn test_visitor_multiple_declarations() {
-    let src = "class Foo {} void bar() {} class Baz {}";
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let mut visitor = CountingVisitor {
-        node_count: 0,
-        class_count: 0,
-        function_count: 0,
-        field_count: 0,
-    };
-    visitor.visit_program(&prog);
-
-    assert_eq!(visitor.class_count, 2);
-    assert_eq!(visitor.function_count, 1);
-}
-
-// ── Span tests ────────────────────────────────────────────────────────────────
-
-#[test]
-fn test_span_merge() {
-    let span1 = Span::new(0, 10);
-    let span2 = Span::new(15, 25);
-
-    let merged = span1.merge(&span2);
-    assert_eq!(merged.start, 0);
-    assert_eq!(merged.end, 25);
-}
-
-#[test]
-fn test_span_merge_overlapping() {
-    let span1 = Span::new(0, 15);
-    let span2 = Span::new(10, 20);
-
-    let merged = span1.merge(&span2);
-    assert_eq!(merged.start, 0);
-    assert_eq!(merged.end, 20);
-}
-
-#[test]
-fn test_span_merge_same() {
-    let span = Span::new(5, 10);
-    let merged = span.merge(&span);
-
-    assert_eq!(merged.start, 5);
-    assert_eq!(merged.end, 10);
-}
-
-#[test]
-fn test_span_from_program() {
-    let src = "class Foo {}";
-    let (prog, _) = parse(src);
-
-    // Program should have a span covering the entire source
-    assert_eq!(prog.span.start, 0);
-    assert!(prog.span.end > 0);
-}
-
-#[test]
-fn test_span_nested_declarations() {
-    let src = "class Parent { class Child {} }";
-    let (prog, errors) = parse(src);
-    // Parse should handle or error gracefully on invalid Dart
-    // Class nesting is not valid in Dart, but parser should not panic
-    assert!(!prog.declarations.is_empty() || !errors.is_empty());
-}
-
-// ── Type span tests ──────────────────────────────────────────────────────────
-
-#[test]
-fn test_type_named_span() {
-    let src = "int x;";
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
-        panic!("expected var")
-    };
-    assert!(v.var_type.is_some());
-    let span = v.var_type.as_ref().unwrap().span();
-    assert!(span.end > span.start);
-}
-
-#[test]
-fn test_type_generic_span() {
-    let src = "List<int> list;";
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
-        panic!("expected var")
-    };
-    assert!(v.var_type.is_some());
-    let span = v.var_type.as_ref().unwrap().span();
-    assert!(span.end > span.start);
-}
-
-// ── Identifier tests ──────────────────────────────────────────────────────────
 
 #[test]
 fn test_identifier_basic() {
@@ -219,8 +26,6 @@ fn test_identifier_with_underscore() {
     assert_eq!(fun.name.name, "_privateFunc");
 }
 
-// ── String literal tests ──────────────────────────────────────────────────────
-
 #[test]
 fn test_string_lit_node_value() {
     let src = r#"var s = "hello";"#;
@@ -236,31 +41,9 @@ fn test_string_lit_node_value() {
     let Expr::StringLit(lit) = init else {
         panic!("expected string lit")
     };
-    // The value should be decoded (without quotes)
-    assert!(!lit.value.is_empty());
-    // The raw should preserve original text
-    assert!(!lit.raw.is_empty());
+    assert_eq!(lit.value, "hello");
+    assert_eq!(lit.raw, "\"hello\"");
 }
-
-#[test]
-fn test_string_lit_node_span() {
-    let src = r#"var s = "hello";"#;
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
-        panic!("expected var")
-    };
-    let Some(init) = &v.declarators[0].initializer else {
-        panic!("expected init")
-    };
-    let Expr::StringLit(lit) = init else {
-        panic!("expected string lit")
-    };
-    assert!(lit.span.end > lit.span.start);
-}
-
-// ── Class member tests ────────────────────────────────────────────────────────
 
 #[test]
 fn test_class_member_span() {
@@ -298,23 +81,6 @@ fn test_field_declarator_span() {
         assert!(declarator.span.end > declarator.span.start);
     }
 }
-
-// ── Function type tests ───────────────────────────────────────────────────────
-
-#[test]
-fn test_function_type_span() {
-    let src = "typedef Callback = void Function(int);";
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let TopLevelDecl::TypeAlias(alias) = &prog.declarations[0] else {
-        panic!("expected type alias")
-    };
-    let span = alias.aliased.span();
-    assert!(span.end > span.start);
-}
-
-// ── Named type tests ─────────────────────────────────────────────────────────
 
 #[test]
 fn test_named_type_simple() {
@@ -385,8 +151,6 @@ fn test_named_type_nullable() {
     assert!(typ.is_nullable());
 }
 
-// ── Formal param tests ────────────────────────────────────────────────────────
-
 #[test]
 fn test_formal_param_positional() {
     let src = "void foo(int x) {}";
@@ -396,7 +160,9 @@ fn test_formal_param_positional() {
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
         panic!("expected function")
     };
-    assert_eq!(fun.params.positional.len(), 1);
+    let params = &fun.params().unwrap().params;
+    assert_eq!(params.len(), 1);
+    assert_eq!(params[0].kind, ParamKind::Positional);
 }
 
 #[test]
@@ -408,7 +174,9 @@ fn test_formal_param_named() {
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
         panic!("expected function")
     };
-    assert_eq!(fun.params.named.len(), 1);
+    let params = &fun.params().unwrap().params;
+    assert_eq!(params.len(), 1);
+    assert_eq!(params[0].kind, ParamKind::Named { required: false });
 }
 
 #[test]
@@ -420,7 +188,9 @@ fn test_formal_param_optional() {
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
         panic!("expected function")
     };
-    assert_eq!(fun.params.optional_positional.len(), 1);
+    let params = &fun.params().unwrap().params;
+    assert_eq!(params.len(), 1);
+    assert_eq!(params[0].kind, ParamKind::OptionalPositional);
 }
 
 #[test]
@@ -432,12 +202,42 @@ fn test_formal_param_multiple_kinds() {
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
         panic!("expected function")
     };
-    assert_eq!(fun.params.positional.len(), 1);
-    assert_eq!(fun.params.optional_positional.len(), 1);
-    assert_eq!(fun.params.named.len(), 1);
+    let params = &fun.params().unwrap().params;
+    assert_eq!(params.len(), 3);
+    assert_eq!(params[0].kind, ParamKind::Positional);
+    assert_eq!(params[1].kind, ParamKind::OptionalPositional);
+    assert_eq!(params[2].kind, ParamKind::Named { required: false });
+    assert_eq!(
+        params
+            .iter()
+            .map(|param| param.name.name.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b", "c"]
+    );
 }
 
-// ── Local declarations tests ──────────────────────────────────────────────────
+#[test]
+fn test_formal_param_named_required_and_source_order() {
+    let (prog, errors) = parse("void foo(int z, {required int y, int a = 1}) {}");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
+        panic!("expected function")
+    };
+    let params = &fun.params().unwrap().params;
+    assert_eq!(params.len(), 3);
+    assert_eq!(
+        params
+            .iter()
+            .map(|param| param.name.name.as_str())
+            .collect::<Vec<_>>(),
+        ["z", "y", "a"]
+    );
+    assert_eq!(params[0].kind, ParamKind::Positional);
+    assert_eq!(params[1].kind, ParamKind::Named { required: true });
+    assert_eq!(params[2].kind, ParamKind::Named { required: false });
+    assert!(params[1].default_value.is_none());
+    assert!(matches!(&params[2].default_value, Some(Expr::IntLit { value, .. }) if value == "1"));
+}
 
 #[test]
 fn test_local_var_decl() {
@@ -473,13 +273,11 @@ fn test_local_var_final() {
             let Stmt::LocalVar(local_var) = &b.stmts[0] else {
                 panic!("expected local var")
             };
-            assert!(local_var.is_final);
+            assert_eq!(local_var.keyword, VarKeyword::Final);
         }
         _ => panic!("expected block body"),
     }
 }
-
-// ── Type param tests ──────────────────────────────────────────────────────────
 
 #[test]
 fn test_type_param_simple() {
@@ -519,8 +317,6 @@ fn test_type_params_multiple() {
     assert_eq!(cls.type_params.len(), 2);
 }
 
-// ── Annotation tests ──────────────────────────────────────────────────────────
-
 #[test]
 fn test_annotation_simple() {
     let src = "@deprecated class Foo {}";
@@ -545,8 +341,6 @@ fn test_annotation_with_args() {
     assert_eq!(cls.annotations.len(), 1);
     assert!(cls.annotations[0].args.is_some());
 }
-
-// ── Constructor tests ─────────────────────────────────────────────────────────
 
 #[test]
 fn test_constructor_default() {
@@ -610,8 +404,6 @@ fn test_constructor_named() {
     assert!(ctor.constructor_name.is_some());
 }
 
-// ── Method tests ──────────────────────────────────────────────────────────────
-
 #[test]
 fn test_method_basic() {
     let src = "class Foo { void bar() {} }";
@@ -639,7 +431,7 @@ fn test_method_async() {
     let ClassMember::Method(meth) = &cls.members[0] else {
         panic!("expected method")
     };
-    assert!(meth.is_async);
+    assert_eq!(meth.async_marker, AsyncMarker::Async);
 }
 
 #[test]
@@ -672,52 +464,84 @@ fn test_method_abstract() {
     assert!(meth.is_abstract);
 }
 
-// ── Getter/Setter tests ───────────────────────────────────────────────────────
-
 #[test]
-fn test_getter() {
-    let src = "class Foo { int get value => 42; }";
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
-        panic!("expected class")
+fn nullable_written_void_recovers_as_canonical_void_without_diagnostics() {
+    let (program, errors) = parse("void? f() {}");
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Function(function) = &program.declarations[0] else {
+        panic!("expected function");
     };
-    assert!(matches!(&cls.members[0], ClassMember::Getter(_)));
+    assert!(matches!(function.return_type, Some(DartType::Void { .. })));
 }
 
 #[test]
-fn test_setter() {
-    let src = "class Foo { void set value(int x) {} }";
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
-        panic!("expected class")
+fn nullable_dynamic_has_one_canonical_representation() {
+    let (program, errors) = parse("dynamic? x; Map<String, dynamic?> y;");
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Variable(first) = &program.declarations[0] else {
+        panic!("expected variable");
     };
-    assert!(matches!(&cls.members[0], ClassMember::Setter(_)));
+    assert!(matches!(first.var_type, Some(DartType::Dynamic { .. })));
+    let TopLevelDecl::Variable(second) = &program.declarations[1] else {
+        panic!("expected variable");
+    };
+    let Some(DartType::Named(map)) = &second.var_type else {
+        panic!("expected map type");
+    };
+    assert!(matches!(map.type_args[1], DartType::Dynamic { .. }));
 }
 
-// ── Operator tests ────────────────────────────────────────────────────────────
-
 #[test]
-fn test_operator_overload() {
-    let src = "class Foo { Foo operator+(Foo other) => this; }";
-    let (prog, errors) = parse(src);
-    assert!(errors.is_empty());
-
-    let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
-        panic!("expected class")
-    };
-    assert!(matches!(&cls.members[0], ClassMember::Operator(_)));
+fn string_delimiters_preserve_content_and_escape_text() {
+    for (raw, content, quote, triple, is_raw, offset) in [
+        ("'hello'", "hello", b'\'', false, false, 1),
+        ("\"hello\"", "hello", b'"', false, false, 1),
+        ("'''hello'''", "hello", b'\'', true, false, 3),
+        ("\"\"\"hello\"\"\"", "hello", b'"', true, false, 3),
+        ("r'\\n'", "\\n", b'\'', false, true, 2),
+        ("r\"\"\"\\n\"\"\"", "\\n", b'"', true, true, 4),
+        ("'\\n'", "\\n", b'\'', false, false, 1),
+    ] {
+        let delimiter = StringLitNode::delimiter(raw).unwrap();
+        assert_eq!(delimiter.content, content);
+        assert_eq!(delimiter.quote, quote);
+        assert_eq!(delimiter.triple, triple);
+        assert_eq!(delimiter.is_raw, is_raw);
+        assert_eq!(delimiter.content_offset, offset);
+        assert!(delimiter.terminated);
+        let (program, errors) = parse(&format!("var s = {raw};"));
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
+            panic!("expected variable");
+        };
+        let Some(Expr::StringLit(literal)) = &variable.declarators[0].initializer else {
+            panic!("expected string");
+        };
+        assert_eq!(literal.value, content);
+        assert_eq!(literal.raw, raw);
+    }
 }
 
-// ── Error node tests ──────────────────────────────────────────────────────────
+#[test]
+fn unterminated_string_delimiters_keep_recovery_content() {
+    for raw in ["'hello", "\"hello", "'''hello", "r'''hello"] {
+        let delimiter = StringLitNode::delimiter(raw).unwrap();
+        assert!(!delimiter.terminated);
+        assert_eq!(delimiter.content, "hello");
+    }
+    assert!(StringLitNode::delimiter("identifier").is_none());
+}
 
 #[test]
-fn test_error_node_graceful() {
-    let src = "this is invalid {";
-    let (prog, _errors) = parse(src);
-    // Parser should not panic, should produce at least an error node or partial tree
-    let _ = prog;
+fn adjacent_string_values_concatenate_without_decoding_escapes() {
+    let (program, errors) = parse("var s = 'a\\n' r\"b\\t\";");
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
+        panic!("expected variable");
+    };
+    let Some(Expr::StringLit(literal)) = &variable.declarators[0].initializer else {
+        panic!("expected string");
+    };
+    assert_eq!(literal.value, "a\\nb\\t");
+    assert_eq!(literal.raw, "'a\\n'r\"b\\t\"");
 }

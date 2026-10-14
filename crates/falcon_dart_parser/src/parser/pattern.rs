@@ -169,8 +169,7 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::Dot) {
             let expr = self.parse_dot_shorthand(false, start);
             return Pattern::Const(ConstPattern {
-                name: Vec::new(),
-                expr: Some(Box::new(expr)),
+                value: ConstPatternValue::Expr(Box::new(expr)),
                 span: self.span_from(start),
             });
         }
@@ -324,8 +323,7 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::Hash) {
             let expr = self.parse_symbol_literal(start);
             return Pattern::Const(ConstPattern {
-                name: Vec::new(),
-                expr: Some(Box::new(expr)),
+                value: ConstPatternValue::Expr(Box::new(expr)),
                 span: self.span_from(start),
             });
         }
@@ -614,8 +612,7 @@ impl<'src> Parser<'src> {
             self.advance(); // const
             let inner = self.parse_paren_or_record(true, start);
             return Pattern::Const(ConstPattern {
-                name: Vec::new(),
-                expr: Some(Box::new(inner)),
+                value: ConstPatternValue::Expr(Box::new(inner)),
                 span: self.span_from(start),
             });
         }
@@ -645,8 +642,7 @@ impl<'src> Parser<'src> {
             // const constructor / collection-literal expression.
             let expr = self.parse_primary();
             return Pattern::Const(ConstPattern {
-                name: Vec::new(),
-                expr: Some(Box::new(expr)),
+                value: ConstPatternValue::Expr(Box::new(expr)),
                 span: self.span_from(start),
             });
         }
@@ -662,8 +658,7 @@ impl<'src> Parser<'src> {
             }
         }
         Pattern::Const(ConstPattern {
-            name,
-            expr: None,
+            value: ConstPatternValue::Name(name),
             span: self.span_from(start),
         })
     }
@@ -775,8 +770,7 @@ impl<'src> Parser<'src> {
                     }
                 } else {
                     Pattern::Const(ConstPattern {
-                        name: nt.segments.clone(),
-                        expr: None,
+                        value: ConstPatternValue::Name(nt.segments.clone()),
                         span: self.span_from(start),
                     })
                 }

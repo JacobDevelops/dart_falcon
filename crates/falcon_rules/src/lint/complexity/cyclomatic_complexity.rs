@@ -281,10 +281,7 @@ fn count_expr(expr: &Expr, count: &mut usize) {
         Expr::Binary {
             op, left, right, ..
         } => {
-            if matches!(
-                op,
-                BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce | BinaryOp::IfNull
-            ) {
+            if matches!(op, BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce) {
                 *count += 1;
             }
             count_expr(left, count);
@@ -329,16 +326,14 @@ fn count_expr(expr: &Expr, count: &mut usize) {
                 count_collection_element(el, count);
             }
         }
-        Expr::Map {
-            entries, elements, ..
-        } => {
-            for e in entries {
-                count_expr(&e.key, count);
-                count_expr(&e.value, count);
+        Expr::Map { .. } => {
+            struct Children<'a>(&'a mut usize);
+            impl falcon_syntax::visitor::Visitor for Children<'_> {
+                fn visit_expr(&mut self, node: &Expr) {
+                    count_expr(node, self.0);
+                }
             }
-            for e in map_element_exprs(elements) {
-                count_expr(e, count);
-            }
+            falcon_syntax::visitor::walk_expr(&mut Children(count), expr);
         }
         Expr::Record { fields, .. } => {
             for f in fields {
@@ -376,13 +371,13 @@ fn count_args(args: &ArgList, count: &mut usize) {
 fn count_cascade(section: &CascadeSection, count: &mut usize) {
     for op in &section.ops {
         match op {
-            CascadeOp::Index(e, _) => count_expr(e, count),
+            CascadeOp::Index { index, .. } => count_expr(index, count),
             CascadeOp::Call(_, _, args) => count_args(args, count),
             CascadeOp::Assign(target, _, value) => {
                 count_expr(target, count);
                 count_expr(value, count);
             }
-            CascadeOp::Field(_, _) => {}
+            CascadeOp::Field { .. } => {}
         }
     }
 }
@@ -405,44 +400,16 @@ fn count_collection_element(el: &CollectionElement, count: &mut usize) {
             }
         }
         CollectionElement::For {
-            iterable, element, ..
+            header, element, ..
         } => {
-            count_expr(iterable, count);
-            count_collection_element(element, count);
-        }
-        CollectionElement::CFor {
-            init,
-            condition,
-            updates,
-            element,
-            ..
-        } => {
-            match init {
-                Some(ForInit::VarDecl(d)) => {
-                    for decl in &d.declarators {
-                        if let Some(e) = &decl.initializer {
-                            count_expr(e, count);
-                        }
-                    }
-                }
-                Some(ForInit::ForIn { iterable, .. }) => {
-                    count_expr(iterable, count);
-                }
-                Some(ForInit::PatternForIn { iterable, .. }) => {
-                    count_expr(iterable, count);
-                }
-                Some(ForInit::Exprs(es)) => {
-                    for e in es {
-                        count_expr(e, count);
-                    }
-                }
-                None => {}
+            if let Some(init) = &header.init {
+                count_for_init(init, count);
             }
-            if let Some(c) = condition {
-                count_expr(c, count);
+            if let Some(condition) = &header.condition {
+                count_expr(condition, count);
             }
-            for u in updates {
-                count_expr(u, count);
+            for update in &header.updates {
+                count_expr(update, count);
             }
             count_collection_element(element, count);
         }

@@ -133,7 +133,9 @@ fn class_fields_allow_const(
         .members
         .iter()
         .filter_map(|member| match member {
-            ClassMember::Field(field) if !field.is_static && (field.is_final || field.is_const) => {
+            ClassMember::Field(field)
+                if !field.is_static && (field.keyword != falcon_syntax::ast::VarKeyword::Var) =>
+            {
                 Some(field)
             }
             _ => None,
@@ -151,7 +153,7 @@ fn class_fields_allow_const(
     class.with_clause.is_empty()
         && class.members.iter().all(|member| match member {
             ClassMember::Field(field) if !field.is_static => {
-                (field.is_final || field.is_const)
+                (field.keyword != falcon_syntax::ast::VarKeyword::Var)
                     && field.declarators.iter().all(|declarator| {
                         declarator.initializer.as_ref().is_none_or(|initializer| {
                             potentially_constant_with_shadowed(
@@ -212,10 +214,8 @@ fn constructor_can_be_const(
     }
     let allowed = constructor
         .params
-        .positional
+        .params
         .iter()
-        .chain(&constructor.params.optional_positional)
-        .chain(&constructor.params.named)
         .map(|parameter| parameter.name.name.clone())
         .collect::<HashSet<_>>();
     let mut shadowed = class_lexical_value_names(class);
@@ -224,7 +224,9 @@ fn constructor_can_be_const(
         .members
         .iter()
         .filter_map(|member| match member {
-            ClassMember::Field(field) if !field.is_static && (field.is_final || field.is_const) => {
+            ClassMember::Field(field)
+                if !field.is_static && (field.keyword != falcon_syntax::ast::VarKeyword::Var) =>
+            {
                 Some(field)
             }
             _ => None,

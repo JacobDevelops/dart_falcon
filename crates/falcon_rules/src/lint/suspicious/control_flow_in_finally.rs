@@ -121,7 +121,7 @@ impl FinallyScanner<'_, '_, '_> {
                 for kind in &case.cases {
                     if let SwitchCaseKind::Pattern(pattern, guard) = kind {
                         this.visit_pattern(pattern);
-                        if let Some(guard) = &**guard {
+                        if let Some(guard) = guard {
                             this.visit_expr(guard);
                         }
                     }

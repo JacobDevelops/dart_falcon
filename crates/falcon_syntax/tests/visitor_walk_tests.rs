@@ -82,6 +82,126 @@ fn record(src: &str) -> Recorder {
     r
 }
 
+#[test]
+fn walks_catch_types_and_bindings() {
+    let r = record("void f() { try {} on CatchType catch (caught, trace) {} }");
+    assert!(r.has_named("CatchType"));
+    assert!(r.has_ident("caught"));
+    assert!(r.has_ident("trace"));
+}
+
+#[test]
+fn walks_collection_literal_type_arguments() {
+    let r = record(
+        "void f() { var a = <ListArg>[]; var b = <SetArg>{value}; \
+         var c = <MapKey, MapValue>{key: value}; }",
+    );
+    for name in ["ListArg", "SetArg", "MapKey", "MapValue"] {
+        assert!(
+            r.has_named(name),
+            "collection type argument {name} not walked"
+        );
+    }
+}
+
+#[test]
+fn walks_pattern_type_arguments_and_constant_name_segments() {
+    let r = record(
+        "void f(Object value) { switch (value) { \
+         case <PatternList>[a]: break; \
+         case <PatternKey, PatternValue>{'key': b}: break; \
+         case PatternOwner.member: break; } }",
+    );
+    for name in ["PatternList", "PatternKey", "PatternValue"] {
+        assert!(r.has_named(name), "pattern type argument {name} not walked");
+    }
+    assert!(r.has_ident("PatternOwner"));
+    assert!(r.has_ident("member"));
+}
+
+#[test]
+fn walks_collection_for_in_header_types_and_bindings() {
+    let r = record(
+        "void f() { var a = [for (ListItem listItem in source) listItem]; \
+         var b = {for (SetItem setItem in source) setItem}; \
+         var c = {for (MapItem mapItem in source) mapItem: value}; }",
+    );
+    for name in ["ListItem", "SetItem", "MapItem"] {
+        assert!(r.has_named(name), "for-in header type {name} not walked");
+    }
+    for name in ["listItem", "setItem", "mapItem"] {
+        assert_eq!(
+            r.idents
+                .iter()
+                .filter(|ident| ident.as_str() == name)
+                .count(),
+            2,
+            "for-in binding and body use of {name} must both be walked",
+        );
+    }
+}
+
+#[test]
+fn local_var_hook_borrows_statement_and_loop_declarations() {
+    #[derive(Default)]
+    struct Locals {
+        declarations: Vec<*const LocalVarDecl>,
+    }
+
+    impl Visitor for Locals {
+        fn visit_local_var(&mut self, declaration: &LocalVarDecl) {
+            self.declarations.push(std::ptr::from_ref(declaration));
+        }
+    }
+
+    let (program, errors) = parse(
+        "void f() { var statement = 1; \
+         for (var counter = 0; counter < 1; counter++) {} \
+         var collection = [for (var item = 0; item < 1; item++) item]; }",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Function(function) = &program.declarations[0] else {
+        panic!("expected function");
+    };
+    let Some(FunctionBody::Block(body)) = &function.body else {
+        panic!("expected block");
+    };
+    let Stmt::LocalVar(statement) = &body.stmts[0] else {
+        panic!("expected local declaration");
+    };
+    let Stmt::For(loop_statement) = &body.stmts[1] else {
+        panic!("expected statement loop");
+    };
+    let Some(ForInit::VarDecl(counter)) = &loop_statement.init else {
+        panic!("expected loop declaration");
+    };
+    let Stmt::LocalVar(collection) = &body.stmts[2] else {
+        panic!("expected collection declaration");
+    };
+    let Some(Expr::List { elements, .. }) = &collection.declarators[0].initializer else {
+        panic!("expected list");
+    };
+    let CollectionElement::For { header, .. } = &elements[0] else {
+        panic!("expected collection loop");
+    };
+    let Some(ForInit::VarDecl(item)) = &header.init else {
+        panic!("expected collection loop declaration");
+    };
+
+    let mut visitor = Locals::default();
+    visitor.visit_stmt(&body.stmts[0]);
+    visitor.visit_stmt(&body.stmts[1]);
+    visitor.visit_expr(collection.declarators[0].initializer.as_ref().unwrap());
+    assert_eq!(
+        visitor.declarations,
+        [
+            std::ptr::from_ref(statement),
+            std::ptr::from_ref(counter),
+            std::ptr::from_ref(item),
+        ],
+    );
+}
+
 // ── Item 1: constructor initializers ──────────────────────────────────────────
 
 #[test]
@@ -308,4 +428,79 @@ fn adjacent_string_span_covers_full_run() {
         "span.end must be the last fragment"
     );
     assert_eq!(&src[lit.span.start..lit.span.end], full_run);
+}
+
+#[derive(Default)]
+struct CountingVisitor {
+    class_count: usize,
+    function_count: usize,
+    field_count: usize,
+}
+
+impl Visitor for CountingVisitor {
+    fn visit_class_decl(&mut self, node: &ClassDecl) {
+        self.class_count += 1;
+        walk_class_decl(self, node);
+    }
+
+    fn visit_function_decl(&mut self, node: &FunctionDecl) {
+        self.function_count += 1;
+        walk_function_decl(self, node);
+    }
+
+    fn visit_field_decl(&mut self, node: &FieldDecl) {
+        self.field_count += 1;
+        walk_field_decl(self, node);
+    }
+}
+
+#[test]
+fn test_visitor_empty_program() {
+    let src = "";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty());
+
+    let mut visitor = CountingVisitor::default();
+    visitor.visit_program(&prog);
+
+    assert_eq!(visitor.class_count, 0);
+    assert_eq!(visitor.function_count, 0);
+}
+
+#[test]
+fn test_visitor_single_class() {
+    let src = "class Foo {}";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty());
+
+    let mut visitor = CountingVisitor::default();
+    visitor.visit_program(&prog);
+
+    assert_eq!(visitor.class_count, 1);
+}
+
+#[test]
+fn test_visitor_class_with_fields() {
+    let src = "class Foo { int x; String y; }";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty());
+
+    let mut visitor = CountingVisitor::default();
+    visitor.visit_program(&prog);
+
+    assert_eq!(visitor.class_count, 1);
+    assert_eq!(visitor.field_count, 2);
+}
+
+#[test]
+fn test_visitor_multiple_declarations() {
+    let src = "class Foo {} void bar() {} class Baz {}";
+    let (prog, errors) = parse(src);
+    assert!(errors.is_empty());
+
+    let mut visitor = CountingVisitor::default();
+    visitor.visit_program(&prog);
+
+    assert_eq!(visitor.class_count, 2);
+    assert_eq!(visitor.function_count, 1);
 }

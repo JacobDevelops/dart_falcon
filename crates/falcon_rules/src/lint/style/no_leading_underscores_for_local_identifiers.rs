@@ -72,7 +72,7 @@ impl Visitor for Collector {
     /// identifiers.") and so do we. The default value is still walked, since it
     /// can host a closure with its own parameters.
     fn visit_formal_param(&mut self, node: &FormalParam) {
-        if !node.is_field && !node.is_super {
+        if node.initializing.is_none() {
             self.check(&node.name);
         }
         walk_formal_param(self, node);
@@ -85,15 +85,16 @@ impl Visitor for Collector {
         walk_setter_decl(self, node);
     }
 
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        for declarator in &node.declarators {
+            self.check(&declarator.name);
+        }
+        falcon_syntax::visitor::walk_local_var(self, node);
+    }
+
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
-            Stmt::LocalVar(lv) => {
-                for d in &lv.declarators {
-                    self.check(&d.name);
-                }
-            }
-            // `ForInit::VarDecl` re-enters as `Stmt::LocalVar` and `PatternForIn`
-            // as a pattern, so only the `for-in` binding needs handling here.
+            // Local declarations and pattern bindings use their dedicated hooks.
             Stmt::For(f) => {
                 if let Some(ForInit::ForIn { name, .. }) = &f.init {
                     self.check(name);

@@ -80,7 +80,9 @@ impl Collector {
             TopLevelDecl::Function(node) if is_public(&node.name) => {
                 self.optional_type(node.return_type.as_ref());
                 self.type_params(&node.type_params);
-                self.params(&node.params);
+                if let Some(params) = node.params() {
+                    self.params(params);
+                }
             }
             TopLevelDecl::Variable(node)
                 if node
@@ -135,10 +137,10 @@ impl Collector {
     }
 
     fn params(&mut self, params: &FormalParamList) {
-        for param in params.positional.iter().chain(&params.optional_positional) {
+        for param in params.positional() {
             self.param(param);
         }
-        for param in &params.named {
+        for param in params.named() {
             if is_public(&param.name) {
                 self.param(param);
             }
@@ -192,7 +194,7 @@ impl Collector {
                     self.type_(&field.field_type);
                 }
             }
-            DartType::Void { .. } | DartType::Dynamic { .. } | DartType::Never { .. } => {}
+            DartType::Void { .. } | DartType::Dynamic { .. } => {}
         }
     }
 

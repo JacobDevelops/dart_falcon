@@ -70,16 +70,15 @@ impl Collector {
     }
 
     fn check_formals(&mut self, params: &FormalParamList, span: &Span) {
-        self.check(
-            params.positional.len() + params.optional_positional.len() + params.named.len(),
-            span,
-        );
+        self.check(params.params.len(), span);
     }
 }
 
 impl Visitor for Collector {
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.check_formals(&node.params, &node.span);
+        if let Some(params) = node.params() {
+            self.check_formals(params, &node.span);
+        }
         walk_function_decl(self, node);
     }
 

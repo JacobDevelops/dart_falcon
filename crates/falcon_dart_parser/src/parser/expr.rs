@@ -3,21 +3,6 @@ use falcon_syntax::token::TokenKind;
 
 use super::Parser;
 
-/// Result of parsing a collection/map comprehension `for (...)` header.
-enum ForHeader {
-    ForIn {
-        variable: Option<Identifier>,
-        var_type: Option<DartType>,
-        pattern: Option<Box<Pattern>>,
-        iterable: Expr,
-    },
-    CStyle {
-        init: Option<ForInit>,
-        condition: Option<Expr>,
-        updates: Vec<Expr>,
-    },
-}
-
 impl<'src> Parser<'src> {
     // ── Public entry ──────────────────────────────────────────────────────────
 
@@ -806,7 +791,10 @@ impl<'src> Parser<'src> {
                 ops.push(CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs)));
                 return ops; // assignment terminates the section
             }
-            CascadeOp::Index(Box::new(idx), index_null_aware)
+            CascadeOp::Index {
+                index: Box::new(idx),
+                is_null_aware: index_null_aware,
+            }
         } else if self.is_ident_like() {
             let name = self.expect_ident();
             if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
@@ -826,7 +814,10 @@ impl<'src> Parser<'src> {
                 ));
                 return ops;
             } else {
-                CascadeOp::Field(name, section_null_aware)
+                CascadeOp::Field {
+                    name,
+                    is_null_aware: section_null_aware,
+                }
             }
         } else {
             return ops; // empty section
@@ -863,7 +854,10 @@ impl<'src> Parser<'src> {
                         ));
                         break;
                     } else {
-                        ops.push(CascadeOp::Field(name, is_null_safe));
+                        ops.push(CascadeOp::Field {
+                            name,
+                            is_null_aware: is_null_safe,
+                        });
                     }
                 }
                 TokenKind::LBracket | TokenKind::QmarkLBracket => {
@@ -876,7 +870,10 @@ impl<'src> Parser<'src> {
                         ops.push(CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs)));
                         break;
                     }
-                    ops.push(CascadeOp::Index(Box::new(idx), is_null_safe));
+                    ops.push(CascadeOp::Index {
+                        index: Box::new(idx),
+                        is_null_aware: is_null_safe,
+                    });
                 }
                 _ => break,
             }
@@ -921,7 +918,7 @@ impl<'src> Parser<'src> {
 
     fn parse_primary_inner(&mut self) -> Expr {
         let start = self.cur().offset;
-        match self.cur().kind.clone() {
+        match self.cur().kind {
             TokenKind::IntLit => {
                 let text = self.cur_text().to_string();
                 self.advance();
@@ -1007,8 +1004,7 @@ impl<'src> Parser<'src> {
                     let is_plain_block_lambda = matches!(
                         &expr,
                         Expr::FuncExpr {
-                            is_async: false,
-                            is_generator: false,
+                            async_marker: AsyncMarker::Sync,
                             body,
                             ..
                         } if matches!(**body, FunctionBody::Block(_))
@@ -1281,12 +1277,12 @@ impl<'src> Parser<'src> {
         start: usize,
     ) -> Expr {
         let params = self.parse_formal_param_list();
-        let (is_async, is_generator) = self.parse_async_marker();
+        let async_marker = self.parse_async_marker();
         // A closure establishes its own async/generator context: `await`/`yield`
         // are reserved per this closure's markers, independent of any enclosing
         // body (a plain closure inside an async function resets them).
         let saved_ctx = (self.in_async, self.in_generator);
-        (self.in_async, self.in_generator) = (is_async, is_generator);
+        (self.in_async, self.in_generator) = (async_marker.is_async(), async_marker.is_generator());
         // A closure's `=>` body is an expression, so it must NOT swallow the `;`
         // that terminates the enclosing declaration/statement — unlike a function
         // *declaration* body. `class C { final f = () => 0; }` relies on the `;`
@@ -1311,8 +1307,7 @@ impl<'src> Parser<'src> {
         Expr::FuncExpr {
             type_params,
             params,
-            is_async,
-            is_generator,
+            async_marker,
             body: Box::new(body),
             span: self.span_from(start),
         }
@@ -1401,7 +1396,6 @@ impl<'src> Parser<'src> {
             return Expr::Map {
                 is_const,
                 type_args,
-                entries: Vec::new(),
                 elements: Vec::new(),
                 span: self.span_from(start),
             };
@@ -1421,31 +1415,11 @@ impl<'src> Parser<'src> {
                 }
             }
             self.expect(TokenKind::RBrace);
-            // Lower a plain map (no comprehension) to `entries` to keep the common
-            // shape; only comprehension maps use `elements`.
-            if elements.iter().all(|e| matches!(e, MapElement::Entry(_))) {
-                let entries = elements
-                    .into_iter()
-                    .map(|e| match e {
-                        MapElement::Entry(entry) => entry,
-                        _ => unreachable!("only entries remain"),
-                    })
-                    .collect();
-                Expr::Map {
-                    is_const,
-                    type_args,
-                    entries,
-                    elements: Vec::new(),
-                    span: self.span_from(start),
-                }
-            } else {
-                Expr::Map {
-                    is_const,
-                    type_args,
-                    entries: Vec::new(),
-                    elements,
-                    span: self.span_from(start),
-                }
+            Expr::Map {
+                is_const,
+                type_args,
+                elements,
+                span: self.span_from(start),
             }
         } else {
             let mut elements = Vec::new();
@@ -1654,91 +1628,25 @@ impl<'src> Parser<'src> {
         }
     }
 
-    /// Finish a collection `for`/`await for` element after the `for` keyword has
-    /// been consumed, building either a for-in ([`CollectionElement::For`], which
-    /// carries `is_await`) or a C-style ([`CollectionElement::CFor`]) element.
     fn finish_for_collection_element(&mut self, is_await: bool, start: usize) -> CollectionElement {
-        match self.parse_collection_for_header() {
-            ForHeader::ForIn {
-                variable,
-                var_type,
-                pattern,
-                iterable,
-            } => {
-                let element = Box::new(self.parse_collection_element());
-                CollectionElement::For {
-                    is_await,
-                    variable,
-                    var_type,
-                    pattern,
-                    iterable,
-                    element,
-                    span: self.span_from(start),
-                }
-            }
-            ForHeader::CStyle {
-                init,
-                condition,
-                updates,
-            } => {
-                if is_await {
-                    self.error(
-                        "'await' cannot be used with a C-style for loop; use 'await for (x in ...)'"
-                            .to_string(),
-                    );
-                }
-                let element = Box::new(self.parse_collection_element());
-                CollectionElement::CFor {
-                    init,
-                    condition,
-                    updates,
-                    element,
-                    span: self.span_from(start),
-                }
-            }
+        let header = self.parse_collection_for_header(is_await);
+        let element = Box::new(self.parse_collection_element());
+        CollectionElement::For {
+            is_await,
+            header,
+            element,
+            span: self.span_from(start),
         }
     }
 
-    /// Map-comprehension twin of [`finish_for_collection_element`].
     fn finish_for_map_element(&mut self, is_await: bool, start: usize) -> MapElement {
-        match self.parse_collection_for_header() {
-            ForHeader::ForIn {
-                variable,
-                var_type,
-                pattern,
-                iterable,
-            } => {
-                let entry = Box::new(self.parse_map_element());
-                MapElement::For {
-                    is_await,
-                    variable,
-                    var_type,
-                    pattern,
-                    iterable,
-                    entry,
-                    span: self.span_from(start),
-                }
-            }
-            ForHeader::CStyle {
-                init,
-                condition,
-                updates,
-            } => {
-                if is_await {
-                    self.error(
-                        "'await' cannot be used with a C-style for loop; use 'await for (x in ...)'"
-                            .to_string(),
-                    );
-                }
-                let entry = Box::new(self.parse_map_element());
-                MapElement::CFor {
-                    init,
-                    condition,
-                    updates,
-                    entry,
-                    span: self.span_from(start),
-                }
-            }
+        let header = self.parse_collection_for_header(is_await);
+        let entry = Box::new(self.parse_map_element());
+        MapElement::For {
+            is_await,
+            header,
+            entry,
+            span: self.span_from(start),
         }
     }
 
@@ -1763,60 +1671,42 @@ impl<'src> Parser<'src> {
         condition
     }
 
-    /// Parse a collection `for (...)` header (the `for` keyword is already
-    /// consumed), returning either a for-in header (loop variable or Dart 3
-    /// destructuring pattern plus the iterable) or a C-style header
-    /// (`init ; cond ; update`). Leaves the closing `)` consumed.
-    fn parse_collection_for_header(&mut self) -> ForHeader {
+    fn parse_collection_for_header(&mut self, is_await: bool) -> ForHeader {
         self.expect(TokenKind::LParen);
-        // A pattern-for header is `final`/`var` (or nothing) followed by a
-        // destructuring pattern (`(a, b)`, `[a, b]`, `{..}`).
-        let is_pattern_for = {
-            let head_offset = if matches!(self.cur().kind, TokenKind::Var | TokenKind::Final) {
-                1
-            } else {
-                0
-            };
-            matches!(
-                self.peek(head_offset).kind,
-                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
-            )
-        };
-        if is_pattern_for {
-            let _ = self
-                .eat(TokenKind::Var)
-                .or_else(|| self.eat(TokenKind::Final));
-            let pattern = Some(Box::new(self.parse_binding_pattern()));
-            self.eat(TokenKind::In);
-            let iterable = self.parse_expr();
+        if matches!(
+            self.cur().kind,
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
+        ) {
+            let pattern = Box::new(self.parse_binding_pattern());
+            self.expect(TokenKind::In);
+            let iterable = Box::new(self.parse_expr());
             self.expect(TokenKind::RParen);
-            return ForHeader::ForIn {
-                variable: None,
-                var_type: None,
-                pattern,
-                iterable,
+            return ForHeader {
+                init: Some(ForInit::PatternForIn {
+                    keyword: VarKeyword::Var,
+                    pattern,
+                    iterable,
+                }),
+                condition: None,
+                updates: Vec::new(),
             };
         }
-        // Reuse the statement for-clause parser, which handles both for-in and
-        // C-style headers and consumes the closing `)`.
         let (init, condition, updates) = self.parse_for_clauses();
-        match init {
-            Some(ForInit::ForIn {
-                var_type,
-                name,
-                iterable,
-                ..
-            }) => ForHeader::ForIn {
-                variable: Some(name),
-                var_type,
-                pattern: None,
-                iterable: *iterable,
-            },
-            other => ForHeader::CStyle {
-                init: other,
-                condition,
-                updates,
-            },
+        if is_await
+            && !matches!(
+                &init,
+                Some(ForInit::ForIn { .. } | ForInit::PatternForIn { .. })
+            )
+        {
+            self.error(
+                "'await' cannot be used with a C-style for loop; use 'await for (x in ...)'"
+                    .to_string(),
+            );
+        }
+        ForHeader {
+            init,
+            condition,
+            updates,
         }
     }
 

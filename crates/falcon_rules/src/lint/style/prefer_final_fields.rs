@@ -102,8 +102,7 @@ fn check_class(
         let ClassMember::Field(field) = member else {
             continue;
         };
-        if field.is_final
-            || field.is_const
+        if field.keyword != falcon_syntax::ast::VarKeyword::Var
             || field.is_late
             || field.is_external
             || field.is_abstract
@@ -157,11 +156,9 @@ fn inits_field(c: &ConstructorDecl, name: &str) -> bool {
     );
     let via_formal = c
         .params
-        .positional
+        .params
         .iter()
-        .chain(&c.params.optional_positional)
-        .chain(&c.params.named)
-        .any(|p| p.is_field && p.name.name == name);
+        .any(|p| p.initializing == Some(InitializingFormal::This) && p.name.name == name);
     via_list || via_formal
 }
 

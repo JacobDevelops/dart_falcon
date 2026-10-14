@@ -157,7 +157,11 @@ fn widgets_message() -> &'static str {
 // 5: instance method/getter/setter/operator
 fn member_category(member: &ClassMember) -> u8 {
     match member {
-        ClassMember::Field(f) if f.is_static && f.is_const => 0,
+        ClassMember::Field(f)
+            if f.is_static && f.keyword == falcon_syntax::ast::VarKeyword::Const =>
+        {
+            0
+        }
         ClassMember::Field(f) if f.is_static => 1,
         ClassMember::Field(_) => 2,
         ClassMember::Constructor(_) => 3,

@@ -1,6 +1,5 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
-assertion_line: 1280
 expression: "prog.declarations[0]"
 ---
 Mixin(
@@ -44,8 +43,7 @@ Mixin(
                     is_static: false,
                     is_abstract: true,
                     is_external: false,
-                    is_async: false,
-                    is_generator: false,
+                    async_marker: Sync,
                     return_type: Some(
                         Named(
                             NamedType {
@@ -102,9 +100,7 @@ Mixin(
                     },
                     type_params: [],
                     params: FormalParamList {
-                        positional: [],
-                        optional_positional: [],
-                        named: [],
+                        params: [],
                         span: Span {
                             start: 58,
                             end: 60,

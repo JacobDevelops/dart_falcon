@@ -142,14 +142,11 @@ pub(crate) fn resolved_param_type(
     ResolvedType::Function {
         return_type: Box::new(return_type),
         positional: function_params
-            .positional
-            .iter()
-            .chain(&function_params.optional_positional)
+            .positional()
             .map(|param| resolved_param_type(param, model, type_parameters))
             .collect(),
         named: function_params
-            .named
-            .iter()
+            .named()
             .map(|param| {
                 (
                     param.name.name.clone(),
@@ -208,7 +205,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
     fn visit_function(
         &mut self,
         type_parameters: &[TypeParam],
-        params: &FormalParamList,
+        params: Option<&FormalParamList>,
         return_type: Option<&DartType>,
         body: Option<&FunctionBody>,
         contextual: bool,
@@ -232,8 +229,10 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
             .unwrap_or(ResolvedType::Dynamic);
         self.state.return_type.push(resolved_return);
         self.with_scope(|walker| {
-            walker.bind_params(params, None);
-            walker.visit_param_defaults(params);
+            if let Some(params) = params {
+                walker.bind_params(params, None);
+                walker.visit_param_defaults(params);
+            }
             if let Some(body) = body {
                 walker.visit_body(body);
             }
@@ -292,15 +291,10 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
     }
 
     fn bind_params(&mut self, params: &FormalParamList, super_constructor: Option<&str>) {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             let mut ty = resolved_param_type(param, &self.state.model, &self.state.type_parameters);
             if param.param_type.is_none() && param.function_params.is_none() {
-                if param.is_super {
+                if param.initializing == Some(InitializingFormal::Super) {
                     ty = super_constructor
                         .and_then(|constructor| {
                             self.state.superclass.as_ref().and_then(|superclass| {
@@ -314,7 +308,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                             })
                         })
                         .unwrap_or(ResolvedType::Unknown);
-                } else if param.is_field {
+                } else if param.initializing == Some(InitializingFormal::This) {
                     ty = self.state.environment.lookup(&param.name.name);
                     if matches!(ty, ResolvedType::Unknown) {
                         ty = self
@@ -340,12 +334,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
     }
 
     fn visit_param_defaults(&mut self, params: &FormalParamList) {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             if let Some(value) = &param.default_value {
                 let expected = self.state.environment.lookup(&param.name.name);
                 self.with_expected(expected, |walker| walker.visit_expr(value));
@@ -435,7 +424,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
             }
             Pattern::Wildcard { .. } | Pattern::Literal(_) | Pattern::Error { .. } => {}
             Pattern::Const(constant) => {
-                if let Some(expression) = &constant.expr {
+                if let ConstPatternValue::Expr(expression) = &constant.value {
                     self.visit_expr(expression);
                 }
             }
@@ -578,7 +567,9 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                     .unwrap_or_else(|| self.iterable_element_type(iterable));
                 self.state.environment.declare(name.name.clone(), ty);
             }
-            ForInit::PatternForIn { pattern, iterable } => {
+            ForInit::PatternForIn {
+                pattern, iterable, ..
+            } => {
                 self.visit_expr(iterable);
                 let matched = self.iterable_element_type(iterable);
                 self.visit_matched_pattern(pattern, matched);
@@ -588,6 +579,18 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                     self.visit_expr(expression);
                 }
             }
+        }
+    }
+
+    fn visit_for_header(&mut self, header: &ForHeader) {
+        if let Some(init) = &header.init {
+            self.visit_for_init(init);
+        }
+        if let Some(condition) = &header.condition {
+            self.visit_expr(condition);
+        }
+        for update in &header.updates {
+            self.visit_expr(update);
         }
     }
 
@@ -642,50 +645,9 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                 },
             ),
             CollectionElement::For {
-                variable,
-                var_type,
-                pattern,
-                iterable,
-                element,
-                ..
-            } => {
-                self.visit_expr(iterable);
-                self.with_scope(|walker| {
-                    if let Some(variable) = variable {
-                        let ty = var_type
-                            .as_ref()
-                            .map(|ty| {
-                                walker
-                                    .state
-                                    .model
-                                    .resolve_type_in(ty, &walker.state.type_parameters)
-                            })
-                            .unwrap_or_else(|| walker.iterable_element_type(iterable));
-                        walker.state.environment.declare(variable.name.clone(), ty);
-                    }
-                    if let Some(pattern) = pattern {
-                        let matched = walker.iterable_element_type(iterable);
-                        walker.visit_matched_pattern(pattern, matched);
-                    }
-                    walker.visit_collection_element(element);
-                });
-            }
-            CollectionElement::CFor {
-                init,
-                condition,
-                updates,
-                element,
-                ..
+                header, element, ..
             } => self.with_scope(|walker| {
-                if let Some(init) = init {
-                    walker.visit_for_init(init);
-                }
-                if let Some(condition) = condition {
-                    walker.visit_expr(condition);
-                }
-                for update in updates {
-                    walker.visit_expr(update);
-                }
+                walker.visit_for_header(header);
                 walker.visit_collection_element(element);
             }),
         }
@@ -712,51 +674,8 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                     }
                 },
             ),
-            MapElement::For {
-                variable,
-                var_type,
-                pattern,
-                iterable,
-                entry,
-                ..
-            } => {
-                self.visit_expr(iterable);
-                self.with_scope(|walker| {
-                    if let Some(variable) = variable {
-                        let ty = var_type
-                            .as_ref()
-                            .map(|ty| {
-                                walker
-                                    .state
-                                    .model
-                                    .resolve_type_in(ty, &walker.state.type_parameters)
-                            })
-                            .unwrap_or_else(|| walker.iterable_element_type(iterable));
-                        walker.state.environment.declare(variable.name.clone(), ty);
-                    }
-                    if let Some(pattern) = pattern {
-                        let matched = walker.iterable_element_type(iterable);
-                        walker.visit_matched_pattern(pattern, matched);
-                    }
-                    walker.visit_map_element(entry);
-                });
-            }
-            MapElement::CFor {
-                init,
-                condition,
-                updates,
-                entry,
-                ..
-            } => self.with_scope(|walker| {
-                if let Some(init) = init {
-                    walker.visit_for_init(init);
-                }
-                if let Some(condition) = condition {
-                    walker.visit_expr(condition);
-                }
-                for update in updates {
-                    walker.visit_expr(update);
-                }
+            MapElement::For { header, entry, .. } => self.with_scope(|walker| {
+                walker.visit_for_header(header);
                 walker.visit_map_element(entry);
             }),
         }
@@ -889,7 +808,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         self.visit_function(
             &node.type_params,
-            &node.params,
+            node.params(),
             node.return_type.as_ref(),
             node.body.as_ref(),
             false,
@@ -899,7 +818,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
     fn visit_method_decl(&mut self, node: &MethodDecl) {
         self.visit_function(
             &node.type_params,
-            &node.params,
+            Some(&node.params),
             node.return_type.as_ref(),
             node.body.as_ref(),
             false,
@@ -910,7 +829,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
         if let ClassMember::Operator(operator) = node {
             self.visit_function(
                 &[],
-                &operator.params,
+                Some(&operator.params),
                 operator.return_type.as_ref(),
                 operator.body.as_ref(),
                 false,
@@ -1004,15 +923,9 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
     }
 
     fn visit_getter_decl(&mut self, node: &GetterDecl) {
-        let empty = FormalParamList {
-            positional: Vec::new(),
-            optional_positional: Vec::new(),
-            named: Vec::new(),
-            span: node.span.clone(),
-        };
         self.visit_function(
             &[],
-            &empty,
+            None,
             node.return_type.as_ref(),
             node.body.as_ref(),
             false,
@@ -1021,25 +934,22 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
 
     fn visit_setter_decl(&mut self, node: &SetterDecl) {
         let params = FormalParamList {
-            positional: vec![FormalParam {
+            params: vec![FormalParam {
                 annotations: Vec::new(),
-                is_required: true,
+                kind: falcon_syntax::ast::ParamKind::Positional,
                 is_covariant: false,
                 is_final: false,
-                is_field: false,
-                is_super: false,
+                initializing: None,
                 param_type: node.param_type.clone(),
                 name: node.param.clone(),
                 default_value: None,
                 type_params: Vec::new(),
                 function_params: None,
-                span: node.param.span.clone(),
+                span: node.param.span,
             }],
-            optional_positional: Vec::new(),
-            named: Vec::new(),
-            span: node.span.clone(),
+            span: node.span,
         };
-        self.visit_function(&[], &params, None, node.body.as_ref(), false);
+        self.visit_function(&[], Some(&params), None, node.body.as_ref(), false);
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {
@@ -1171,7 +1081,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                     .declare(function.name.name.clone(), ResolvedType::Unknown);
                 self.visit_function(
                     &function.type_params,
-                    &function.params,
+                    Some(&function.params),
                     function.return_type.as_ref(),
                     Some(&function.body),
                     false,
@@ -1185,7 +1095,11 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
             }
             Stmt::Yield(statement) => self.visit_expr(&statement.value),
             Stmt::Expr(statement) => self.visit_expr(&statement.expr),
-            Stmt::Break(_) | Stmt::Continue(_) | Stmt::Error(_) => {}
+            Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Rethrow(_)
+            | Stmt::Empty(_)
+            | Stmt::Error(_) => {}
         }
     }
 
@@ -1361,7 +1275,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                 params,
                 body,
                 ..
-            } => self.visit_function(type_params, params, None, Some(body), true),
+            } => self.visit_function(type_params, Some(params), None, Some(body), true),
             Expr::Assign {
                 target,
                 op: AssignOp::Eq,
@@ -1377,13 +1291,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                     self.visit_collection_element(element);
                 }
             }
-            Expr::Map {
-                entries, elements, ..
-            } => {
-                for entry in entries {
-                    self.visit_expr(&entry.key);
-                    self.visit_expr(&entry.value);
-                }
+            Expr::Map { elements, .. } => {
                 for element in elements {
                     self.visit_map_element(element);
                 }

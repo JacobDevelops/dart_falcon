@@ -188,34 +188,39 @@ fn check_body(
 }
 
 fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cfg: &IdentCfg) {
-    // Exhaustive traversal reaches declarations nested in any statement form —
-    // including labeled blocks and closure bodies, which a hand-rolled walk with
-    // a `_ => {}` arm skipped.
-    falcon_syntax::visitor::for_each_stmt_in_stmts(stmts, &mut |stmt| {
-        check_stmt(stmt, diags, ctx, cfg);
-    });
+    struct Names<'a, 'ctx> {
+        diags: &'a mut Vec<Diagnostic>,
+        ctx: &'a AnalyzeContext<'ctx>,
+        cfg: &'a IdentCfg,
+    }
+
+    impl falcon_syntax::visitor::Visitor for Names<'_, '_> {
+        fn visit_stmt(&mut self, stmt: &Stmt) {
+            check_stmt(stmt, self.diags, self.ctx, self.cfg);
+            falcon_syntax::visitor::walk_stmt(self, stmt);
+        }
+
+        fn visit_local_var(&mut self, local: &LocalVarDecl) {
+            for decl in &local.declarators {
+                check_ident(&decl.name, self.diags, self.ctx, self.cfg);
+            }
+            falcon_syntax::visitor::walk_local_var(self, local);
+        }
+    }
+
+    let mut visitor = Names { diags, ctx, cfg };
+    for stmt in stmts {
+        falcon_syntax::visitor::Visitor::visit_stmt(&mut visitor, stmt);
+    }
 }
 
 /// Checks the names one statement declares. Nested statements are reached by the
 /// caller's walker, so this must not recurse itself.
 fn check_stmt(stmt: &Stmt, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext, cfg: &IdentCfg) {
-    match stmt {
-        Stmt::LocalVar(local) => {
-            for decl in &local.declarators {
-                check_ident(&decl.name, diags, ctx, cfg);
-            }
+    if let Stmt::PatternDecl(pattern_decl) = stmt {
+        for name in falcon_syntax::visitor::bound_names(&pattern_decl.pattern) {
+            check_ident(name, diags, ctx, cfg);
         }
-        // Dart 3 destructuring declares variables just as `final x = …` does, so
-        // every name the pattern binds is checked.
-        Stmt::PatternDecl(pattern_decl) => {
-            for name in falcon_syntax::visitor::bound_names(&pattern_decl.pattern) {
-                check_ident(name, diags, ctx, cfg);
-            }
-        }
-        // A C-style `for (var i = 0; …)` counter arrives here as the init's own
-        // `Stmt::LocalVar` via the walker. A for-*each* variable is a
-        // `DeclaredIdentifier`, not a declaration, and dcl does not check it.
-        _ => {}
     }
 }
 

@@ -25,7 +25,7 @@ impl<'src> Parser<'src> {
             let span = self.cur_span();
             self.advance();
             return Stmt::Expr(ExprStmt {
-                expr: Expr::Error { span: span.clone() },
+                expr: Expr::Error { span },
                 span,
             });
         }
@@ -84,7 +84,7 @@ impl<'src> Parser<'src> {
                 // only when the brace group has no top-level `;`. A `;` at the outer
                 // brace level (`{ 1; }`) can never appear in a collection literal, so
                 // the group is a block of statements, not a `{1}` set literal.
-                let next = self.peek(1).kind.clone();
+                let next = self.peek(1).kind;
                 let looks_like_collection = matches!(
                     next,
                     TokenKind::StringLit
@@ -113,7 +113,6 @@ impl<'src> Parser<'src> {
                 self.eat(TokenKind::Semicolon);
                 Stmt::Throw(ThrowStmt {
                     value,
-                    is_rethrow: false,
                     span: self.span_from(start),
                 })
             }
@@ -149,24 +148,16 @@ impl<'src> Parser<'src> {
             // expression/declaration parsing (`var yield = 0; yield = 1;`).
             TokenKind::Yield if self.in_generator => self.parse_yield_stmt(),
             TokenKind::Rethrow => {
-                self.advance();
-                self.eat(TokenKind::Semicolon);
-                Stmt::Throw(ThrowStmt {
-                    value: Expr::Error {
-                        span: self.span_from(start),
-                    },
-                    is_rethrow: true,
-                    span: self.span_from(start),
-                })
+                let token = self.advance();
+                let mut span = Self::tok_span(&token);
+                if let Some(semicolon) = self.eat(TokenKind::Semicolon) {
+                    span.end = semicolon.offset + semicolon.len;
+                }
+                Stmt::Rethrow(span)
             }
             TokenKind::Semicolon => {
-                self.advance();
-                Stmt::Expr(ExprStmt {
-                    expr: Expr::NullLit {
-                        span: self.span_from(start),
-                    },
-                    span: self.span_from(start),
-                })
+                let token = self.advance();
+                Stmt::Empty(Self::tok_span(&token))
             }
             _ => self.parse_expr_or_local_decl_stmt(),
         }
@@ -287,6 +278,11 @@ impl<'src> Parser<'src> {
         {
             let saved_pat = self.pos;
             let saved_errs = self.errors.len();
+            let keyword = if self.at(TokenKind::Final) {
+                VarKeyword::Final
+            } else {
+                VarKeyword::Var
+            };
             self.advance(); // final / var
             let pattern = self.parse_binding_pattern();
             if self.eat(TokenKind::In).is_some() {
@@ -294,6 +290,7 @@ impl<'src> Parser<'src> {
                 self.expect(TokenKind::RParen);
                 return (
                     Some(ForInit::PatternForIn {
+                        keyword,
                         pattern: Box::new(pattern),
                         iterable: Box::new(iterable),
                     }),
@@ -319,8 +316,13 @@ impl<'src> Parser<'src> {
                 self.expect(TokenKind::RParen);
                 return (
                     Some(ForInit::ForIn {
-                        // `ForIn` has no `is_const`; `const` is invalid here anyway.
-                        is_final: is_final || is_const,
+                        keyword: if is_const {
+                            VarKeyword::Const
+                        } else if is_final {
+                            VarKeyword::Final
+                        } else {
+                            VarKeyword::Var
+                        },
                         var_type,
                         name,
                         iterable: Box::new(iterable),
@@ -358,7 +360,7 @@ impl<'src> Parser<'src> {
                     self.expect(TokenKind::RParen);
                     return (
                         Some(ForInit::ForIn {
-                            is_final: false,
+                            keyword: VarKeyword::Var,
                             var_type: Some(ty),
                             name,
                             iterable: Box::new(iterable),
@@ -390,7 +392,7 @@ impl<'src> Parser<'src> {
             self.expect(TokenKind::RParen);
             return (
                 Some(ForInit::ForIn {
-                    is_final: false,
+                    keyword: VarKeyword::Var,
                     var_type: None,
                     name,
                     iterable: Box::new(iterable),
@@ -467,8 +469,13 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::RParen);
         (
             LocalVarDecl {
-                is_final,
-                is_const,
+                keyword: if is_const {
+                    VarKeyword::Const
+                } else if is_final {
+                    VarKeyword::Final
+                } else {
+                    VarKeyword::Var
+                },
                 is_late: false,
                 var_type,
                 declarators,
@@ -521,8 +528,13 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::RParen);
         (
             LocalVarDecl {
-                is_final,
-                is_const,
+                keyword: if is_const {
+                    VarKeyword::Const
+                } else if is_final {
+                    VarKeyword::Final
+                } else {
+                    VarKeyword::Var
+                },
                 is_late,
                 var_type,
                 declarators,
@@ -607,12 +619,12 @@ impl<'src> Parser<'src> {
                     self.advance();
                     let pattern = self.parse_pattern();
                     let guard = if self.eat(TokenKind::When).is_some() {
-                        Some(self.parse_expr())
+                        Some(Box::new(self.parse_expr()))
                     } else {
                         None
                     };
                     self.expect(TokenKind::Colon);
-                    case_kinds.push(SwitchCaseKind::Pattern(Box::new(pattern), Box::new(guard)));
+                    case_kinds.push(SwitchCaseKind::Pattern(Box::new(pattern), guard));
                 } else if self.at(TokenKind::Default) {
                     self.advance();
                     self.expect(TokenKind::Colon);
@@ -864,15 +876,14 @@ impl<'src> Parser<'src> {
                         Vec::new()
                     };
                     let params = self.parse_formal_param_list();
-                    let (is_async, is_generator) = self.parse_async_marker();
+                    let async_marker = self.parse_async_marker();
                     if let Some(body) = self.parse_function_body() {
                         return Stmt::LocalFunc(LocalFuncDecl {
                             return_type: Some(ty),
                             name,
                             type_params,
                             params,
-                            is_async,
-                            is_generator,
+                            async_marker,
                             body,
                             span: self.span_from(start),
                         });
@@ -915,8 +926,7 @@ impl<'src> Parser<'src> {
                     if self.at_any(&[TokenKind::Semicolon, TokenKind::RBrace, TokenKind::Eof]) {
                         self.eat(TokenKind::Semicolon);
                         return Stmt::LocalVar(LocalVarDecl {
-                            is_final: false,
-                            is_const: false,
+                            keyword: VarKeyword::Var,
                             is_late: false,
                             var_type: Some(ty),
                             declarators,
@@ -962,7 +972,7 @@ impl<'src> Parser<'src> {
     /// declaration `const List<int> xs = ...` by the `(`/`.` (constructor) vs
     /// identifier (variable name) that follows.
     fn const_starts_expr(&self) -> bool {
-        let kind = |i: usize| self.tokens.get(i).map(|t| t.kind.clone());
+        let kind = |i: usize| self.tokens.get(i).map(|t| t.kind);
         let mut i = self.pos + 1; // token after `const`
         // Collection / record literal: const [..], const {..}, const <T>[..], const (..).
         if matches!(
@@ -1043,8 +1053,13 @@ impl<'src> Parser<'src> {
         }
         self.eat(TokenKind::Semicolon);
         Stmt::LocalVar(LocalVarDecl {
-            is_final,
-            is_const,
+            keyword: if is_const {
+                VarKeyword::Const
+            } else if is_final {
+                VarKeyword::Final
+            } else {
+                VarKeyword::Var
+            },
             is_late,
             var_type,
             declarators,
@@ -1082,7 +1097,11 @@ impl<'src> Parser<'src> {
             let init = self.parse_expr();
             self.eat(TokenKind::Semicolon);
             return Some(Stmt::PatternDecl(PatternDeclaration {
-                is_final,
+                keyword: if is_final {
+                    VarKeyword::Final
+                } else {
+                    VarKeyword::Var
+                },
                 pattern,
                 init,
                 span: self.span_from(start),
@@ -1113,8 +1132,7 @@ impl<'src> Parser<'src> {
                 }];
                 self.eat(TokenKind::Semicolon);
                 return Stmt::LocalVar(LocalVarDecl {
-                    is_final: false,
-                    is_const: false,
+                    keyword: VarKeyword::Var,
                     is_late: false,
                     var_type: Some(ty),
                     declarators,
@@ -1305,11 +1323,10 @@ impl<'src> Parser<'src> {
             return None;
         }
         let params = self.parse_formal_param_list();
-        let (is_async, is_generator) = self.parse_async_marker();
+        let async_marker = self.parse_async_marker();
         if let Some(body) = self.parse_function_body() {
             return Some(Stmt::LocalFunc(LocalFuncDecl {
-                is_async,
-                is_generator,
+                async_marker,
                 return_type: None,
                 name,
                 type_params,

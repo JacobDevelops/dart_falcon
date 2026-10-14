@@ -144,7 +144,9 @@ fn visit_function_decl(
     if let Some(return_type) = &func.return_type {
         check_dart_type(return_type, diagnostics, ctx);
     }
-    visit_formal_param_list(&func.params, diagnostics, ctx);
+    if let Some(params) = func.params() {
+        visit_formal_param_list(params, diagnostics, ctx);
+    }
     if let Some(body) = &func.body {
         visit_function_body(body, diagnostics, ctx);
     }
@@ -165,13 +167,7 @@ fn visit_formal_param_list(
     diagnostics: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    for param in &params.positional {
-        visit_formal_param(param, diagnostics, ctx);
-    }
-    for param in &params.optional_positional {
-        visit_formal_param(param, diagnostics, ctx);
-    }
-    for param in &params.named {
+    for param in &params.params {
         visit_formal_param(param, diagnostics, ctx);
     }
 }
@@ -235,27 +231,7 @@ fn visit_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         }
         Stmt::For(for_stmt) => {
             if let Some(init) = &for_stmt.init {
-                match init {
-                    ForInit::VarDecl(var_decl) => {
-                        visit_local_var_decl(var_decl, diagnostics, ctx);
-                    }
-                    ForInit::ForIn {
-                        var_type, iterable, ..
-                    } => {
-                        if let Some(vtype) = var_type {
-                            check_dart_type(vtype, diagnostics, ctx);
-                        }
-                        visit_expr(iterable, diagnostics, ctx);
-                    }
-                    ForInit::PatternForIn { iterable, .. } => {
-                        visit_expr(iterable, diagnostics, ctx);
-                    }
-                    ForInit::Exprs(exprs) => {
-                        for expr in exprs {
-                            visit_expr(expr, diagnostics, ctx);
-                        }
-                    }
-                }
+                falcon_syntax::visitor::walk_for_init(&mut Children { diagnostics, ctx }, init);
             }
             if let Some(condition) = &for_stmt.condition {
                 visit_expr(condition, diagnostics, ctx);
@@ -320,7 +296,7 @@ fn visit_stmt(stmt: &Stmt, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         Stmt::Labeled(labeled) => {
             visit_stmt(&labeled.stmt, diagnostics, ctx);
         }
-        Stmt::Error(_) => {}
+        Stmt::Rethrow(_) | Stmt::Empty(_) | Stmt::Error(_) => {}
     }
 }
 
@@ -434,10 +410,10 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
                                 visit_expr(&named_arg.value, diagnostics, ctx);
                             }
                         }
-                        CascadeOp::Index(index, _) => {
+                        CascadeOp::Index { index, .. } => {
                             visit_expr(index, diagnostics, ctx);
                         }
-                        CascadeOp::Field(_, _) => {}
+                        CascadeOp::Field { .. } => {}
                         CascadeOp::Assign(target, _, value) => {
                             visit_expr(target, diagnostics, ctx);
                             visit_expr(value, diagnostics, ctx);
@@ -458,7 +434,6 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
         }
         Expr::Map {
             type_args,
-            entries,
             elements,
             ..
         } => {
@@ -470,12 +445,11 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
                 }
                 check_dart_type(type_arg, diagnostics, ctx);
             }
-            for entry in entries {
-                visit_expr(&entry.key, diagnostics, ctx);
-                visit_expr(&entry.value, diagnostics, ctx);
-            }
-            for e in map_element_exprs(elements) {
-                visit_expr(e, diagnostics, ctx);
+            for element in elements {
+                falcon_syntax::visitor::walk_map_element(
+                    &mut Children { diagnostics, ctx },
+                    element,
+                );
             }
         }
         Expr::Set {
@@ -534,6 +508,23 @@ fn visit_expr(expr: &Expr, diagnostics: &mut Vec<Diagnostic>, ctx: &AnalyzeConte
     }
 }
 
+struct Children<'a, 'ctx> {
+    diagnostics: &'a mut Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'ctx>,
+}
+
+impl falcon_syntax::visitor::Visitor for Children<'_, '_> {
+    fn visit_expr(&mut self, node: &Expr) {
+        visit_expr(node, self.diagnostics, self.ctx);
+    }
+    fn visit_dart_type(&mut self, node: &DartType) {
+        check_dart_type(node, self.diagnostics, self.ctx);
+    }
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        visit_local_var_decl(node, self.diagnostics, self.ctx);
+    }
+}
+
 fn visit_collection_element(
     elem: &CollectionElement,
     diagnostics: &mut Vec<Diagnostic>,
@@ -572,51 +563,9 @@ fn visit_collection_element(
             }
         }
         CollectionElement::For {
-            var_type,
-            iterable,
-            element,
-            ..
+            header, element, ..
         } => {
-            if let Some(vtype) = var_type {
-                check_dart_type(vtype, diagnostics, ctx);
-            }
-            visit_expr(iterable, diagnostics, ctx);
-            visit_collection_element(element, diagnostics, ctx);
-        }
-        CollectionElement::CFor {
-            init,
-            condition,
-            updates,
-            element,
-            ..
-        } => {
-            match init {
-                Some(ForInit::VarDecl(d)) => {
-                    for decl in &d.declarators {
-                        if let Some(e) = &decl.initializer {
-                            visit_expr(e, diagnostics, ctx);
-                        }
-                    }
-                }
-                Some(ForInit::ForIn { iterable, .. }) => {
-                    visit_expr(iterable, diagnostics, ctx);
-                }
-                Some(ForInit::PatternForIn { iterable, .. }) => {
-                    visit_expr(iterable, diagnostics, ctx);
-                }
-                Some(ForInit::Exprs(es)) => {
-                    for e in es {
-                        visit_expr(e, diagnostics, ctx);
-                    }
-                }
-                None => {}
-            }
-            if let Some(c) = condition {
-                visit_expr(c, diagnostics, ctx);
-            }
-            for u in updates {
-                visit_expr(u, diagnostics, ctx);
-            }
+            falcon_syntax::visitor::walk_for_header(&mut Children { diagnostics, ctx }, header);
             visit_collection_element(element, diagnostics, ctx);
         }
     }
@@ -659,6 +608,5 @@ fn check_dart_type(dart_type: &DartType, diagnostics: &mut Vec<Diagnostic>, ctx:
         }
         DartType::Record(_) => {}
         DartType::Void { .. } => {}
-        DartType::Never { .. } => {}
     }
 }

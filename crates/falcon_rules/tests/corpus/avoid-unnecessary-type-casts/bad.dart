@@ -78,3 +78,13 @@ void loopScopeRegression(List<int> xs) {
     print(e);
   }
 }
+
+void typedCollectionForCastRegression() {
+  final list = [
+    for (int i = 0; i < 2; i++) i as int, /* expect: avoid-unnecessary-type-casts */
+  ];
+  final map = {
+    for (int j = 0; j < 2; j++) j: j as int, /* expect: avoid-unnecessary-type-casts */
+  };
+  print([list, map]);
+}

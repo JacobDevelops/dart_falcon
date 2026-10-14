@@ -48,12 +48,7 @@ impl Rule for AvoidRenamingMethodParameters {
 }
 
 fn positional_param_names(params: &FormalParamList) -> Vec<&Identifier> {
-    params
-        .positional
-        .iter()
-        .chain(&params.optional_positional)
-        .map(|param| &param.name)
-        .collect()
+    params.positional().map(|param| &param.name).collect()
 }
 
 fn check_members(

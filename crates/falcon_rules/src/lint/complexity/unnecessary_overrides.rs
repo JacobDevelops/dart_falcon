@@ -80,20 +80,13 @@ fn only_override(annotations: &[Annotation]) -> bool {
 
 fn params_add_meaning(params: &FormalParamList) -> bool {
     params
-        .positional
+        .params
         .iter()
-        .chain(&params.optional_positional)
-        .chain(&params.named)
         .any(|p| p.default_value.is_some() || p.is_covariant)
 }
 
 fn args_match_params(args: &ArgList, params: &FormalParamList) -> bool {
-    let positional: Vec<&str> = params
-        .positional
-        .iter()
-        .chain(&params.optional_positional)
-        .map(|p| p.name.name.as_str())
-        .collect();
+    let positional: Vec<&str> = params.positional().map(|p| p.name.name.as_str()).collect();
     if args.positional.len() != positional.len() {
         return false;
     }
@@ -103,10 +96,10 @@ fn args_match_params(args: &ArgList, params: &FormalParamList) -> bool {
             _ => return false,
         }
     }
-    if args.named.len() != params.named.len() {
+    if args.named.len() != params.named().count() {
         return false;
     }
-    for np in &params.named {
+    for np in params.named() {
         let Some(na) = args.named.iter().find(|na| na.name.name == np.name.name) else {
             return false;
         };

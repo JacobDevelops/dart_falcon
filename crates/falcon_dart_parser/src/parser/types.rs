@@ -19,18 +19,9 @@ impl<'src> Parser<'src> {
                 };
                 return self.parse_function_type(Some(ret), start);
             }
-            let nullable = self.eat_type_qmark();
-            let span = self.span_from(start);
-            return if nullable {
-                // void? is technically invalid Dart but we parse it gracefully
-                DartType::Named(NamedType {
-                    segments: vec![Identifier::new("void", span.clone())],
-                    type_args: vec![],
-                    is_nullable: true,
-                    span,
-                })
-            } else {
-                DartType::Void { span }
+            self.eat_type_qmark();
+            return DartType::Void {
+                span: self.span_from(start),
             };
         }
 
@@ -44,17 +35,9 @@ impl<'src> Parser<'src> {
                 };
                 return self.parse_function_type(Some(ret), start);
             }
-            let is_nullable = self.eat_type_qmark();
-            let span = self.span_from(start);
-            return if is_nullable {
-                DartType::Named(NamedType {
-                    segments: vec![Identifier::new("dynamic", span.clone())],
-                    type_args: vec![],
-                    is_nullable: true,
-                    span,
-                })
-            } else {
-                DartType::Dynamic { span }
+            self.eat_type_qmark();
+            return DartType::Dynamic {
+                span: self.span_from(start),
             };
         }
 
@@ -360,14 +343,12 @@ impl<'src> Parser<'src> {
         let start = self.cur().offset;
         self.expect(TokenKind::LParen);
 
-        let mut positional = Vec::new();
-        let mut optional_positional = Vec::new();
-        let mut named = Vec::new();
+        let mut params = Vec::new();
 
         if self.at(TokenKind::LBracket) {
             self.advance();
             while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
-                optional_positional.push(self.parse_formal_param(false));
+                params.push(self.parse_formal_param(ParamKind::OptionalPositional));
                 if self.eat(TokenKind::Comma).is_none() {
                     break;
                 }
@@ -376,7 +357,7 @@ impl<'src> Parser<'src> {
         } else if self.at(TokenKind::LBrace) {
             self.advance();
             while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-                named.push(self.parse_formal_param(true));
+                params.push(self.parse_formal_param(ParamKind::Named { required: false }));
                 if self.eat(TokenKind::Comma).is_none() {
                     break;
                 }
@@ -387,7 +368,7 @@ impl<'src> Parser<'src> {
                 if self.at(TokenKind::LBracket) {
                     self.advance();
                     while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
-                        optional_positional.push(self.parse_formal_param(false));
+                        params.push(self.parse_formal_param(ParamKind::OptionalPositional));
                         if self.eat(TokenKind::Comma).is_none() {
                             break;
                         }
@@ -397,7 +378,7 @@ impl<'src> Parser<'src> {
                 } else if self.at(TokenKind::LBrace) {
                     self.advance();
                     while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-                        named.push(self.parse_formal_param(true));
+                        params.push(self.parse_formal_param(ParamKind::Named { required: false }));
                         if self.eat(TokenKind::Comma).is_none() {
                             break;
                         }
@@ -405,7 +386,7 @@ impl<'src> Parser<'src> {
                     self.eat(TokenKind::RBrace);
                     break;
                 } else {
-                    positional.push(self.parse_formal_param(false));
+                    params.push(self.parse_formal_param(ParamKind::Positional));
                     if self.eat(TokenKind::Comma).is_none() {
                         break;
                     }
@@ -415,20 +396,21 @@ impl<'src> Parser<'src> {
 
         self.expect(TokenKind::RParen);
         FormalParamList {
-            positional,
-            optional_positional,
-            named,
+            params,
             span: self.span_from(start),
         }
     }
 
-    fn parse_formal_param(&mut self, is_named: bool) -> FormalParam {
+    fn parse_formal_param(&mut self, mut kind: ParamKind) -> FormalParam {
         let start = self.cur().offset;
         let mut annotations = Vec::new();
         while self.at(TokenKind::At) {
             annotations.extend(self.parse_annotations());
         }
         let is_required = self.eat(TokenKind::Required).is_some();
+        if let ParamKind::Named { required } = &mut kind {
+            *required = is_required;
+        }
         let is_covariant = self.eat(TokenKind::Covariant).is_some();
         let is_final = self.eat(TokenKind::Final).is_some();
         // `var` marks an untyped mutable parameter; consume it so the following
@@ -438,8 +420,7 @@ impl<'src> Parser<'src> {
         // A `this.field` / `super.field` formal may be preceded by a type
         // (`C(int this.x)`, `C(int super.x)`), so parse an optional leading type
         // before deciding.
-        let mut is_field = false;
-        let mut is_super = false;
+        let mut initializing = None;
         let (param_type, name) = if is_var {
             // `var name` — untyped, the next token is the parameter name.
             (None, self.expect_ident())
@@ -463,12 +444,12 @@ impl<'src> Parser<'src> {
             };
 
             if self.at(TokenKind::This) && self.peek(1).kind == TokenKind::Dot {
-                is_field = true;
+                initializing = Some(InitializingFormal::This);
                 self.advance(); // this
                 self.advance(); // .
                 (leading, self.expect_ident())
             } else if self.at(TokenKind::Super) && self.peek(1).kind == TokenKind::Dot {
-                is_super = true;
+                initializing = Some(InitializingFormal::Super);
                 self.advance(); // super
                 self.advance(); // .
                 (leading, self.expect_ident())
@@ -481,7 +462,10 @@ impl<'src> Parser<'src> {
         // (`{required this._x}`, `{super._y}`) needs the off-by-default
         // `private-named-parameters` feature; the pinned front end rejects it as a
         // syntactic error rather than accepting the looser grammar.
-        if is_named && (is_field || is_super) && name.name.starts_with('_') {
+        if matches!(kind, ParamKind::Named { .. })
+            && initializing.is_some()
+            && name.name.starts_with('_')
+        {
             self.error(
                 "This requires the 'private-named-parameters' language feature to be enabled",
             );
@@ -515,11 +499,10 @@ impl<'src> Parser<'src> {
 
         FormalParam {
             annotations,
-            is_required: is_required || !is_named,
+            kind,
             is_covariant,
             is_final,
-            is_field,
-            is_super,
+            initializing,
             param_type,
             name,
             default_value,

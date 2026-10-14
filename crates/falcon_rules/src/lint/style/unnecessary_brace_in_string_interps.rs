@@ -30,35 +30,6 @@ impl Rule for UnnecessaryBraceInStringInterps {
     }
 }
 
-struct StrLit<'a> {
-    is_raw: bool,
-    content: &'a str,
-    content_offset: usize,
-}
-
-fn parse_str_lit(raw: &str) -> Option<StrLit<'_>> {
-    let is_raw = raw.as_bytes().first() == Some(&b'r');
-    let prefix = usize::from(is_raw);
-    let rest = &raw[prefix..];
-    let dlen = if rest.starts_with("'''") || rest.starts_with("\"\"\"") {
-        3
-    } else if rest.starts_with('\'') || rest.starts_with('"') {
-        1
-    } else {
-        return None;
-    };
-    let closing = &rest[..dlen];
-    if rest.len() < 2 * dlen || !rest[dlen..].ends_with(closing) {
-        return None;
-    }
-    let content_offset = prefix + dlen;
-    Some(StrLit {
-        is_raw,
-        content: &raw[content_offset..raw.len() - dlen],
-        content_offset,
-    })
-}
-
 fn is_ident_start(c: u8) -> bool {
     c.is_ascii_alphabetic() || c == b'_'
 }
@@ -90,10 +61,10 @@ impl Visitor for Collector {
     }
 
     fn visit_string_lit(&mut self, node: &StringLitNode) {
-        let Some(lit) = parse_str_lit(&node.raw) else {
+        let Some(lit) = StringLitNode::delimiter(&node.raw) else {
             return;
         };
-        if lit.is_raw {
+        if !lit.terminated || lit.is_raw {
             return;
         }
         let bytes = lit.content.as_bytes();

@@ -8,7 +8,7 @@ use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_class_decl, walk_class_member, walk_enum_decl, walk_expr, walk_extension_decl,
-    walk_mixin_decl, walk_pattern, walk_program, walk_stmt, walk_top_level_decl,
+    walk_local_var, walk_mixin_decl, walk_pattern, walk_program, walk_stmt, walk_top_level_decl,
 };
 
 pub struct TypeLiteralInConstantPattern;
@@ -45,7 +45,6 @@ struct Collector<'a> {
 }
 
 enum StmtAction<'a> {
-    LocalVar(&'a LocalVarDecl),
     PatternDecl(&'a PatternDeclaration),
     Block,
     IfCase(&'a IfStmt),
@@ -58,7 +57,6 @@ enum StmtAction<'a> {
 
 fn classify_stmt(stmt: &Stmt) -> StmtAction<'_> {
     match stmt {
-        Stmt::LocalVar(declaration) => StmtAction::LocalVar(declaration),
         Stmt::PatternDecl(declaration) => StmtAction::PatternDecl(declaration),
         Stmt::Block(_) => StmtAction::Block,
         Stmt::If(statement) if matches!(statement.condition, IfCondition::Case(..)) => {
@@ -77,10 +75,13 @@ impl Collector<'_> {
         let Pattern::Const(constant) = pattern else {
             return;
         };
-        if constant.expr.is_some() || constant.name.is_empty() {
+        let ConstPatternValue::Name(name) = &constant.value else {
             return;
-        }
-        let head = &constant.name[0].name;
+        };
+        let Some(first) = name.first() else {
+            return;
+        };
+        let head = &first.name;
         if self.locals.is_bound(head)
             || self
                 .enclosing_members
@@ -89,15 +90,14 @@ impl Collector<'_> {
         {
             return;
         }
-        let segments: Vec<String> = constant
-            .name
+        let segments: Vec<String> = name
             .iter()
             .map(|identifier| identifier.name.clone())
             .collect();
         if self.identities.resolve(self.file_path, &segments) != NameIdentity::Type {
             return;
         }
-        let span = &constant.name.last().expect("non-empty constant name").span;
+        let span = &name.last().expect("non-empty constant name").span;
         self.diags.push(Diagnostic::new(
             "type-literal-in-constant-pattern",
             Severity::Warning,
@@ -131,23 +131,25 @@ impl Collector<'_> {
     }
 
     fn visit_params(&mut self, params: &FormalParamList) {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             self.visit_formal_param(param);
         }
     }
 
-    fn function(&mut self, params: &FormalParamList, body: Option<&FunctionBody>, fresh: bool) {
+    fn function(
+        &mut self,
+        params: Option<&FormalParamList>,
+        body: Option<&FunctionBody>,
+        fresh: bool,
+    ) {
         let saved = fresh.then(|| std::mem::replace(&mut self.locals, LocalTypes::new()));
         if !fresh {
             self.locals.push_scope();
         }
-        self.visit_params(params);
-        self.locals.bind_params(params);
+        if let Some(params) = params {
+            self.visit_params(params);
+            self.locals.bind_params(params);
+        }
         if let Some(body) = body {
             self.body(body);
         }
@@ -181,23 +183,25 @@ impl Collector<'_> {
         }
     }
 
+    fn for_init(&mut self, init: &ForInit) {
+        match init {
+            ForInit::VarDecl(declaration) => self.visit_local_var(declaration),
+            ForInit::ForIn { iterable, .. } | ForInit::PatternForIn { iterable, .. } => {
+                self.visit_expr(iterable);
+                self.locals.bind_for_init(init);
+            }
+            ForInit::Exprs(expressions) => {
+                for expression in expressions {
+                    self.visit_expr(expression);
+                }
+            }
+        }
+    }
+
     fn for_stmt(&mut self, node: &ForStmt) {
         self.locals.push_scope();
         if let Some(init) = &node.init {
-            match init {
-                ForInit::VarDecl(declaration) => {
-                    self.visit_stmt(&Stmt::LocalVar(declaration.clone()));
-                }
-                ForInit::ForIn { iterable, .. } | ForInit::PatternForIn { iterable, .. } => {
-                    self.visit_expr(iterable);
-                    self.locals.bind_for_init(init);
-                }
-                ForInit::Exprs(expressions) => {
-                    for expression in expressions {
-                        self.visit_expr(expression);
-                    }
-                }
-            }
+            self.for_init(init);
         }
         if let Some(condition) = &node.condition {
             self.visit_expr(condition);
@@ -275,11 +279,11 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        self.function(&node.params, node.body.as_ref(), true);
+        self.function(node.params(), node.body.as_ref(), true);
     }
 
     fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.function(&node.params, node.body.as_ref(), true);
+        self.function(Some(&node.params), node.body.as_ref(), true);
     }
 
     fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
@@ -319,18 +323,19 @@ impl Visitor for Collector<'_> {
 
     fn visit_class_member(&mut self, node: &ClassMember) {
         if let ClassMember::Operator(operator) = node {
-            self.function(&operator.params, operator.body.as_ref(), true);
+            self.function(Some(&operator.params), operator.body.as_ref(), true);
         } else {
             walk_class_member(self, node);
         }
     }
 
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        walk_local_var(self, node);
+        self.locals.declare_local(node);
+    }
+
     fn visit_stmt(&mut self, node: &Stmt) {
         match classify_stmt(node) {
-            StmtAction::LocalVar(declaration) => {
-                walk_stmt(self, node);
-                self.locals.declare_local(declaration);
-            }
             StmtAction::PatternDecl(declaration) => {
                 self.visit_expr(&declaration.init);
                 self.visit_pattern(&declaration.pattern);
@@ -380,7 +385,7 @@ impl Visitor for Collector<'_> {
             StmtAction::LocalFunc(function) => {
                 self.locals
                     .declare(function.name.name.clone(), StaticType::Unknown);
-                self.function(&function.params, Some(&function.body), false);
+                self.function(Some(&function.params), Some(&function.body), false);
             }
             StmtAction::Other => walk_stmt(self, node),
         }
@@ -388,7 +393,7 @@ impl Visitor for Collector<'_> {
 
     fn visit_expr(&mut self, node: &Expr) {
         match node {
-            Expr::FuncExpr { params, body, .. } => self.function(params, Some(body), false),
+            Expr::FuncExpr { params, body, .. } => self.function(Some(params), Some(body), false),
             _ => walk_expr(self, node),
         }
     }

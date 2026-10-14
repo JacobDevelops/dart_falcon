@@ -29,7 +29,11 @@ impl Rule for AvoidTopLevelMemberAccess {
             .declarations
             .iter()
             .filter_map(|decl| match decl {
-                TopLevelDecl::Variable(var) if !var.is_const && !var.is_final => Some(var),
+                TopLevelDecl::Variable(var)
+                    if var.keyword == falcon_syntax::ast::VarKeyword::Var =>
+                {
+                    Some(var)
+                }
                 _ => None,
             })
             .flat_map(|var| var.declarators.iter().map(|decl| decl.name.name.clone()))
@@ -60,16 +64,11 @@ impl ScopeCollector {
         self.bindings
             .entry(name.name.clone())
             .or_default()
-            .push(span.clone());
+            .push(*span);
     }
 
     fn bind_params(&mut self, params: &FormalParamList, span: &Span) {
-        for param in params
-            .positional
-            .iter()
-            .chain(&params.optional_positional)
-            .chain(&params.named)
-        {
+        for param in params.params.iter() {
             self.bind(&param.name, span);
         }
     }
@@ -115,12 +114,27 @@ impl ScopeCollector {
             walk(self);
         }
     }
+    fn bind_for_init(&mut self, init: &ForInit, statement: &ForStmt) {
+        match init {
+            ForInit::VarDecl(declaration) => {
+                for declarator in &declaration.declarators {
+                    let scope = Span::new(declarator.name.span.end, statement.span.end);
+                    self.bind(&declarator.name, &scope);
+                }
+                self.suppress_next_local_var_binding = true;
+            }
+            ForInit::ForIn { name, .. } => self.bind(name, statement.body.span()),
+            ForInit::PatternForIn { pattern, .. } => {
+                self.bind_pattern(pattern, statement.body.span());
+            }
+            ForInit::Exprs(_) => {}
+        }
+    }
 }
 
 /// Statement kinds that introduce bindings. `Block`, `Switch`, and `TryCatch` are
 /// absent: `visit_stmt` handles those before it classifies.
 enum StmtScope<'a> {
-    LocalVar(&'a LocalVarDecl),
     PatternDecl(&'a PatternDeclaration),
     For(&'a ForStmt),
     IfCase(&'a IfStmt, &'a Pattern),
@@ -130,7 +144,6 @@ enum StmtScope<'a> {
 
 fn classify_stmt_scope(stmt: &Stmt) -> StmtScope<'_> {
     match stmt {
-        Stmt::LocalVar(local) => StmtScope::LocalVar(local),
         Stmt::PatternDecl(pattern) => StmtScope::PatternDecl(pattern),
         Stmt::For(for_stmt) => StmtScope::For(for_stmt),
         Stmt::If(if_stmt) => match &if_stmt.condition {
@@ -145,7 +158,9 @@ fn classify_stmt_scope(stmt: &Stmt) -> StmtScope<'_> {
 impl Visitor for ScopeCollector {
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         if let Some(body) = &node.body {
-            self.bind_params(&node.params, body.span());
+            if let Some(params) = node.params() {
+                self.bind_params(params, body.span());
+            }
             self.with_body(body, |this| walk_function_decl(this, node));
         } else {
             walk_function_decl(self, node);
@@ -199,9 +214,18 @@ impl Visitor for ScopeCollector {
         }
     }
 
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        if !std::mem::take(&mut self.suppress_next_local_var_binding) {
+            for declaration in &node.declarators {
+                if let Some(scope) = self.current_tail(declaration.name.span.end) {
+                    self.bind(&declaration.name, &scope);
+                }
+            }
+        }
+        falcon_syntax::visitor::walk_local_var(self, node);
+    }
+
     fn visit_stmt(&mut self, node: &Stmt) {
-        let suppress_local_var_binding = matches!(node, Stmt::LocalVar(_))
-            && std::mem::take(&mut self.suppress_next_local_var_binding);
         match node {
             Stmt::Block(block) => {
                 self.with_statement_list(&block.stmts, &block.span);
@@ -216,7 +240,7 @@ impl Visitor for ScopeCollector {
                     for kind in &case.cases {
                         if let SwitchCaseKind::Pattern(pattern, guard) = kind {
                             self.visit_pattern(pattern);
-                            if let Some(guard) = &**guard {
+                            if let Some(guard) = guard {
                                 self.visit_expr(guard);
                             }
                             let scope = Span::new(pattern.span().end, case.span.end);
@@ -248,15 +272,6 @@ impl Visitor for ScopeCollector {
 
         let mut pushed_end = None;
         match classify_stmt_scope(node) {
-            StmtScope::LocalVar(local) => {
-                if !suppress_local_var_binding {
-                    for decl in &local.declarators {
-                        if let Some(scope) = self.current_tail(decl.name.span.end) {
-                            self.bind(&decl.name, &scope);
-                        }
-                    }
-                }
-            }
             StmtScope::PatternDecl(decl) => {
                 if let Some(scope) = self.current_tail(decl.span.end) {
                     self.bind_pattern(&decl.pattern, &scope);
@@ -264,20 +279,7 @@ impl Visitor for ScopeCollector {
             }
             StmtScope::For(for_stmt) => {
                 if let Some(init) = &for_stmt.init {
-                    match init {
-                        ForInit::VarDecl(decl) => {
-                            for declarator in &decl.declarators {
-                                let scope = Span::new(declarator.name.span.end, for_stmt.span.end);
-                                self.bind(&declarator.name, &scope);
-                            }
-                            self.suppress_next_local_var_binding = true;
-                        }
-                        ForInit::ForIn { name, .. } => self.bind(name, for_stmt.body.span()),
-                        ForInit::PatternForIn { pattern, .. } => {
-                            self.bind_pattern(pattern, for_stmt.body.span());
-                        }
-                        ForInit::Exprs(_) => {}
-                    }
+                    self.bind_for_init(init, for_stmt);
                 }
             }
             StmtScope::IfCase(if_stmt, pattern) => {
@@ -343,7 +345,7 @@ impl Collector<'_, '_> {
 impl Visitor for Collector<'_, '_> {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(var) = node {
-            if !var.is_const && !var.is_final {
+            if var.keyword == falcon_syntax::ast::VarKeyword::Var {
                 self.flag(&var.span);
             }
             // A top-level initializer is part of the declaration itself, not an
@@ -354,7 +356,10 @@ impl Visitor for Collector<'_, '_> {
     }
 
     fn visit_field_decl(&mut self, node: &FieldDecl) {
-        if node.is_static && !node.is_final && !node.is_const {
+        if node.is_static
+            && node.keyword != falcon_syntax::ast::VarKeyword::Final
+            && node.keyword != falcon_syntax::ast::VarKeyword::Const
+        {
             self.flag(&node.span);
         }
         walk_field_decl(self, node);

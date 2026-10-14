@@ -24,3 +24,13 @@ class D extends Base {
 class E extends Base {
   E(int a) : super(a); /* expect: use-super-parameters */
 }
+
+class ObjectBase {
+  ObjectBase(Object e);
+}
+
+class CatchBinding extends ObjectBase {
+  CatchBinding(Object e) : super(e) { /* expect: use-super-parameters */
+    try {} catch (e) {}
+  }
+}

@@ -134,8 +134,8 @@ fn candidates(program: &Program) -> Vec<Candidate> {
             if is_public(&name.name) && anns.is_empty() && name.name != "main" {
                 out.push(Candidate {
                     name: name.name.clone(),
-                    span: name.span.clone(),
-                    decl_span: decl_span.clone(),
+                    span: name.span,
+                    decl_span: *decl_span,
                     kind,
                 });
             }

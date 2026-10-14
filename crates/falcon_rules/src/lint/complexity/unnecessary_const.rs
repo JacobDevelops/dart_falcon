@@ -13,7 +13,7 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_expr, walk_field_decl, walk_program, walk_stmt, walk_top_level_decl,
+    Visitor, walk_expr, walk_field_decl, walk_local_var, walk_program, walk_top_level_decl,
 };
 
 pub struct UnnecessaryConst;
@@ -60,7 +60,7 @@ impl Visitor for Collector {
 
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(v) = node
-            && v.is_const
+            && v.keyword == falcon_syntax::ast::VarKeyword::Const
         {
             self.const_depth += 1;
             walk_top_level_decl(self, node);
@@ -71,7 +71,7 @@ impl Visitor for Collector {
     }
 
     fn visit_field_decl(&mut self, node: &FieldDecl) {
-        if node.is_const {
+        if node.keyword == falcon_syntax::ast::VarKeyword::Const {
             self.const_depth += 1;
             walk_field_decl(self, node);
             self.const_depth -= 1;
@@ -80,16 +80,14 @@ impl Visitor for Collector {
         walk_field_decl(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalVar(lv) = node
-            && lv.is_const
-        {
+    fn visit_local_var(&mut self, lv: &LocalVarDecl) {
+        if lv.keyword == falcon_syntax::ast::VarKeyword::Const {
             self.const_depth += 1;
-            walk_stmt(self, node);
+            walk_local_var(self, lv);
             self.const_depth -= 1;
             return;
         }
-        walk_stmt(self, node);
+        walk_local_var(self, lv);
     }
 
     fn visit_expr(&mut self, node: &Expr) {

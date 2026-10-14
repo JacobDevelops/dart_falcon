@@ -11,7 +11,7 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_enum_decl, walk_field_decl, walk_stmt, walk_top_level_decl,
+    Visitor, walk_enum_decl, walk_field_decl, walk_local_var, walk_top_level_decl,
 };
 
 pub struct ConstantIdentifierNames;
@@ -84,7 +84,7 @@ impl Collector {
 impl Visitor for Collector {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(v) = node
-            && v.is_const
+            && v.keyword == falcon_syntax::ast::VarKeyword::Const
         {
             self.check_declarators(&v.declarators);
         }
@@ -92,7 +92,7 @@ impl Visitor for Collector {
     }
 
     fn visit_field_decl(&mut self, node: &FieldDecl) {
-        if node.is_const {
+        if node.keyword == falcon_syntax::ast::VarKeyword::Const {
             self.check_declarators(&node.declarators);
         }
         walk_field_decl(self, node);
@@ -105,13 +105,11 @@ impl Visitor for Collector {
         walk_enum_decl(self, node);
     }
 
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::LocalVar(lv) = node
-            && lv.is_const
-        {
-            self.check_declarators(&lv.declarators);
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        if node.keyword == falcon_syntax::ast::VarKeyword::Const {
+            self.check_declarators(&node.declarators);
         }
-        walk_stmt(self, node);
+        walk_local_var(self, node);
     }
 }
 

@@ -87,7 +87,7 @@ fn check_members(
                         field.annotations.as_slice(),
                         SemanticMemberKind::Field,
                         true,
-                        !field.is_final && !field.is_const,
+                        field.keyword == falcon_syntax::ast::VarKeyword::Var,
                     )
                 })
                 .collect(),

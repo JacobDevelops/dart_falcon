@@ -225,9 +225,9 @@ fn scan_cascade_section(
 ) {
     for op in &section.ops {
         match op {
-            CascadeOp::Field(_, _) => {}
-            CascadeOp::Index(idx_expr, _) => {
-                scan_expr(idx_expr, diags, ctx);
+            CascadeOp::Field { .. } => {}
+            CascadeOp::Index { index, .. } => {
+                scan_expr(index, diags, ctx);
             }
             CascadeOp::Call(_, _, args) => {
                 for arg in &args.positional {
