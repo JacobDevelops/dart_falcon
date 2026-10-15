@@ -355,6 +355,89 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn dynamic_result_context_preserves_inferred_accumulator_type() {
+        let source = r"
+import 'expect.dart';
+T fold<T>(T initial, T Function(T, int) combine) => initial;
+void use(dynamic value) {
+  expect(fold(0, (sum, item) => sum + item));
+  value.missing();
+}
+";
+        let path = Path::new("/project/lib/test.dart");
+        let expect_path = Path::new("/project/lib/expect.dart");
+        let (expect_program, errors) = parse("void expect(dynamic actual) {}");
+        assert!(errors.is_empty(), "{errors:?}");
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let identities = IdentityIndex::from_project_files(
+            &[
+                IdentitySource {
+                    path,
+                    program: &program,
+                    has_parse_errors: false,
+                },
+                IdentitySource {
+                    path: expect_path,
+                    program: &expect_program,
+                    has_parse_errors: false,
+                },
+            ],
+            &[],
+        );
+        let files = [(path, &program), (expect_path, &expect_program)];
+        let types = falcon_analyze::TypeIndex::from_resolved_files(
+            files.map(|(path, program)| {
+                (
+                    path,
+                    falcon_analyze::LibrarySource {
+                        program,
+                        has_parse_errors: false,
+                        has_unresolved_parts: false,
+                    },
+                )
+            }),
+            &identities,
+        );
+        let signatures = SignatureIndex::build(
+            &files.map(|(path, program)| (path.to_path_buf(), program)),
+            None,
+            &identities,
+            &types,
+        );
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(path, source, &config)
+            .with_identities(&identities)
+            .with_signatures(&signatures);
+        struct AccumulatorTypes(Vec<ResolvedType>);
+        impl SemanticRuleVisitor for AccumulatorTypes {
+            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+                if matches!(node, Expr::Ident(identifier) if identifier.name == "sum") {
+                    self.0.push(state.infer(node));
+                }
+            }
+        }
+        let mut accumulator = AccumulatorTypes(Vec::new());
+        visit_program(
+            &mut accumulator,
+            &program,
+            SemanticState::new(&program, &ctx).unwrap(),
+        );
+        assert_eq!(accumulator.0.len(), 1);
+        assert!(
+            accumulator.0[0].interface("dart:core", "int"),
+            "{:?}",
+            accumulator.0
+        );
+        let diagnostics = AvoidDynamicCalls.analyze(&program, &ctx);
+        let actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(actual, ["value"], "{diagnostics:?}");
+    }
+
+    #[test]
     fn reports_dynamic_operations_at_their_ast_receivers() {
         let source = "class Callbacks { final Function callback; Callbacks(this.callback); }\nvoid f(dynamic d, Function fn, Callbacks callbacks) {\n  d\n    ..x += 1;\n  d\n    ..a.b();\n  fn.call();\n  --d.z;\n  (d)();\n  d.toString();\n  (d as dynamic).foo();\n  callbacks\n      .callback();\n}";
         let path = Path::new("/project/lib/test.dart");

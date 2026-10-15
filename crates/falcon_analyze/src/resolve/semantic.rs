@@ -10234,7 +10234,9 @@ impl TypeEnvironment {
         }
         let mut inferred = HashMap::with_capacity(call_parameters.len());
         let mut upper = HashMap::with_capacity(call_parameters.len());
-        if let Some(expected) = expected {
+        // A dynamic result context supplies no downward type schema. Freezing
+        // it here would discard upward constraints from ordinary arguments.
+        if let Some(expected) = expected.filter(|ty| !matches!(ty, ResolvedType::Dynamic)) {
             let mut constraints = TypeConstraintContext {
                 parameters: call_parameters,
                 inferred: &mut inferred,
