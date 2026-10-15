@@ -303,33 +303,91 @@ fn character_column(source: &str, line: usize, utf16_column: usize) -> usize {
         .count()
 }
 
-fn run_falcon(
-    falcon_bin: &str,
-    file: &Path,
-    config: Option<&Path>,
-) -> Result<Vec<DiagnosticJson>, String> {
-    let mut cmd = Command::new(falcon_bin);
-    cmd.args(["check", "--format", "json", file.to_str().unwrap_or("")]);
-    if let Some(config_path) = config {
-        cmd.args(["--config", config_path.to_str().unwrap_or("")]);
-    }
-    let output = cmd
-        .env("RUST_LOG", "error")
-        .output()
-        .map_err(|e| format!("Failed to run falcon binary '{}': {}", falcon_bin, e))?;
+#[path = "../../crates/falcon_rules/tests/support/sdk_fixture.rs"]
+mod sdk_fixture;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
-    if trimmed.is_empty() || trimmed == "[]" {
-        return Ok(Vec::new());
+/// Bundled listed corpus fixtures always use parsed dependency sources,
+/// independently of the developer machine's installed SDK.
+struct FalconRunner {
+    binary: String,
+    fallback_sdk: Option<PathBuf>,
+}
+
+impl FalconRunner {
+    fn new(binary: PathBuf, workspace: &Path, corpus: &Path) -> Self {
+        let fallback_sdk = corpus_fixture_sdk(workspace, corpus);
+        Self {
+            binary: binary.to_string_lossy().into_owned(),
+            fallback_sdk,
+        }
     }
-    serde_json::from_str::<Vec<DiagnosticJson>>(trimmed).map_err(|e| {
-        format!(
-            "JSON parse error: {}\nOutput was: {}",
-            e,
-            &trimmed[..trimmed.len().min(200)]
-        )
-    })
+
+    fn sdk_for(&self, file: &Path) -> Option<&Path> {
+        self.fallback_sdk
+            .as_deref()
+            .filter(|_| sdk_fixture::requires_sdk(file))
+    }
+
+    fn run(&self, file: &Path, config: Option<&Path>) -> Result<Vec<DiagnosticJson>, String> {
+        // Stage the parsed SDK, dependency sources and package metadata together,
+        // using the same fixture builder as the in-process corpus harness.
+        let staged = self.sdk_for(file).map(|_| {
+            let directory = sdk_fixture::source_directory(file);
+            (sdk_fixture::stage_project(directory), directory)
+        });
+        let analyzed_file = staged.as_ref().map_or_else(
+            || file.to_path_buf(),
+            |(project, directory)| sdk_fixture::staged_file(project.path(), directory, file),
+        );
+        let mut cmd = Command::new(&self.binary);
+        cmd.args(["check", "--format", "json"]);
+        cmd.arg(&analyzed_file);
+        if let Some(config_path) = config {
+            cmd.args(["--config", config_path.to_str().unwrap_or("")]);
+        }
+        if let Some((project, _)) = &staged {
+            cmd.env(
+                "DART_SDK",
+                project.path().join("flutter/bin/cache/dart-sdk"),
+            );
+        }
+        let output = cmd
+            .env("RUST_LOG", "error")
+            .output()
+            .map_err(|e| format!("Failed to run falcon binary '{}': {}", self.binary, e))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let trimmed = stdout.trim();
+        if trimmed.is_empty() || trimmed == "[]" {
+            return Ok(Vec::new());
+        }
+        let mut diagnostics =
+            serde_json::from_str::<Vec<DiagnosticJson>>(trimmed).map_err(|e| {
+                format!(
+                    "JSON parse error: {}\nOutput was: {}",
+                    e,
+                    &trimmed[..trimmed.len().min(200)]
+                )
+            })?;
+        if let Some((project, directory)) = &staged {
+            let staged_root = falcon_analyze::canonical_or_lexical(&sdk_fixture::staged_directory(
+                project.path(),
+                directory,
+            ));
+            for diagnostic in &mut diagnostics {
+                if let Ok(relative) = Path::new(&diagnostic.file_path).strip_prefix(&staged_root) {
+                    diagnostic.file_path = directory.join(relative).to_string_lossy().into_owned();
+                }
+            }
+        }
+        Ok(diagnostics)
+    }
+}
+
+fn corpus_fixture_sdk(workspace: &Path, corpus: &Path) -> Option<PathBuf> {
+    let bundled = workspace.join("crates/falcon_rules/tests/corpus");
+    (falcon_analyze::canonical_or_lexical(corpus) == falcon_analyze::canonical_or_lexical(&bundled))
+        .then(|| workspace.join("crates/falcon_rules/tests/support/sdk"))
 }
 
 #[derive(Debug)]
@@ -360,7 +418,7 @@ fn fuzzy_match(a: &str, b: &str) -> f64 {
 fn validate_file(
     file: &Path,
     source: &str,
-    falcon_bin: &str,
+    falcon: &FalconRunner,
     threshold: f64,
     rule_filter: Option<&str>,
     config: Option<&Path>,
@@ -371,7 +429,7 @@ fn validate_file(
         .filter(|e| rule_filter.map(|r| e.rule == r).unwrap_or(true))
         .collect();
 
-    let raw_diags = run_falcon(falcon_bin, file, config).unwrap_or_default();
+    let raw_diags = falcon.run(file, config).unwrap_or_default();
     let diags: Vec<(usize, &DiagnosticJson)> = raw_diags
         .iter()
         .enumerate()
@@ -469,7 +527,7 @@ fn cross_file_project_roots(cross_file_dir: &Path) -> Vec<PathBuf> {
 fn validate_cross_file_dir(
     cross_file_dir: &Path,
     rule_name: &str,
-    falcon_bin: &str,
+    falcon: &FalconRunner,
     config: Option<&Path>,
 ) -> (usize, usize, Vec<String>) {
     let fixture_files = recursive_files(cross_file_dir);
@@ -491,7 +549,7 @@ fn validate_cross_file_dir(
     let mut diags = Vec::new();
     for root in cross_file_project_roots(cross_file_dir) {
         // A failed invocation must not read as "the rule fired nowhere".
-        match run_falcon(falcon_bin, &root, config) {
+        match falcon.run(&root, config) {
             Ok(found) => diags.extend(found),
             Err(e) => failures.push(format!(
                 "ERROR {} — falcon invocation failed: {e}",
@@ -576,7 +634,7 @@ fn validate_rules(options: ValidateRules) {
     let corpus_path =
         corpus_path.unwrap_or_else(|| workspace.join("crates/falcon_rules/tests/corpus"));
     let falcon_bin = falcon_bin.unwrap_or_else(|| build_falcon(false));
-    let falcon_bin = falcon_bin.to_string_lossy().to_string();
+    let falcon = FalconRunner::new(falcon_bin, &workspace, &corpus_path);
 
     if !corpus_path.exists() {
         eprintln!(
@@ -650,7 +708,7 @@ fn validate_rules(options: ValidateRules) {
             let result = validate_file(
                 dart_file,
                 &source,
-                &falcon_bin,
+                &falcon,
                 threshold,
                 Some(&rule_name),
                 rule_config.as_deref(),
@@ -693,7 +751,7 @@ fn validate_rules(options: ValidateRules) {
             let (expected, matched, failures) = validate_cross_file_dir(
                 &cross_file_dir,
                 &rule_name,
-                &falcon_bin,
+                &falcon,
                 rule_config.as_deref(),
             );
             total_files += 1;
@@ -975,8 +1033,15 @@ fn strip_provenance(lines: &mut Vec<String>) {
             i += 1;
             continue;
         };
-        let wraps = sentence_end(&lines[i][cut..]).is_none();
-        lines[i].truncate(cut);
+        let end = sentence_end(&lines[i][cut..]);
+        let wraps = end.is_none();
+        if let Some(end) = end {
+            let rest = cut + end + 1;
+            let rest = rest + lines[i][rest..].len() - lines[i][rest..].trim_start().len();
+            lines[i].replace_range(cut..rest, "");
+        } else {
+            lines[i].truncate(cut);
+        }
         let trimmed_len = lines[i].trim_end().len();
         lines[i].truncate(trimmed_len);
 
@@ -998,7 +1063,17 @@ fn strip_provenance(lines: &mut Vec<String>) {
                 }
             }
         }
-        i += 1;
+        if lines[i].is_empty() {
+            lines.remove(i);
+            if i > 0
+                && lines[i - 1].trim().is_empty()
+                && lines.get(i).is_some_and(|line| line.trim().is_empty())
+            {
+                lines.remove(i);
+            }
+        } else {
+            i += 1;
+        }
     }
 }
 
@@ -1393,7 +1468,7 @@ fn docgen() {
     let corpus_root = root.join("crates/falcon_rules/tests/corpus");
 
     let falcon_bin = build_falcon(false);
-    let falcon_bin = falcon_bin.to_string_lossy().to_string();
+    let falcon = FalconRunner::new(falcon_bin, &root, &corpus_root);
     if RULE_METADATA.is_empty() {
         eprintln!("error: RULE_METADATA is empty");
         std::process::exit(1);
@@ -1477,9 +1552,7 @@ fn docgen() {
             had_fixture = true;
             for d in cross_file_project_roots(&cross_file_dir)
                 .into_iter()
-                .flat_map(|project| {
-                    run_falcon(&falcon_bin, &project, config.as_deref()).unwrap_or_default()
-                })
+                .flat_map(|project| falcon.run(&project, config.as_deref()).unwrap_or_default())
                 .filter(|d| d.rule == meta.name)
             {
                 let relative = Path::new(&d.file_path)
@@ -1500,7 +1573,8 @@ fn docgen() {
         } else if bad_path.exists() {
             had_fixture = true;
             let source = fs::read_to_string(&bad_path).unwrap_or_default();
-            for d in run_falcon(&falcon_bin, &bad_path, config.as_deref())
+            for d in falcon
+                .run(&bad_path, config.as_deref())
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|d| d.rule == meta.name)
@@ -1616,6 +1690,72 @@ mod tests {
     use clap::Parser;
 
     #[test]
+    fn fixture_sdk_is_always_used_for_the_bundled_corpus() {
+        let workspace = super::workspace_root();
+        let bundled = workspace.join("crates/falcon_rules/tests/corpus");
+        let fixture = workspace.join("crates/falcon_rules/tests/support/sdk");
+        // Constructing the runner does not need or consult an ambient SDK locator.
+        let runner = super::FalconRunner::new(
+            std::path::PathBuf::from("unused-falcon"),
+            &workspace,
+            &bundled,
+        );
+        assert_eq!(runner.fallback_sdk, Some(fixture));
+        let custom = workspace.join("target/custom-corpus");
+        assert_eq!(super::corpus_fixture_sdk(&workspace, &custom), None);
+    }
+
+    #[test]
+    fn fixture_sdk_only_applies_to_listed_source_files() {
+        let workspace = super::workspace_root();
+        let sdk = workspace.join("crates/falcon_rules/tests/support/sdk");
+        let runner = super::FalconRunner {
+            binary: String::from("falcon"),
+            fallback_sdk: Some(sdk.clone()),
+        };
+        let bundled = workspace.join("crates/falcon_rules/tests/corpus");
+        assert_eq!(
+            runner.sdk_for(&bundled.join("omit-local-variable-types/enum_values.dart")),
+            Some(sdk.as_path()),
+        );
+        assert_eq!(
+            runner.sdk_for(&bundled.join("omit-local-variable-types/good.dart")),
+            None,
+        );
+        assert_eq!(runner.sdk_for(&bundled), None);
+        let custom_runner = super::FalconRunner {
+            binary: String::from("falcon"),
+            fallback_sdk: super::corpus_fixture_sdk(
+                &workspace,
+                &workspace.join("target/custom-corpus"),
+            ),
+        };
+        assert_eq!(
+            custom_runner.sdk_for(
+                &workspace.join("target/custom-corpus/omit-local-variable-types/enum_values.dart"),
+            ),
+            None,
+        );
+    }
+
+    #[test]
+    fn fixture_inventory_ignores_blank_lines_and_surrounding_whitespace() {
+        let fixtures = "\n \t\n omit-local-variable-types/enum_values.dart \n\n";
+        assert!(super::sdk_fixture::fixture_list_contains(
+            std::path::Path::new("corpus/omit-local-variable-types/enum_values.dart"),
+            fixtures,
+        ));
+        assert!(!super::sdk_fixture::fixture_list_contains(
+            std::path::Path::new("corpus/omit-local-variable-types/good.dart"),
+            fixtures,
+        ));
+        assert!(!super::sdk_fixture::fixture_list_contains(
+            std::path::Path::new("anything.dart"),
+            "\n \t\n",
+        ));
+    }
+
+    #[test]
     fn docgen_columns_count_characters_not_utf16_units() {
         assert_eq!(super::character_column("x😀é target\n", 1, 6), 5);
         assert_eq!(super::character_column("first\n😀 target\n", 2, 4), 3);
@@ -1687,6 +1827,53 @@ mod tests {
                 "`prefer_is_empty`. Only a plain access matches."
             ]),
             vec!["intro.", "Only a plain access matches."]
+        );
+    }
+
+    #[test]
+    fn keeps_description_after_provenance_on_the_same_line() {
+        assert_eq!(
+            run(&[
+                "Summary. Adopted from the official `example` lint. Only plain accesses",
+                "match; calls do not.",
+            ]),
+            vec!["Summary. Only plain accesses", "match; calls do not."]
+        );
+        assert_eq!(
+            run(&[
+                "Adopted from the official `example` lint. Only plain accesses",
+                "match; calls do not.",
+            ]),
+            vec!["Only plain accesses", "match; calls do not."]
+        );
+    }
+
+    #[test]
+    fn removing_standalone_provenance_does_not_add_a_paragraph_break() {
+        assert_eq!(
+            run(&[
+                "Summary.",
+                "",
+                "Adopted from the official",
+                "`example` lint. Only plain accesses",
+                "match; calls do not.",
+            ]),
+            vec![
+                "Summary.",
+                "",
+                "Only plain accesses",
+                "match; calls do not."
+            ]
+        );
+        assert_eq!(
+            run(&[
+                "Summary.",
+                "",
+                "Adopted from the official `example` lint.",
+                "",
+                "Description.",
+            ]),
+            vec!["Summary.", "", "Description."]
         );
     }
 
