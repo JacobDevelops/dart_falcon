@@ -105,6 +105,42 @@ pub fn byte_to_line_col(source: &str, offset: usize) -> (u32, u32) {
     (pos.line + 1, pos.character + 1)
 }
 
+/// Line starts of one source, so resolving many offsets in it does not
+/// rescan the source from the beginning for each.
+pub struct LineIndex<'a> {
+    source: &'a str,
+    line_starts: Vec<usize>,
+}
+
+impl<'a> LineIndex<'a> {
+    pub fn new(source: &'a str) -> Self {
+        let line_starts = std::iter::once(0)
+            .chain(source.match_indices('\n').map(|(newline, _)| newline + 1))
+            .collect();
+        Self {
+            source,
+            line_starts,
+        }
+    }
+
+    /// The same position as [`byte_to_lsp_position`] for this source.
+    pub fn lsp_position(&self, offset: usize) -> Position {
+        let clamped = offset.min(self.source.len());
+        // Line 0 starts at 0 <= clamped, so the partition point is at least 1.
+        let line = self.line_starts.partition_point(|&start| start <= clamped) - 1;
+        let start = self.line_starts[line];
+        let character = self.source[start..]
+            .char_indices()
+            .take_while(|(index, _)| start + index < clamped)
+            .map(|(_, c)| c.len_utf16() as u32)
+            .sum();
+        Position {
+            line: line as u32,
+            character,
+        }
+    }
+}
+
 impl Diagnostic {
     pub fn new(
         rule: &'static str,
@@ -129,6 +165,13 @@ impl Diagnostic {
         let (line, col) = byte_to_line_col(source, self.span.start);
         self.line = line;
         self.col = col;
+    }
+
+    /// [`Self::resolve_position`] against a prebuilt index of the source.
+    pub fn resolve_position_in(&mut self, lines: &LineIndex<'_>) {
+        let position = lines.lsp_position(self.span.start);
+        self.line = position.line + 1;
+        self.col = position.character + 1;
     }
 
     pub fn format_text(&self) -> String {
@@ -178,11 +221,25 @@ impl fmt::Display for Severity {
 
 #[cfg(test)]
 mod position_tests {
-    use super::{byte_to_lsp_position, lsp_position_to_byte};
+    use super::{LineIndex, byte_to_lsp_position, lsp_position_to_byte};
     use lsp_types::Position;
 
     // `😀` is U+1F600: 4 UTF-8 bytes, 1 scalar, 2 UTF-16 code units.
     const EMOJI: &str = "😀";
+
+    #[test]
+    fn line_index_matches_scanning_at_every_offset() {
+        for src in ["", "\n", "a😀b\n\nc\r\né😀\n", "x\n😀"] {
+            let lines = LineIndex::new(src);
+            for offset in 0..=src.len() + 2 {
+                assert_eq!(
+                    lines.lsp_position(offset),
+                    byte_to_lsp_position(src, offset),
+                    "{src:?} at {offset}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn character_counts_utf16_units_past_astral_char() {
