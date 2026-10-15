@@ -1,18 +1,20 @@
 # Roadmap
 
-falcon is pre-1.0. This lists what's *not* done yet — a direction sketch, not a
-commitment. Items and order will shift.
+falcon is pre-1.0. This tracks shipped milestones and what's left, not a release commitment. Items and order will shift.
 
 ## Toward 1.0
 
-1.0 is a rule-catalog and readiness push. The full planned catalog — every rule,
-with falcon group, analysis type, and priority — lives in
-[`docs/rule-catalog-1.0.md`](docs/rule-catalog-1.0.md). The shipped registry is
-defined by `RULE_METADATA` in `crates/falcon_rules/src/meta.rs`; the catalog
-records candidate rules and their priorities, some of which have since shipped.
+1.0 is a rule-catalog and readiness push. [`docs/rule-catalog-1.0.md`](docs/rule-catalog-1.0.md) records the shipped official lints and planned additions. `RULE_METADATA` in `crates/falcon_rules/src/meta.rs` defines the shipped registry and default enablement.
 
-- **Rule-catalog expansion.** Two sources remain for 1.0 (all 145 remaining
-  official lints have shipped):
+### Shipped
+
+All 145 section-1 official lints are registered. Against `dart analyze` 3.13.5 on 34 corpora, they recorded 421,953 agreements, 0 false negatives, and 36 false positives. All 36 are `package_prefixed_library_names`, which upstream no longer enforces. `implicit_reopen` deliberately differs from the analyzer's declaration-order bug.
+
+All 145 have `recommended: false` in falcon, including the 25 upstream preset members. Enable them explicitly or migrate an analyzer config; upstream preset membership isn't falcon default enablement.
+
+### Remaining
+
+- **Rule-catalog expansion.** Two sources remain in the catalog:
   - **DCM-inspired rules — 231** (75 must-have, 132 nice-to-have, 24 post-1.0).
     DCM's modern catalog is paywalled; these reimplement the high-value ones as
     open falcon rules.
@@ -20,11 +22,7 @@ records candidate rules and their priorities, some of which have since shipped.
 - **New domains.** Alongside `flutter`, add `test`, `bloc`, `riverpod`,
   `provider`, `flutter_hooks`, and `equatable` domains (from the DCM survey),
   activated per file/framework so framework users get targeted checks.
-- **Cross-file rules.** Three ship today (`unused-code`, `unused-files`,
-  `unnecessary-nullable`); 11 more are planned — Tier 1 must-haves
-  `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`,
-  `banned-imports`; Tier 2 `unused-assets`, `unused-l10n`,
-  `unexported-public-api`; Tier 3 post-1.0.
+- **Cross-file rules.** Eight ship today: `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, `package-api-docs`, and `sort-pub-dependencies`. The 11 planned additions are Tier 1 must-haves `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, `banned-imports`; Tier 2 `unused-assets`, `unused-l10n`, `unexported-public-api`; and four Tier 3 post-1.0 rules.
 - **e2e OSS corpus.** A `cargo xtask e2e` harness running falcon against pinned,
   shallow clones of large real-world Dart/Flutter repos (immich, AppFlowy,
   flutter/packages, flame, LocalSend, bloc, riverpod, Wonderous, flutter/samples,

@@ -1,10 +1,6 @@
-# Falcon 1.0 Rule Catalog (planned)
+# Falcon 1.0 Rule Catalog
 
-This is the planning catalog for falcon 1.0, drawn from remaining official
-Dart/Flutter lints, DCM-inspired rules, and cross-file (whole-project) rules.
-It assigns each candidate a falcon group, an analysis type, and a 1.0 priority.
-Some candidates have since shipped; consult `RULE_METADATA` in
-`crates/falcon_rules/src/meta.rs` for the current registry.
+Section 1 has shipped. Sections 2 and 3 track planned DCM-inspired and cross-file additions for falcon 1.0. The registry in `crates/falcon_rules/src/meta.rs` is authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
 
 **Priorities**
 
@@ -25,44 +21,39 @@ suspicious`.
 - **needs-full-type-resolution** — element model / SDK type hierarchies.
 - **needs-cross-file/project** — whole-program or pubspec/asset analysis.
 
-## Planned catalog size
+## Catalog status and size
 
-| Source | must-have | nice-to-have | post-1.0 | total |
-|---|---:|---:|---:|---:|
-| Official lints (gaps) | 25 | 120 | 0 | 145 |
-| DCM-inspired | 75 | 132 | 24 | 231 |
-| Cross-file | 4 | 3 | 4 | 11 |
-| **Total (new for 1.0)** | **104** | **255** | **28** | **387** |
+| Source | shipped | planned must-have | planned nice-to-have | planned post-1.0 | total |
+|---|---:|---:|---:|---:|---:|
+| Official lints (section 1) | 145 | 0 | 0 | 0 | 145 |
+| DCM-inspired | 0 | 75 | 132 | 24 | 231 |
+| Cross-file additions | 0 | 4 | 3 | 4 | 11 |
+| **Total in this catalog** | **145** | **79** | **135** | **28** | **387** |
 
-The projected registry is the union of the shipped metadata and the must-have
-and nice-to-have candidates below; candidates already shipped count only once.
+This is the catalog's scope, not the full shipped registry. Section 1 added 145 official lints; its original priorities were 25 must-have and 120 nice-to-have. The remaining planned additions total 242, including 28 post-1.0 candidates. Count any candidate that overlaps the shipped registry only once.
 
 Six DCM rows were deduplicated against the official-lints and cross-file lists (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 ---
 
-# 1. Remaining official lints (145)
+# 1. Shipped official lints (145)
 
-Every live official `dart-lang/linter` rule falcon does not implement. Falcon's
-official universe is 216 live rules (227 total minus 6 removed and 5
-deprecated); falcon covers 71 of them today, leaving these 145. Preset
-membership is authoritative from `package:lints` (`core.yaml`,
-`recommended.yaml`) and `package:flutter_lints` (`flutter.yaml`); `recommended`
-includes `core`, `flutter` includes `recommended`.
+**Status: shipped.** All 145 rules in this section are registered with `RuleSource::Lints` provenance. The rule column uses the upstream Dart lint id; use the registry's kebab-case id in falcon config. `no_runtimeType_toString` maps to `no-runtime-type-to-string`.
 
-**Status: shipped.** All 145 rules in this section are registered in
-`RULE_METADATA` under their kebab-case ids with `RuleSource::Lints` provenance.
-The 25 preset rules follow their preset; the 120 non-preset rules are opt-in
-(`recommended: false`).
+The groups and domains below match the registry. All 145 have `recommended: false`, including the 25 upstream preset members. Upstream `core`, `recommended`, and `flutter` membership is not falcon default enablement: explicitly enable these rules or migrate an analyzer config. A Flutter domain set to `all` also enables its file rules.
 
-Preset rules are **must-have** for 1.0. Non-preset (opt-in / Effective-Dart)
-rules are **nice-to-have**. For non-preset rows, `falcon_group`, `domain`, and
-`analysis` are heuristic; the 25 preset rows are hand-classified.
+The analysis column preserves the original design estimates, not the shipped engine's execution requirements. The registry records 52 file rules without resolution, 88 resolved file rules, and 5 cross-file rules. The latter are `depend_on_referenced_packages`, `package_names`, `secure_pubspec_urls`, `package_api_docs`, and `sort_pub_dependencies`.
 
-## 1a. Must-have — official preset gaps (25)
+Against `dart analyze` 3.13.5 on 34 corpora, section 1 recorded 421,953 agreements, 0 false negatives, and 36 false positives. All 36 are `package_prefixed_library_names`, which upstream no longer enforces. This is corpus parity evidence, not a claim of zero differences.
 
-| rule | falcon group | domain | analysis | preset | official group | description |
+`implicit_reopen` deliberately differs from the analyzer's declaration-order bug: falcon checks the class relationship regardless of declaration order.
+
+The 25 section-1 upstream preset members below were the original 1.0 must-haves. The other 117 shipped rules were nice-to-haves. Upstream `recommended` includes `core`, and `flutter` includes `recommended`; this section doesn't list every rule in those presets.
+
+## 1a. Shipped upstream preset members (25)
+
+| rule | falcon group | domain | analysis estimate | upstream preset | official group | description |
 |---|---|---|---|---|---|---|
 | `avoid_types_as_parameter_names` | suspicious | none | needs-full-type-resolution | core | errors | Avoid types as parameter names. |
 | `collection_methods_unrelated_type` | correctness | none | needs-full-type-resolution | core | errors | Invocation of collection methods with arguments of unrelated types. |
@@ -90,20 +81,11 @@ rules are **nice-to-have**. For non-preset rows, `falcon_group`, `domain`, and
 | `void_checks` | correctness | none | needs-full-type-resolution | core | style | Don't assign to void. |
 | `invalid_runtime_check_with_js_interop_types` | correctness | none | needs-full-type-resolution | recommended | errors | Avoid is/as runtime checks on JS interop types (unsound). |
 
-Preset breakdown: core 12, recommended 10, flutter 3. By analysis type:
-needs-full-type-resolution 18, needs-cross-file/project 3, needs-local-type-inference 3, syntax-only 1.
+Upstream preset breakdown: core 12, recommended 10, flutter 3. These labels describe upstream membership, not falcon's `recommended` flag.
 
-**Resolver-expansion implication:** all but `file_names` (syntax-only) need type
-resolution. Three need only local inference (`library_annotations`,
-`prefer_interpolation_to_compose_strings`, `type_literal_in_constant_pattern`);
-three are pubspec-driven and can ship independently of the type resolver
-(`depend_on_referenced_packages`, `secure_pubspec_urls`, `package_names`); the
-remaining ~18 need full type resolution and drive the resolver-expansion
-workstream.
+## 1b. Shipped non-preset official lints (120)
 
-## 1b. Nice-to-have — non-preset official gaps (120)
-
-| rule | falcon group | domain | analysis | official group | description |
+| rule | falcon group | domain | analysis estimate | official group | description |
 |---|---|---|---|---|---|
 | `always_declare_return_types` | style | none | needs-local-type-inference | style | Declare method return types. |
 | `always_put_control_body_on_new_line` | style | none | syntax-only | style | Separate the control structure expression from its statement. |
@@ -150,8 +132,8 @@ workstream.
 | `do_not_use_environment` | style | none | needs-cross-file/project | style | Do not use environment-declared variables. |
 | `eol_at_end_of_file` | style | none | syntax-only | style | Put a single newline at end of file. |
 | `flutter_style_todos` | style | none | syntax-only | style | Use Flutter TODO format: `// TODO(username): message, https://URL`. |
-| `implicit_reopen` | correctness | none | needs-full-type-resolution | errors | Don't implicitly reopen classes. _(experimental — defer)_ |
-| `invalid_case_patterns` | correctness | none | needs-full-type-resolution | errors | Use case expressions that are valid in Dart 3.0. _(experimental — defer)_ |
+| `implicit_reopen` | correctness | none | needs-full-type-resolution | errors | Don't implicitly reopen classes. Shipped, including the deliberate declaration-order divergence noted above. |
+| `invalid_case_patterns` | correctness | none | needs-full-type-resolution | errors | Use case expressions that are valid in Dart 3.0. |
 | `join_return_with_assignment` | complexity | none | needs-full-type-resolution | style | Join return statement with assignment when possible. |
 | `leading_newlines_in_multiline_strings` | style | none | syntax-only | style | Start multiline strings with a newline. |
 | `library_names` | style | none | syntax-only | style | Name libraries using `lowercase_with_underscores`. |
@@ -160,7 +142,7 @@ workstream.
 | `matching_super_parameters` | style | none | needs-full-type-resolution | style | Use matching super parameter names. |
 | `missing_whitespace_between_adjacent_strings` | style | none | syntax-only | style | Missing whitespace between adjacent strings. |
 | `no_adjacent_strings_in_list` | correctness | none | syntax-only | errors | Don't use adjacent strings in list. |
-| `no_default_cases` | style | none | syntax-only | style | No default cases. _(experimental — defer)_ |
+| `no_default_cases` | style | none | syntax-only | style | No default cases. |
 | `no_literal_bool_comparisons` | style | none | syntax-only | style | Don't compare booleans to boolean literals. |
 | `no_runtimeType_toString` | style | none | needs-full-type-resolution | style | Avoid calling `toString()` on runtimeType. |
 | `no_self_assignments` | correctness | none | needs-full-type-resolution | errors | Don't assign a variable to itself. |
@@ -169,7 +151,7 @@ workstream.
 | `one_member_abstracts` | complexity | none | syntax-only | style | Avoid a one-member abstract class when a simple function will do. |
 | `only_throw_errors` | style | none | needs-full-type-resolution | style | Only throw instances of classes extending Exception or Error. |
 | `package_api_docs` | style | none | needs-cross-file/project | style | Provide doc comments for all public APIs. |
-| `package_prefixed_library_names` | style | none | syntax-only | style | Prefix library names with the package name and a dot-separated path. |
+| `package_prefixed_library_names` | style | none | syntax-only | style | Prefix library names with the package name and a dot-separated path. Upstream no longer enforces this rule. |
 | `parameter_assignments` | style | none | needs-full-type-resolution | style | Don't reassign references to parameters of functions or methods. |
 | `prefer_asserts_in_initializer_lists` | style | none | syntax-only | style | Prefer putting asserts in initializer lists. |
 | `prefer_asserts_with_message` | style | none | syntax-only | style | Prefer asserts with message. |
@@ -207,7 +189,7 @@ workstream.
 | `unnecessary_lambdas` | complexity | none | needs-full-type-resolution | style | Don't create a lambda when a tear-off will do. |
 | `unnecessary_library_directive` | style | none | syntax-only | style | Avoid library directives unless documented or annotated. |
 | `unnecessary_null_aware_operator_on_extension_on_nullable` | style | none | needs-full-type-resolution | style | Unnecessary null aware operator on extension on a nullable type. |
-| `unnecessary_null_checks` | style | none | needs-full-type-resolution | style | Unnecessary null checks. _(experimental — defer)_ |
+| `unnecessary_null_checks` | style | none | needs-full-type-resolution | style | Unnecessary null checks. |
 | `unnecessary_parenthesis` | style | none | needs-full-type-resolution | style | Unnecessary parentheses can be removed. |
 | `unnecessary_raw_strings` | style | none | syntax-only | style | Unnecessary raw string. |
 | `unnecessary_statements` | correctness | none | needs-full-type-resolution | errors | Avoid using unnecessary statements. |
@@ -218,7 +200,7 @@ workstream.
 | `use_enums` | style | none | needs-full-type-resolution | style | Use enums rather than classes that behave like enums. |
 | `use_if_null_to_convert_nulls_to_bools` | style | none | needs-full-type-resolution | style | Use if-null operators to convert nulls to bools. |
 | `use_is_even_rather_than_modulo` | performance | none | needs-full-type-resolution | style | Prefer `isOdd`/`isEven` over checking the result of `% 2`. |
-| `use_late_for_private_fields_and_variables` | style | none | needs-full-type-resolution | style | Use late for private members with a non-nullable type. _(experimental — defer)_ |
+| `use_late_for_private_fields_and_variables` | style | none | needs-full-type-resolution | style | Use late for private members with a non-nullable type. |
 | `use_named_constants` | style | none | needs-full-type-resolution | style | Use predefined named constants. |
 | `use_raw_strings` | style | none | syntax-only | style | Use raw string to avoid escapes. |
 | `use_setters_to_change_properties` | style | none | needs-full-type-resolution | style | Use a setter for operations that conceptually change a property. |
@@ -226,12 +208,11 @@ workstream.
 | `use_test_throws_matchers` | style | none | needs-full-type-resolution | style | Use `throwsA` matcher instead of `fail()`. |
 | `use_to_and_as_if_applicable` | style | none | needs-full-type-resolution | style | Start method names with to/_to or as/_as if applicable. |
 
-Non-preset analysis-type breakdown (heuristic): needs-full-type-resolution 63,
-syntax-only 37, needs-local-type-inference 12, needs-cross-file/project 8.
+All 117 are registered with `recommended: false`; none are deferred.
 
 ---
 
-# 2. DCM-inspired rules (154)
+# 2. Planned DCM-inspired rules (231)
 
 Rules worth reimplementing as **open** falcon rules, surveyed from the DCM
 (dcm.dev) catalog. DCM went commercial (~2023): its free CLI tier covers metrics
@@ -584,8 +565,7 @@ infrastructure: **A** reuses the resolved directive graph / lexical name index;
 (`dependencies`/`dev_dependencies`/`flutter.assets`); **C** needs a new
 asset/l10n index (filesystem walk and/or `.arb` parsing).
 
-**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`,
-`depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`.
+**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, `package-api-docs`, and `sort-pub-dependencies`. The five official lints are counted in section 1, not in the 11 planned additions below.
 
 ## 3a. Tier 1 — must-have (4)
 
