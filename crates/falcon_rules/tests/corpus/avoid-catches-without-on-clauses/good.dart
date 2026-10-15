@@ -70,3 +70,15 @@ void neverReturning() {
     fail(e);
   }
 }
+
+void inferredCompleterInCallback(Stream<int> events) {
+  final completed = Completer<Map<String, dynamic>>();
+  events.listen((event) async {
+    try {
+      work();
+    } catch (error, stack) {
+      // Inferred SDK receivers forward errors just like annotated receivers.
+      if (!completed.isCompleted) completed.completeError(error, stack);
+    }
+  });
+}

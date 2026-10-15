@@ -497,7 +497,11 @@ impl IdentityIndex {
                     .then(|| library.origin.clone()),
                 doc_imports: Vec::new(),
                 extensions: HashSet::new(),
-                uri: None,
+                uri: external.and_then(|external| {
+                    external
+                        .libraries
+                        .package_uri(external.environment, &library.files.first()?.path)
+                }),
                 named: false,
             });
             if matches!(&library.origin, ExternalOrigin::Sdk(uri) if uri.as_str() == "dart:core") {
@@ -652,20 +656,28 @@ impl IdentityIndex {
         for (path, file) in &by_path {
             paths[file.0] = Some(path.clone());
         }
-        let mut declared_by: FxHashMap<(&ExternalOrigin, &InternedString), usize> =
+        let mut declared_by: FxHashMap<(&ExternalOrigin, &InternedString), (Option<&str>, bool)> =
             FxHashMap::default();
         for library in &libraries {
-            if let Some(origin) = &library.origin {
+            // SDK URI/name identities are canonical even when package contexts
+            // load both an SDK and an embedder's physical copy of its libraries.
+            if let Some(origin @ ExternalOrigin::Package(_)) = &library.origin {
                 for name in library.declarations.keys().chain(library.extensions.iter()) {
-                    *declared_by.entry((origin, name)).or_default() += 1;
+                    let uri = library.uri.as_deref();
+                    declared_by
+                        .entry((origin, name))
+                        .and_modify(|(first, colliding)| {
+                            *colliding |= uri.is_none() || *first != uri;
+                        })
+                        .or_insert((uri, false));
                 }
             }
         }
         let mut colliding: FxHashMap<ExternalOrigin, FxHashSet<InternedString>> =
             FxHashMap::default();
         let declaration_capacity = declared_by.len();
-        for ((origin, name), count) in declared_by {
-            if count > 1 {
+        for ((origin, name), (_, has_collision)) in declared_by {
+            if has_collision {
                 colliding
                     .entry(origin.clone())
                     .or_default()
@@ -951,6 +963,16 @@ impl IdentityIndex {
             .get(name)
             .filter(|(identity, _)| *identity != NameIdentity::Unknown)
             .map(|(_, file)| *file)
+    }
+
+    /// A canonical external identity has one defining library even when several
+    /// package contexts load different physical copies of its logical library.
+    pub(crate) fn is_authoritative_declaration(&self, library: LibraryId, name: &str) -> bool {
+        if self.get(library).origin.is_none() {
+            return true;
+        }
+        self.declared(library, name)
+            .is_some_and(|identity| self.declaration_library(&identity) == Some(library))
     }
 
     pub fn declaration_library(&self, identity: &DeclarationIdentity) -> Option<LibraryId> {
@@ -1441,6 +1463,9 @@ impl IdentityIndex {
         match unique_declaration(candidates)? {
             DeclarationIdentity::Project { library, name } => {
                 let unit = self.get(library);
+                if unit.origin.is_some() {
+                    return Some(DeclarationIdentity::Project { library, name });
+                }
                 let (package, _) = unit
                     .uri
                     .as_ref()?
@@ -2617,6 +2642,94 @@ fn package_member(package: &str, name: &str) -> Option<DeclarationIdentity> {
 mod tests {
     use super::*;
     use falcon_dart_parser::parse;
+
+    #[test]
+    fn package_copies_share_identity_but_distinct_libraries_still_collide() {
+        use crate::{AnalysisEnvironment, ExternalLibraries};
+
+        let root = tempfile::tempdir().unwrap();
+        let source = "import 'package:meta/meta.dart'; import 'package:meta/other.dart' as other;";
+        let mut paths = Vec::with_capacity(2);
+        for context in ["a", "b"] {
+            let directory = root.path().join(context);
+            std::fs::create_dir_all(directory.join(".dart_tool")).unwrap();
+            std::fs::create_dir_all(directory.join("meta/lib")).unwrap();
+            std::fs::write(directory.join("main.dart"), source).unwrap();
+            std::fs::write(
+                directory.join("meta/lib/meta.dart"),
+                "class immutable {} class Marker {} const annotation = 0;",
+            )
+            .unwrap();
+            std::fs::write(
+                directory.join("meta/lib/other.dart"),
+                "class Marker {} const annotation = 0;",
+            )
+            .unwrap();
+            std::fs::write(directory.join(".dart_tool/package_config.json"),
+                r#"{"configVersion":2,"packages":[{"name":"meta","rootUri":"../meta","packageUri":"lib/"}]}"#).unwrap();
+            paths.push(directory.join("main.dart"));
+        }
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            paths.iter().map(PathBuf::as_path),
+            |_| None,
+        );
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let project: Vec<_> = paths
+            .iter()
+            .map(|path| (path.as_path(), &program, source))
+            .collect();
+        let external = ExternalLibraries::load(&environment, &project, |_| false);
+        assert_eq!(external.libraries().len(), 4);
+        let sources: Vec<_> = paths
+            .iter()
+            .map(|path| IdentitySource {
+                path,
+                program: &program,
+                has_parse_errors: false,
+            })
+            .collect();
+        let external = ExternalSources {
+            libraries: &external,
+            environment: &environment,
+        };
+        let monolithic = IdentityIndex::build(&sources, &[source, source], &[], Some(external));
+        let overlay = IdentityIndex::with_external(
+            &sources,
+            &[source, source],
+            &[],
+            external,
+            Arc::new(IdentityIndex::build_external(external)),
+        );
+        for index in [&monolithic, &overlay] {
+            for path in &paths {
+                let library = index.library(index.file(path).unwrap());
+                let identity = index
+                    .resolve_declaration(library, "immutable".into())
+                    .unwrap();
+                assert!(identity.is_package("meta", "immutable"), "{identity:?}");
+                let first = index.resolve_declaration(library, "Marker".into()).unwrap();
+                let second = index
+                    .resolve_declaration(library, QualifiedName::prefixed("other", "Marker"))
+                    .unwrap();
+                assert!(matches!(first, DeclarationIdentity::Project { .. }));
+                assert!(matches!(second, DeclarationIdentity::Project { .. }));
+                assert_ne!(first, second);
+                let first = index
+                    .resolve_imported_member(library, "annotation".into())
+                    .unwrap();
+                let second = index
+                    .resolve_imported_member(
+                        library,
+                        QualifiedName::prefixed("other", "annotation"),
+                    )
+                    .unwrap();
+                assert!(matches!(first, DeclarationIdentity::Project { .. }));
+                assert!(matches!(second, DeclarationIdentity::Project { .. }));
+                assert_ne!(first, second);
+            }
+        }
+    }
 
     fn index(inputs: &[(&str, &str)], packages: &[PackageIdentity]) -> IdentityIndex {
         let parsed: Vec<_> = inputs.iter().map(|(_, source)| parse(source)).collect();

@@ -245,6 +245,9 @@ impl TypeIndex {
                 TopLevelDecl::ExtensionType(c) => (&c.name.name, None, &[], &c.implements),
                 _ => continue,
             };
+            if !identities.is_authoritative_declaration(library, name) {
+                continue;
+            }
             let Some(identity) = identities.resolve_declaration(library, name.into()) else {
                 continue;
             };

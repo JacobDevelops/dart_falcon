@@ -2325,6 +2325,32 @@ impl<'a> SemanticModel<'a> {
         }
     }
 
+    fn owns_declaration(&self, name: &str) -> bool {
+        self.library
+            .is_none_or(|library| self.identities.is_authoritative_declaration(library, name))
+    }
+
+    fn owns_top_level_declaration(&self, declaration: &TopLevelDecl) -> bool {
+        let name = match declaration {
+            TopLevelDecl::Class(node) => &node.name,
+            TopLevelDecl::ClassTypeAlias(node) => &node.name,
+            TopLevelDecl::Mixin(node) => &node.name,
+            TopLevelDecl::MixinClass(node) => &node.name,
+            TopLevelDecl::Enum(node) => &node.name,
+            TopLevelDecl::Extension(node) => {
+                return node
+                    .name
+                    .as_ref()
+                    .is_none_or(|name| self.owns_declaration(&name.name));
+            }
+            TopLevelDecl::ExtensionType(node) => &node.name,
+            TopLevelDecl::Function(node) => &node.name,
+            TopLevelDecl::TypeAlias(node) => &node.name,
+            TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => return true,
+        };
+        self.owns_declaration(&name.name)
+    }
+
     /// The `package:` URI of the library declaring a project `identity`.
     pub fn declaration_uri(&self, identity: &DeclarationIdentity) -> Option<&'a str> {
         let DeclarationIdentity::Project { library, .. } = identity else {
@@ -4071,6 +4097,9 @@ impl SignatureIndex {
                     }
                     _ => continue,
                 };
+                if !model.owns_declaration(owner) {
+                    continue;
+                }
                 let ClassMember::Operator(operator) = &members[member] else {
                     continue;
                 };
@@ -4144,6 +4173,9 @@ impl SignatureIndex {
                 continue;
             }
             for declarator in &variable.declarators {
+                if !model.owns_declaration(&declarator.name.name) {
+                    continue;
+                }
                 if let Some(initializer) = &declarator.initializer
                     && let Some(identity) = model.resolve_value(&declarator.name.name)
                 {
@@ -4239,6 +4271,9 @@ impl SignatureIndex {
                 continue;
             }
             for declarator in &variable.declarators {
+                if !model.owns_declaration(&declarator.name.name) {
+                    continue;
+                }
                 let Some(identity) = model.resolve_value(&declarator.name.name) else {
                     continue;
                 };
@@ -4375,6 +4410,9 @@ impl SignatureIndex {
         let mut changed = false;
         let mut lookup = inherited::OverrideInferenceLookup::default();
         for declaration in &program.declarations {
+            if !model.owns_top_level_declaration(declaration) {
+                continue;
+            }
             let (name, members) = match declaration {
                 TopLevelDecl::Class(class) => (&class.name, &class.members),
                 TopLevelDecl::MixinClass(class) => (&class.name, &class.members),
@@ -4401,6 +4439,9 @@ impl SignatureIndex {
     fn infer_declaration_types(&mut self, program: &Program, model: &SemanticModel<'_>) -> bool {
         let mut changed = self.infer_override_types(program, model);
         for declaration in &program.declarations {
+            if !model.owns_top_level_declaration(declaration) {
+                continue;
+            }
             let (name, parameters, members) = match declaration {
                 TopLevelDecl::Class(class) => (&class.name, &class.type_params, &class.members),
                 TopLevelDecl::MixinClass(class) => {
@@ -5028,6 +5069,9 @@ impl SignatureIndex {
             .entry(model.file)
             .or_insert_with(|| Arc::new(super::flow_writes::FlowWrites::program(program)));
         for declaration in &program.declarations {
+            if !model.owns_top_level_declaration(declaration) {
+                continue;
+            }
             let kind = match declaration {
                 TopLevelDecl::Class(class) => Some((
                     &class.name,
@@ -5177,6 +5221,9 @@ impl SignatureIndex {
                 }
                 TopLevelDecl::Variable(variable) => {
                     for declarator in &variable.declarators {
+                        if !model.owns_declaration(&declarator.name.name) {
+                            continue;
+                        }
                         let Some(identity) = model.resolve_value(&declarator.name.name) else {
                             continue;
                         };
@@ -5554,6 +5601,9 @@ impl SignatureIndex {
 
     fn add_immutability(&mut self, program: &Program, model: &SemanticModel<'_>) {
         for declaration in &program.declarations {
+            if !model.owns_top_level_declaration(declaration) {
+                continue;
+            }
             let (name, annotations, superclass) = match declaration {
                 TopLevelDecl::Class(node) => (&node.name, &node.annotations, node.extends.as_ref()),
                 TopLevelDecl::MixinClass(node) => {
@@ -5624,6 +5674,9 @@ impl SignatureIndex {
         for _ in 0..program.declarations.len() {
             let mut changed = false;
             for declaration in &program.declarations {
+                if !model.owns_top_level_declaration(declaration) {
+                    continue;
+                }
                 if let TopLevelDecl::ClassTypeAlias(alias) = declaration {
                     changed |= self.forward_alias_constructors(&alias.name.name, model);
                     continue;
@@ -13710,6 +13763,247 @@ mod tests {
 
     use super::*;
     use crate::resolve::{IdentitySource, LibrarySource};
+
+    #[test]
+    fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let sdk = root.join("flutter/bin/cache/dart-sdk/lib");
+        let embedded = root.join("embedder/lib");
+        std::fs::create_dir_all(&sdk).unwrap();
+        std::fs::create_dir_all(&embedded).unwrap();
+        std::fs::write(
+            sdk.join("libraries.json"),
+            r#"{"vm":{"libraries":{"core":{"uri":"core.dart"},"async":{"uri":"async.dart"}}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            embedded.join("_embedder.yaml"),
+            "embedded_libs:\n  dart:core: core.dart\n  dart:async: async.dart\n",
+        )
+        .unwrap();
+        for (lib, parameter) in [(&sdk, "int"), (&embedded, "String")] {
+            let operator = if parameter == "int" {
+                "bool operator ==(Object other) => true;"
+            } else {
+                "bool operator ==(Object other);"
+            };
+            std::fs::write(
+                lib.join("core.dart"),
+                format!("class Object {{}} class num {{}} class int extends num {{}} \
+                 class String {{}} class Type {{}} class Error {{}} class Exception {{}} \
+                 class ArgumentError extends Error {{ ArgumentError(String message); }} \
+                 class StateError extends Error {{ StateError(String message); }} \
+                 class Box<T> {{ Box(T value); }} \
+                 abstract class Canonical extends Box<{parameter}> {{ Canonical(super.value); {operator} }}"),
+            )
+            .unwrap();
+            std::fs::write(
+                lib.join("async.dart"),
+                "class Future<T> {} class Completer<T> { Completer(); }",
+            )
+            .unwrap();
+        }
+        let paths = [
+            root.join("plain/lib/main.dart"),
+            root.join("embedded/lib/main.dart"),
+        ];
+        let source = "import 'dart:async'; import 'package:dependency/dependency.dart'; final error = ArgumentError('x'); \
+                      final state = StateError('x'); int number = 0; String text = ''; \
+                      final done = Completer<void>(); class LocalError extends Error {} \
+                      class NotAnError {}";
+        for (index, path) in paths.iter().enumerate() {
+            let app = path.parent().unwrap().parent().unwrap();
+            std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::create_dir_all(app.join("dependency/lib")).unwrap();
+            let parameter = if index == 0 { "int" } else { "String" };
+            std::fs::write(app.join("dependency/lib/dependency.dart"), format!(
+                "class PackageBox<T> {{ PackageBox(T value); }} \
+                 class PackageCanonical extends PackageBox<{parameter}> {{ PackageCanonical(super.value); }}"
+            )).unwrap();
+            let packages = if index == 0 {
+                serde_json::json!([{"name":"dependency","rootUri":"../dependency","packageUri":"lib/"}])
+            } else {
+                serde_json::json!([
+                    {"name":"sky_engine","rootUri":"../../embedder","packageUri":"lib/"},
+                    {"name":"dependency","rootUri":"../dependency","packageUri":"lib/"}
+                ])
+            };
+            std::fs::write(
+                app.join(".dart_tool/package_config.json"),
+                serde_json::json!({
+                    "configVersion": 2,
+                    "flutterRoot": format!("file://{}", root.join("flutter").display()),
+                    "packages": packages
+                })
+                .to_string(),
+            )
+            .unwrap();
+            std::fs::write(path, source).unwrap();
+        }
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let environment = crate::AnalysisEnvironment::discover_with_sdk_locator(
+            paths.iter().map(PathBuf::as_path),
+            |config| {
+                crate::environment::DartSdk::load(
+                    &config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"),
+                )
+            },
+        );
+        let project: Vec<_> = paths
+            .iter()
+            .map(|path| (path.as_path(), &program, source))
+            .collect();
+        let external = ExternalLibraries::load(&environment, &project, |path| {
+            paths.iter().any(|project| project == path)
+        });
+        assert_eq!(
+            external.libraries().iter().filter(|library| {
+                matches!(&library.origin, crate::environment::ExternalOrigin::Sdk(uri) if uri.as_str() == "dart:core")
+            }).count(),
+            2,
+        );
+        let files: Vec<_> = paths.iter().map(|path| (path.clone(), &program)).collect();
+        let sources: Vec<_> = paths
+            .iter()
+            .map(|path| IdentitySource {
+                path,
+                program: &program,
+                has_parse_errors: false,
+            })
+            .collect();
+        let external_sources = crate::ExternalSources {
+            libraries: &external,
+            environment: &environment,
+        };
+        let monolithic =
+            IdentityIndex::build(&sources, &[source, source], &[], Some(external_sources));
+        let base = Arc::new(IdentityIndex::build_external(external_sources));
+        let overlay = IdentityIndex::with_external(
+            &sources,
+            &[source, source],
+            &[],
+            external_sources,
+            base.clone(),
+        );
+        for (identities, external_identities) in
+            [(&monolithic, None), (&overlay, Some(base.as_ref()))]
+        {
+            let mut types = TypeIndex::from_resolved_files(
+                paths.iter().map(|path| {
+                    (
+                        path.as_path(),
+                        LibrarySource {
+                            program: &program,
+                            has_parse_errors: false,
+                            has_unresolved_parts: false,
+                        },
+                    )
+                }),
+                identities,
+            );
+            types.add_external(&external, identities);
+            let signatures = if let Some(external_identities) = external_identities {
+                let external_signatures = Arc::new(SignatureIndex::build(
+                    &[],
+                    Some(&external),
+                    external_identities,
+                    &types,
+                ));
+                SignatureIndex::with_external(&files, identities, &types, external_signatures)
+            } else {
+                SignatureIndex::build(&files, Some(&external), identities, &types)
+            };
+            for path in &paths {
+                let model = SemanticModel::new(path, identities, Some(&types));
+                for name in ["Canonical", "PackageCanonical"] {
+                    let identity = model.resolve_name(name).unwrap();
+                    let library = identities.declaration_library(&identity).unwrap();
+                    let file = identities.declaration_file(library, name).unwrap();
+                    let source = identities.source_path(file).unwrap();
+                    let parameter = if source.starts_with(&embedded)
+                        || source.starts_with(root.join("embedded"))
+                    {
+                        "String"
+                    } else {
+                        "int"
+                    };
+                    assert_eq!(
+                        signatures.constructor(&identity, "new").unwrap().positional,
+                        [model.core_type(parameter, false)],
+                        "{identity:?} from {source:?}",
+                    );
+                    if name == "Canonical" {
+                        let facts = signatures.declared_member_facts(&identity, "==");
+                        assert_eq!(facts.len(), 1);
+                        assert_eq!(facts[0].is_abstract, parameter == "String");
+                    }
+                }
+                for (name, library) in [
+                    ("int", "dart:core"),
+                    ("String", "dart:core"),
+                    ("Type", "dart:core"),
+                    ("Completer", "dart:async"),
+                ] {
+                    assert_eq!(
+                        model.resolve_name(name),
+                        Some(DeclarationIdentity::sdk(library, name))
+                    );
+                }
+                for name in ["error", "state"] {
+                    let ty = signatures
+                        .value_type(&model.resolve_value(name).unwrap())
+                        .unwrap();
+                    assert_eq!(
+                        signatures.interface_check_sdk(ty, "dart:core", "Error", &model),
+                        Truth::Yes
+                    );
+                }
+                for name in ["number", "text", "done", "NotAnError"] {
+                    let ty = model
+                        .resolve_value(name)
+                        .and_then(|id| signatures.value_type(&id).cloned())
+                        .unwrap_or_else(|| model.declared_type(&model.resolve_name(name).unwrap()));
+                    assert_eq!(
+                        signatures.interface_check_sdk(&ty, "dart:core", "Error", &model),
+                        Truth::No
+                    );
+                }
+                let number = signatures
+                    .value_type(&model.resolve_value("number").unwrap())
+                    .unwrap();
+                let text = signatures
+                    .value_type(&model.resolve_value("text").unwrap())
+                    .unwrap();
+                assert_eq!(
+                    signatures.types_are_unrelated(number, &model.core_type("int", false), &model),
+                    Truth::No
+                );
+                assert_eq!(
+                    signatures.types_are_unrelated(text, &model.core_type("String", false), &model),
+                    Truth::No
+                );
+                assert_eq!(
+                    signatures.types_are_unrelated(number, text, &model),
+                    Truth::Yes
+                );
+                let done = signatures
+                    .value_type(&model.resolve_value("done").unwrap())
+                    .unwrap();
+                assert_eq!(
+                    signatures.interface_check_sdk(done, "dart:async", "Completer", &model),
+                    Truth::Yes
+                );
+                let local = model.declared_type(&model.resolve_name("LocalError").unwrap());
+                assert_eq!(
+                    signatures.interface_check_sdk(&local, "dart:core", "Error", &model),
+                    Truth::Yes
+                );
+            }
+        }
+    }
 
     #[test]
     fn single_file_and_project_inference_share_converged_headers_and_values() {

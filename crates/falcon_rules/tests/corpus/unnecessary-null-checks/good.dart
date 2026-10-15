@@ -60,3 +60,15 @@ void nullableFallback(int? value) {
   print(local);
 }
 
+
+class Registration<T extends Object> {
+  T? instance;
+  final ready = Completer<T>();
+}
+
+// Future.value and Completer.complete deliberately retain their null checks,
+// including a generic receiver obtained from an instance field.
+void completeRegistration<T extends Object>(Registration<T> registration) {
+  Future<T>.value(registration.instance!);
+  registration.ready.complete(registration.instance!);
+}

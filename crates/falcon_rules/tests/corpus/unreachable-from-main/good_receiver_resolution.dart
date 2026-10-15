@@ -1,3 +1,5 @@
+import 'dart:async';
+
 void main() {
   final box = Box();
   print(box + 1);
@@ -6,6 +8,7 @@ void main() {
   print(box.extra());
   box.counter += 1;
   print(LocalIterable());
+  readAsyncFields();
 }
 
 class Box {
@@ -22,4 +25,21 @@ extension Extra on Box {
 class LocalIterable extends Iterable<int> {
   @override
   Iterator<int> get iterator => [1].iterator;
+}
+
+class AsyncFields {
+  final String? first;
+  final int? second;
+  AsyncFields({this.first, this.second});
+}
+
+Future<T> resolveAsync<T extends Object>(T value) async => value;
+
+Future<void> readAsyncFields() async {
+  final value = await resolveAsync<AsyncFields>(
+    AsyncFields(first: 'value', second: 3),
+  );
+  // Awaiting a generic SDK Future must retain the instance's field owner.
+  print(value.first);
+  print(value.second);
 }

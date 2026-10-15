@@ -335,6 +335,25 @@ impl ExternalLibraries {
         self.libraries.is_empty()
     }
 
+    /// The logical package URI of a loaded defining file in its loading context.
+    pub(crate) fn package_uri(
+        &self,
+        environment: &AnalysisEnvironment,
+        path: &Path,
+    ) -> Option<String> {
+        let context = *self.contexts.get(path)?;
+        let package = environment
+            .config_in(context)?
+            .package_library_containing(path)?;
+        let relative = path.strip_prefix(&package.lib_root).ok()?;
+        let mut uri = format!("package:{}", package.name);
+        for component in relative.components() {
+            uri.push('/');
+            super::percent_encode(component.as_os_str().to_str()?, &mut uri);
+        }
+        Some(uri)
+    }
+
     /// The canonical file `uri` names when written in `from` (a project or an
     /// external file); `None` when unresolvable.
     pub fn resolve_uri(
