@@ -106,9 +106,9 @@ fn test_run_check_with_config_path_nonexistent_returns_error() {
     assert_eq!(exit_code, 1);
 }
 
-/// Test 7: --parallel flag runs analysis and returns zero on violation-free files
+/// Test 7: Default analysis returns zero on violation-free files across imports.
 #[test]
-fn test_run_check_parallel_flag_clean_returns_zero() {
+fn test_run_check_default_clean_imports_returns_zero() {
     let temp = tempdir().unwrap();
     // a.dart is the entrypoint and references b.dart's Foo, so the cross-file
     // rules (unused-files / unused-code) stay quiet alongside the per-file rules.
@@ -121,7 +121,6 @@ fn test_run_check_parallel_flag_clean_returns_zero() {
     let exit_code = run_check(CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
-        parallel: true,
         ..Default::default()
     });
     assert_eq!(exit_code, 0);
@@ -387,23 +386,99 @@ fn test_config_max_errors_and_cli_precedence() {
     );
 }
 
-/// Parallel and sequential runs produce identical, deterministically ordered output.
+/// Default CLI analysis matches the sequential library oracle in stable order.
 #[test]
-fn test_parallel_sequential_output_identical() {
+fn test_default_output_matches_ordered_sequential_diagnostics() {
     let temp = tempdir().unwrap();
-    for name in ["b.dart", "a.dart", "c.dart"] {
-        fs::write(temp.path().join(name), DYNAMIC_SRC).unwrap();
+    fs::create_dir_all(temp.path().join("lib/src")).unwrap();
+    let files = [
+        ("b.dart", "void f(bool flag) {\n  dynamic x = 1;\n  dynamic y = 2;\n  if (flag == true) { print(x); }\n  print(y);\n}\n"),
+        ("a.dart", DYNAMIC_SRC),
+        ("lib/src/orphan.dart", DYNAMIC_SRC),
+        ("typo.dart", "void main() {\n  dynamic value = 1;\n  print(\"hello\"\n}\n"),
+    ]
+    .map(|(name, source)| {
+        let path = temp.path().join(name);
+        fs::write(&path, source).unwrap();
+        (path, source.to_owned())
+    });
+    let config_path = temp.path().join("falcon.json");
+    fs::write(
+        &config_path,
+        r#"{ "linter": { "rules": { "recommended": false, "suspicious": { "avoid-dynamic": "warn" }, "complexity": { "no-boolean-literal-compare": "warn" } } }, "cross-file": { "rules": { "recommended": false, "correctness": { "unused-files": "warn" } } } }"#,
+    )
+    .unwrap();
+    let config = falcon_config::load_config(&config_path).unwrap();
+    let registry = falcon_rules::build_registry(&config);
+    assert!(falcon_rules::requires_resolution(&registry));
+    let cross_file_registry = falcon_rules::build_cross_file_registry(&config);
+    assert!(!cross_file_registry.is_empty());
+    let packages = falcon_rules::package_identities(files.iter().map(|(path, _)| path.as_path()));
+    let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+        files.iter().map(|(path, _)| path.as_path()),
+        |_| None,
+    );
+    let (mut sequential, project_files, indexes) =
+        falcon_analyze::analyze_sequential_collecting_resolving(
+            &registry,
+            &files,
+            &config,
+            true,
+            true,
+            falcon_analyze::Workspace {
+                packages: &packages,
+                environment: Some(&environment),
+            },
+        );
+    falcon_rules::apply_severities(&mut sequential, &config);
+    sequential.extend(falcon_rules::run_cross_file(
+        &cross_file_registry,
+        &project_files,
+        &config,
+        indexes.as_ref(),
+    ));
+    for diagnostic in &mut sequential {
+        let (_, source) = files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy() == diagnostic.file_path)
+            .unwrap();
+        diagnostic.resolve_position(source);
     }
-    let seq = collect_check(&options_for(temp.path(), None)).unwrap();
-    let mut opts = options_for(temp.path(), None);
-    opts.parallel = true;
-    let par = collect_check(&opts).unwrap();
-    let key = |d: &falcon_diagnostics::Diagnostic| {
-        (d.file_path.clone(), d.span.start, d.rule, d.message.clone())
-    };
+    sequential.sort_by(|a, b| {
+        a.file_path
+            .cmp(&b.file_path)
+            .then((a.rule != "syntax-error").cmp(&(b.rule != "syntax-error")))
+            .then(a.span.start.cmp(&b.span.start))
+            .then(a.rule.cmp(b.rule))
+            .then(a.span.end.cmp(&b.span.end))
+            .then(a.message.cmp(&b.message))
+    });
+    for rule in [
+        "avoid-dynamic",
+        "no-boolean-literal-compare",
+        "unused-files",
+        "syntax-error",
+    ] {
+        assert!(
+            sequential.iter().any(|diagnostic| diagnostic.rule == rule),
+            "missing oracle diagnostic for {rule}"
+        );
+    }
+
+    let mut options = options_for(temp.path(), Some(config_path));
+    let output = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+    assert_eq!(output.total_files, files.len());
+    assert_eq!(output.exit_code, 1);
     assert_eq!(
-        seq.diagnostics.iter().map(key).collect::<Vec<_>>(),
-        par.diagnostics.iter().map(key).collect::<Vec<_>>()
+        serde_json::to_value(&output.diagnostics).unwrap(),
+        serde_json::to_value(&sequential).unwrap()
+    );
+
+    options.max_errors = Some(2);
+    let limited = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+    assert_eq!(
+        serde_json::to_value(&limited.diagnostics).unwrap(),
+        serde_json::to_value(&sequential[..2]).unwrap()
     );
 }
 

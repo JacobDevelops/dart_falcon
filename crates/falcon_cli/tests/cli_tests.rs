@@ -21,7 +21,6 @@ fn check_options_parse_with_stable_argument_ids() {
         "max_errors",
         "quiet",
         "exit_code",
-        "parallel",
     ] {
         assert!(ids.contains(&id), "missing argument id {id}");
     }
@@ -47,7 +46,6 @@ fn check_options_parse_with_stable_argument_ids() {
         "--quiet",
         "--exit-code",
         "2",
-        "--parallel",
     ])
     .unwrap();
     let Command::Check(options) = cli.command else {
@@ -63,7 +61,13 @@ fn check_options_parse_with_stable_argument_ids() {
     assert_eq!(options.max_errors, Some(10));
     assert!(options.quiet);
     assert_eq!(options.error_exit_code, 2);
-    assert!(options.parallel);
+}
+
+#[test]
+fn check_rejects_removed_parallel_flag() {
+    let error = Cli::try_parse_from(["falcon", "check", "--parallel"]).unwrap_err();
+    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+    assert!(error.to_string().contains("--parallel"));
 }
 
 #[test]
@@ -105,7 +109,6 @@ fn check_and_logging_defaults_and_global_flags() {
                 assert_eq!(options.error_exit_code, 1);
                 assert_eq!(options.format, falcon_cli::OutputFormat::Text);
                 assert!(!options.quiet);
-                assert!(!options.parallel);
             } else {
                 assert!(matches!(cli.command, Command::Lsp));
             }

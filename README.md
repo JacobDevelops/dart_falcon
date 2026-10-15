@@ -73,6 +73,8 @@ then the enclosing git root, then `~/.falcon.json`. With no config found, every
 recommended rule runs at its default severity. Pass `--config <path>` to point at
 a specific file.
 
+Checks analyze files in parallel and sort diagnostics deterministically. Set `RAYON_NUM_THREADS` to limit worker threads, for example `RAYON_NUM_THREADS=4 falcon check .`.
+
 ## Configuration
 
 `falcon.json` is biome 2.x-shaped — rules are grouped, and each entry is either a

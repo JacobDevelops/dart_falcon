@@ -102,16 +102,6 @@
           "possibleValues": [],
           "short": null,
           "valueName": "N"
-        },
-        {
-          "default": "false",
-          "help": "Use Rayon parallel file analysis instead of sequential",
-          "long": "--parallel",
-          "name": "parallel",
-          "positional": false,
-          "possibleValues": [],
-          "short": null,
-          "valueName": null
         }
       ],
       "name": "check",

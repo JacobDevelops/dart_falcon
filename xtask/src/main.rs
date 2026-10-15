@@ -806,7 +806,7 @@ fn perf_lock(options: PerfLock) {
         let output = Command::new(&falcon_bin)
             // --exit-code 0 keeps "violations found" from reading as failure;
             // a non-zero exit therefore means the pipeline itself broke.
-            .args(["check", "--quiet", "--parallel", "--exit-code", "0"])
+            .args(["check", "--quiet", "--exit-code", "0"])
             .arg(&corpus)
             .output()
             .expect("failed to spawn falcon");

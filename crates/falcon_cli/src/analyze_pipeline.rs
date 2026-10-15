@@ -9,7 +9,6 @@ use clap::{Args, ValueEnum};
 use falcon_analyze::environment::{DartSdk, PackageConfig};
 use falcon_analyze::{
     AnalysisEnvironment, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
-    analyze_sequential_collecting_resolving,
 };
 use falcon_config::{load_config, load_or_default};
 use falcon_diagnostics::{Diagnostic, LineIndex};
@@ -56,9 +55,6 @@ pub struct CheckOptions {
         default_value_t = 1
     )]
     pub error_exit_code: i32,
-    /// Use Rayon parallel file analysis instead of sequential
-    #[arg(long)]
-    pub parallel: bool,
 }
 
 impl Default for CheckOptions {
@@ -71,7 +67,6 @@ impl Default for CheckOptions {
             quiet: false,
             format: OutputFormat::Text,
             error_exit_code: 1,
-            parallel: false,
         }
     }
 }
@@ -167,25 +162,14 @@ pub fn collect_check_with_sdk_locator(
         packages: &packages,
         environment: Some(&environment),
     };
-    let (mut diagnostics, mut project_files, indexes) = if options.parallel {
-        analyze_parallel_collecting_resolving(
-            &registry,
-            &files,
-            &config,
-            collect_programs,
-            resolve,
-            workspace,
-        )
-    } else {
-        analyze_sequential_collecting_resolving(
-            &registry,
-            &files,
-            &config,
-            collect_programs,
-            resolve,
-            workspace,
-        )
-    };
+    let (mut diagnostics, mut project_files, indexes) = analyze_parallel_collecting_resolving(
+        &registry,
+        &files,
+        &config,
+        collect_programs,
+        resolve,
+        workspace,
+    );
     if collect_programs {
         let (empty_program, _) = falcon_dart_parser::parse("");
         project_files.extend(manifests.iter().map(|(path, source)| ProjectFile {
@@ -221,8 +205,8 @@ pub fn collect_check_with_sdk_locator(
         }
     }
 
-    // Parallel analysis collects in nondeterministic file order; sort so
-    // output (and max_errors truncation) is stable across runs and modes.
+    // File walking order can vary; sort diagnostics so output and max_errors
+    // truncation remain stable across runs.
     // Syntax errors sort ahead of lints within a file (`false` < `true`).
     diagnostics.sort_by(|a, b| {
         a.file_path
