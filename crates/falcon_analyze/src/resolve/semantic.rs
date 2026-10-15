@@ -26,6 +26,8 @@ use super::{
 use crate::environment::ExternalLibraries;
 
 mod inherited;
+mod queries;
+pub use queries::ResolvedInvocation;
 mod unrelated;
 
 #[cfg(test)]
@@ -94,35 +96,30 @@ pub fn expression_has_dot_shorthand_base(mut expression: &Expr) -> bool {
 /// Whether a null-aware selector (`?.`, `?[`) in `expression`'s own
 /// selector chain null-shorts it, which makes its static type nullable
 /// (`a?.b.c`, `a?.b!`, `a?[0].c()`). Explicit parentheses end a chain.
-fn null_shorted(expression: &Expr) -> bool {
-    fn receiver(expression: &Expr) -> Option<&Expr> {
-        let receiver = match expression {
-            Expr::Field { object, .. } | Expr::Index { object, .. } => object,
+pub fn null_shorted(expression: &Expr) -> bool {
+    let mut current = expression;
+    loop {
+        current = match current {
+            Expr::Field {
+                object,
+                is_null_safe,
+                ..
+            }
+            | Expr::Index {
+                object,
+                is_null_safe,
+                ..
+            } => {
+                if *is_null_safe {
+                    return true;
+                }
+                object
+            }
             Expr::NullAssert { operand, .. } => operand,
             Expr::Call { callee, .. } => callee,
             Expr::GenericInstantiation { target, .. } => target,
-            _ => return None,
+            _ => return false,
         };
-        Some(receiver.as_ref())
-    }
-    let mut current = expression;
-    loop {
-        if matches!(
-            current,
-            Expr::Field {
-                is_null_safe: true,
-                ..
-            } | Expr::Index {
-                is_null_safe: true,
-                ..
-            }
-        ) {
-            return true;
-        }
-        let Some(next) = receiver(current) else {
-            return false;
-        };
-        current = next;
     }
 }
 
@@ -3266,6 +3263,19 @@ pub struct ResolvedSignature {
 }
 
 impl ResolvedSignature {
+    fn returning(return_type: ResolvedType) -> Self {
+        Self {
+            owner_parameters: Vec::new(),
+            call_parameters: Vec::new(),
+            defaults: HashMap::new(),
+            positional_parameter_names: Vec::new(),
+            non_optional_defaults: HashSet::new(),
+            positional: Vec::new(),
+            named: HashMap::new(),
+            return_type,
+        }
+    }
+
     /// The callable type, with named parameters in deterministic name order.
     pub fn function_type(&self) -> ResolvedType {
         let mut named: Vec<_> = self
@@ -3547,69 +3557,102 @@ impl<K: Eq + Hash, V> SignatureMap<K, V> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct SignatureIndex {
-    /// Loop writes resolved once per source file, not per closure inference.
-    region_writes: FxHashMap<Option<FileId>, HashMap<usize, HashSet<String>>>,
-    functions: SignatureMap<DeclarationIdentity, ResolvedSignature>,
-    /// Read types of top-level getters and variables, including imported ones.
-    value_types: SignatureMap<DeclarationIdentity, ResolvedType>,
-    /// Getter reads may execute code even when their static type is scalar.
-    value_getters: FxHashSet<DeclarationIdentity>,
-    constructors: SignatureMap<DeclarationIdentity, FxHashMap<String, ResolvedSignature>>,
-    member_entries: SignatureMap<DeclarationIdentity, FxHashMap<String, MemberEntry>>,
-    /// Cached after member ingestion; overlays consult this without scanning the base.
-    has_field_forwarders: bool,
-    /// Non-promotable private instance names conflict library-wide.
-    blocked_field_promotions: SignatureMap<LibraryId, FxHashSet<String>>,
-    supertypes: SignatureMap<DeclarationIdentity, (Vec<TypeParameterId>, Vec<ResolvedType>)>,
-    owner_defaults: SignatureMap<TypeParameterId, ResolvedType>,
-    /// Whether the declaration of each type parameter of an indexed type,
-    /// alias, function or method states a bound; parameters of local
-    /// functions are absent.
-    bound_declared: SignatureMap<TypeParameterId, bool>,
-    member_supertypes: SignatureMap<DeclarationIdentity, Vec<ResolvedType>>,
-    declarations: SignatureMap<DeclarationIdentity, DeclarationFacts>,
-    constants: SignatureMap<DeclarationIdentity, Expr>,
-    constant_types: SignatureMap<DeclarationIdentity, DeclarationIdentity>,
-    enum_values: SignatureMap<DeclarationIdentity, Vec<String>>,
-    /// Bodies of project `const` constructors, keyed by class and name.
-    const_constructors: SignatureMap<DeclarationIdentity, FxHashMap<String, ConstConstructorBody>>,
-    /// Instance field initializers of project classes with a `const`
-    /// constructor, in declaration order.
-    const_field_initializers: SignatureMap<DeclarationIdentity, Vec<(String, Expr)>>,
-    extensions: Vec<ExtensionFacts>,
-    /// Resolved external annotations of top-level functions that have any.
-    function_annotations: SignatureMap<DeclarationIdentity, Vec<DeclarationIdentity>>,
-    /// The declaration kind of every indexed class-like declaration.
-    kinds: SignatureMap<DeclarationIdentity, TypeKind>,
-    /// Whether each class, mixin, enum, or extension type is itself annotated
-    /// with package:meta's `@immutable` (`Unknown` for an unresolvable
-    /// `immutable` annotation, which may arrive through an export chain).
-    immutable: SignatureMap<DeclarationIdentity, Truth>,
-    /// The superclass of classes, mixin classes, and named mixin applications.
-    superclasses: SignatureMap<DeclarationIdentity, ResolvedType>,
-    /// The `with` clause of each class or enum declaring one, as the index
-    /// range of its mixins within the declaration's `supertypes` entry.
-    mixin_applications: SignatureMap<DeclarationIdentity, Range<usize>>,
-    /// The `on`-clause prefix of each mixin's canonical `supertypes` entry.
-    mixin_constraint_counts: SignatureMap<DeclarationIdentity, usize>,
-    /// Whether the trailing implicit `Object` subtype edge is also a direct
-    /// inherited-interface candidate. When used, it precedes mixins/interfaces.
-    inherited_object: SignatureMap<DeclarationIdentity, bool>,
-    /// Every identity whose supertype graph reaches a cycle, once the index
-    /// is complete; `None` while building, when lookups walk the graph.
-    cyclic_supertypes: Option<FxHashSet<DeclarationIdentity>>,
-    /// Inferred top-level variables in an initializer dependency SCC.
-    cyclic_values: FxHashSet<DeclarationIdentity>,
-    /// The [`Self::extensions`] declaring each member name (methods, other
-    /// members, and instance members), once the index is complete.
-    extension_members: Option<ExtensionMembers>,
-    /// The explicit class modifier of each class, mixin class, and mixin that
-    /// declares one (`base` for base mixins and mixin classes).
-    restrictions: SignatureMap<DeclarationIdentity, ClassRestriction>,
-    /// Only external-only snapshots may be retained here, never project facts.
-    external: Option<Arc<SignatureIndex>>,
+// Declare shared maps once so adding a table also wires its external overlay.
+macro_rules! signature_index {
+    (
+        local { $($(#[$local_doc:meta])* $local:ident: $local_type:ty,)* }
+        shared { $($(#[$shared_doc:meta])* $shared:ident: $shared_type:ty,)* }
+    ) => {
+        #[derive(Debug, Clone, Default)]
+        pub struct SignatureIndex {
+            $($(#[$local_doc])* $local: $local_type,)*
+            $($(#[$shared_doc])* $shared: $shared_type,)*
+            /// Only external-only snapshots may be retained here, never project facts.
+            external: Option<Arc<SignatureIndex>>,
+        }
+
+        impl SignatureIndex {
+            fn borrowing_external(external: Arc<Self>) -> Self {
+                assert!(
+                    external.external.is_none(),
+                    "external base must not be an overlay"
+                );
+                Self {
+                    $($shared: SignatureMap {
+                        local: FxHashMap::default(),
+                        external: Some((Arc::clone(&external), |base| &base.$shared)),
+                    },)*
+                    external: Some(external),
+                    ..Self::default()
+                }
+            }
+        }
+    };
+}
+
+signature_index! {
+    local {
+        flow_writes: FxHashMap<Option<FileId>, Arc<super::flow_writes::FlowWrites>>,
+        /// Getter reads may execute code even when their static type is scalar.
+        value_getters: FxHashSet<DeclarationIdentity>,
+        /// Cached after member ingestion; overlays consult this without scanning the base.
+        has_field_forwarders: bool,
+        extensions: Vec<ExtensionFacts>,
+        /// Every identity whose supertype graph reaches a cycle, once the index
+        /// is complete; `None` while building, when lookups walk the graph.
+        cyclic_supertypes: Option<FxHashSet<DeclarationIdentity>>,
+        /// Inferred top-level variables in an initializer dependency SCC.
+        cyclic_values: FxHashSet<DeclarationIdentity>,
+        /// The [`Self::extensions`] declaring each member name (methods, other
+        /// members, and instance members), once the index is complete.
+        extension_members: Option<ExtensionMembers>,
+    }
+    shared {
+        functions: SignatureMap<DeclarationIdentity, ResolvedSignature>,
+        /// Read types of top-level getters and variables, including imported ones.
+        value_types: SignatureMap<DeclarationIdentity, ResolvedType>,
+        constructors: SignatureMap<DeclarationIdentity, FxHashMap<String, ResolvedSignature>>,
+        member_entries: SignatureMap<DeclarationIdentity, FxHashMap<String, MemberEntry>>,
+        /// Non-promotable private instance names conflict library-wide.
+        blocked_field_promotions: SignatureMap<LibraryId, FxHashSet<String>>,
+        supertypes: SignatureMap<DeclarationIdentity, (Vec<TypeParameterId>, Vec<ResolvedType>)>,
+        owner_defaults: SignatureMap<TypeParameterId, ResolvedType>,
+        /// Whether the declaration of each type parameter of an indexed type,
+        /// alias, function or method states a bound; parameters of local
+        /// functions are absent.
+        bound_declared: SignatureMap<TypeParameterId, bool>,
+        member_supertypes: SignatureMap<DeclarationIdentity, Vec<ResolvedType>>,
+        declarations: SignatureMap<DeclarationIdentity, DeclarationFacts>,
+        constants: SignatureMap<DeclarationIdentity, Expr>,
+        constant_types: SignatureMap<DeclarationIdentity, DeclarationIdentity>,
+        enum_values: SignatureMap<DeclarationIdentity, Vec<String>>,
+        /// Bodies of project `const` constructors, keyed by class and name.
+        const_constructors: SignatureMap<DeclarationIdentity, FxHashMap<String, ConstConstructorBody>>,
+        /// Instance field initializers of project classes with a `const`
+        /// constructor, in declaration order.
+        const_field_initializers: SignatureMap<DeclarationIdentity, Vec<(String, Expr)>>,
+        /// Resolved external annotations of top-level functions that have any.
+        function_annotations: SignatureMap<DeclarationIdentity, Vec<DeclarationIdentity>>,
+        /// The declaration kind of every indexed class-like declaration.
+        kinds: SignatureMap<DeclarationIdentity, TypeKind>,
+        /// Whether each class, mixin, enum, or extension type is itself annotated
+        /// with package:meta's `@immutable` (`Unknown` for an unresolvable
+        /// `immutable` annotation, which may arrive through an export chain).
+        immutable: SignatureMap<DeclarationIdentity, Truth>,
+        /// The superclass of classes, mixin classes, and named mixin applications.
+        superclasses: SignatureMap<DeclarationIdentity, ResolvedType>,
+        /// The `with` clause of each class or enum declaring one, as the index
+        /// range of its mixins within the declaration's `supertypes` entry.
+        mixin_applications: SignatureMap<DeclarationIdentity, Range<usize>>,
+        /// The `on`-clause prefix of each mixin's canonical `supertypes` entry.
+        mixin_constraint_counts: SignatureMap<DeclarationIdentity, usize>,
+        /// Whether the trailing implicit `Object` subtype edge is also a direct
+        /// inherited-interface candidate. When used, it precedes mixins/interfaces.
+        inherited_object: SignatureMap<DeclarationIdentity, bool>,
+        /// The explicit class modifier of each class, mixin class, and mixin that
+        /// declares one (`base` for base mixins and mixin classes).
+        restrictions: SignatureMap<DeclarationIdentity, ClassRestriction>,
+    }
 }
 
 /// A value declaration is either unqualified or import-prefixed. Longer
@@ -3864,6 +3907,10 @@ impl<F: FnMut(&Expr, &TypeEnvironment)> Visitor for InitializerDependencies<F> {
 }
 
 impl SignatureIndex {
+    pub(crate) fn flow_writes(&self, file: FileId) -> Option<&Arc<super::flow_writes::FlowWrites>> {
+        self.flow_writes.get(&Some(file))
+    }
+
     fn member_entry(&self, identity: &DeclarationIdentity, name: &str) -> Option<&MemberEntry> {
         self.member_entries.get(identity)?.get(name)
     }
@@ -3963,42 +4010,7 @@ impl SignatureIndex {
         types: &TypeIndex,
         external: Arc<SignatureIndex>,
     ) -> Self {
-        assert!(
-            external.external.is_none(),
-            "external base must not be an overlay"
-        );
-        let mut index = Self::default();
-        macro_rules! share {
-            ($($field:ident),+ $(,)?) => {
-                $(index.$field.external = Some((Arc::clone(&external), |base| &base.$field));)+
-            };
-        }
-        share!(
-            functions,
-            value_types,
-            constructors,
-            member_entries,
-            blocked_field_promotions,
-            supertypes,
-            owner_defaults,
-            bound_declared,
-            member_supertypes,
-            declarations,
-            constants,
-            constant_types,
-            enum_values,
-            const_constructors,
-            const_field_initializers,
-            function_annotations,
-            kinds,
-            immutable,
-            superclasses,
-            mixin_applications,
-            mixin_constraint_counts,
-            inherited_object,
-            restrictions,
-        );
-        index.external = Some(external);
+        let index = Self::borrowing_external(external);
         let all = files
             .iter()
             .map(|(path, program)| (path.as_path(), *program, &[] as &[(usize, usize)]))
@@ -4080,101 +4092,11 @@ impl SignatureIndex {
             index.add_fallback_signatures();
         }
         index.finish();
-        let mut dependencies = FxHashMap::default();
-        for (path, program, _) in &all {
-            let model = SemanticModel::new(path, identities, Some(types));
-            Self::collect_value_dependencies(program, &model, &mut dependencies);
-        }
-        index.cyclic_values = Self::cyclic_value_identities(&dependencies);
-        // Complete header-only forwarding first. Inferred field types can
-        // subsequently refine initializing and super formals; revisit these
-        // headers only when declaration inference makes progress.
-        loop {
-            let mut changed = false;
-            for (path, program, _) in &all {
-                let model = SemanticModel::new(path, identities, Some(types));
-                changed |= index.resolve_constructor_formals(program, &model);
-            }
-            if !changed {
-                break;
-            }
-        }
-        // Override headers across every file settle before an initializer can
-        // freeze a temporary implicit dynamic/void signature.
-        loop {
-            let mut changed = false;
-            for (path, program, _) in &all {
-                let model = SemanticModel::new(path, identities, Some(types));
-                changed |= index.infer_override_types(program, &model);
-            }
-            if !changed {
-                break;
-            }
-        }
-        let mut pending_values = FxHashMap::default();
-        loop {
-            let mut changed = false;
-            let mut declarations_changed = false;
-            for (path, program, _) in &all {
-                let model = SemanticModel::new(path, identities, Some(types));
-                declarations_changed |= index.infer_declaration_types(program, &model);
-                changed |=
-                    index.resolve_value_initializers(program, &model, &mut pending_values, true);
-            }
-            if declarations_changed {
-                loop {
-                    let mut formals_changed = false;
-                    for (path, program, _) in &all {
-                        let model = SemanticModel::new(path, identities, Some(types));
-                        formals_changed |= index.resolve_constructor_formals(program, &model);
-                    }
-                    if !formals_changed {
-                        break;
-                    }
-                }
-                changed = true;
-            }
-            if !changed {
-                break;
-            }
-        }
-        // Partial receiver types can still determine concrete members. Publish
-        // each partial once, then propagate concrete results to a fixpoint.
-        // Newly discovered partial aliases unlock another round. Published
-        // partials can become concrete, but never expand to another partial.
-        while !pending_values.is_empty() {
-            index.value_types.extend(pending_values.drain());
-            loop {
-                let mut changed = false;
-                let mut declarations_changed = false;
-                for (path, program, _) in &all {
-                    let model = SemanticModel::new(path, identities, Some(types));
-                    declarations_changed |= index.infer_declaration_types(program, &model);
-                    changed |= index.resolve_value_initializers(
-                        program,
-                        &model,
-                        &mut pending_values,
-                        false,
-                    );
-                }
-                if declarations_changed {
-                    loop {
-                        let mut formals_changed = false;
-                        for (path, program, _) in &all {
-                            let model = SemanticModel::new(path, identities, Some(types));
-                            formals_changed |= index.resolve_constructor_formals(program, &model);
-                        }
-                        if !formals_changed {
-                            break;
-                        }
-                    }
-                    changed = true;
-                }
-                if !changed {
-                    break;
-                }
-            }
-        }
+        let programs: Vec<_> = all
+            .iter()
+            .map(|(path, program, _)| (*program, SemanticModel::new(path, identities, Some(types))))
+            .collect();
+        index.infer_programs(&programs);
         index.mark_library_subclasses();
         index.mark_field_forwarders(identities, Some(types));
         index
@@ -4387,37 +4309,64 @@ impl SignatureIndex {
     fn add_program(&mut self, program: &Program, model: &SemanticModel<'_>) {
         self.add_declarations(program, model);
         self.finish();
-        let mut dependencies = FxHashMap::default();
-        Self::collect_value_dependencies(program, model, &mut dependencies);
-        self.cyclic_values = Self::cyclic_value_identities(&dependencies);
-        self.resolve_constructor_formals(program, model);
-        while self.infer_override_types(program, model) {}
-        let mut pending_values = FxHashMap::default();
+        self.infer_programs(&[(program, *model)]);
+        self.mark_field_forwarders(model.identities, model.types);
+    }
+
+    fn converge(
+        &mut self,
+        programs: &[(&Program, SemanticModel<'_>)],
+        mut step: impl FnMut(&mut Self, &Program, &SemanticModel<'_>) -> bool,
+    ) {
         loop {
-            let mut changed = self.infer_declaration_types(program, model);
-            if changed {
-                self.resolve_constructor_formals(program, model);
+            let mut changed = false;
+            for (program, model) in programs {
+                changed |= step(self, program, model);
             }
-            changed |= self.resolve_value_initializers(program, model, &mut pending_values, true);
             if !changed {
                 break;
             }
         }
-        while !pending_values.is_empty() {
-            self.value_types.extend(pending_values.drain());
+    }
+
+    fn infer_programs(&mut self, programs: &[(&Program, SemanticModel<'_>)]) {
+        let mut dependencies = FxHashMap::default();
+        for (program, model) in programs {
+            Self::collect_value_dependencies(program, model, &mut dependencies);
+        }
+        self.cyclic_values = Self::cyclic_value_identities(&dependencies);
+        // Settle forwarded and inherited headers before initializers can freeze implicit types.
+        self.converge(programs, Self::resolve_constructor_formals);
+        self.converge(programs, Self::infer_override_types);
+        let mut pending_values = FxHashMap::default();
+        let mut retry_partial = true;
+        loop {
             loop {
-                let mut changed = self.infer_declaration_types(program, model);
-                if changed {
-                    self.resolve_constructor_formals(program, model);
+                let mut declarations_changed = false;
+                let mut values_changed = false;
+                for (program, model) in programs {
+                    declarations_changed |= self.infer_declaration_types(program, model);
+                    values_changed |= self.resolve_value_initializers(
+                        program,
+                        model,
+                        &mut pending_values,
+                        retry_partial,
+                    );
                 }
-                changed |=
-                    self.resolve_value_initializers(program, model, &mut pending_values, false);
-                if !changed {
+                if declarations_changed {
+                    self.converge(programs, Self::resolve_constructor_formals);
+                }
+                if !declarations_changed && !values_changed {
                     break;
                 }
             }
+            if pending_values.is_empty() {
+                break;
+            }
+            // Published partials may become concrete, but never expand to another partial.
+            self.value_types.extend(pending_values.drain());
+            retry_partial = false;
         }
-        self.mark_field_forwarders(model.identities, model.types);
     }
 
     /// Propagate callable headers before initializers and revisit dependencies
@@ -5075,9 +5024,9 @@ impl SignatureIndex {
     }
 
     fn add_declarations(&mut self, program: &Program, model: &SemanticModel<'_>) {
-        self.region_writes
+        self.flow_writes
             .entry(model.file)
-            .or_insert_with(|| super::flow_writes::FlowWrites::program(program).region_writes);
+            .or_insert_with(|| Arc::new(super::flow_writes::FlowWrites::program(program)));
         for declaration in &program.declarations {
             let kind = match declaration {
                 TopLevelDecl::Class(class) => Some((
@@ -6331,13 +6280,8 @@ impl SignatureIndex {
             entry.is_instance_method = true;
             entry.signature = Some(ResolvedSignature {
                 owner_parameters: parameters,
-                call_parameters: Vec::new(),
-                defaults: HashMap::new(),
-                positional_parameter_names: Vec::new(),
-                non_optional_defaults: HashSet::new(),
                 positional,
-                named: HashMap::new(),
-                return_type,
+                ..ResolvedSignature::returning(return_type)
             });
         };
         let parameter = |type_name: &'static str, ordinal: usize| ResolvedType::TypeParameter {
@@ -6372,68 +6316,65 @@ impl SignatureIndex {
                     annotations: Vec::new(),
                 });
         }
-        add(
-            self,
-            "dart:core",
-            "List",
-            1,
-            "add",
-            vec![parameter("List", 0)],
-            ResolvedType::Void,
-        );
-        add(
-            self,
-            "dart:core",
-            "List",
-            1,
-            "[]=",
-            vec![ResolvedType::Dynamic, parameter("List", 0)],
-            ResolvedType::Void,
-        );
-        add(
-            self,
-            "dart:core",
-            "Set",
-            1,
-            "add",
-            vec![parameter("Set", 0)],
-            ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: DeclarationIdentity::sdk("dart:core", "bool"),
-                arguments: empty_type_arguments(),
-                nullable: false,
-                extension_type: false,
-            },
-        );
-        add(
-            self,
-            "dart:collection",
-            "Queue",
-            1,
-            "add",
-            vec![parameter("Queue", 0)],
-            ResolvedType::Void,
-        );
-        add(
-            self,
-            "dart:core",
-            "Map",
-            2,
-            "[]=",
-            vec![parameter("Map", 0), parameter("Map", 1)],
-            ResolvedType::Void,
-        );
+        for (library, name, arity, member, positional, return_type) in [
+            (
+                "dart:core",
+                "List",
+                1,
+                "add",
+                vec![parameter("List", 0)],
+                ResolvedType::Void,
+            ),
+            (
+                "dart:core",
+                "List",
+                1,
+                "[]=",
+                vec![ResolvedType::Dynamic, parameter("List", 0)],
+                ResolvedType::Void,
+            ),
+            (
+                "dart:core",
+                "Set",
+                1,
+                "add",
+                vec![parameter("Set", 0)],
+                ResolvedType::interface_identity(DeclarationIdentity::sdk("dart:core", "bool")),
+            ),
+            (
+                "dart:collection",
+                "Queue",
+                1,
+                "add",
+                vec![parameter("Queue", 0)],
+                ResolvedType::Void,
+            ),
+            (
+                "dart:core",
+                "Map",
+                2,
+                "[]=",
+                vec![parameter("Map", 0), parameter("Map", 1)],
+                ResolvedType::Void,
+            ),
+            (
+                "dart:core",
+                "String",
+                0,
+                "toUpperCase",
+                Vec::new(),
+                ResolvedType::interface_identity(DeclarationIdentity::sdk("dart:core", "String")),
+            ),
+        ] {
+            add(self, library, name, arity, member, positional, return_type);
+        }
         for (library, name) in [
             ("dart:core", "List"),
             ("dart:core", "Set"),
             ("dart:collection", "Queue"),
         ] {
             let parameter_id = sdk_parameter(name, 0);
-            let parameter = ResolvedType::TypeParameter {
-                id: parameter_id.clone(),
-                bound: Arc::new(ResolvedType::Dynamic),
-                nullable: false,
-            };
+            let parameter = parameter(name, 0);
             let identity = DeclarationIdentity::sdk(library, name);
             let supertype = ResolvedType::Interface {
                 occurrence: Default::default(),
@@ -6448,37 +6389,9 @@ impl SignatureIndex {
             );
             self.member_supertypes.insert(identity, vec![supertype]);
         }
-        let string = DeclarationIdentity::sdk("dart:core", "String");
-        let entry = self
-            .member_entries
-            .entry(string)
-            .or_default()
-            .entry("toUpperCase".to_string())
-            .or_default();
-        entry.is_instance_method = true;
-        entry.signature = Some(ResolvedSignature {
-            owner_parameters: Vec::new(),
-            call_parameters: Vec::new(),
-            defaults: HashMap::new(),
-            positional_parameter_names: Vec::new(),
-            non_optional_defaults: HashSet::new(),
-            positional: Vec::new(),
-            named: HashMap::new(),
-            return_type: ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: DeclarationIdentity::sdk("dart:core", "String"),
-                arguments: empty_type_arguments(),
-                nullable: false,
-                extension_type: false,
-            },
-        });
         let iterable = DeclarationIdentity::sdk("dart:core", "Iterable");
         let map_parameter = sdk_parameter("Iterable.map", 0);
-        let map_type = ResolvedType::TypeParameter {
-            id: map_parameter.clone(),
-            bound: Arc::new(ResolvedType::Dynamic),
-            nullable: false,
-        };
+        let map_type = parameter("Iterable.map", 0);
         let entry = self
             .member_entries
             .entry(iterable)
@@ -6489,9 +6402,6 @@ impl SignatureIndex {
         entry.signature = Some(ResolvedSignature {
             owner_parameters: vec![sdk_parameter("Iterable", 0)],
             call_parameters: vec![map_parameter],
-            defaults: HashMap::new(),
-            positional_parameter_names: Vec::new(),
-            non_optional_defaults: HashSet::new(),
             positional: vec![ResolvedType::Function {
                 alias: FunctionTypeAlias::default(),
                 optional_positional: 0,
@@ -6500,14 +6410,13 @@ impl SignatureIndex {
                 named: Vec::new().into(),
                 nullable: false,
             }],
-            named: HashMap::new(),
-            return_type: ResolvedType::Interface {
+            ..ResolvedSignature::returning(ResolvedType::Interface {
                 occurrence: Default::default(),
                 identity: DeclarationIdentity::sdk("dart:core", "Iterable"),
                 arguments: vec![map_type].into(),
                 nullable: false,
                 extension_type: false,
-            },
+            })
         });
 
         let widget = DeclarationIdentity::flutter("Widget");
@@ -6538,28 +6447,16 @@ impl SignatureIndex {
             self.constructors.entry(identity).or_default().insert(
                 "new".to_string(),
                 ResolvedSignature {
-                    owner_parameters: Vec::new(),
-                    call_parameters: Vec::new(),
-                    defaults: HashMap::new(),
-                    positional_parameter_names: Vec::new(),
-                    non_optional_defaults: HashSet::new(),
-                    positional: Vec::new(),
                     named: HashMap::from([("key".to_string(), key.clone())]),
-                    return_type: ResolvedType::Unknown,
+                    ..ResolvedSignature::returning(ResolvedType::Unknown)
                 },
             );
         }
         self.constructors.entry(widget).or_default().insert(
             "new".to_string(),
             ResolvedSignature {
-                owner_parameters: Vec::new(),
-                call_parameters: Vec::new(),
-                defaults: HashMap::new(),
-                positional_parameter_names: Vec::new(),
-                non_optional_defaults: HashSet::new(),
-                positional: Vec::new(),
                 named: HashMap::from([("key".to_string(), key)]),
-                return_type: ResolvedType::Unknown,
+                ..ResolvedSignature::returning(ResolvedType::Unknown)
             },
         );
         self.add_sdk_hierarchy();
@@ -6628,10 +6525,6 @@ impl SignatureIndex {
         listen.is_instance_method = true;
         listen.signature = Some(ResolvedSignature {
             owner_parameters: vec![sdk_parameter("Stream", 0)],
-            call_parameters: Vec::new(),
-            defaults: HashMap::new(),
-            positional_parameter_names: Vec::new(),
-            non_optional_defaults: HashSet::new(),
             positional: vec![ResolvedType::Function {
                 alias: FunctionTypeAlias::default(),
                 optional_positional: 0,
@@ -6640,8 +6533,11 @@ impl SignatureIndex {
                 named: Vec::new().into(),
                 nullable: true,
             }],
-            named: HashMap::new(),
-            return_type: sdk("dart:async", "StreamSubscription", vec![element("Stream")]),
+            ..ResolvedSignature::returning(sdk(
+                "dart:async",
+                "StreamSubscription",
+                vec![element("Stream")],
+            ))
         });
         self.member_entries
             .entry(DeclarationIdentity::sdk("dart:async", "StreamController"))
@@ -6660,16 +6556,11 @@ impl SignatureIndex {
             .entry("openWrite".to_string())
             .or_default();
         open_write.is_instance_method = true;
-        open_write.signature = Some(ResolvedSignature {
-            owner_parameters: Vec::new(),
-            call_parameters: Vec::new(),
-            defaults: HashMap::new(),
-            positional_parameter_names: Vec::new(),
-            non_optional_defaults: HashSet::new(),
-            positional: Vec::new(),
-            named: HashMap::new(),
-            return_type: sdk("dart:io", "IOSink", Vec::new()),
-        });
+        open_write.signature = Some(ResolvedSignature::returning(sdk(
+            "dart:io",
+            "IOSink",
+            Vec::new(),
+        )));
     }
 
     fn add_type(
@@ -10563,16 +10454,7 @@ impl TypeEnvironment {
                 extension_type,
             };
         };
-        let empty = ResolvedSignature {
-            owner_parameters: Vec::new(),
-            call_parameters: Vec::new(),
-            positional: Vec::new(),
-            named: HashMap::new(),
-            defaults: HashMap::new(),
-            return_type: ResolvedType::Unknown,
-            positional_parameter_names: Vec::new(),
-            non_optional_defaults: HashSet::new(),
-        };
+        let empty = ResolvedSignature::returning(ResolvedType::Unknown);
         let signature = context
             .signatures
             .constructor(&identity, name)
@@ -10630,13 +10512,7 @@ impl TypeEnvironment {
                 .super_receiver(&self.lookup("this"), name, context.model)
                 .unwrap_or(ResolvedType::Unknown)
         } else {
-            let inference = InferenceContext {
-                model: context.model,
-                signatures: context.signatures,
-                type_parameters: context.type_parameters,
-                lookup: context.lookup,
-                argument_fallback: context.argument_fallback,
-            };
+            let inference = queries::context_copy(context);
             if null_shorted(object) {
                 self.infer_unshorted(object, inference, expected, None)
             } else {
@@ -10840,7 +10716,6 @@ impl TypeEnvironment {
             return None;
         }
         let signature = ResolvedSignature {
-            owner_parameters: Vec::new(),
             call_parameters: parameters,
             positional: constructor.map_or_else(Vec::new, |signature| {
                 signature
@@ -10856,12 +10731,10 @@ impl TypeEnvironment {
                     .map(|(name, ty)| (name.clone(), context.model.substitute(ty, &owner)))
                     .collect()
             }),
-            defaults: HashMap::new(),
             positional_parameter_names: constructor.map_or_else(Vec::new, |signature| {
                 signature.positional_parameter_names.clone()
             }),
-            non_optional_defaults: HashSet::new(),
-            return_type: result,
+            ..ResolvedSignature::returning(result)
         };
         Some(self.tearoff_type(&signature, &HashMap::new(), explicit, context, expected))
     }
@@ -10872,80 +10745,20 @@ impl TypeEnvironment {
         explicit: &[DartType],
         context: &InferenceContext<'_, '_, F>,
         expected: Option<&ResolvedType>,
-        cached_receiver: Option<&ResolvedType>,
+        cached_receiver: &mut Option<ResolvedType>,
     ) -> Option<ResolvedType> {
-        let unshadowed = expression_segments(target, true).is_some_and(|segments| {
-            segments
-                .first()
-                .is_some_and(|name| !self.is_bound(name) && (context.lookup)(name).is_none())
-        });
-        if unshadowed {
-            if let Expr::Ident(identifier) = target
-                && let Some((signature, owner)) =
-                    self.implicit_this_method(&identifier.name, context.model, context.signatures)
-            {
-                return Some(self.tearoff_type(signature, &owner, explicit, context, expected));
-            }
-            if let Some(segments) = expression_segments(target, true)
-                && let Some(name) = QualifiedName::from_segments(&segments)
-                && let Some(identity) = context.model.resolve_value(name)
-                && let Some(signature) = context.signatures.function(&identity)
-            {
-                return Some(self.tearoff_type(
-                    signature,
-                    &HashMap::new(),
-                    explicit,
-                    context,
-                    expected,
-                ));
-            }
-            if matches!(target, Expr::Field { .. })
-                && expression_segments(target, true)
-                    .is_some_and(|segments| context.model.resolve_dotted(&segments).is_none())
-                && let Some((identity, name)) =
-                    resolve_call_constructor(target, context.model, true)
-                && let Some(ty) =
-                    self.constructor_tearoff(identity, name, explicit, context, expected)
-            {
-                return Some(ty);
-            }
+        if self.invocation_unshadowed(target, context)
+            && matches!(target, Expr::Field { .. })
+            && expression_segments(target, true)
+                .is_some_and(|segments| context.model.resolve_dotted(&segments).is_none())
+            && let Some((identity, name)) = resolve_call_constructor(target, context.model, true)
+            && let Some(ty) = self.constructor_tearoff(identity, name, explicit, context, expected)
+        {
+            return Some(ty);
         }
-        let resolved = match target {
-            Expr::Field {
-                object,
-                field,
-                is_null_safe,
-                ..
-            } => {
-                let inferred = cached_receiver
-                    .is_none()
-                    .then(|| self.receiver_type(object, &field.name, context, None));
-                let receiver = cached_receiver.or(inferred.as_ref())?;
-                let receiver = if *is_null_safe {
-                    Cow::Owned(receiver.non_null())
-                } else {
-                    Cow::Borrowed(receiver)
-                };
-                context
-                    .signatures
-                    .resolved_member(receiver.as_ref(), &field.name, context.model)
-                    .or_else(|| {
-                        if !unshadowed {
-                            return None;
-                        }
-                        let identity = context
-                            .model
-                            .resolve_dotted(&expression_segments(object, true)?)?;
-                        Some((
-                            context.signatures.member(&identity, &field.name)?,
-                            HashMap::new(),
-                        ))
-                    })
-            }
-            _ => None,
-        }?;
-        let ty = self.tearoff_type(resolved.0, &resolved.1, explicit, context, expected);
-        Some(ty)
+        let (signature, owner) =
+            self.invocation_declaration(target, context, cached_receiver, None, false)?;
+        Some(self.tearoff_type(signature, &owner, explicit, context, expected))
     }
 
     /// Infers an expression with a downward result context and lexical lookup.
@@ -10977,18 +10790,7 @@ impl TypeEnvironment {
         expected: Option<&ResolvedType>,
         receiver: Option<ResolvedType>,
     ) -> ResolvedType {
-        let ty = self.infer_unshorted(
-            expr,
-            InferenceContext {
-                model: context.model,
-                signatures: context.signatures,
-                type_parameters: context.type_parameters,
-                lookup: context.lookup,
-                argument_fallback: context.argument_fallback,
-            },
-            expected,
-            receiver,
-        );
+        let ty = self.infer_unshorted(expr, queries::context_copy(&context), expected, receiver);
         let ty = self.contextual_callable_type(ty, &context, expected);
         if null_shorted(expr) {
             ty.with_nullable(true)
@@ -11084,16 +10886,20 @@ impl TypeEnvironment {
             {
                 return model.substitute(&original, &substitutions);
             }
+            if field.name == "call" && matches!(receiver, ResolvedType::Function { .. }) {
+                return receiver.with_nullable(false);
+            }
             let explicit = match object.as_ref() {
                 Expr::GenericInstantiation { type_args, .. } => type_args.as_slice(),
                 _ => &[],
             };
+            let unknown_receiver = receiver == ResolvedType::Unknown;
             if let Some(ty) =
-                self.callable_tearoff(expr, explicit, &context, expected, Some(&receiver))
+                self.callable_tearoff(expr, explicit, &context, expected, &mut Some(receiver))
             {
                 return ty;
             }
-            if receiver == ResolvedType::Unknown
+            if unknown_receiver
                 && let Some(segments) = expression_segments(expr, true)
                 && segments
                     .first()
@@ -11154,33 +10960,14 @@ impl TypeEnvironment {
             }
             let unshadowed = receiver.as_ref().is_none_or(|ty| {
                 matches!(ty, ResolvedType::Unknown) || ty.interface("dart:core", "Type")
-            }) && expression_segments(target, true).is_some_and(|segments| {
-                segments
-                    .first()
-                    .is_some_and(|name| !self.is_bound(name) && lookup(name).is_none())
-            });
+            }) && self.invocation_unshadowed(target, &context);
             if unshadowed {
-                if let Expr::Ident(identifier) = target
+                if matches!(target, Expr::Ident(_))
                     && let Some((signature, owner)) =
-                        self.implicit_this_method(&identifier.name, model, signatures)
+                        self.invocation_declaration(target, &context, &mut receiver, expected, true)
                 {
                     let substitutions = self.infer_signature_substitutions(
                         signature, args, explicit, &context, expected, &owner,
-                    );
-                    return model.substitute(&signature.return_type, &substitutions);
-                }
-                if let Some(segments) = expression_segments(target, true)
-                    && let Some(name) = QualifiedName::from_segments(&segments)
-                    && let Some(identity) = model.resolve_value(name)
-                    && let Some(signature) = signatures.function(&identity)
-                {
-                    let substitutions = self.infer_signature_substitutions(
-                        signature,
-                        args,
-                        explicit,
-                        &context,
-                        expected,
-                        &HashMap::new(),
                     );
                     return model.substitute(&signature.return_type, &substitutions);
                 }
@@ -11193,63 +10980,16 @@ impl TypeEnvironment {
                         .infer_constructor(identity, name, explicit, args, &context, expected);
                 }
             }
-            let callee_type = if let Expr::Field {
+            // `num.clamp` alone has argument-dependent return typing.
+            if let Expr::Field {
                 object,
                 field,
-                is_null_safe,
+                is_null_safe: false,
                 ..
             } = target
+                && field.name == "clamp"
             {
-                if let Expr::Call {
-                    callee: override_name,
-                    type_args: override_type_args,
-                    args: override_args,
-                    ..
-                } = object.unparenthesized()
-                    && let [override_receiver] = override_args.positional.as_slice()
-                    && override_args.named.is_empty()
-                {
-                    let (override_name, override_type_args) = match override_name.unparenthesized()
-                    {
-                        Expr::GenericInstantiation {
-                            target, type_args, ..
-                        } => (target.as_ref(), type_args.as_slice()),
-                        name => (name, override_type_args.as_slice()),
-                    };
-                    if let Some(segments) = expression_segments(override_name, true)
-                        && segments
-                            .first()
-                            .is_some_and(|name| !self.is_bound(name) && lookup(name).is_none())
-                        && let Some(name) = QualifiedName::from_segments(&segments)
-                        && let Some(identity) = model.resolve_extension(name)
-                    {
-                        let override_receiver = infer(override_receiver);
-                        let override_receiver = if *is_null_safe {
-                            override_receiver.non_null()
-                        } else {
-                            override_receiver
-                        };
-                        let override_type_args: Vec<_> = override_type_args
-                            .iter()
-                            .map(|ty| model.resolve_type_in(ty, type_parameters))
-                            .collect();
-                        if let Some((signature, owner)) = signatures
-                            .resolved_extension_override_method(
-                                &identity,
-                                &override_receiver,
-                                &override_type_args,
-                                &field.name,
-                                model,
-                            )
-                        {
-                            let substitutions = self.infer_signature_substitutions(
-                                signature, args, explicit, &context, expected, &owner,
-                            );
-                            return model.substitute(&signature.return_type, &substitutions);
-                        }
-                    }
-                }
-                let receiver = receiver.take().unwrap_or_else(|| {
+                let reached = receiver.get_or_insert_with(|| {
                     self.receiver_type(
                         object,
                         &field.name,
@@ -11257,23 +10997,12 @@ impl TypeEnvironment {
                         expected.filter(|_| expression_has_dot_shorthand_base(object)),
                     )
                 });
-                // `?.` selects a member on the non-null receiver, including
-                // extensions whose on-type is non-nullable.
-                let receiver = if *is_null_safe {
-                    receiver.non_null()
-                } else {
-                    receiver
-                };
-                // Special typing of `num.clamp`: all-`int` operands make an
-                // `int`, all-`double` ones a `double`, anything else a `num`.
-                if field.name == "clamp"
-                    && !*is_null_safe
-                    && numeric(&receiver)
-                    && !receiver.nullable()
+                if numeric(reached)
+                    && !reached.nullable()
                     && let [lower, upper] = args.positional.as_slice()
                     && args.named.is_empty()
                 {
-                    let operands = [receiver.clone(), infer(lower), infer(upper)];
+                    let operands = [reached.clone(), infer(lower), infer(upper)];
                     let all = |name| {
                         operands
                             .iter()
@@ -11288,103 +11017,28 @@ impl TypeEnvironment {
                     };
                     return model.core_type(name, false);
                 }
-                // Intrinsic record fields outrank extension methods, even
-                // when the field's value is itself callable.
-                let record_callee = receiver.record_field(&field.name);
-                let resolved = if record_callee.is_some() {
-                    None
-                } else {
-                    signatures
-                        .resolved_member(&receiver, &field.name, model)
-                        .or_else(|| {
-                            if !unshadowed {
-                                return None;
-                            }
-                            let identity =
-                                model.resolve_dotted(&expression_segments(object, true)?)?;
-                            Some((signatures.member(&identity, &field.name)?, HashMap::new()))
-                        })
-                };
-                if let Some((signature, owner)) = resolved {
-                    let substitutions = self.infer_signature_substitutions(
-                        signature, args, explicit, &context, expected, &owner,
-                    );
-                    return model.substitute(&signature.return_type, &substitutions);
-                }
-                // A member of a `dynamic` receiver is `dynamic` unless it
-                // resolved above as an `Object` member.
-                self.promoted_field(object, &field.name)
-                    .or(record_callee)
-                    .or_else(|| {
-                        matches!(receiver, ResolvedType::Dynamic).then_some(ResolvedType::Dynamic)
-                    })
-                    .or_else(|| {
-                        signatures
-                            .resolved_field(&receiver, &field.name, model)
-                            .or_else(|| {
-                                signatures.resolved_extension_getter(&receiver, &field.name, model)
-                            })
-                            .map(|(ty, substitutions)| model.substitute(&ty, &substitutions))
-                    })
-                    .or_else(|| {
-                        (field.name == "call" && matches!(receiver, ResolvedType::Function { .. }))
-                            .then(|| receiver.with_nullable(false))
-                    })
-                    .unwrap_or(ResolvedType::Unknown)
-            } else {
-                infer(target)
-            };
-            if let ResolvedType::Function {
-                alias: callee_alias,
-                return_type,
-                positional,
-                named,
-                ..
-            } = &callee_type
-            {
-                let local_generic = matches!(target, Expr::Ident(identifier) if self.is_local_function(&identifier.name));
-                let ty = if local_generic {
-                    let mut signature = ResolvedSignature {
-                        owner_parameters: Vec::new(),
-                        call_parameters: Vec::new(),
-                        positional: positional.to_vec(),
-                        named: named.iter().cloned().collect(),
-                        defaults: HashMap::new(),
-                        return_type: return_type.as_ref().clone(),
-                        positional_parameter_names: Vec::new(),
-                        non_optional_defaults: HashSet::new(),
-                    };
-                    signature.bind_local_type_parameters(type_parameters);
-                    let substitutions = self.infer_signature_substitutions(
-                        &signature,
+            }
+            return match self.resolved_invocation_in(
+                target,
+                explicit,
+                &context,
+                expected,
+                &mut receiver,
+                false,
+            ) {
+                Ok(invocation) => {
+                    let substitutions = self.infer_signature_substitutions_with_result(
+                        invocation.inference_signature(),
                         args,
-                        explicit,
+                        invocation.type_args,
                         &context,
                         expected,
-                        &HashMap::new(),
+                        &invocation.owner,
                     );
-                    model.substitute(return_type, &substitutions)
-                } else {
-                    return_type.as_ref().clone()
-                };
-                return ty.projected_from(callee_alias);
-            }
-            if let Some((signature, substitutions)) =
-                signatures.resolved_member(&callee_type, "call", model)
-            {
-                let substitutions = self.infer_signature_substitutions(
-                    signature,
-                    args,
-                    explicit,
-                    &context,
-                    expected,
-                    &substitutions,
-                );
-                return model.substitute(&signature.return_type, &substitutions);
-            }
-            if matches!(callee_type, ResolvedType::Dynamic) {
-                return ResolvedType::Dynamic;
-            }
+                    model.substitute(invocation.inference_signature().2, &substitutions)
+                }
+                Err(return_type) => return_type,
+            };
         }
         match expr {
             Expr::FuncExpr {
@@ -11458,7 +11112,7 @@ impl TypeEnvironment {
             Expr::GenericInstantiation {
                 target, type_args, ..
             } => self
-                .callable_tearoff(target, type_args, &context, expected, None)
+                .callable_tearoff(target, type_args, &context, expected, &mut None)
                 .or_else(|| {
                     let receiver = infer(target);
                     if receiver.nullable() {
@@ -11523,7 +11177,7 @@ impl TypeEnvironment {
                 // Bindings this environment adds (pattern variables of an
                 // inferred switch arm) shadow the lexical lookup.
                 if self.is_local_function(&identifier.name) {
-                    self.callable_tearoff(expr, &[], &context, expected, None)
+                    self.callable_tearoff(expr, &[], &context, expected, &mut None)
                         .unwrap_or_else(|| self.lookup(&identifier.name))
                 } else if self.is_bound(&identifier.name) {
                     self.lookup(&identifier.name)
@@ -11531,21 +11185,14 @@ impl TypeEnvironment {
                     ty
                 } else if let Some(ty) = lookup(&identifier.name) {
                     ty
-                } else if let Some((signature, owner)) =
-                    self.implicit_this_method(&identifier.name, model, signatures)
+                } else if let Some(ty) =
+                    self.callable_tearoff(expr, &[], &context, expected, &mut None)
                 {
-                    self.tearoff_type(signature, &owner, &[], &context, expected)
+                    ty
                 } else if let Some(identity) = model.resolve_value(identifier.name.as_str())
                     && let Some(ty) = signatures.value_type(&identity)
                 {
                     ty.clone()
-                } else if let Some(identity) = model.resolve_value(identifier.name.as_str())
-                    && let Some(signature) = signatures.function(&identity)
-                {
-                    self.tearoff_type(signature, &HashMap::new(), &[], &context, expected)
-                } else if let Some(ty) = self.callable_tearoff(expr, &[], &context, expected, None)
-                {
-                    ty
                 } else if identifier.name == "Never"
                     || model.resolve_name(identifier.name.as_str()).is_some()
                     || type_parameters.lookup(&identifier.name).is_some()
@@ -12625,9 +12272,9 @@ impl<L: Fn(&str) -> Option<ResolvedType>> Visitor for ClosureReturns<'_, '_, L> 
             && let Some(writes) = self
                 .flow
                 .signatures
-                .region_writes
+                .flow_writes
                 .get(&self.flow.model.file)
-                .and_then(|regions| regions.get(&start))
+                .and_then(|writes| writes.region_writes.get(&start))
         {
             for name in writes {
                 self.environment.demote(name);
@@ -14065,6 +13712,57 @@ mod tests {
     use crate::resolve::{IdentitySource, LibrarySource};
 
     #[test]
+    fn single_file_and_project_inference_share_converged_headers_and_values() {
+        with_model(
+            r#"
+class Root { final int value; Root(this.value); }
+class Middle extends Root { Middle(super.value); }
+class Leaf extends Middle { Leaf(super.value); }
+class Base<T> { T get value => throw 0; T method(T input) => input; }
+class Child extends Base<int> {
+  get value => 1;
+  method(input) => input;
+}
+final first = second;
+final second = third;
+final third = Child().value;
+final partial = [first, unresolved];
+"#,
+            |program, model| {
+                let single = SignatureIndex::from_program(program, model);
+                let project = SignatureIndex::from_project_files(
+                    &[(PathBuf::from("/project/lib/main.dart"), program)],
+                    model.identities,
+                    model.types.unwrap(),
+                );
+                for name in ["first", "second", "third", "partial"] {
+                    let identity = model.resolve_value(name).unwrap();
+                    let actual = single.value_type(&identity).unwrap();
+                    assert_eq!(Some(actual), project.value_type(&identity));
+                    if name == "partial" {
+                        assert!(actual.interface("dart:core", "List"));
+                        assert!(has_inference_holes(actual));
+                    } else {
+                        assert!(actual.interface("dart:core", "int"));
+                    }
+                }
+                for name in ["Root", "Middle", "Leaf"] {
+                    let identity = model.resolve_name(name).unwrap();
+                    let actual = single.constructor(&identity, "new").unwrap();
+                    assert_eq!(
+                        actual.function_type(),
+                        project
+                            .constructor(&identity, "new")
+                            .unwrap()
+                            .function_type(),
+                    );
+                    assert!(actual.positional[0].interface("dart:core", "int"));
+                }
+            },
+        );
+    }
+
+    #[test]
     fn extension_setter_lookup_borrows_indexed_spelling_through_overlays() {
         let mut setters = FxHashMap::default();
         setters.insert(ExtensionMemberName("value=".to_owned()), vec![0]);
@@ -14736,13 +14434,24 @@ mod tests {
             (paths[1].clone(), &programs[1]),
         ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
+        let config = falcon_config::FalconConfig::default();
         for (index, name) in ["x", "y"].into_iter().enumerate() {
             let model = SemanticModel::new(&paths[index], &identities, Some(&types));
             let start = sources[index].find("while").unwrap();
             assert_eq!(
-                signatures.region_writes[&model.file][&start],
+                signatures.flow_writes[&model.file].region_writes[&start],
                 HashSet::from([name.to_owned()]),
             );
+            let mut context = crate::AnalyzeContext::new(&paths[index], sources[index], &config);
+            context.identities = Some(&identities);
+            context.signatures = Some(&signatures);
+            assert!(std::ptr::eq(
+                context.flow_writes(&programs[index]),
+                signatures
+                    .flow_writes(model.file.unwrap())
+                    .unwrap()
+                    .as_ref(),
+            ));
         }
     }
 

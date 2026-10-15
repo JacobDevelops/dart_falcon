@@ -18,11 +18,11 @@ pub use library::{
 };
 pub use semantic::{
     ConstConstructorBody, DeclarationFacts, FunctionTypeAlias, InferenceContext, MemberFacts,
-    ParameterDefault, ParameterOwner, ResolvedSignature, ResolvedType, SemanticModel,
-    SignatureIndex, TypeEnvironment, TypeParameterId, TypeParameterScope,
+    ParameterDefault, ParameterOwner, ResolvedInvocation, ResolvedSignature, ResolvedType,
+    SemanticModel, SignatureIndex, TypeEnvironment, TypeParameterId, TypeParameterScope,
 };
 pub use semantic::{
-    expression_has_dot_shorthand_base, expression_segments, resolve_call_constructor,
+    expression_has_dot_shorthand_base, expression_segments, null_shorted, resolve_call_constructor,
     resolve_new_constructor,
 };
 pub use type_index::{

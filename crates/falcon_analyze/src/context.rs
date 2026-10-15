@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use falcon_config::FalconConfig;
 use falcon_dart_parser::lexer::Lexer;
@@ -17,7 +17,7 @@ use crate::resolve::{
 /// Lazily computed facts shared by all rules analyzing one file.
 #[derive(Default)]
 pub struct AnalysisCache {
-    flow_writes: OnceLock<FlowWrites>,
+    flow_writes: OnceLock<Arc<FlowWrites>>,
     globals: OnceLock<HashMap<String, ResolvedType>>,
     tokens: OnceLock<Vec<Token>>,
 }
@@ -71,9 +71,13 @@ impl<'a> AnalyzeContext<'a> {
 
     /// Lexical writes collected once for this file's parsed program.
     pub fn flow_writes(&self, program: &Program) -> &FlowWrites {
-        self.cache
-            .flow_writes
-            .get_or_init(|| FlowWrites::program(program))
+        self.cache.flow_writes.get_or_init(|| {
+            self.identities
+                .and_then(|identities| identities.file(self.file_path))
+                .and_then(|file| self.signatures?.flow_writes(file))
+                .cloned()
+                .unwrap_or_else(|| Arc::new(FlowWrites::program(program)))
+        })
     }
 
     /// Top-level variable and setter types shared by semantic rule visitors.

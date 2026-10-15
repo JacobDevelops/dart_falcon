@@ -9,7 +9,7 @@ use falcon_syntax::visitor::{
     walk_map_element, walk_pattern, walk_stmt,
 };
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct FlowWrites {
     /// Direct writes of bindings enclosing each loop, switch, or try/catch region.
     pub region_writes: HashMap<usize, HashSet<String>>,

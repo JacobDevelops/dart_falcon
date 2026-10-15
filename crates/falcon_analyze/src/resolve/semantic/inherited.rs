@@ -61,6 +61,25 @@ pub(super) struct OverrideInferenceLookup {
 }
 
 impl SignatureIndex {
+    /// The return type of an overridden getter/field or method on an already
+    /// instantiated supertype. `None` means no resolved declaration, whereas
+    /// `Some(Unknown)` retains a declaration whose return type is not known.
+    pub fn instantiated_override_return(
+        &self,
+        receiver: &ResolvedType,
+        name: &str,
+        getter: bool,
+        model: &SemanticModel<'_>,
+    ) -> Option<ResolvedType> {
+        if getter {
+            let (ty, substitutions) = self.resolved_field(receiver, name, model)?;
+            Some(model.substitute(&ty, &substitutions))
+        } else {
+            let (signature, substitutions) = self.resolved_member(receiver, name, model)?;
+            Some(model.substitute(&signature.return_type, &substitutions))
+        }
+    }
+
     /// Select the same combined interface signature used by override
     /// inference, then recover its declaring type's canonical instantiation.
     pub(super) fn combined_instance_owner(
