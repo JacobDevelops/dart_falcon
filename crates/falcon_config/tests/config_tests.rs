@@ -414,14 +414,16 @@ fn test_legacy_schema_is_rejected() {
 
 #[test]
 fn test_find_config_in_cwd() {
-    let dir = std::env::temp_dir();
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("falcon_test_find_config_{}", id));
+    fs::create_dir_all(&dir).expect("create temp dir");
     let config_path = dir.join("falcon.json");
     fs::write(&config_path, "{}").expect("write config");
 
     let found = find_config(&dir);
     assert_eq!(found, Some(config_path.clone()));
 
-    fs::remove_file(&config_path).expect("cleanup");
+    fs::remove_dir_all(&dir).expect("cleanup");
 }
 
 #[test]

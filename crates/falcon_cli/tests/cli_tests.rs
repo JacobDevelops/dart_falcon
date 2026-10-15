@@ -1,6 +1,6 @@
 use clap::{CommandFactory, Parser};
 use falcon_cli::args::{Cli, Command, LogFormat};
-use falcon_cli::{CheckOptions, run_check};
+use falcon_cli::{CheckOptions, run_check_with_sdk_locator};
 use std::fs;
 use tempfile::tempdir;
 
@@ -76,11 +76,14 @@ fn test_run_check_integration_clean_file_exit_zero() {
         "void main() {\n  final greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
-    let code = run_check(CheckOptions {
-        paths: vec![dir.path().to_path_buf()],
-        quiet: true,
-        ..Default::default()
-    });
+    let code = run_check_with_sdk_locator(
+        CheckOptions {
+            paths: vec![dir.path().to_path_buf()],
+            quiet: true,
+            ..Default::default()
+        },
+        |_| None,
+    );
     assert_eq!(code, 0);
 }
 

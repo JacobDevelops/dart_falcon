@@ -1,9 +1,17 @@
 //! Integration tests for the analyze pipeline.
 
-use falcon_cli::{CheckOptions, OutputFormat, collect_check, run_check};
+use falcon_cli::{CheckOptions, CheckOutput, OutputFormat};
 use falcon_lsp::LspState;
 use std::fs;
 use tempfile::tempdir;
+
+fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
+    falcon_cli::collect_check_with_sdk_locator(options, |_| None)
+}
+
+fn run_check(options: CheckOptions) -> i32 {
+    falcon_cli::run_check_with_sdk_locator(options, |_| None)
+}
 
 /// Test 1: No files found returns zero exit code
 #[test]
@@ -542,7 +550,7 @@ fn package_identity_is_discovered_for_direct_files_with_yaml_name_syntax() {
     fs::write(&types, "class PackageType {}\n").unwrap();
     fs::write(
         &main,
-        "import 'package:direct_pkg/types.dart';\nvoid f(int PackageType) {}\n",
+        "import 'package:direct_pkg/types.dart';\nvoid f(PackageType) {}\n",
     )
     .unwrap();
 
@@ -566,7 +574,7 @@ fn package_identity_is_discovered_for_lib_directory_invocation() {
     fs::write(lib.join("types.dart"), "class PackageType {}\n").unwrap();
     fs::write(
         lib.join("main.dart"),
-        "import 'package:lib_pkg/types.dart';\nvoid f(int PackageType) {}\n",
+        "import 'package:lib_pkg/types.dart';\nvoid f(PackageType) {}\n",
     )
     .unwrap();
 
@@ -592,7 +600,7 @@ fn package_identity_supports_nested_multi_package_analysis() {
         fs::write(lib.join("types.dart"), "class PackageType {}\n").unwrap();
         fs::write(
             lib.join("main.dart"),
-            format!("import 'package:{package}/types.dart';\nvoid f(int PackageType) {{}}\n"),
+            format!("import 'package:{package}/types.dart';\nvoid f(PackageType) {{}}\n"),
         )
         .unwrap();
     }
@@ -622,7 +630,7 @@ fn sibling_workspace_package_name_binds_analyzed_project_file() {
     fs::write(inner_lib.join("own.dart"), "class InnerType {}\n").unwrap();
     fs::write(
         inner_lib.join("main.dart"),
-        "import 'package:inner/own.dart';\nimport 'package:outer/foreign.dart';\nvoid f(int InnerType, int ForeignType) {}\n",
+        "import 'package:inner/own.dart';\nimport 'package:outer/foreign.dart';\nvoid f(InnerType, ForeignType) {}\n",
     )
     .unwrap();
 
@@ -662,7 +670,7 @@ fn resolver_backed_rule_has_cli_lsp_parity() {
         ..Default::default()
     })
     .unwrap();
-    let mut lsp = LspState::new(Some(config_path));
+    let mut lsp = LspState::new_with_sdk_locator(Some(config_path), |_| None);
     let uri = format!("file://{}", dart_path.display());
     let lsp = lsp.open(&uri, source.to_string(), Some(1));
 
