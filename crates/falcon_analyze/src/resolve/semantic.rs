@@ -2581,7 +2581,7 @@ impl<'a> SemanticModel<'a> {
                 if let [segment] = named.segments.as_slice()
                     && let Some(parameter) = parameters.lookup(&segment.name)
                 {
-                    return parameter.with_nullable(named.is_nullable);
+                    return parameter.with_nullable(parameter.nullable() || named.is_nullable);
                 }
                 let Some(identity) = QualifiedName::from_identifiers(&named.segments)
                     .and_then(|name| self.resolve_name(name))

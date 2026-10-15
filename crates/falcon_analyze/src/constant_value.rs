@@ -7,6 +7,7 @@
 //! their declaration identity and type, and enum shorthands use declared context.
 //! Integer operations use native signed-64-bit wrapping and strings count UTF-16
 //! code units; type-test conditions use the same source-proven types as casts.
+//! Constructor type tests and casts resolve instantiated owner type parameters.
 
 use std::collections::HashMap;
 
@@ -277,6 +278,7 @@ struct ConstEvaluator<'a, 'model> {
     /// arguments that could not be evaluated.
     parameters: Vec<HashMap<String, Option<ConstantValue>>>,
     parameter_types: HashMap<String, ResolvedType>,
+    type_parameters: TypeParameterScope,
     /// Set once evaluation proves a constant-evaluation error: a failing
     /// assertion.
     failed: bool,
@@ -305,6 +307,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             constants: HashMap::new(),
             parameters: Vec::new(),
             parameter_types: HashMap::new(),
+            type_parameters: TypeParameterScope::default(),
             failed: false,
         }
     }
@@ -452,7 +455,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 let (identity, constructor) = resolve_call_constructor(callee, &self.model, true)?;
                 let type_args = invocation_type_args(callee, type_args)
                     .iter()
-                    .map(|ty| self.model.resolve_type(ty))
+                    .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
                     .collect();
                 self.invoke(identity, constructor, type_args, args)
             }
@@ -511,7 +514,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 ..
             } => {
                 let value = self.evaluate(expr)?;
-                let target = self.model.resolve_type(dart_type);
+                let target = self.model.resolve_type_in(dart_type, &self.type_parameters);
                 Some(ConstantValue::Bool(
                     self.cast_accepts(&value, &target)? != *negated,
                 ))
@@ -520,7 +523,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 expr, dart_type, ..
             } => {
                 let value = self.evaluate(expr)?;
-                let target = self.model.resolve_type(dart_type);
+                let target = self.model.resolve_type_in(dart_type, &self.type_parameters);
                 (self.cast_accepts(&value, &target) == Some(true)).then_some(value)
             }
             Expr::DotShorthand { name, .. } => {
@@ -838,9 +841,11 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         // constructor being run.
         self.parameters.push(HashMap::new());
         let previous_parameter_types = std::mem::take(&mut self.parameter_types);
+        let previous_type_parameters = std::mem::take(&mut self.type_parameters);
         let value = self.evaluate_with_context(expression, expected);
         self.parameters.pop();
         self.parameter_types = previous_parameter_types;
+        self.type_parameters = previous_type_parameters;
         self.model = previous_model;
         self.unqualified_fields = previous_fields;
         self.static_scope = previous_scope;
@@ -881,7 +886,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             return Some(
                 explicit
                     .iter()
-                    .map(|ty| self.model.resolve_type(ty))
+                    .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
                     .collect(),
             );
         }
@@ -1024,7 +1029,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         let type_args = named
             .type_args
             .iter()
-            .map(|ty| self.model.resolve_type(ty))
+            .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
             .collect();
         Some((identity, constructor.to_string(), type_args))
     }
@@ -1267,10 +1272,20 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         // this constructor's parameters when it is primary.
         self.parameters.push(HashMap::new());
         let previous_parameter_types = std::mem::take(&mut self.parameter_types);
+        let previous_type_parameters = std::mem::take(&mut self.type_parameters);
+        self.type_parameters.push_bindings(
+            signatures
+                .type_parameters(&identity)
+                .unwrap_or(&[])
+                .iter()
+                .zip(&type_args)
+                .map(|(parameter, ty)| (parameter.name.clone(), ty.clone())),
+        );
         let value =
             self.run_constructor(&identity, constructor, body, type_args, positional, named);
         self.parameters.pop();
         self.parameter_types = previous_parameter_types;
+        self.type_parameters = previous_type_parameters;
         self.model = previous_model;
         self.unqualified_fields = previous_fields;
         self.static_scope = previous_scope;
