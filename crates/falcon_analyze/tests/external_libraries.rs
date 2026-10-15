@@ -562,6 +562,137 @@ fn compact_external_types_do_not_collide_with_project_names() {
 }
 
 #[test]
+fn reexports_keep_distinct_same_package_declarations_resolvable() {
+    use falcon_analyze::{MemberKind, MemberResult, QualifiedName};
+
+    let (dir, app) = workspace();
+    write(
+        dir.path(),
+        "flutter/bin/cache/dart-sdk/lib/core/core.dart",
+        "class Object {} class double {} class int {}",
+    );
+    for (file, source) in [
+        (
+            "left.dart",
+            "class Vector { Vector(double x); void left() {} } typedef Alias = Vector; extension type Measure(double value) {}",
+        ),
+        (
+            "right.dart",
+            "class Vector { Vector(int x); void right() {} } typedef Alias = Vector; extension type Measure(int value) {}",
+        ),
+        (
+            "dep.dart",
+            "export 'left.dart' show Vector, Alias, Measure; export 'other.dart' hide Vector, Alias, Measure;",
+        ),
+        (
+            "other.dart",
+            "import 'right.dart'; export 'left.dart' show Vector, Alias, Measure;",
+        ),
+    ] {
+        write(dir.path(), &format!("cache/dep/lib/{file}"), source);
+    }
+    let source = "import 'package:dep/dep.dart'; import 'package:dep/right.dart' as right;";
+    let (program, errors) = parse(source);
+    assert!(errors.is_empty());
+    let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
+    let externals =
+        ExternalLibraries::load(&environment, &[(app.as_path(), &program, source)], |path| {
+            path == app
+        });
+    let sources = [IdentitySource {
+        path: &app,
+        program: &program,
+        has_parse_errors: false,
+    }];
+    let base = std::sync::Arc::new(IdentityIndex::build_external(ExternalSources {
+        libraries: &externals,
+        environment: &environment,
+    }));
+    for identities in [
+        IdentityIndex::build(
+            &sources,
+            &[source],
+            &[],
+            Some(ExternalSources {
+                libraries: &externals,
+                environment: &environment,
+            }),
+        ),
+        IdentityIndex::with_external(
+            &sources,
+            &[source],
+            &[],
+            ExternalSources {
+                libraries: &externals,
+                environment: &environment,
+            },
+            base,
+        ),
+    ] {
+        let mut types = TypeIndex::from_resolved_files(
+            [(
+                app.as_path(),
+                LibrarySource {
+                    program: &program,
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )],
+            &identities,
+        );
+        types.add_external(&externals, &identities);
+        let signatures = SignatureIndex::build(
+            &[(app.clone(), &program)],
+            Some(&externals),
+            &identities,
+            &types,
+        );
+        let model = SemanticModel::new(&app, &identities, Some(&types));
+        let left = model.resolve_name("Vector").unwrap();
+        let right = model
+            .resolve_name(QualifiedName::prefixed("right", "Vector"))
+            .unwrap();
+        assert_ne!(
+            model.resolve_name("Measure").unwrap(),
+            model
+                .resolve_name(QualifiedName::prefixed("right", "Measure"))
+                .unwrap(),
+        );
+        assert_ne!(left, right);
+        assert!(identities.is_package_declaration(&left, "dep", "Vector"));
+        assert_eq!(
+            types.member_lookup_identity(&left, "left"),
+            MemberResult::Found(MemberKind::Method)
+        );
+        assert_eq!(
+            types.member_lookup_identity(&left, "right"),
+            MemberResult::Absent
+        );
+        assert_eq!(
+            types.member_lookup_identity(&right, "right"),
+            MemberResult::Found(MemberKind::Method)
+        );
+        assert!(
+            signatures.constructor(&left, "new").unwrap().positional[0]
+                .interface("dart:core", "double")
+        );
+        assert!(
+            signatures.constructor(&right, "new").unwrap().positional[0]
+                .interface("dart:core", "int")
+        );
+        assert_eq!(model.unaliased(model.resolve_name("Alias").unwrap()), left);
+        assert_eq!(
+            model.unaliased(
+                model
+                    .resolve_name(QualifiedName::prefixed("right", "Alias"))
+                    .unwrap()
+            ),
+            right,
+        );
+    }
+}
+
+#[test]
 fn compact_external_facts_keep_body_errors_separate_from_header_errors() {
     let (dir, app) = workspace();
     let dep = write(
@@ -1585,7 +1716,7 @@ fn transitive_libraries_and_parts_reload_after_project_buffers_close_without_sdk
             if opened == &part {
                 let companions: Vec<_> = libraries.project_companions().collect();
                 assert!(companions.contains(&leaf.as_path()));
-                assert!(companions.contains(&part.as_path()));
+                assert!(!companions.contains(&part.as_path()));
             }
             libraries.extend(&environment, &roots, |path| path == app);
             let files: Vec<_> = libraries

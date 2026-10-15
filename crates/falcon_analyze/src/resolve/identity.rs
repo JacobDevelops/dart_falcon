@@ -304,8 +304,8 @@ pub struct IdentityIndex {
     source_annotations: SourceAnnotations,
     /// The loaded `dart:core`, when external libraries are indexed.
     core: Option<LibraryId>,
-    /// Names more than one external library of the same origin declares; such
-    /// declarations have no unique [`DeclarationIdentity`] and stay unresolved.
+    /// Names declared by multiple libraries within one package origin;
+    /// these require library-scoped identities instead of package-wide ones.
     colliding: FxHashMap<ExternalOrigin, FxHashSet<InternedString>>,
     /// Every indexed `typedef`, by the identity of its name.
     aliases: HashMap<DeclarationIdentity, TypeAlias>,
@@ -364,9 +364,9 @@ impl IdentityIndex {
         Self::build(files, &[], packages, None)
     }
 
-    /// Index project `files` plus, when given, loaded external libraries. Only
-    /// project declarations get [`DeclarationIdentity::Project`]; external ones
-    /// get their SDK or package identity.
+    /// Index project `files` plus, when given, loaded external libraries.
+    /// External declarations use canonical SDK identities and package identities
+    /// when unique within their package, otherwise their defining library identity.
     ///
     /// `sources` holds the text of each of `files`, in order, so `@docImport`s
     /// in library documentation can be indexed; pass `&[]` to skip them.
@@ -408,6 +408,17 @@ impl IdentityIndex {
             alias.file.0 |= EXTERNAL_ID;
             alias.library.0 |= EXTERNAL_ID;
         }
+        let external_identity = |mut identity: DeclarationIdentity| {
+            if let DeclarationIdentity::Project { library, .. } = &mut identity {
+                library.0 |= EXTERNAL_ID;
+            }
+            identity
+        };
+        index.aliases = index
+            .aliases
+            .into_iter()
+            .map(|(identity, alias)| (external_identity(identity), alias))
+            .collect();
         for library in index.declaration_libraries.values_mut() {
             library.0 |= EXTERNAL_ID;
         }
@@ -482,7 +493,8 @@ impl IdentityIndex {
                 exports: Vec::new(),
                 incomplete: library.has_unresolved_parts,
                 implicit_core: true,
-                origin: Some(library.origin.clone()),
+                origin: (!matches!(library.origin, ExternalOrigin::Project))
+                    .then(|| library.origin.clone()),
                 doc_imports: Vec::new(),
                 extensions: HashSet::new(),
                 uri: None,
@@ -692,12 +704,15 @@ impl IdentityIndex {
             for (name, (kind, _)) in &library.declarations {
                 if *kind != NameIdentity::Unknown
                     && let Some(identity) = index.declared(library_id, name)
+                    && !matches!(identity, DeclarationIdentity::Project { .. })
                 {
                     index.declaration_libraries.insert(identity, library_id);
                 }
             }
             for name in &library.extensions {
-                if let Some(identity) = index.declared(library_id, name) {
+                if let Some(identity) = index.declared(library_id, name)
+                    && !matches!(identity, DeclarationIdentity::Project { .. })
+                {
                     index.declaration_libraries.insert(identity, library_id);
                 }
             }
@@ -740,9 +755,8 @@ impl IdentityIndex {
             .or_else(|| self.external.as_ref()?.type_alias(identity))
     }
 
-    /// The identity of `name` as declared in `library`: a project identity,
-    /// or the SDK/package identity of an external library. `None` when two
-    /// external libraries of one origin declare the name.
+    /// The identity of a declaration, retaining its library when its name
+    /// is not unique within the external package.
     fn declared(&self, library: LibraryId, name: &str) -> Option<DeclarationIdentity> {
         match &self.get(library).origin {
             None => Some(DeclarationIdentity::Project {
@@ -761,7 +775,10 @@ impl IdentityIndex {
                             .is_some_and(|names| names.contains(name))
                     })
                 {
-                    return None;
+                    return Some(DeclarationIdentity::Project {
+                        library,
+                        name: name.to_owned(),
+                    });
                 }
                 let name = self
                     .get(library)
@@ -777,6 +794,10 @@ impl IdentityIndex {
                     ExternalOrigin::Package(package) => DeclarationIdentity::Package {
                         package: package.clone(),
                         name: name.clone(),
+                    },
+                    ExternalOrigin::Project => DeclarationIdentity::Project {
+                        library,
+                        name: name.to_string(),
                     },
                 })
             }
@@ -801,19 +822,23 @@ impl IdentityIndex {
         else {
             return false;
         };
-        found_name == name
-            && self
-                .get(*library)
-                .declarations
-                .get(name)
-                .and_then(|(_, file)| self.source_path(*file))
-                .and_then(|path| {
-                    self.packages
-                        .iter()
-                        .filter(|package| path.starts_with(&package.lib_root))
-                        .max_by_key(|package| package.lib_root.components().count())
-                })
-                .is_some_and(|origin| origin.name == package)
+        if found_name != name {
+            return false;
+        }
+        if let Some(ExternalOrigin::Package(origin)) = &self.get(*library).origin {
+            return origin.as_str() == package;
+        }
+        self.get(*library)
+            .declarations
+            .get(name)
+            .and_then(|(_, file)| self.source_path(*file))
+            .and_then(|path| {
+                self.packages
+                    .iter()
+                    .filter(|package| path.starts_with(&package.lib_root))
+                    .max_by_key(|package| package.lib_root.components().count())
+            })
+            .is_some_and(|origin| origin.name == package)
     }
     /// Whether real `dart:core` sources are indexed (so curated SDK fallback
     /// tables must not be consulted).
@@ -2530,6 +2555,7 @@ const PACKAGE_MEMBERS: Allowlist = &[
         "meta",
         &[
             "visibleForTesting",
+            "protected",
             "immutable",
             "Immutable",
             "Target",

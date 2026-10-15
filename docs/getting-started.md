@@ -86,6 +86,8 @@ falcon check lib/ test/   # lint specific paths
 falcon check . --config ./falcon.json   # point at an explicit config
 ```
 
+Imported libraries and their parts provide type information even when they are outside the paths you pass. Diagnostics remain limited to the requested files.
+
 Emit machine-readable output for tooling:
 
 ```sh

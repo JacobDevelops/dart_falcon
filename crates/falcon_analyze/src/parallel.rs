@@ -141,18 +141,17 @@ fn analyze_indexed(
                     info!(file = %file.path.display(), "external file has parse errors; its library stays unresolved");
                 }
             }
-            (libraries, environment)
+            (libraries, environment, project_paths)
         });
     // Opening a dependency part promotes the defining library into the project
     // view. Index its unopened companions without linting them as requested files.
     let companions: Vec<Parsed> = externals
         .as_ref()
         .into_iter()
-        .flat_map(|(libraries, _)| libraries.project_companions())
-        .filter(|path| {
-            !parsed
-                .iter()
-                .any(|file| canonical_or_lexical(&file.path) == *path)
+        .flat_map(|(libraries, _, project_paths)| {
+            libraries
+                .project_companions()
+                .filter(|path| !project_paths.contains(*path))
         })
         .filter_map(|path| {
             std::fs::read_to_string(path)
@@ -181,7 +180,7 @@ fn analyze_indexed(
         workspace.packages,
         externals
             .as_ref()
-            .map(|(libraries, environment)| ExternalSources {
+            .map(|(libraries, environment, _)| ExternalSources {
                 libraries,
                 environment,
             }),
@@ -199,12 +198,12 @@ fn analyze_indexed(
         }),
         &identities,
     );
-    if let Some((libraries, _)) = &externals {
+    if let Some((libraries, _, _)) = &externals {
         type_index.add_external(libraries, &identities);
     }
     let signatures = SignatureIndex::build(
         &project_files,
-        externals.as_ref().map(|(libraries, _)| libraries),
+        externals.as_ref().map(|(libraries, _, _)| libraries),
         &identities,
         &type_index,
     );

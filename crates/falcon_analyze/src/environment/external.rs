@@ -1,8 +1,8 @@
-//! Loading the SDK and dependency libraries project files import.
+//! Loading libraries omitted from the requested project files.
 //!
-//! External libraries are parsed and indexed so the resolver sees real
-//! declarations, but they are never linted, never produce diagnostics and are
-//! never handed to cross-file rules.
+//! SDK, dependency and unrequested local libraries are parsed and indexed so the
+//! resolver sees real declarations, but are never linted, never produce
+//! diagnostics and are never handed to cross-file rules.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -25,6 +25,8 @@ pub enum ExternalOrigin {
     Sdk(InternedString),
     /// A library of a dependency package, by package name.
     Package(InternedString),
+    /// A local library outside a configured package's public library directory.
+    Project,
 }
 
 /// Compact, unresolved declaration facts for one external file.
@@ -62,9 +64,21 @@ pub struct ExternalLibraries {
     contexts: HashMap<PathBuf, Option<usize>>,
     /// Every defining file a load was attempted for, loaded or not.
     attempted: HashSet<PathBuf>,
+    /// Local defining targets, including unreadable paths that need file watches.
+    attempted_project_paths: HashSet<PathBuf>,
     /// Files evicted for open project buffers; closing one requires retraversal.
     project_evictions: HashMap<PathBuf, PathBuf>,
     project_companions: std::collections::BTreeMap<PathBuf, Vec<PathBuf>>,
+    companion_dependencies: HashMap<PathBuf, CompanionDependencies>,
+}
+
+/// Source-validated directives: unchanged snapshots need not reparse unopened parts.
+#[derive(Debug)]
+struct CompanionDependencies {
+    source: String,
+    context: Option<usize>,
+    dependencies: Vec<PathBuf>,
+    parts: Vec<PathBuf>,
 }
 
 impl ExternalLibraries {
@@ -115,19 +129,58 @@ impl ExternalLibraries {
             *self = Self {
                 project_evictions: evictions,
                 project_companions: companions,
+                companion_dependencies: std::mem::take(&mut self.companion_dependencies),
                 ..Self::default()
             };
         }
+        self.project_companions.retain(|root, companions| {
+            companions.retain(|path| !is_project(path));
+            !companions.is_empty()
+                && (is_project(root) || self.project_evictions.values().any(|owner| owner == root))
+        });
         let mut wave = Vec::new();
         for (path, program, source) in project {
             let context = environment.context_index(path);
-            for dependency in dependencies(environment, context, path, program)
-                .into_iter()
-                .chain(
-                    crate::resolve::doc_imports(program, source)
-                        .filter_map(|uri| resolve(environment, context, path, uri)),
-                )
-            {
+            let mut dependencies = dependencies(environment, context, path, program);
+            dependencies.extend(
+                program
+                    .part_of_directive
+                    .as_ref()
+                    .and_then(|part| part.uri.as_ref())
+                    .and_then(|uri| resolve(environment, context, path, &uri.value)),
+            );
+            dependencies.extend(
+                crate::resolve::doc_imports(program, source)
+                    .filter_map(|uri| resolve(environment, context, path, uri)),
+            );
+            // Buffered defining directives own unopened parts, even at traversal boundaries.
+            let root = canonical_or_lexical(path);
+            self.project_companions.remove(&root);
+            let mut seen = HashSet::from([root.clone()]);
+            let mut parts: Vec<_> = program
+                .part_directives
+                .iter()
+                .filter_map(|part| resolve(environment, context, path, &part.uri.value))
+                .collect();
+            let mut companions = Vec::new();
+            while let Some(part) = parts.pop() {
+                if !seen.insert(part.clone()) {
+                    continue;
+                }
+                if is_project(&part) {
+                    continue;
+                }
+                companions.push(part.clone());
+                let Some(cached) = self.companion_dependencies(environment, context, &part) else {
+                    continue;
+                };
+                dependencies.extend(cached.dependencies.iter().cloned());
+                parts.extend(cached.parts.iter().cloned());
+            }
+            if !companions.is_empty() {
+                self.project_companions.insert(root, companions);
+            }
+            for dependency in dependencies {
                 if is_project(&dependency) {
                     self.project_evictions
                         .insert(dependency.clone(), dependency.clone());
@@ -146,6 +199,50 @@ impl ExternalLibraries {
         self.load_waves(environment, wave, &is_project);
     }
 
+    fn companion_dependencies(
+        &mut self,
+        environment: &AnalysisEnvironment,
+        context: Option<usize>,
+        path: &Path,
+    ) -> Option<&CompanionDependencies> {
+        let source = match std::fs::read_to_string(path) {
+            Ok(source) => source,
+            Err(_) => {
+                self.companion_dependencies.remove(path);
+                return None;
+            }
+        };
+        let unchanged = self
+            .companion_dependencies
+            .get(path)
+            .is_some_and(|cached| cached.source == source && cached.context == context);
+        if !unchanged {
+            let file = read_source(path, &source, environment.package_language_version(path));
+            let mut dependencies = dependencies(environment, context, path, &file.facts);
+            dependencies.extend(
+                file.doc_imports
+                    .iter()
+                    .filter_map(|uri| resolve(environment, context, path, uri)),
+            );
+            let parts = file
+                .facts
+                .part_directives
+                .iter()
+                .filter_map(|part| resolve(environment, context, path, &part.uri.value))
+                .collect();
+            self.companion_dependencies.insert(
+                path.to_path_buf(),
+                CompanionDependencies {
+                    source,
+                    context,
+                    dependencies,
+                    parts,
+                },
+            );
+        }
+        self.companion_dependencies.get(path)
+    }
+
     fn load_waves(
         &mut self,
         environment: &AnalysisEnvironment,
@@ -157,11 +254,19 @@ impl ExternalLibraries {
             let loaded: Vec<_> = wave
                 .into_par_iter()
                 .map_init(StringInterner::default, |interner, (path, context)| {
-                    load_library(environment, &path, context, interner)
+                    let origin = environment.origin(context, &path, interner);
+                    let local = matches!(origin, ExternalOrigin::Project);
+                    let loaded = load_library(environment, &path, context, origin);
+                    (path, local, loaded)
                 })
-                .flatten()
                 .collect();
-            for (library, context, dependencies) in loaded {
+            for (path, local, loaded) in loaded {
+                if local {
+                    self.attempted_project_paths.insert(path);
+                }
+                let Some((library, context, dependencies)) = loaded else {
+                    continue;
+                };
                 let mut project_owned = false;
                 for file in library.files.iter().filter(|file| is_project(&file.path)) {
                     self.project_evictions
@@ -171,7 +276,12 @@ impl ExternalLibraries {
                 if project_owned {
                     self.project_companions.insert(
                         library.files[0].path.clone(),
-                        library.files.iter().map(|file| file.path.clone()).collect(),
+                        library
+                            .files
+                            .iter()
+                            .filter(|file| !is_project(&file.path))
+                            .map(|file| file.path.clone())
+                            .collect(),
                     );
                 }
                 for file in &library.files {
@@ -209,6 +319,12 @@ impl ExternalLibraries {
             .values()
             .flatten()
             .map(PathBuf::as_path)
+    }
+
+    /// Local defining targets attempted during traversal, whether readable or not.
+    /// Watch these paths so newly created imports can invalidate failed loads.
+    pub fn attempted_project_paths(&self) -> impl Iterator<Item = &Path> {
+        self.attempted_project_paths.iter().map(PathBuf::as_path)
     }
 
     pub fn libraries(&self) -> &[ExternalLibrary] {
@@ -253,7 +369,7 @@ fn resolve(
     Some(canonical_or_lexical(&target))
 }
 
-/// The libraries `program` (at `path`) imports or exports, plus `dart:core`.
+/// The libraries `program` imports or exports, plus implicit `dart:core`.
 fn dependencies(
     environment: &AnalysisEnvironment,
     context: Option<usize>,
@@ -276,15 +392,13 @@ fn dependencies(
 }
 
 /// Read and parse the library defined at `path` with its parts; `None` when
-/// the file is unreadable, is itself a part, or belongs to neither the SDK nor
-/// a configured package.
+/// the file is unreadable or is itself a part.
 fn load_library(
     environment: &AnalysisEnvironment,
     path: &Path,
     context: Option<usize>,
-    interner: &mut StringInterner,
+    origin: ExternalOrigin,
 ) -> Option<(ExternalLibrary, Option<usize>, Vec<PathBuf>)> {
-    let origin = environment.origin(context, path, interner)?;
     // Each file parses at its package's language version (SDK: current).
     let read = |path: &Path| {
         let package_version =
@@ -339,19 +453,27 @@ fn load_library(
 
 fn read(path: &Path, package_version: Option<LanguageVersion>) -> std::io::Result<ExternalFile> {
     let source = std::fs::read_to_string(path)?;
-    let (mut program, errors) = parse_for_package(&source, package_version);
+    Ok(read_source(path, &source, package_version))
+}
+
+fn read_source(
+    path: &Path,
+    source: &str,
+    package_version: Option<LanguageVersion>,
+) -> ExternalFile {
+    let (mut program, errors) = parse_for_package(source, package_version);
     let has_parse_errors = !declarations_intact(&program, &errors);
-    let doc_imports = crate::resolve::doc_imports(&program, &source)
+    let doc_imports = crate::resolve::doc_imports(&program, source)
         .map(str::to_owned)
         .collect();
     let concrete_operators = compact_declarations(&mut program);
-    Ok(ExternalFile {
+    ExternalFile {
         path: path.to_path_buf(),
         facts: program,
         doc_imports,
         concrete_operators,
         has_parse_errors,
-    })
+    }
 }
 
 /// Whether every parse error leaves the file's declarations intact: it lies
@@ -521,19 +643,80 @@ impl AnalysisEnvironment {
         context: Option<usize>,
         path: &Path,
         interner: &mut StringInterner,
-    ) -> Option<ExternalOrigin> {
+    ) -> ExternalOrigin {
         if let Some(uri) = self.sdk_in(context).and_then(|sdk| sdk.library_uri(path)) {
-            return Some(ExternalOrigin::Sdk(interner.intern(uri)));
+            return ExternalOrigin::Sdk(interner.intern(uri));
         }
-        self.config_in(context)?
-            .package_library_containing(path)
-            .map(|package| ExternalOrigin::Package(interner.intern(&package.name)))
+        self.config_in(context)
+            .and_then(|config| config.package_library_containing(path))
+            .map_or(ExternalOrigin::Project, |package| {
+                ExternalOrigin::Package(interner.intern(&package.name))
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn companion_directives_cache_refreshes_content_changes_and_failed_reads() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("part.dart");
+        std::fs::write(&path, "import 'first.dart'; part 'nested.dart';").unwrap();
+        let environment =
+            AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
+        let mut libraries = ExternalLibraries::default();
+        let cached = libraries
+            .companion_dependencies(&environment, None, &path)
+            .unwrap();
+        let dependencies = cached.dependencies.as_ptr();
+        let parts = cached.parts.as_ptr();
+        let cached = libraries
+            .companion_dependencies(&environment, None, &path)
+            .unwrap();
+        assert_eq!(cached.dependencies.as_ptr(), dependencies);
+        assert_eq!(cached.parts.as_ptr(), parts);
+        assert_eq!(cached.dependencies, [directory.path().join("first.dart")]);
+        assert_eq!(cached.parts, [directory.path().join("nested.dart")]);
+        // Content, not size or mtime, determines whether the cache is reusable.
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::fs::write(&path, "import 'other.dart'; part 'second.dart';").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        let cached = libraries
+            .companion_dependencies(&environment, None, &path)
+            .unwrap();
+        assert_eq!(cached.dependencies, [directory.path().join("other.dart")]);
+        assert_eq!(cached.parts, [directory.path().join("second.dart")]);
+        // Different-size changes must also refresh and remove old part edges.
+        std::fs::write(&path, "import 'replacement.dart';").unwrap();
+        let cached = libraries
+            .companion_dependencies(&environment, None, &path)
+            .unwrap();
+        assert_eq!(
+            cached.dependencies,
+            [directory.path().join("replacement.dart")]
+        );
+        assert!(cached.parts.is_empty());
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            libraries
+                .companion_dependencies(&environment, None, &path)
+                .is_none(),
+        );
+        assert!(!libraries.companion_dependencies.contains_key(&path));
+        std::fs::write(&path, "part 'restored.dart';").unwrap();
+        let cached = libraries
+            .companion_dependencies(&environment, None, &path)
+            .unwrap();
+        assert!(cached.dependencies.is_empty());
+        assert_eq!(cached.parts, [directory.path().join("restored.dart")]);
+    }
 
     #[test]
     fn const_primary_and_implicit_enum_fields_survive_compaction() {
