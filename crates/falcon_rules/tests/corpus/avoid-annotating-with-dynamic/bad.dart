@@ -13,6 +13,9 @@ void log(dynamic message) {} /* expect: avoid-annotating-with-dynamic */
 
 void named({dynamic extra}) {} /* expect: avoid-annotating-with-dynamic */
 
+// A function-typed formal returning `dynamic` is annotated with `dynamic` too.
+void callback(dynamic f()) {} /* expect: avoid-annotating-with-dynamic */
+
 typedef Callback = void Function(dynamic event); /* expect: avoid-annotating-with-dynamic */
 
 void main() {

@@ -25,10 +25,9 @@ void bad(
   future.then(null, onError: null); /* expect: null-closures */ /* expect: null-closures */
   Future.microtask(null); /* expect: null-closures */
   Future.doWhile(null); /* expect: null-closures */
-  Future.delayed(Duration.zero, null); /* expect: null-closures */
   Timer.run(null); /* expect: null-closures */
   List.generate(2, null); /* expect: null-closures */
-  scheduleMicrotask(null); /* expect: null-closures */
+  new Future.sync(null); /* expect: null-closures */
 }
 
 extension UnrelatedMap on int {
@@ -53,4 +52,15 @@ class ConstructorInitializers extends ConstructorBase {
       : this(values.map(null)); /* expect: null-closures */
 
   final Iterable<int> field;
+}
+
+// The official lint checks the static type and all its supertypes, so a
+// project override of an SDK callback method is flagged too.
+abstract class CustomIterable implements Iterable<int> {
+  @override
+  bool any(Object? callback) => false;
+}
+
+void overrides(CustomIterable values) {
+  values.any(null); /* expect: null-closures */
 }

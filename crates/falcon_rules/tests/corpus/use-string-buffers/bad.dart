@@ -42,3 +42,22 @@ String interpolatedBraces(List<int> values) {
   }
   return s;
 }
+
+class Joiner {
+  Joiner(this.prefix, this.label);
+  final String prefix;
+  final String? label;
+
+  // The variables' types come from the enclosing class's fields.
+  String join(List<String> parts) {
+    var s = prefix;
+    for (final part in parts) {
+      s += part; /* expect: use-string-buffers */
+    }
+    var t = label ?? '';
+    for (final part in parts) {
+      t += part; /* expect: use-string-buffers */
+    }
+    return s + t;
+  }
+}

@@ -53,3 +53,11 @@ void catchesTypeError() {
     print(e);
   }
 }
+
+extension type WrappedStateError(StateError error) implements StateError {}
+extension type WrappedError(Error error) implements Object {}
+
+void catchesWrappedErrors() {
+  try {} on WrappedStateError {} /* expect: avoid-catching-errors */
+  try {} on WrappedError catch (_) {} /* expect: avoid-catching-errors */
+}

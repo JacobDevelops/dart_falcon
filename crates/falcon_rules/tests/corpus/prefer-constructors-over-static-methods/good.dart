@@ -43,3 +43,12 @@ class Shape {
 }
 
 class Square extends Shape {}
+
+// The analyzer's visitor overwrites earlier matching constructor calls.
+class LastCreation {
+  static LastCreation create() {
+    final value = LastCreation();
+    Object();
+    return value;
+  }
+}

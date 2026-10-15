@@ -11,8 +11,6 @@ void untyped(message) {}
 
 dynamic decode(String json) => json;
 
-void callback(dynamic f()) {}
-
 typedef Legacy(event);
 
 typedef Callback = void Function(Object? event);

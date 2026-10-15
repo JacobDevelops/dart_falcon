@@ -1,3 +1,5 @@
+// @dart = 3.12
+
 class Pair {
   final int a;
   Pair(this.a);
@@ -30,4 +32,10 @@ void cases(Object o) {
   }
   final handler = (final int v) => v; /* expect: unnecessary-final */ /* expect: unnecessary-final */
   print(handler);
+}
+
+void functionTyped(List<void Function(String message)> listeners) {
+  for (final void Function(String message) listener in listeners) { /* expect: unnecessary-final */
+    listener('x');
+  }
 }

@@ -17,3 +17,29 @@ void f(List<String> names) {
   final int Function(int) inc = (int x) => x + 1; /* expect: avoid-types-on-closure-parameters */
   print(inc);
 }
+
+// An `async` body returning `Future<F>` gives a returned closure context `F`.
+Future<int Function(int)> later() async {
+  return (int x) => x; /* expect: avoid-types-on-closure-parameters */
+}
+
+final Future<int Function(int)> Function() deferred = () async {
+  return (int x) => x; /* expect: avoid-types-on-closure-parameters */
+};
+
+void sink(Object value) {}
+
+// A conditional branch's context is the conditional's own static type.
+void conditional(bool b) {
+  sink(b ? (int x) => x : (int x) => -x); /* expect: avoid-types-on-closure-parameters */ /* expect: avoid-types-on-closure-parameters */
+}
+
+class CallbackBox {
+  const CallbackBox.named(this.callback);
+  final void Function(int) callback;
+}
+
+void contravariantAndFieldFormal() {
+  // The annotation need not equal the context's parameter type.
+  new CallbackBox.named((Object value) {}); /* expect: avoid-types-on-closure-parameters */
+}

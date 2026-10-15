@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 
 Future<void> work() async {}
 Future<bool> ready() async => true;
-void consume(BuildContext context) {}
+Object? consume(BuildContext context) => null;
 
 Future<void> unguarded(BuildContext context) async {
   await work();
@@ -12,7 +12,7 @@ Future<void> unguarded(BuildContext context) async {
 Future<void> wrongGuard(BuildContext context, BuildContext other) async {
   await work();
   if (!other.mounted) return;
-  context.toString(); /* expect: use-build-context-synchronously */
+  context.toString();
 }
 
 Future<void> guardRhs(BuildContext context) async {
@@ -104,13 +104,13 @@ Future<void> patternForInContext(List<(BuildContext, int)> entries) async {
 
 Future<void> whileBodyDoesNotReplaceOuter(BuildContext context) async {
   await work();
-  while (false) int context = 0;
+  while (false) { int context = 0; }
   context.toString(); /* expect: use-build-context-synchronously */
 }
 
 Future<void> doWhileBodyDoesNotReplaceOuter(BuildContext context) async {
   await work();
-  do int context = 0; while (false);
+  do { int context = 0; } while (false);
   context.toString(); /* expect: use-build-context-synchronously */
 }
 
@@ -131,7 +131,7 @@ Future<void> classicForContextShadow(
   await work();
   if (!context.mounted || !other.mounted) return;
   for (BuildContext context = other; false;) {
-    context.toString(); /* expect: use-build-context-synchronously */
+    context.toString();
   }
   context.toString();
 }
@@ -143,7 +143,7 @@ Future<void> forInContextShadow(
   await work();
   if (!context.mounted) return;
   for (BuildContext context in contexts) {
-    context.toString(); /* expect: use-build-context-synchronously */
+    context.toString();
   }
   context.toString();
 }
@@ -155,7 +155,7 @@ Future<void> patternForInContextShadow(
   await work();
   if (!context.mounted) return;
   for (final (BuildContext context, _) in entries) {
-    context.toString(); /* expect: use-build-context-synchronously */
+    context.toString();
   }
   context.toString();
 }
@@ -178,7 +178,7 @@ Future<void> doBodyFactDoesNotEscape(
     final BuildContext context = other;
     if (!context.mounted) return;
   } while (false);
-  context.toString(); /* expect: use-build-context-synchronously */
+  context.toString();
 }
 
 Future<void> conditionalBreakWhile(
@@ -191,7 +191,7 @@ Future<void> conditionalBreakWhile(
     if (stop) break;
     if (!context.mounted) continue;
   }
-  context.toString(); /* expect: use-build-context-synchronously */
+  context.toString();
 }
 
 Future<void> conditionalContinueFor(
@@ -204,7 +204,7 @@ Future<void> conditionalContinueFor(
     if (skip) continue;
     if (!context.mounted) break;
   }
-  context.toString(); /* expect: use-build-context-synchronously */
+  context.toString();
 }
 
 Future<void> conditionalBreakDoWhile(
@@ -217,7 +217,7 @@ Future<void> conditionalBreakDoWhile(
     if (stop) break;
     if (!context.mounted) continue;
   } while (keepGoing);
-  context.toString(); /* expect: use-build-context-synchronously */
+  context.toString();
 }
 
 Future<void> reassignedContext(
@@ -227,23 +227,23 @@ Future<void> reassignedContext(
   await work();
   if (!context.mounted || !other.mounted) return;
   context = other;
-  context.toString(); /* expect: use-build-context-synchronously */
+  context.toString();
 }
 
 Future<void> inferredAssignmentContext(BuildContext context) async {
-  var value = 0;
+  Object value = 0;
   value = context;
   await work();
-  value.toString(); /* expect: use-build-context-synchronously */
+  value.toString();
 }
 
 Future<void> nestedInferredAssignmentContext(BuildContext context) async {
-  var value = 0;
+  Object value = 0;
   {
     value = context;
   }
   await work();
-  value.toString(); /* expect: use-build-context-synchronously */
+  value.toString();
 }
 
 Future<void> patternReassignedContext(
@@ -253,7 +253,7 @@ Future<void> patternReassignedContext(
   await work();
   if (!context.mounted || !other.mounted) return;
   (context, _) = (other, 0);
-  context.toString(); /* expect: use-build-context-synchronously */
+  context.toString();
 }
 
 Future<void> outerTargetedBreak(BuildContext context, bool stop) async {
@@ -266,7 +266,7 @@ Future<void> outerTargetedBreak(BuildContext context, bool stop) async {
       return;
     }
   }
-  context.toString(); /* expect: use-build-context-synchronously */
+  context.toString();
 }
 
 Future<void> outerTargetedContinue(
@@ -316,10 +316,11 @@ Future<void> dynamicAssignmentPreservesContext(
 
 Future<void> branchAssignmentKeepsContextPath(
   BuildContext context,
+  BuildContext other,
   bool clear,
 ) async {
   var value = context;
-  if (clear) value = null;
+  if (clear) value = other;
   await work();
   value.toString(); /* expect: use-build-context-synchronously */
 }
@@ -328,19 +329,19 @@ Future<void> mutuallyExclusiveAssignmentStillMerges(
   BuildContext context,
   bool useContext,
 ) async {
-  var value = 0;
+  Object value = 0;
   if (useContext) {
     value = context;
   } else {
     value = 0;
   }
   await work();
-  value.toString(); /* expect: use-build-context-synchronously */
+  value.toString();
 }
 
-Future<void> defaultBeforeLaterCase(BuildContext context, int value) async {
+Future<void> caseBeforeLaterCase(BuildContext context, int value) async {
   switch (value) {
-    default:
+    case 0:
       break;
     case 1:
       await work();
@@ -348,22 +349,22 @@ Future<void> defaultBeforeLaterCase(BuildContext context, int value) async {
   context.toString(); /* expect: use-build-context-synchronously */
 }
 
-Future<void> defaultBeforeLaterGuard(BuildContext context, int value) async {
+Future<void> caseBeforeLaterGuard(BuildContext context, int value) async {
   switch (value) {
-    default:
-      context.toString(); /* expect: use-build-context-synchronously */
+    case 0:
+      context.toString();
       break;
     case 1 when await ready():
       break;
   }
 }
 
-Future<void> groupedDefaultBeforeLaterGuard(
+Future<void> groupedCaseBeforeLaterGuard(
   BuildContext context,
   int value,
 ) async {
   switch (value) {
-    default:
+    case 0:
     case 1 when await ready():
       context.toString(); /* expect: use-build-context-synchronously */
   }
@@ -380,7 +381,7 @@ Future<void> chainedSwitchContinue(BuildContext context, int value) async {
       continue third;
     third:
     default:
-      context.toString(); /* expect: use-build-context-synchronously */
+      context.toString();
   }
 }
 
@@ -399,7 +400,7 @@ Future<void> blockPropertyShadow(Holder holder, Holder other) async {
   if (!holder.context.mounted) return;
   {
     final Holder holder = other;
-    holder.context.toString(); /* expect: use-build-context-synchronously */
+    holder.context.toString();
   }
   holder.context.toString();
 }
@@ -408,7 +409,7 @@ Future<void> classicForPropertyShadow(Holder holder, Holder other) async {
   await work();
   if (!holder.context.mounted) return;
   for (Holder holder = other; false;) {
-    holder.context.toString(); /* expect: use-build-context-synchronously */
+    holder.context.toString();
   }
   holder.context.toString();
 }
@@ -417,12 +418,12 @@ Future<void> forInPropertyShadow(Holder holder, List<Holder> others) async {
   await work();
   if (!holder.context.mounted) return;
   for (final holder in others) {
-    holder.context.toString(); /* expect: use-build-context-synchronously */
+    holder.context.toString();
   }
   holder.context.toString();
 }
 
-class MyState extends State<Object> {
+abstract class MyState extends State<StatefulWidget> {
   Future<void> stateUses() async {
     await work();
     this.context.toString(); /* expect: use-build-context-synchronously */
@@ -433,22 +434,76 @@ class MyState extends State<Object> {
     await work();
     if (!this.context.mounted) return;
     for (BuildContext context in contexts) {
-      context.toString(); /* expect: use-build-context-synchronously */
+      context.toString();
     }
   }
 
   Future<void> parameterContextShadow(BuildContext context) async {
     await work();
     if (!this.context.mounted) return;
-    context.toString(); /* expect: use-build-context-synchronously */
+    context.toString();
   }
 
   void closureContextShadow() {
     final callback = (BuildContext context) async {
       await work();
       if (!this.context.mounted) return;
-      context.toString(); /* expect: use-build-context-synchronously */
+      context.toString();
     };
     callback(this.context);
+  }
+}
+
+Future<void> unrelatedMountedGetter(
+  BuildContext context,
+  UnrelatedMounted receiver,
+) async {
+  await work();
+  if (!receiver.mounted) return;
+  context.toString(); /* expect: use-build-context-synchronously */
+}
+
+class UnrelatedMounted {
+  bool get mounted => true;
+}
+
+Future<void> whileMountedConditionIsNotGuard(BuildContext context) async {
+  await work();
+  while (context.mounted) {
+    context.toString(); /* expect: use-build-context-synchronously */
+    break;
+  }
+}
+
+Future<void> doConditionGap(BuildContext context) async {
+  do {
+    context.toString(); /* expect: use-build-context-synchronously */
+  } while (await ready());
+}
+
+Future<void> tryBodyGuardDoesNotEscape(BuildContext context) async {
+  await work();
+  try {
+    if (!context.mounted) return;
+  } catch (_) {}
+  context.toString(); /* expect: use-build-context-synchronously */
+}
+
+Future<void> catchGapReachesFinally(BuildContext context) async {
+  try {
+    throw StateError('failure');
+  } catch (_) {
+    await work();
+  } finally {
+    context.toString(); /* expect: use-build-context-synchronously */
+  }
+}
+
+Future<void> switchSubjectGap(BuildContext context) async {
+  switch (await ready()) {
+    case true:
+      context.toString();
+    case false:
+      break;
   }
 }

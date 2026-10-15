@@ -36,3 +36,16 @@ class External extends Object with Mixed {
 mixin Mixed {
   int get mixed => 1;
 }
+
+class Parent {
+  final int value;
+  Parent(this.value);
+}
+
+class SuperFormal extends Parent {
+  SuperFormal(super.value) : assert(value > 0);
+}
+
+extension type CheckedValue(int? value) {
+  CheckedValue.checked(this.value) : assert(value != null);
+}

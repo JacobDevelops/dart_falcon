@@ -27,3 +27,7 @@ class Sub extends Base {
 }
 
 Map<String, Null> lookup() => {}; /* expect: prefer-void-to-null */
+
+class Remote extends SomeUnknownBase {
+  Null fetch() => null; /* expect: prefer-void-to-null */
+}

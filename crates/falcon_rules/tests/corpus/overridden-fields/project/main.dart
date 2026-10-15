@@ -6,7 +6,7 @@ class Child extends Base {
   int abstractValue = 1;
   int computed = 1;
   int staticValue = 1;
-  String flexible = '';
+  String flexible = ''; /* expect: overridden-fields */
   int _private = 1;
 }
 

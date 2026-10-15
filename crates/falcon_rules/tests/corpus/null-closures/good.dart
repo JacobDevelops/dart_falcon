@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:core' as core;
 
 void good(
   Iterable<int> values,
@@ -24,17 +23,20 @@ void shadowed(Iterable<int> values) {
   values.any(null);
 }
 
-class CustomIterable implements core.Iterable<int> {
-  bool any(Object? callback) => false;
-}
-
 extension CustomAny on String {
   bool any(Object? callback) => false;
 }
 
-void overrides(CustomIterable values, String text) {
-  values.any(null);
+void overrides(String text) {
   text.any(null);
+}
+
+// Neither `Future.delayed` nor the top-level `scheduleMicrotask` is on the
+// official list, and cascaded calls have no target to check.
+void unlisted(List<int> list) {
+  Future.delayed(Duration.zero, null);
+  scheduleMicrotask(null);
+  list..removeWhere(null);
 }
 
 class AsyncShadow {

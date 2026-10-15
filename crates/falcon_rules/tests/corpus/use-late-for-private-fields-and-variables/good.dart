@@ -61,3 +61,46 @@ class Initialized {
   Initialized() : _name = 'x';
   String get name => _name!;
 }
+
+// Through `this.` or another receiver, the analyzer also visits the bare
+// property name, which counts as a nullable read even under `!`.
+class ThisAsserted {
+  int? _count;
+
+  void reset() {
+    this._count = 0;
+  }
+
+  int next() => this._count! + 1;
+}
+
+class PlainReader {
+  int? _count;
+
+  void reset() {
+    _count = 0;
+  }
+
+  int? peek(PlainReader other) => other._count;
+}
+
+class Shadowed {
+  int? _total;
+
+  void reset() {
+    _total = 0;
+  }
+
+  int? read() => _total;
+}
+
+// `Type._x!` is a prefixed identifier: its bare name is a nullable read.
+class QualifiedRead {
+  static int? _shared;
+
+  static void init() {
+    _shared = 1;
+  }
+}
+
+int sharedValue() => QualifiedRead._shared! + 1;

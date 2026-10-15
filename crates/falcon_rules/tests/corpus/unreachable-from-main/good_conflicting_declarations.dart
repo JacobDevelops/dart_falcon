@@ -1,13 +1,7 @@
-// A library that declares the same top-level name twice does not compile;
-// reachability through the ambiguous name is unknowable, so nothing is
-// reported.
-
+// A valid executable library: every declaration is reachable.
 void main() {
-  Twice();
-}
-
-class Twice {
-  void render() {}
+  Twice().render();
+  unrelated();
 }
 
 class Twice {

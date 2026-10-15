@@ -45,3 +45,13 @@ void cascadeClosure(List<int> list) {
       print(even);
     });
 }
+
+// Only the expression parentheses are reported, not wildcard-pattern grouping.
+int groupedSwitch(Object value) => switch ((value)) { /* expect: unnecessary-parenthesis */
+  (_) => (1), /* expect: unnecessary-parenthesis */
+};
+
+// A declaration pattern's grouping is not the initializer's expression grouping.
+void patternDeclaration() {
+  var (_) = ('a'); /* expect: unnecessary-parenthesis */
+}

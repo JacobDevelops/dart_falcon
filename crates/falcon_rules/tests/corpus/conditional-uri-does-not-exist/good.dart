@@ -6,8 +6,8 @@ import 'targets/stub.dart'
     as second;
 export 'targets/stub.dart'
     if (dart.library.js_interop) 'targets/web.dart';
-// dart: libraries and other packages cannot be checked without the SDK and a
-// package configuration, so they are never reported.
+// SDK libraries remain unknown without an SDK. The local package configuration
+// maps package:web to the declaration targets in this fixture.
 import 'targets/stub.dart'
     if (dart.library.io) 'dart:io'
     if (dart.library.js_interop) 'package:web/web.dart'

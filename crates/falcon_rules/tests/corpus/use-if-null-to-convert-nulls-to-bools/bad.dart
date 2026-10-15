@@ -12,3 +12,11 @@ void check(bool? flag, Flags flags) {
   final bool? local = flag;
   print(local == true); /* expect: use-if-null-to-convert-nulls-to-bools */
 }
+
+Future<bool?> answer() async => null;
+
+Future<void> awaited() async {
+  print((await answer()) == true); /* expect: use-if-null-to-convert-nulls-to-bools */
+  final result = await answer();
+  print(result != false); /* expect: use-if-null-to-convert-nulls-to-bools */
+}

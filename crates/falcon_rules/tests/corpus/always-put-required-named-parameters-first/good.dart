@@ -12,11 +12,6 @@ class Base {
   Base({required int b, int? a});
 }
 
-class Sub extends Base {
-  // A lone optional super parameter does not count as an optional parameter.
-  Sub({super.a, required super.b});
-}
-
 typedef Callback = void Function({required int b, int a});
 
 void h(void Function({required int a, int? b}) cb) {}

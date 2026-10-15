@@ -60,3 +60,9 @@ int Function() closure(int x) {
     return x;
   };
 }
+
+// Parentheses around the returned name do not matter.
+int parenthesizedReturn(int x) {
+  x = 1; /* expect: join-return-with-assignment */
+  return (x);
+}

@@ -32,3 +32,12 @@ class WithNew {
 class Implicit {
   static Implicit build() => Implicit(); /* expect: prefer-constructors-over-static-methods */
 }
+
+class Singleton {
+  static Singleton get instance => Singleton(); /* expect: prefer-constructors-over-static-methods */
+}
+
+class NamedCreation {
+  const NamedCreation.fallback();
+  static NamedCreation of(Object? value) => value as NamedCreation? ?? const NamedCreation.fallback(); /* expect: prefer-constructors-over-static-methods */
+}

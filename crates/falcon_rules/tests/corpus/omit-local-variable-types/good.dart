@@ -25,3 +25,11 @@ void f(int n, String s, List<int> items, dynamic dyn) {
   for (var item in items) {}
   print([a, b, c, d, e, f, g, h, i, j, k, l, m, o, q]);
 }
+
+T identity<T>(T value) => value;
+void genericReturnPolicy() {
+  int argument = identity(1);
+  T localIdentity<T>(T value) => value;
+  int localArgument = localIdentity(1);
+  print([argument, localArgument]);
+}

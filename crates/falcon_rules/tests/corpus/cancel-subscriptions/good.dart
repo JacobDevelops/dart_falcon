@@ -81,13 +81,58 @@ void cascaded(Stream<int> stream) {
     ..cancel();
 }
 
-void reassigned(Stream<int> stream, StreamSubscription<int>? holder) {
-  final subscription = stream.listen((_) {});
-  holder = subscription;
-  holder.cancel();
-}
-
 void unresolved(dynamic stream) {
   final subscription = stream.listen((_) {});
   subscription.pause();
+}
+
+void cancelledFromClosure(Stream<int> stream) {
+  final subscription = stream.listen((_) {});
+  final dispose = () => subscription.cancel();
+  dispose();
+}
+
+class CascadingField {
+  StreamSubscription<int>? subscription;
+  void hold() {
+    subscription?..pause();
+  }
+}
+
+abstract class ResourceBase {
+  StreamSubscription<int>? subscription;
+}
+
+class ResourceChild extends ResourceBase {
+  void dispose() => subscription?.cancel();
+}
+
+abstract class ThisResourceBase {
+  StreamSubscription<int>? subscription;
+}
+
+class ThisResourceChild extends ThisResourceBase {
+  void dispose() => this.subscription?.cancel();
+}
+
+void siblingCases(Stream<int> stream, int value) {
+  switch (value) {
+    case 1:
+      final subscription = stream.listen((_) {});
+      subscription.cancel();
+    case 2:
+      final subscription = stream.listen((_) {});
+      subscription.cancel();
+  }
+}
+
+void collectionScope(Stream<int> stream) {
+  final values = [for (var subscription = 0; subscription < 1; subscription++) subscription];
+  final subscription = stream.listen((_) {});
+  subscription.cancel();
+}
+
+void nestedFormal(Stream<int> stream, void callback(StreamSubscription<int> subscription)) {
+  final subscription = stream.listen((_) {});
+  subscription.cancel();
 }

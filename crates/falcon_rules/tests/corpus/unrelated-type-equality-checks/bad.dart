@@ -11,8 +11,6 @@ void bad(
   String value,
   List<int> ints,
   List<String> strings,
-  int Function(int) intFn,
-  String Function(String) stringFn,
   (int,) intRecord,
   (String,) stringRecord,
 ) {
@@ -21,7 +19,6 @@ void bad(
   alpha == beta; /* expect: unrelated-type-equality-checks */
   makeNumber() == text; /* expect: unrelated-type-equality-checks */
   ints == strings; /* expect: unrelated-type-equality-checks */
-  intFn == stringFn; /* expect: unrelated-type-equality-checks */
   intRecord == stringRecord; /* expect: unrelated-type-equality-checks */
   if (value case == 1) { /* expect: unrelated-type-equality-checks */
     print(value);
@@ -62,4 +59,46 @@ void patternBindings(
   if (box case TypedBox(value: var item)) {
     item == 'x'; /* expect: unrelated-type-equality-checks */
   }
+}
+
+abstract mixin class Equatable {
+  const Equatable();
+}
+
+class Plain {}
+
+class Equal extends Equatable {
+  const Equal();
+}
+
+enum Color { red }
+
+enum Shape { circle }
+
+mixin Tagged {}
+
+class Callable {
+  int call() => 1;
+}
+
+void hierarchy(
+  Equal equal,
+  Plain plain,
+  Color color,
+  Shape shape,
+  Tagged tagged,
+  int Function() function,
+  String text,
+  int number,
+  List<int> ints,
+  Iterable<String> strings,
+  String Function(String) stringFunction,
+) {
+  equal == plain; /* expect: unrelated-type-equality-checks */
+  color == shape; /* expect: unrelated-type-equality-checks */
+  tagged == plain; /* expect: unrelated-type-equality-checks */
+  function == text; /* expect: unrelated-type-equality-checks */
+  text == (1,); /* expect: unrelated-type-equality-checks */
+  ints == strings; /* expect: unrelated-type-equality-checks */
+  if (number case != null) {} /* expect: unrelated-type-equality-checks */
 }

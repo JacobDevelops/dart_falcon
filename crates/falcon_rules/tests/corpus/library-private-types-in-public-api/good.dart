@@ -27,3 +27,25 @@ enum PublicEnum {
 
 void publicNamedParameter({String? value}) {}
 void _privateNamedParameter({_Private? value}) {}
+
+// Supertypes are not public API to the analyzer.
+class _Base {}
+mixin _Mixin {}
+abstract class _Marker {}
+class PublicSubclass extends _Base with _Mixin implements _Marker {}
+
+// Non-function aliases and record types are not checked.
+typedef PublicRecordAlias = ({_Private value, void Function(_Private) callback});
+typedef PublicClassAlias = _Private;
+({_Private value}) publicRecord() => (value: _Private(null as dynamic));
+
+// Constructors of effectively private classes are exempt.
+sealed class PublicSealed {
+  PublicSealed(_Private value);
+}
+abstract final class PublicAbstractFinal {
+  PublicAbstractFinal(_Private value);
+}
+abstract interface class PublicAbstractInterface {
+  PublicAbstractInterface(_Private value);
+}

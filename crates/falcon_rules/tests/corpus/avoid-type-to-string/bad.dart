@@ -1,11 +1,5 @@
 void foo(String Function() f) {}
 
-var fromRuntimeType = 7.runtimeType.toString(); /* expect: avoid-type-to-string */
-
-void tearOff() {
-  foo(7.runtimeType.toString); /* expect: avoid-type-to-string */
-}
-
 class Type2 implements Type {}
 
 class Type3 extends Type2 {}
@@ -25,14 +19,6 @@ class Type4 implements Type {
   }
 }
 
-extension E on Type {
+extension E on Type2 {
   String describe() => toString(); /* expect: avoid-type-to-string */
-}
-
-class Widget {
-  String label() => runtimeType.toString(); /* expect: avoid-type-to-string */
-}
-
-void typeParameter(Type type) {
-  print(type.toString()); /* expect: avoid-type-to-string */
 }

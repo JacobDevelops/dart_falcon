@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/material.dart' as m;
+import 'package:flutter/widgets.dart' as widgets;
 
 Widget decorationAndChild(Widget child) {
   return Container( /* expect: use-decorated-box */
@@ -32,4 +33,8 @@ Widget nested(Widget child) {
   return Center(
     child: Container(decoration: BoxDecoration(), child: child), /* expect: use-decorated-box */
   );
+}
+
+Widget widgetLibraryContainer(Widget child) {
+  return widgets.Container(decoration: const BoxDecoration(), child: child); /* expect: use-decorated-box */
 }

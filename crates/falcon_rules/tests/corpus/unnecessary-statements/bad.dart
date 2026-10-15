@@ -41,3 +41,34 @@ void f(List<int> list, bool foo, int a, int b, Box box) {
   Box; /* expect: unnecessary-statements */
   for (a; a < 10; a + 1) {} /* expect: unnecessary-statements */ /* expect: unnecessary-statements */
 }
+
+void dynamicReads(dynamic value) {
+  value.missing; /* expect: unnecessary-statements */
+  value.first.last; /* expect: unnecessary-statements */
+  unknownName; /* expect: unnecessary-statements */
+  unknownPrefix.member; /* expect: unnecessary-statements */
+}
+
+class MissingMember {
+  void test() {
+    this.missing; /* expect: unnecessary-statements */
+  }
+}
+
+class FunctionValues {
+  void Function() callback = () {};
+  void Function() get getter => callback;
+}
+
+void functionCascades(FunctionValues value) {
+  value..callback; /* expect: unnecessary-statements */
+  value..getter; /* expect: unnecessary-statements */
+}
+
+extension BoxMethods on Box {
+  void extensionMethod() {}
+}
+
+void extensionMethodTearoff(Box box) {
+  box.extensionMethod; /* expect: unnecessary-statements */
+}

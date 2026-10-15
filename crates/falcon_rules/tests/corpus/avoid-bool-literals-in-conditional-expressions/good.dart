@@ -8,3 +8,7 @@ void f(bool a, bool b, bool? maybe, int i, dynamic d) {
   final t = a ? 'yes' : 'no';
   print([x, y, z, w, v, u, t]);
 }
+
+Object? partialPromotion(Object? value) => value is bool ? true : value;
+
+Object? inversePartialPromotion(Object? value) => value is! bool ? value : false;

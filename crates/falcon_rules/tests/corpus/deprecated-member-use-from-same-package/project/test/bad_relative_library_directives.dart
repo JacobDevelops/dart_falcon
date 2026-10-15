@@ -1,0 +1,2 @@
+import '../lib/good_deprecated_library.dart'; /* expect: deprecated-member-use-from-same-package, msg: "'package:deprecation_example/good_deprecated_library.dart' is deprecated and shouldn't be used." */
+export '../lib/good_deprecated_library.dart'; /* expect: deprecated-member-use-from-same-package, msg: "'package:deprecation_example/good_deprecated_library.dart' is deprecated and shouldn't be used." */

@@ -88,3 +88,11 @@ void typedCollectionForCastRegression() {
   };
   print([list, map]);
 }
+
+// Initializing an `int?` local with an `int` promotes it to `int`; Dart 3.13.5
+// `dart analyze` reports unnecessary_cast here.
+void testCastPromotedOnInitialization() {
+  int? maybeInt = 5;
+  final int nonNull = maybeInt as int; /* expect: avoid-unnecessary-type-casts */
+  print(nonNull);
+}

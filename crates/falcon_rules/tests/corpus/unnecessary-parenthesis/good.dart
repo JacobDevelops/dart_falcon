@@ -57,3 +57,41 @@ class Callback {
   bool Function() e;
   Callback() : e = (() => true);
 }
+
+// Pattern grouping is distinct from parenthesized expressions.
+int wildcardPattern(Object? value) => switch (value) {
+  (_) => 1,
+};
+
+int nestedWildcardPattern(Object? value) => switch (value) {
+  ((/* grouping */ _)) => 1,
+};
+
+int recordPattern((int?, int?) value) => switch (value) {
+  (null, final int right) => right,
+  (final int left, null) => left,
+  (_) => 0,
+};
+
+void statementPattern(Object? value) {
+  if (value case (_)) {}
+  switch (value) {
+    case (_):
+      break;
+  }
+}
+
+// A pattern initializer has a non-expression declaration parent, unlike an
+// ordinary variable initializer.
+Future<void> patternInitializers(
+  int a,
+  int b,
+  Object value,
+  Future<(int, int)> Function() fetch,
+) async {
+  var (sum) = (a + b);
+  var (cast) = (value as int);
+  var (check) = (value is int);
+  final (left, right) = (await fetch());
+  print([sum, cast, check, left, right]);
+}

@@ -50,3 +50,12 @@ class Unrelated {
   @override
   bool operator ==(Object other) => other is Unrelated; /* expect: avoid-equals-and-hash-code-on-mutable-classes */
 }
+
+// SDK supertypes never carry `@immutable`.
+class Ordered implements Comparable<Ordered> {
+  int value = 0;
+  @override
+  int compareTo(Ordered other) => 0;
+  @override
+  bool operator ==(Object other) => other is Ordered && other.value == value; /* expect: avoid-equals-and-hash-code-on-mutable-classes */
+}

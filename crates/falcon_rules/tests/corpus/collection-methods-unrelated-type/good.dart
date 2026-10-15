@@ -27,3 +27,15 @@ class Map<K, V> {
 void shadowed(Map<String, int> map) {
   map.containsKey(1);
 }
+
+void functionKeys(core.Map<core.Function?, core.int> makers, core.int Function() maker) {
+  makers[maker];
+}
+
+// Named record fields match by name, not by source order.
+void recordKeys() {
+  final byScope = <({core.String id, core.int count}), core.List<core.int>>{};
+  final key = (id: 'x', count: 1);
+  (byScope[key] ??= <core.int>[]).add(1);
+  byScope.containsKey((id: 'y', count: 2));
+}

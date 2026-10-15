@@ -9,6 +9,7 @@ void main() {
   service.counter += 1;
   print(service[0]);
   print(-service);
+  print(service + 1);
   print(TypeLiteralOnly);
   print(<TypeArgumentOnly>[]);
   Callback? callback;

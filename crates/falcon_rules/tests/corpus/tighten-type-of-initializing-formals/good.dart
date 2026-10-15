@@ -26,11 +26,6 @@ class Derived extends Base {
   Derived(super.name) : assert(name != null);
 }
 
-class UnresolvedNonNullable {
-  Missing value;
-  UnresolvedNonNullable(this.value) : assert(value != null);
-}
-
 class Inferred {
   var value = 0;
   Inferred(this.value) : assert(value != null);

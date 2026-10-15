@@ -45,3 +45,40 @@ final closure = (num x) {
   }
   return 0;
 };
+
+void negated(num x) {
+  if (x is! double) {
+    print('not double');
+  } else if (x is int) { /* expect: avoid-double-and-int-checks */
+    print('int');
+  }
+}
+
+void negatedElse(num x) {
+  if (x is double) {
+    print('double');
+  } else if (x is! int) { /* expect: avoid-double-and-int-checks */
+    print('not int');
+  }
+}
+
+class ShadowedFieldChecks {
+  num field = 1;
+
+  void parameter(num field) {
+    if (field is double) {
+      print('double');
+    } else if (field is int) { /* expect: avoid-double-and-int-checks */
+      print('int');
+    }
+  }
+
+  void local() {
+    final field = this.field;
+    if (field is double) {
+      print('double');
+    } else if (field is int) { /* expect: avoid-double-and-int-checks */
+      print('int');
+    }
+  }
+}

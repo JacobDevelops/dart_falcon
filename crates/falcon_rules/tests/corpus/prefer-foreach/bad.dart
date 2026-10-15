@@ -5,8 +5,19 @@ class Sink {
   static void record(int value) {}
 }
 
-class Processor {
+class Base {
+  final Sink sink = Sink();
+}
+
+class Processor extends Base {
   void handle(int value) {}
+
+  // An inherited field as the receiver.
+  void inherited(List<int> values) {
+    for (final v in values) { /* expect: prefer-foreach */
+      sink.add(v);
+    }
+  }
 
   void run(List<int> values) {
     for (final v in values) { /* expect: prefer-foreach */
@@ -15,7 +26,7 @@ class Processor {
   }
 }
 
-void main(List<int> values, Sink sink, void Function(int) callback) {
+void examples(List<int> values, Sink sink, void Function(int) callback) {
   for (final v in values) print(v); /* expect: prefer-foreach */
   for (var v in values) { /* expect: prefer-foreach */
     log(v);

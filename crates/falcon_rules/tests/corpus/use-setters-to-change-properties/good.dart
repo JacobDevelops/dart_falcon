@@ -45,11 +45,6 @@ class Counter {
   void setGlobal(int value) => globalCount = value;
 }
 
-// Unresolvable inheritance stays silent.
-class Remote extends SomeUnknownBase {
-  int port = 0;
-  void setPort(int value) => port = value;
-}
 
 // Implementing an SDK interface member.
 class Recorder implements Sink<int> {
@@ -59,4 +54,17 @@ class Recorder implements Sink<int> {
   }
 
   void close() {}
+}
+
+class ExtensionTarget {
+  int value = 0;
+}
+
+extension ChangeValue on ExtensionTarget {
+  void updateLocal(int newValue) {
+    var value = 0;
+    value = newValue;
+  }
+
+  void updateGlobal(int newValue) => globalCount = newValue;
 }

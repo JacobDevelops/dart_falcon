@@ -27,3 +27,7 @@ Widget prefixedContainer(Widget child) {
 Widget explicitNew(Widget child) {
   return new Container(color: Colors.transparent, child: child); /* expect: use-colored-box */
 }
+
+Widget explicitNullColor(Widget child) {
+  return Container(color: null, child: child); /* expect: use-colored-box */
+}

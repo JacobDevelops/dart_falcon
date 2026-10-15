@@ -35,10 +35,6 @@ class Node extends Link {
   Link next() => this;
 }
 
-// Unresolvable inheritance stays silent.
-class Remote extends SomeUnknownBase {
-  Remote ping() => this;
-}
 
 // Extensions are not checked.
 extension on String {
@@ -50,5 +46,16 @@ class Holder {
   Holder run() {
     final f = () => this;
     return Holder();
+  }
+}
+
+class GroupedReceiver {
+  GroupedReceiver arrow() => (this);
+  GroupedReceiver block() {
+    return (/* grouping is significant to this lint */ this);
+  }
+  GroupedReceiver mixed(bool flag) {
+    if (flag) return this;
+    return ((this));
   }
 }

@@ -8,3 +8,13 @@ void main() {
   /* Block comment text that is very long and keeps going past the limit. */ /* expect: lines-longer-than-80-chars */
   use('héllo wörld with accents ééééééééééééééééééééééééééééééééééééééééé'); /* expect: lines-longer-than-80-chars */
 }
+
+var nestedPath = '${"p/q"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; /* expect: lines-longer-than-80-chars */
+
+const kIsWeb = true;
+var bindingMessage =
+        'The app requested a view, but the platform did not provide one.\n'
+        'Try using `runWidget` instead of `runApp` to start your app.\n'
+        '`runWidget` allows you to provide a `View` widget, without requiring '
+        'a default view.'
+        '${kIsWeb ? "\nSee: https://flutter.dev/to/web-multiview-runwidget" : ""}'; /* expect: lines-longer-than-80-chars */

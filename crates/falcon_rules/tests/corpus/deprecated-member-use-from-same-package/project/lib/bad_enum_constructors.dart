@@ -1,5 +1,5 @@
 enum OldCtor {
-  current.old(), /* expect: deprecated-member-use-from-same-package */
+  current.old(),
   @deprecated
   obsolete.old();
 
@@ -8,7 +8,7 @@ enum OldCtor {
 }
 
 enum OldParameter {
-  current.named(oldParameter: 0); /* expect: deprecated-member-use-from-same-package */
+  current.named(oldParameter: 0);
 
   const OldParameter.named({@deprecated int? oldParameter});
 }

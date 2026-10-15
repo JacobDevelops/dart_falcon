@@ -35,3 +35,23 @@ void interpolation(Type type) {
 void dynamicReceiver(dynamic value) {
   print(value.toString());
 }
+
+// `dart:core` `Type` redeclares `toString`, so `Type` receivers (including
+// every `runtimeType` read) never resolve to `Object.toString`.
+var fromRuntimeType = 7.runtimeType.toString();
+
+void tearOff(void Function(String Function()) foo) {
+  foo(7.runtimeType.toString);
+}
+
+extension E on Type {
+  String describe() => toString();
+}
+
+class Widget {
+  String label() => runtimeType.toString();
+}
+
+void typeParameter(Type type) {
+  print(type.toString());
+}

@@ -1,4 +1,5 @@
 import 'package:meta/meta.dart';
+import 'package:meta/meta.dart' as m;
 
 @immutable
 class Point {
@@ -46,15 +47,6 @@ class Counter {
   void increment() => count++;
 }
 
-// An unresolved supertype might be immutable: stay silent.
-class External extends SomeUnknownBase {
-  @override
-  bool operator ==(Object other) => other is External;
-
-  @override
-  int get hashCode => 1;
-}
-
 // Other operators are not reported.
 class Vector {
   int x = 0;
@@ -63,3 +55,15 @@ class Vector {
 
 // Extensions cannot override `==`; enums cannot either.
 enum Mode { on, off }
+
+@m.Immutable('x')
+class ImmutableReason {
+  @override
+  bool operator ==(Object other) => true;
+}
+
+@Immutable()
+class ImmutableConstructor {
+  @override
+  int get hashCode => 0;
+}

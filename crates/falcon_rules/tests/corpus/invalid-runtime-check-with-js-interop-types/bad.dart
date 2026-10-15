@@ -1,4 +1,6 @@
 import 'dart:js_interop';
+import 'dart:core';
+import 'dart:core' as core;
 
 extension type MyJs(JSObject value) {}
 extension type OtherJs(JSObject value) {}
@@ -14,15 +16,24 @@ String invalidCast(JSAny value) => value as String; /* expect: invalid-runtime-c
 bool anyIsObject(JSAny value) => value is JSObject; /* expect: invalid-runtime-check-with-js-interop-types */
 bool nestedGeneric(List<JSAny> value) => value is List<JSObject>; /* expect: invalid-runtime-check-with-js-interop-types */
 bool nestedRecord((JSAny,) value) => value is (JSObject,); /* expect: invalid-runtime-check-with-js-interop-types */
-bool functionParameterWrongDirection(void Function(JSObject) value) =>
-    value is void Function(JSAny); /* expect: invalid-runtime-check-with-js-interop-types */
-bool functionReturnWrongDirection(JSAny Function() value) =>
-    value is JSObject Function(); /* expect: invalid-runtime-check-with-js-interop-types */
 
 void catchesInterop() {
   try {
     throw StateError('x');
   } on JSAny catch (error) { /* expect: invalid-runtime-check-with-js-interop-types */
+    error;
+  }
+}
+
+bool dynamicIsInterop(dynamic value) => value is JSAny; /* expect: invalid-runtime-check-with-js-interop-types */
+
+// Explicit core prefixes exercise SDK-free imported identity resolution too.
+void catchesNestedInterop<T extends JSNumber>() {
+  try {
+    throw StateError('nested');
+  } on core.List<JSString> catch (error) { /* expect: invalid-runtime-check-with-js-interop-types */
+    error;
+  } on core.List<T> catch (error) { /* expect: invalid-runtime-check-with-js-interop-types */
     error;
   }
 }

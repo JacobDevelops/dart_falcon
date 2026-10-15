@@ -5,20 +5,21 @@ extension NullableText on String? {
   set label(String value) {}
 }
 
-class Box {
-  const Box(this.size);
+class Crate {
+  const Crate(this.size);
   final int size;
 }
 
-extension NullableBox on Box? {
+extension NullableCrate on Crate? {
   int area() => this == null ? 0 : this!.size * this!.size;
+  int operator [](int index) => index;
 }
 
-void main(String? text, Box? box) {
+void main(String? text, Crate? box) {
   print(text?.isBlank); /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
   print(text?.orEmpty()); /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
-  print(text?[0]); /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
   text?.label = 'x'; /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
+  print(box?[0]); /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
   print(box?.area()); /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
   print(NullableText(text)?.orEmpty()); /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
 }

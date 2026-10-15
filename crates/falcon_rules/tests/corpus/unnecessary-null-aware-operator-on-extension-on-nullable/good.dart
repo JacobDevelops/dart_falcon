@@ -1,5 +1,7 @@
 extension NullableText on String? {
   bool get isBlank => this == null || this!.trim().isEmpty;
+  int get length => 0;
+  int operator [](int index) => 0;
 }
 
 extension NonNullText on String {
@@ -31,4 +33,7 @@ void main(String? text, Box? box, int? count) {
   print(text?.length);
   print(count?.isPositive);
   print(NonNullText(text ?? '').shout());
+  // `String` declares `length` and `[]`; instance members win over extensions.
+  print(text?.length);
+  print(text?[0]);
 }

@@ -19,7 +19,7 @@ void testCastFromParameter() {
 }
 
 void testCastNullableToNonNullable() {
-  int? maybeInt = 5;
+  int? maybeInt = int.tryParse('5');
   final int nonNull = maybeInt as int;
 }
 

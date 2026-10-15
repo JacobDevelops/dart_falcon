@@ -41,3 +41,14 @@ void closures() {
     break;
   }
 }
+
+String switchArms(Object o, (int, String?) pair) {
+  final label = switch (o) {
+    int v => '$v', /* expect: prefer-final-locals */
+    var other => '$other', /* expect: prefer-final-locals */
+  };
+  return switch (pair) {
+    (_, var text?) => text + label, /* expect: prefer-final-locals */
+    _ => label,
+  };
+}

@@ -40,3 +40,33 @@ Future<int> awaitsNonFuture() async {
 Future<num> transformed() async {
   return (await fetch()) + 1;
 }
+
+void inferredClosureInTry() {
+  final callback = () async {
+    try {
+      return await fetch();
+    } catch (_) {
+      return 0;
+    }
+  };
+  callback();
+}
+
+inferredFunction() async => await fetch();
+
+class UntypedDeclarations {
+  method() async => await fetch();
+  get value async => await fetch();
+}
+
+Future legacy() async => 1;
+void register(Future<int> Function() callback) {}
+void typedClosure() {
+  register(() async => await legacy());
+}
+
+Future<Future<int>> nested() async => fetch();
+void flattenedClosure() {
+  final callback = () async => await nested();
+  callback();
+}

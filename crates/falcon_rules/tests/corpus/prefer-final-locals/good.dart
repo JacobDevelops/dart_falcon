@@ -37,7 +37,7 @@ void patterns((int, int) pair, Object o, List<(int, String)> rows) {
     print(value);
   }
   final label = switch (o) {
-    int v => '$v',
+    final int v => '$v',
     _ => '',
   };
   print(label);
@@ -60,3 +60,9 @@ void closures() {
     print(loop);
   }
 }
+
+// Patterns outside any function body are not reported.
+final topLevelLabel = switch (Object()) {
+  int v => '$v',
+  _ => '',
+};

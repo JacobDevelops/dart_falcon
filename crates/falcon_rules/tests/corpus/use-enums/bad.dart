@@ -46,3 +46,13 @@ class Status { /* expect: use-enums */
   @override
   String toString() => label;
 }
+
+// Explicit constructor type arguments still create instances of this class.
+class _GenericChoice<T> { /* expect: use-enums */
+  static const first = _GenericChoice<int>._(0);
+  static const second = _GenericChoice<int>._(1);
+  final int value;
+  const _GenericChoice._(this.value);
+}
+
+final genericChoice = _GenericChoice.first;

@@ -1,5 +1,6 @@
 import 'base.dart' show Base;
 import 'duplicate.dart' as duplicate;
+import 'operators.dart' as operators;
 
 class Child extends Base {
   void method(int value) {} /* expect: annotate-overrides */
@@ -16,4 +17,9 @@ class Child extends Base {
 
 class Unrelated extends duplicate.Base {
   void method(int value) {}
+}
+
+class OperatorChild extends operators.Vec {
+  @Deprecated('use operator - instead')
+  operators.Vec operator +(operators.Vec other) => other; /* expect: annotate-overrides */
 }

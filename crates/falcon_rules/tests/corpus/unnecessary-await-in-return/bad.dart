@@ -38,3 +38,35 @@ Future<int> afterTry() async {
   }
   return await fetch(); /* expect: unnecessary-await-in-return */
 }
+
+void inferredClosures() {
+  final arrow = () async => await fetch(); /* expect: unnecessary-await-in-return */
+  final block = () async {
+    return await fetch(); /* expect: unnecessary-await-in-return */
+  };
+  arrow();
+  block();
+}
+
+
+Future<List<int>> fetchList() async => <int>[1];
+Future<List<num>> covariantFuture() async => await fetchList(); /* expect: unnecessary-await-in-return */
+
+Future<int> nestedClosureInTry() async {
+  try {
+    final callback = () async => await fetch(); /* expect: unnecessary-await-in-return */
+    return callback();
+  } catch (_) {
+    return 0;
+  }
+}
+
+Future<Never> neverCompletes() => Future<Never>.error('failure');
+Future<int> awaitsNever() async => await neverCompletes(); /* expect: unnecessary-await-in-return */
+
+class AuthResult {}
+class AuthSuccess extends AuthResult {}
+void registerAuth(Future<AuthResult> Function() callback) {}
+void subtypeClosure(Future<AuthSuccess> result) {
+  registerAuth(() async => await result); /* expect: unnecessary-await-in-return */
+}

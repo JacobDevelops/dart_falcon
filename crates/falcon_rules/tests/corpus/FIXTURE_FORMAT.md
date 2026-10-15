@@ -163,6 +163,17 @@ dynamic value = 42; /* expect: avoid-dynamic, msg: "Expected message here" */
 
 The `cargo xtask validate-rules` harness processes corpus fixtures to verify that rule implementations produce correct diagnostics.
 
+When no installed Dart SDK is discoverable, `validate-rules` for the bundled corpus
+and `docgen` pass the shared `tests/support/sdk` fixture SDK through subprocess
+`DART_SDK` only for sources listed in `tests/support/sdk/fixtures.txt`. The
+in-process corpus tests consume that same fixture inventory and parse those same
+declaration-only Dart excerpts, not a separate semantic signature table. Unlisted
+fixtures and custom `--corpus` directories retain normal SDK discovery and builtin
+fallback behavior. An available real SDK (including a package's Flutter SDK)
+retains precedence. Keep SDK-dependent expressions and expectations intact, and
+extend the shared declarations and fixture inventory when testing additional SDK
+member signatures.
+
 ### How It Works
 
 1. **Parse Annotations**: Reads `/* expect: */` comments from all bad.dart files

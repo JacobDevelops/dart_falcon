@@ -1,3 +1,5 @@
+// @dart = 3.12
+
 void f(final int x) {} /* expect: avoid-final-parameters */
 
 void g(int a, [final int b = 0]) {} /* expect: avoid-final-parameters */

@@ -16,6 +16,7 @@ void ordinaryVoid() {
 }
 
 void good(
+  Future<int> integerFuture,
   Future<void> voidFuture,
   Future<Null> nullFuture,
   dynamic dynamicValue,
@@ -29,4 +30,22 @@ void good(
   Box<void> box = Box<void>(null);
   box.setValue(null);
   box.field = null;
+  // Only `void` and `FutureOr<void>` locations are checked.
+  acceptFuture<void>(integerFuture);
+  // Function literals are inferred against their `void Function()` context,
+  // and function-typed locations never conflict.
+  acceptCallback<void>(() => 1);
+  acceptCallback<void>(() { return 'x'; });
+  final inferredCallback = () => 3;
+  acceptCallback<void>(inferredCallback);
+  acceptCallback<void>(() {
+    if (true) {
+      return 'nested';
+    }
+    for (final value in <int>[1]) {
+      print(value);
+      return 2;
+    }
+    return null;
+  });
 }

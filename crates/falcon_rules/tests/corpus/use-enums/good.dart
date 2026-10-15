@@ -99,3 +99,13 @@ class Suit {
   const Suit._(this.code);
   factory Suit.parse(String code) => code == 'h' ? hearts : spades;
 }
+
+// An explicit generic constructor invocation outside the constants is a use.
+class _GenericChoice<T> {
+  static const first = _GenericChoice<int>._(0);
+  static const second = _GenericChoice<int>._(1);
+  final int value;
+  const _GenericChoice._(this.value);
+}
+
+_GenericChoice<int> customGenericChoice(int value) => _GenericChoice<int>._(value);

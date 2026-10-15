@@ -4,5 +4,5 @@ import 'helper.dart';
 void check(NullApi local, List<int> values) {
   async.Future.microtask(null); /* expect: null-closures */
   local.any(null);
-  values.map(null);
+  values.map(null); /* expect: null-closures */
 }

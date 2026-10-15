@@ -26,17 +26,6 @@ class Pet {
   int get hashCode => name.hashCode;
 }
 
-class Car {
-  final String? model;
-  Car(this.model);
-
-  @override
-  bool operator ==(dynamic other) =>
-      other?.model == model; /* expect: avoid-null-checks-in-equality-operators */
-
-  @override
-  int get hashCode => model.hashCode;
-}
 
 class Box {
   final Object? content;

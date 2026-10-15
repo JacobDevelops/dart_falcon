@@ -38,3 +38,10 @@ void cases(Object o) {
       print(other);
   }
 }
+
+// Collection `for` elements are not `for` statements; the analyzer skips them.
+List<int> elements(List<int> numbers, List<(int, int)> rows) => [
+  for (final n in numbers) n,
+  for (final int m in numbers) m,
+  for (final (a, b) in rows) a + b,
+];

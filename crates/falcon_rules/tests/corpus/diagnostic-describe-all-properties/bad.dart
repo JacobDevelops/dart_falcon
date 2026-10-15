@@ -48,3 +48,28 @@ class Model with Diagnosticable {
   final double value; /* expect: diagnostic-describe-all-properties */
   final Duration timeout = Duration.zero; /* expect: diagnostic-describe-all-properties */
 }
+
+class Choice<T> extends StatelessWidget {
+  const Choice({super.key, required this.value});
+
+  final T value; /* expect: diagnostic-describe-all-properties */
+
+  @override
+  Widget build(BuildContext context) => const SizedBox();
+}
+
+abstract class SinkWidget extends StatelessWidget {
+  const SinkWidget({super.key});
+
+  set sink(int value);
+}
+
+class Sink extends SinkWidget {
+  Sink({super.key});
+
+  // A field does not override an inherited setter.
+  int sink = 0; /* expect: diagnostic-describe-all-properties */
+
+  @override
+  Widget build(BuildContext context) => const SizedBox();
+}

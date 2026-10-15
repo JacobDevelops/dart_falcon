@@ -39,3 +39,37 @@ enum Mode {
   const Mode(this.code); /* expect: deprecated-consistency */
   final int code;
 }
+@Deprecated.extend()
+class Extendable {
+  Extendable(); /* expect: deprecated-consistency */
+}
+
+@Deprecated.implement()
+class Implementable {
+  Implementable(); /* expect: deprecated-consistency */
+}
+@deprecated
+extension type Representation(int value) { /* expect: deprecated-consistency */
+  Representation.named(this.value); /* expect: deprecated-consistency */
+}
+
+@deprecated
+extension type PrivateRepresentation._(int value) {} /* expect: deprecated-consistency */
+
+typedef Dep = Deprecated;
+
+@Dep('old')
+class Aliased {
+  Aliased(); /* expect: deprecated-consistency */
+}
+
+@Dep.extend()
+class AliasedNamed {
+  AliasedNamed(); /* expect: deprecated-consistency */
+}
+
+@deprecated
+extension type const ConstRepresentation(int value) {} /* expect: deprecated-consistency */
+
+@deprecated
+extension type const ConstNamedRepresentation._(int value) {} /* expect: deprecated-consistency */

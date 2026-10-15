@@ -17,3 +17,7 @@ void d(int x) {
     print('never');
   }
 }
+
+// A local binding shadows the effectful top-level getter.
+int get changing => 0;
+bool shadowedGetter(int changing) => changing == changing; /* expect: no-self-comparisons */

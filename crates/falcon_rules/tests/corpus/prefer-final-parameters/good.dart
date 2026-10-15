@@ -1,3 +1,4 @@
+// @dart = 3.12
 class Counter {
   int count = 0;
   final String label;
@@ -28,10 +29,6 @@ void greet(final String name, {final String greeting = 'Hi'}) {
 
 void wildcard(final int _) {}
 
-void callback(void cb(final int x)) {
-  cb(1);
-}
-
 void closures(final List<int> items) {
   items.forEach((final item) => print(item));
   void local(int x) {
@@ -44,3 +41,9 @@ void closures(final List<int> items) {
 
   local(1);
 }
+
+// Representation formals declare final fields, even without `final`.
+extension type Identifier(int value) {}
+extension type const NamedIdentifier._(int value) {}
+extension type Pair((int, int) value) {}
+extension type WildcardIdentifier(int _) {}

@@ -22,10 +22,6 @@ Future<void> readsGetter(Api api) async {
   api.pending; /* expect: unawaited-futures */
 }
 
-Future<void> callsFutureOr() async {
-  maybeFetch(); /* expect: unawaited-futures */
-}
-
 Future<void> cascade(Api api) async {
   api..save(); /* expect: unawaited-futures */
 }

@@ -1,3 +1,5 @@
+// @dart = 3.13
+
 class Good {
   final int a;
 
@@ -65,4 +67,80 @@ class Redirect {
 
   Redirect(this.value);
   Redirect.twice(int value) : this(value * 2);
+}
+
+class PrimaryDeclaring(var int value);
+
+class PrimaryFinalDeclaring([final int value = 0]);
+
+class PrimaryInitializing(this.value) {
+  final int value;
+}
+
+class PrimarySuper(super.x) extends Base;
+
+class PrimaryInitializer(int value) {
+  this : stored = value;
+  final int stored;
+}
+
+class PrimaryAssert({int value = 1}) {
+  this : assert(value > 0);
+}
+
+class PrimaryBody({int value = 0}) {
+  this {
+    print(value);
+  }
+}
+
+class PrimaryField(int value) {
+  final int stored = value;
+}
+
+class PrimaryFieldClosure(int value) {
+  final int Function() callback = () => value;
+}
+
+class PrimaryBodyClosure(int value) {
+  this {
+    void inner() {
+      print(value);
+    }
+    inner();
+  }
+}
+
+// A body-local shadow must not hide a parameter in a later field initializer.
+class PrimarySeparateScopes(int value) {
+  this {
+    {
+      int value = 1;
+      print(value);
+    }
+  }
+  final int stored = value;
+}
+
+class PrimaryNamedUsed.named(int value) {
+  final int stored = value;
+}
+
+class PrimaryPrivateUsed._(int value) {
+  this : assert(value > 0);
+}
+
+class PrimaryDeprecated(@deprecated int old, @Deprecated('use other') int older);
+
+class PrimaryUnderscores(int _, int __);
+
+extension type PrimaryRepresentation(int value) {}
+
+extension type PrimaryPrivateRepresentation._(int value) {}
+
+mixin class PrimaryMixinTrivial();
+
+enum PrimaryEnumField(int value) {
+  a(1);
+  final int stored = value;
 }

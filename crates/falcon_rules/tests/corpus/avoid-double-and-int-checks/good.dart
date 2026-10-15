@@ -41,19 +41,24 @@ void nullableTypes(Object? x) {
   }
 }
 
-void negated(num x) {
-  if (x is! double) {
-    print('not double');
-  } else if (x is int) {
-    print('int');
-  }
-}
 
 void nestedBlock(num x) {
   if (x is double) {
     print('double');
   } else {
     if (x is int) {
+      print('int');
+    }
+  }
+}
+
+class FieldChecks {
+  num field = 1;
+
+  void check() {
+    if (field is double) {
+      print('double');
+    } else if (field is int) {
       print('int');
     }
   }

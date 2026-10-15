@@ -24,7 +24,7 @@ void testParameterTypeCheck() {
 }
 
 void testNullableTypeCheck() {
-  int? maybeInt = 5;
+  int? maybeInt = int.tryParse('5');
   if (maybeInt is int) {
     print("maybeInt is int");
   }

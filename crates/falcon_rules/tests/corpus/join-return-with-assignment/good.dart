@@ -68,8 +68,3 @@ int callStatement(List<int> list) {
   list.add(1);
   return list.length;
 }
-
-int parenthesizedReturn(int x) {
-  x = 1;
-  return (x);
-}

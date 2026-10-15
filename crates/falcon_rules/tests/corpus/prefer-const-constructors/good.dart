@@ -24,8 +24,6 @@ void use(Object value) {}
 
 Box<T> wrap<T>(T value) => Box<T>(value);
 
-Box<List<T>> empty<T>() => Box([]);
-
 void constructors(int x) {
   const a = Point(1, 2);
   final b = const Point.origin();
@@ -47,3 +45,39 @@ class Holder {
 
 @Deprecated('use Point.origin')
 const origin = Point(0, 0);
+
+class Keyed {
+  const Keyed();
+  @override
+  bool operator ==(Object other) => other is Keyed;
+  @override
+  int get hashCode => 0;
+}
+
+class Wrapper {
+  const Wrapper(this.value, {required this.flag}) : assert(value != null);
+  final Object? value;
+  final bool flag;
+}
+
+class Pair<T> {
+  const Pair(this.first);
+  final T first;
+}
+
+class Notify<T> {
+  const Notify();
+  void call(Pair<T> pair) {}
+}
+
+void notConstant(Notify<int> notify, Object? unknown) {
+  print(Wrapper({1.5: 1}, flag: true));
+  // Only the key itself can be const: `Keyed` overrides `==`.
+  print(Wrapper({const Keyed(): 1}, flag: true));
+  print(Wrapper(null, flag: true));
+}
+
+class Typed<T> {
+  Pair<T> make() => Pair(1 as T);
+  void send(void Function(Pair<T>) sink) => sink(Pair(null as T));
+}

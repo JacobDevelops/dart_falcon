@@ -42,10 +42,6 @@ class Sub extends Base {
   Null value() => null;
 }
 
-// Unresolvable inheritance stays silent.
-class Remote extends SomeUnknownBase {
-  Null fetch() => null;
-}
 
 // Overriding an SDK member.
 class Failure extends Error {

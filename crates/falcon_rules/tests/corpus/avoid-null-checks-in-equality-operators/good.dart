@@ -58,3 +58,14 @@ class Num {
 
   Num operator +(Num? other) => Num(n + (other?.n ?? 0));
 }
+class Car {
+  final String? model;
+  Car(this.model);
+
+  @override
+  bool operator ==(dynamic other) =>
+      other?.model == model;
+
+  @override
+  int get hashCode => model.hashCode;
+}

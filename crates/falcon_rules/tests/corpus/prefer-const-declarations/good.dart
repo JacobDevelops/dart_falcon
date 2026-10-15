@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 const o = <int>[];
 
 // Non-const collection literals create fresh mutable values.
@@ -30,8 +28,7 @@ class Point {
 
 final implicit = Point(0, 0);
 
-// Imported or unknown names cannot be proven constant.
-final pi = math.pi;
+// Unknown names cannot be proven constant.
 final unknown = somewhereElse;
 
 late final lazy = DateTime.now();
@@ -40,11 +37,10 @@ void locals(int parameter) {
   const c = 1;
   final fromParam = parameter;
   final fromCall = c.toString();
-  final typeTest = c is int;
   final noInit;
   noInit = 2;
   final interpolatedVar = 'value $parameter';
-  print([fromParam, fromCall, typeTest, noInit, interpolatedVar]);
+  print([fromParam, fromCall, noInit, interpolatedVar]);
 }
 
 const shadowed = 1;
@@ -62,9 +58,35 @@ void loops(List<int> values) {
   }
 }
 
+// For-loop initializer declarations are not variable declaration statements.
+void forInitializers() {
+  for (final int i = 0; i < 1;) {
+    print(i);
+    break;
+  }
+  for (final first = 0, second = 1; first < second;) {
+    break;
+  }
+}
+
 void divide() {
   final bad = 1 ~/ 0;
   print(bad);
 }
 
 final nonConstantTuple = (1, () {});
+
+// Operators are constant only for the operand types the language allows.
+const separatorWidth = 80;
+final repeated = '-' * separatorWidth;
+final repeatedLiteral = 'ab' * 2;
+const numbers = [1, 2];
+final joined = const [0] + numbers;
+
+class Holder {
+  static const label = 'x';
+  static final labelTimesTwo = label * 2;
+  int instanceMethod() => 0;
+}
+
+final instanceTearOff = Holder().instanceMethod;

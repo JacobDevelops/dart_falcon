@@ -27,3 +27,16 @@ class Remote extends SomeUnknownBase {}
 class Base {}
 
 class Derived extends Base {}
+
+sealed class SealedInterface extends I {}
+
+interface class KeepsInterface extends SealedInterface {}
+
+sealed class SealedFinal extends F {}
+
+final class KeepsFinal extends SealedFinal {}
+
+mixin EmptyMixin {}
+sealed class SealedAlias = I with EmptyMixin;
+
+interface class KeepsAliasInterface extends SealedAlias {}

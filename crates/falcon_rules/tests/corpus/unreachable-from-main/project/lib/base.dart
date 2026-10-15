@@ -1,0 +1,3 @@
+class ImportedBase {
+  void inherited() {}
+}

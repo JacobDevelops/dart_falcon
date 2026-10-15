@@ -19,3 +19,11 @@ void bad(int x) {
   };
   print(y);
 }
+
+void constantInterpolation() {
+  const a = 20;
+  if ('$a' == '20') {} /* expect: literal-only-boolean-expressions */
+  if ('${1 + 2}' == '3') {} /* expect: literal-only-boolean-expressions */
+  const flag = true;
+  if ('${flag ? a : 0}' == '20') {} /* expect: literal-only-boolean-expressions */
+}

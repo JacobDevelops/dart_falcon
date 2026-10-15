@@ -54,3 +54,9 @@ void promotedInOneFunction(dynamic scopedValue) {
 void stillDynamicInAnotherFunction(dynamic scopedValue) {
   print(scopedValue.length); /* expect: avoid-dynamic-calls */
 }
+
+void cascadeFunction(Function callback) {
+  callback
+    ..call() /* expect: avoid-dynamic-calls */
+    ..call(); /* expect: avoid-dynamic-calls */
+}

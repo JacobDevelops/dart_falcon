@@ -44,3 +44,9 @@ void closures(int total) {
   };
   print(f(total));
 }
+
+void nestedInOwnAssignment(int count, [int? limit]) {
+  count = count++; /* expect: parameter-assignments */
+  limit = limit ??= 2; /* expect: parameter-assignments */
+  print('$count$limit');
+}

@@ -15,10 +15,7 @@ class Box<T> {
 void bad(Future<int> integerFuture) {
   accept<void>(1); /* expect: void-checks */
   accept<void>(makeInt()); /* expect: void-checks */
-  acceptFuture<void>(integerFuture); /* expect: void-checks */
   acceptFutureOr<void>('text'); /* expect: void-checks */
-  acceptCallback<void>(() => 1); /* expect: void-checks */
-  acceptCallback<void>(() { return 'x'; }); /* expect: void-checks */
   Box<void>(1); /* expect: void-checks */
   Box<void> box = Box<void>(null);
   box.setValue(1); /* expect: void-checks */
@@ -26,16 +23,31 @@ void bad(Future<int> integerFuture) {
   List<void> list = [];
   list.add(1); /* expect: void-checks */
   list[0] = 1; /* expect: void-checks */
-  final inferredCallback = () => 3;
-  acceptCallback<void>(inferredCallback); /* expect: void-checks */
-  acceptCallback<void>(() {
-    if (true) {
-      return 'nested'; /* expect: void-checks */
-    }
-    for (final value in <int>[1]) {
-      print(value);
-      return 2; /* expect: void-checks */
-    }
-    return null;
-  });
+}
+
+// Analyzer 3.13.5: adv-AdvB/repro/vc_local.dart and vc_misc.dart.
+void voidLocal(dynamic value) {
+  void local;
+  local = 1; /* expect: void-checks */
+  local = value; /* expect: void-checks */
+}
+void voidPatterns(void parameter) {
+  [parameter] = <int>[7]; /* expect: void-checks */
+  (parameter, _) = (1, 2); /* expect: void-checks */
+}
+class VoidLocations<T> {
+  set value(T value) {}
+  static void accept(void value) {}
+  set dynamicReturn(dynamic value) {
+    return value; /* expect: void-checks */
+  }
+}
+extension VoidExtension on int {
+  void accept(void value) {}
+}
+void voidCalls(void Function(void) callback, dynamic value) {
+  VoidLocations<void>().value = 1; /* expect: void-checks */
+  VoidLocations.accept(1); /* expect: void-checks */
+  callback.call(1); /* expect: void-checks */
+  VoidExtension(1).accept(value); /* expect: void-checks */
 }

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:meta/meta.dart' show awaitNotRequired;
+import 'package:meta/meta.dart' as meta;
 
 Future<int> fetch() async => 1;
 
@@ -42,4 +44,15 @@ void assignment(Api api) {
   Future<void> pending;
   pending = api.save();
   pending.ignore();
+}
+
+void annotatedLocalFunctions() {
+  @awaitNotRequired
+  Future<void> handleError() async {}
+  handleError();
+  print('${handleError()}');
+
+  @meta.awaitNotRequired
+  Future<void> prefixed() async {}
+  prefixed();
 }

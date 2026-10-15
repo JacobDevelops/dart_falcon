@@ -28,3 +28,9 @@ void strings(String? s, Object o) {
 }
 
 void debugPrint(String message) {}
+
+// Mixed `int` and `double` operands make `clamp` return a `num`.
+void mixedClamp(double d, int? maybe) {
+  d.clamp(0, 1).toDouble();
+  (maybe ?? 1.5).toDouble();
+}

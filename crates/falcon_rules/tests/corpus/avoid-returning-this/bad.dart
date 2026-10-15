@@ -34,3 +34,8 @@ enum Level {
 
   Level same() => this; /* expect: avoid-returning-this */
 }
+
+// An unresolved superclass does not establish an override.
+class Remote extends SomeUnknownBase {
+  Remote ping() => this; /* expect: avoid-returning-this */
+}

@@ -34,7 +34,32 @@ class Counter {
     this._count = 0;
   }
 
-  int next() => this._count! + 1;
+  int next() => _count! + 1;
+}
+
+// Each class's field is its own declaration: a plain read of the other
+// class's same-named field does not disqualify this one.
+class NullAsserted {
+  int? _count; /* expect: use-late-for-private-fields-and-variables */
+
+  int next() => _count! + 1;
+}
+
+// A read inside a class with a const constructor is not visited.
+class ConstReader {
+  const ConstReader();
+  int? read() => _i;
+}
+
+// Writes through a type name keep the field lateable.
+class Qualified {
+  static int? _shared; /* expect: use-late-for-private-fields-and-variables */
+
+  static int read() => _shared!;
+}
+
+void initShared() {
+  Qualified._shared = 1;
 }
 
 extension _Helpers on String {

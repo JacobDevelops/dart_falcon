@@ -19,3 +19,43 @@ void use(Api value) {
   Api.old(); /* expect: deprecated-member-use-from-same-package */
   value.oldMethod(); /* expect: deprecated-member-use-from-same-package */
 }
+
+class Properties {
+  @deprecated
+  int oldField = 0;
+  @deprecated
+  int get oldGetter => 0;
+  @deprecated
+  set oldSetter(int value) {}
+}
+class InheritedProperties extends Properties {}
+void propertyUses(InheritedProperties value) {
+  print(value.oldField); /* expect: deprecated-member-use-from-same-package */
+  print(value.oldGetter); /* expect: deprecated-member-use-from-same-package */
+}
+class GlobalUses {
+  void call() {
+    oldFunction(); /* expect: deprecated-member-use-from-same-package */
+  }
+}
+/// [oldFunction] /* expect: deprecated-member-use-from-same-package */
+void linkedFunction() {}
+/// [Properties.oldGetter] /* expect: deprecated-member-use-from-same-package */
+void linkedGetter() {}
+class LinkedProperties extends Properties {
+  /// [oldField] /* expect: deprecated-member-use-from-same-package */
+  void linkedMember() {}
+}
+enum OldChoice {
+  @deprecated
+  old,
+  current;
+}
+void patternUse(OldChoice value) {
+  switch (value) {
+    case OldChoice.old: /* expect: deprecated-member-use-from-same-package */
+      break;
+    case OldChoice.current:
+      break;
+  }
+}

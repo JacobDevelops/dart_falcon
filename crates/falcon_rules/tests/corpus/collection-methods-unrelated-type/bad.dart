@@ -60,3 +60,20 @@ void scopedCollections(List<int> values) {
   }
   values.contains(1);
 }
+
+class Lookup implements Map<String, int> {
+  @override
+  bool containsKey(Object? key) => false;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+void overridden(Lookup lookup, List<int> values) {
+  lookup.containsKey(1); /* expect: collection-methods-unrelated-type */
+  values..contains('x'); /* expect: collection-methods-unrelated-type */
+}
+
+extension IntListChecks on List<int> {
+  bool hasText(String text) => contains(text); /* expect: collection-methods-unrelated-type */
+}

@@ -23,3 +23,12 @@ void main() {
   const viaName = Point.origin;
   print([notNamed, notConst, otherFlag, runtimeFlag, viaName, Point._secret]);
 }
+
+class Different {
+  const Different(this.value);
+  const Different.one() : value = 1;
+  final int value;
+  static const zero = Different(0);
+}
+
+const unequalFields = Different.one();

@@ -24,24 +24,17 @@ class Square implements Shape {
   double get area => 1;
 }
 
-// An abstract `==` declaration is not an override with value semantics.
-abstract class Comparable2 {
-  @override
-  bool operator ==(Object other);
-}
-
-class Impl implements Comparable2 {}
-
-// A `==` provided by a mixin is not a class override.
-mixin Equality {
-  @override
-  bool operator ==(Object other) => true;
-}
-
-class Point implements Equality {}
 
 // SDK types keep the platform's `==`.
 class MyException implements Exception {}
 
 // Unresolved interfaces stay silent.
 class Remote implements SomeUnknownType {}
+
+// Only class declarations participate in the official lint.
+mixin SizeInterface implements Size {}
+enum SizeEnum implements Size {
+  byte;
+  @override
+  int get inBytes => 1;
+}

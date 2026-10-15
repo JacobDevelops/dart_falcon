@@ -24,3 +24,6 @@ enum Shade {
   light,
   dark,
 }
+
+/// A typedef's scope is closed: [day] and [T] resolve, [missingName] does not. /* expect: comment-references */
+typedef DayPredicate<T> = bool Function(DateTime day, T value);

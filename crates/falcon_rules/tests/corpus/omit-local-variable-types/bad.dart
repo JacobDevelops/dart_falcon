@@ -22,3 +22,22 @@ void f(int n, String s, List<int> items, Point p, bool flag) {
   for (int item in items) {} /* expect: omit-local-variable-types */
   print([a, b, c, d, e, g, h, i, j, k, q, r, t, flag]);
 }
+
+T identity<T>(T value) => value;
+class Box<T> {
+  final T value;
+  Box(this.value);
+  U convert<U>(U value) => value;
+}
+void genericInferred(Box<String> receiver, int Function() callback) {
+  int argument = identity(1);
+  Box<int> instance = Box(1); /* expect: omit-local-variable-types */
+  Box<int> explicitNew = new Box(1); /* expect: omit-local-variable-types */
+  int method = receiver.convert(1); /* expect: omit-local-variable-types */
+  int functionValue = callback(); /* expect: omit-local-variable-types */
+}
+
+void objectBound<T extends Object>(T? p) {
+  final T y = p!; /* expect: omit-local-variable-types */
+  print(y);
+}

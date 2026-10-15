@@ -36,3 +36,18 @@ void loop(int item, List<int> items) {
     print(item);
   }
 }
+
+// The analyzer does not search inside assignments that write something else.
+class Callbacks {
+  void Function()? onCancel;
+}
+
+void nestedInAssignment(List<int> target, int targetOffset, int size, Callbacks c) {
+  target[targetOffset++] = 1;
+  var copy = 0;
+  copy = size++;
+  c.onCancel = () {
+    size = 0;
+  };
+  print(copy);
+}

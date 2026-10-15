@@ -34,3 +34,22 @@ class PubliclyConstructible {
 void ignored(PubliclyConstructible value) {
   switch (value) {}
 }
+
+enum Level {
+  low._(1),
+  high._(2);
+
+  const Level._(this.value);
+  final int value;
+  static const Level min = low;
+  static const Level max = high;
+}
+
+void exhaustiveEnum(Level level) {
+  switch (level) {
+    case Level.low:
+      break;
+    case Level.high:
+      break;
+  }
+}

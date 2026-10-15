@@ -1,0 +1,2 @@
+import 'good_deprecated_library.dart' show RawKeyEvent; /* expect: deprecated-member-use-from-same-package, msg: "'package:deprecation_example/good_deprecated_library.dart' is deprecated and shouldn't be used." */ /* expect: deprecated-member-use-from-same-package */
+export 'good_deprecated_library.dart' show RawKeyEvent; /* expect: deprecated-member-use-from-same-package, msg: "'package:deprecation_example/good_deprecated_library.dart' is deprecated and shouldn't be used." */ /* expect: deprecated-member-use-from-same-package */

@@ -40,3 +40,37 @@ class Box {
     size = value;
   }
 }
+
+class Remote extends SomeUnknownBase {
+  int port = 0;
+  void setPort(int value) => port = value; /* expect: use-setters-to-change-properties */
+}
+
+class PropertyBase {
+  int port = 0;
+}
+class InheritedProperty extends PropertyBase {
+  void setPort(int value) => port = value; /* expect: use-setters-to-change-properties */
+}
+
+class Payload {
+  int value = 0;
+}
+class WritesOther {
+  final Payload payload = Payload();
+  void update(int value) => payload.value = value; /* expect: use-setters-to-change-properties */
+  void updateArgument(Payload other) => other.value = other.value;
+}
+
+// Resolve the implicit property target through a locally declared extension.
+class ExtensionTarget {
+  int value = 0;
+}
+
+extension ChangeValue on ExtensionTarget {
+  void changeValue(int newValue) { /* expect: use-setters-to-change-properties */
+    value = newValue;
+  }
+
+  void changeExplicitly(int newValue) => this.value = newValue; /* expect: use-setters-to-change-properties */
+}

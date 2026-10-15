@@ -46,3 +46,15 @@ class WeirdEquality {
 
   bool compare() => this == this;
 }
+
+// Resolving a getter's scalar type must not make repeated reads stable.
+bool negatedGetterEqual() => -changing == -changing;
+
+class ChangingValue {
+  int get value => nextId++;
+  bool equal() => value == value;
+}
+
+class InheritedChangingValue extends ChangingValue {
+  bool inheritedEqual() => value == value;
+}

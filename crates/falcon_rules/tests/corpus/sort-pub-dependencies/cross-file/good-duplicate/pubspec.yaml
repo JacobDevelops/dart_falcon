@@ -1,0 +1,9 @@
+name: duplicate_dependencies
+environment:
+  sdk: ^3.9.0
+dependencies:
+  b: any
+  a: any
+dev_dependencies:
+  x: any
+  x: any

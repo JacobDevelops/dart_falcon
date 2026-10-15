@@ -31,3 +31,10 @@ class Child extends Base {
 class OptionalChild extends Base {
   OptionalChild(super.a, [super.c]); /* expect: matching-super-parameters */
 }
+
+class PrivateBase {
+  PrivateBase(int _channel);
+}
+class PublicChild extends PrivateBase {
+  PublicChild(super.channel); /* expect: matching-super-parameters */
+}

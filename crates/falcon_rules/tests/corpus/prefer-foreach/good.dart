@@ -8,9 +8,15 @@ class Node {
   void add(Node other) {}
 }
 
+class Callable {
+  void call() {}
+}
+
+void accept(Function callback) {}
+
 void log(Object? value) {}
 
-void main(List<int> values, List<Node> nodes, int other) {
+void examples(List<int> values, List<Node> nodes, int other, List<Callable> callables) {
   values.forEach(print);
   for (final v in values) {
     print(v);
@@ -25,5 +31,8 @@ void main(List<int> values, List<Node> nodes, int other) {
   for (x in values) print(x);
   for (final (a, b) in [(1, 2)]) print(a);
   for (var i = 0; i < 3; i++) print(i);
-  for (final v in values) unknownFunction(v);
+  // The argument is torn off implicitly as `c.call`.
+  for (final c in callables) {
+    accept(c);
+  }
 }

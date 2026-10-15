@@ -25,3 +25,13 @@ void more<T>(int x, String s) {
   final list = [if (x > 1) 1];
   print(list);
 }
+
+void nonConstantInterpolation() {
+  final a = 20;
+  if ('$a' == '20') {}
+  const outer = 20;
+  void shadowed(int outer) {
+    if ('$outer' == '20') {}
+  }
+  shadowed(outer);
+}

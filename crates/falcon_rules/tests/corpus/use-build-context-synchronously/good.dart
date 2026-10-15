@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 Future<void> work() async {}
-void consume(BuildContext context) {}
+Object? consume(BuildContext context) => null;
 
 Future<void> guarded(BuildContext context) async {
   await work();
@@ -54,7 +54,7 @@ Future<void> terminatingSwitch(BuildContext context, int value) async {
     default:
       break;
   }
-  context.toString();
+  context.toString(); /* expect: use-build-context-synchronously */
 }
 
 Future<void> outerGapDoesNotEnterClosure(BuildContext context) async {
@@ -106,7 +106,7 @@ Future<void> classicForMountedCondition(BuildContext context) async {
 Future<void> doWhileMountedExit(BuildContext context) async {
   await work();
   do {} while (!context.mounted);
-  context.toString();
+  context.toString(); /* expect: use-build-context-synchronously */
 }
 
 Future<void> guardedGapBranch(BuildContext context, bool flag) async {
@@ -148,7 +148,7 @@ Future<void> unreachableAfterConditionlessFor(BuildContext context) async {
   for (;;) {
     await work();
   }
-  context.toString();
+  context.toString(); /* expect: use-build-context-synchronously */
 }
 
 Future<void> multiDeclaratorShadow(BuildContext context) async {
@@ -166,7 +166,7 @@ Future<void> unbracedIfScope(
 ) async {
   await work();
   if (!context.mounted) return;
-  if (replace) int context = 0;
+  if (replace) { int context = 0; }
   context.toString();
 }
 
@@ -215,14 +215,14 @@ Future<void> unreachableAfterReturningSwitch(
     default:
       return;
   }
-  context.toString();
+  context.toString(); /* expect: use-build-context-synchronously */
 }
 
 Future<void> returningAssignmentDoesNotLeak(
   BuildContext context,
   bool replace,
 ) async {
-  var value = 0;
+  Object value = 0;
   if (replace) {
     value = context;
     return;
@@ -235,7 +235,7 @@ Future<void> mutuallyExclusiveAssignment(
   BuildContext context,
   bool useContext,
 ) async {
-  var value = 0;
+  Object value = 0;
   if (useContext) {
     value = context;
   } else {
@@ -244,7 +244,7 @@ Future<void> mutuallyExclusiveAssignment(
   }
 }
 
-class MyState extends State<Object> {
+abstract class MyState extends State<StatefulWidget> {
   Future<void> guardedState() async {
     await work();
     if (!mounted) return;
@@ -260,7 +260,6 @@ class MyState extends State<Object> {
   }
 
   void localFunctionContextShadow() {
-    context();
     Future<void> context() async {
       await work();
       context();
@@ -299,4 +298,89 @@ class MyState extends State<Object> {
       context();
     }
   }
+}
+
+// The official rule matches the mounted getter, not receiver identity.
+Future<void> otherContextMountedGetter(
+  BuildContext context,
+  BuildContext other,
+) async {
+  await work();
+  if (other.mounted) {
+    context.toString();
+  }
+}
+
+Future<void> declaredObjectDoesNotBecomeContext(BuildContext context) async {
+  Object value = context;
+  await work();
+  value.toString();
+}
+
+Future<void> declaredDynamicDoesNotBecomeContext(BuildContext context) async {
+  dynamic value = 0;
+  value = context;
+  await work();
+  value.toString();
+}
+
+Future<void> finallyGuardEscapes(BuildContext context) async {
+  try {
+    await work();
+  } finally {
+    if (!context.mounted) return;
+  }
+  context.toString();
+}
+
+Future<void> catchGuardAppliesInsideCatch(BuildContext context) async {
+  try {
+    await work();
+  } catch (_) {
+    if (!context.mounted) return;
+    context.toString();
+  }
+}
+
+Future<void> switchMountedWhenGuard(BuildContext context, int value) async {
+  await work();
+  switch (value) {
+    case 0 when context.mounted:
+      context.toString();
+    default:
+      break;
+  }
+}
+
+Future<void> doBodyGapIsObserved(BuildContext context) async {
+  do {
+    context.toString(); /* expect: use-build-context-synchronously */
+    await work();
+  } while (false);
+}
+
+abstract class OtherMountedState extends State<StatefulWidget> {
+  Future<void> otherStateGetterGuardsStateContext(
+    State<StatefulWidget> other,
+  ) async {
+    await work();
+    if (!other.mounted) return;
+    context.toString();
+  }
+}
+
+Future<void> infiniteLoopMountedExit(BuildContext context) async {
+  await work();
+  if (!context.mounted) {
+    while (true) {}
+  }
+  context.toString();
+}
+
+Never stop() => throw StateError('stopped');
+
+Future<void> neverCallMountedExit(BuildContext context) async {
+  await work();
+  if (!context.mounted) stop();
+  context.toString();
 }

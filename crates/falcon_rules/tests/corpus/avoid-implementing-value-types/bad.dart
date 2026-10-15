@@ -31,9 +31,9 @@ class Both implements Other, Size { /* expect: avoid-implementing-value-types */
   int get inBytes => 1;
 }
 
-mixin SizeLike implements Size {} /* expect: avoid-implementing-value-types */
+mixin SizeLike implements Size {}
 
-enum Unit implements Size { /* expect: avoid-implementing-value-types */
+enum Unit implements Size {
   byte;
 
   @override
@@ -41,3 +41,15 @@ enum Unit implements Size { /* expect: avoid-implementing-value-types */
 }
 
 abstract class Measured implements Kilobytes {} /* expect: avoid-implementing-value-types */
+
+abstract class Comparable2 {
+  @override
+  bool operator ==(Object other);
+}
+class Impl implements Comparable2 {} /* expect: avoid-implementing-value-types */
+
+mixin Equality {
+  @override
+  bool operator ==(Object other) => true;
+}
+class Point implements Equality {} /* expect: avoid-implementing-value-types */

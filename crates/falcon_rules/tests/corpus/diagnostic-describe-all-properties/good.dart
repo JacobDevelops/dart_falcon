@@ -48,12 +48,3 @@ class Plain {
 
   final int value;
 }
-
-class Unresolved extends StatelessWidget {
-  const Unresolved({super.key, required this.padding});
-
-  final EdgeInsets padding;
-
-  @override
-  Widget build(BuildContext context) => Padding(padding: padding);
-}

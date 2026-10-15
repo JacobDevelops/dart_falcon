@@ -1,3 +1,5 @@
+// Tall-style formatting (language 3.7+) disables the lint; pin an older version.
+// @dart = 3.6
 void call(Object a, [Object? b, Object? c]) {}
 void named({Object? a, Object? b}) {}
 
@@ -51,3 +53,8 @@ void f() {
 typedef Callback = void Function(
   int a,
   int b); /* expect: require-trailing-commas */
+
+List<Object> nestedLast() => [
+      [0, 'a'],
+      [1, 'b']
+    ]; /* expect: require-trailing-commas */

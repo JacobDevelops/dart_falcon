@@ -25,3 +25,20 @@ class Sub extends Range {
     assert(a > 0); /* expect: prefer-asserts-in-initializer-lists */
   }
 }
+
+class Parent {
+  final int value;
+  Parent(this.value);
+}
+
+class SuperFormal extends Parent {
+  SuperFormal(super.value) {
+    assert(value > 0); /* expect: prefer-asserts-in-initializer-lists */
+  }
+}
+
+extension type CheckedValue(int? value) {
+  CheckedValue.checked(this.value) {
+    assert(value != null); /* expect: prefer-asserts-in-initializer-lists */
+  }
+}

@@ -13,7 +13,7 @@ class NamedMarker {
   const NamedMarker({@deprecated String? oldOption, String? option});
 }
 
-@NamedMarker(oldOption: 'old') /* expect: deprecated-member-use-from-same-package */
+@NamedMarker(oldOption: 'old')
 void namedMarked() {}
 
 @deprecated

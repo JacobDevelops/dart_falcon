@@ -26,3 +26,36 @@ class MemberShadow {
     if (value case LocalType) {}
   }
 }
+
+// Matching Type values against type literals is intentional.
+void typeValues(Type value) {
+  if (value case int) {}
+  switch (value) {
+    case String:
+      break;
+    default:
+      break;
+  }
+}
+
+void boundedTypeValues<T extends Type>(T value) {
+  if (value case int) {}
+}
+
+void dynamicTypedPatterns(Object? value) {
+  if (value case dynamic _) {}
+  if (value case dynamic item) {
+    print(item);
+  }
+  if (value case const (dynamic)) {}
+}
+
+void dynamicTypeValues(Type value) {
+  if (value case dynamic) {}
+  switch (value) {
+    case dynamic:
+      break;
+    default:
+      break;
+  }
+}

@@ -26,3 +26,14 @@ class WithMethod {
   void size() {}
   set length(int value) {} /* expect: avoid-setters-without-getters */
 }
+
+abstract class Readable {
+  int get width;
+}
+class WriteOnly implements Readable {
+  set width(int value) {} /* expect: avoid-setters-without-getters */
+}
+
+class Remote extends SomeUnknownBase {
+  set port(int value) {} /* expect: avoid-setters-without-getters */
+}

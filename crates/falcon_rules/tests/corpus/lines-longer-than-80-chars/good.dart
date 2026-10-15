@@ -15,3 +15,6 @@ A multiline string line that is very long and goes past the eighty limit here, w
   use('short');
   use('éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé');
 }
+
+int a = 1;
+var interpolationComment = '${a /* p/q */} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';

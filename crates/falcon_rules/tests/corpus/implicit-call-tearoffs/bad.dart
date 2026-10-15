@@ -1,3 +1,5 @@
+import 'dart:async';
+
 class Callable {
   const Callable();
   void call() {}
@@ -109,4 +111,76 @@ class ChildReceiver extends BaseReceiver {
 void topLevelCalls(Callable callback, Receiver receiver) {
   Receiver(callback, named: callback.call); /* expect: implicit-call-tearoffs */
   receiver.instance(callback, named: callback.call); /* expect: implicit-call-tearoffs */
+}
+
+class ObjectReceiver {
+  void accept(Object value) {}
+}
+
+class LexicalLookup extends ObjectReceiver {
+  // Inherited members are not in lexical scope: the top-level `accept` wins.
+  void topLevelShadowsInherited(Callable callback) {
+    accept(callback); /* expect: implicit-call-tearoffs */
+  }
+}
+
+class MutableCallable {
+  void call() {}
+  int value = 0;
+}
+
+void outerCoercions(
+  MutableCallable first,
+  MutableCallable second,
+  MutableCallable? nullable,
+  bool condition,
+) {
+  void Function() conditional = condition ? first : second; /* expect: implicit-call-tearoffs */
+  void Function() cascade = first..value = 1; /* expect: implicit-call-tearoffs */
+  void Function() coalesced = nullable ?? second; /* expect: implicit-call-tearoffs */
+}
+
+extension type CallableView(Callable value) implements Callable {}
+
+void contextualCoercions(Callable callback, CallableView view) {
+  void Function() extensionValue = view; /* expect: implicit-call-tearoffs */
+  var spread = <void Function()>[...[callback]]; /* expect: implicit-call-tearoffs */
+  (void Function(), int) positional = (callback, 1); /* expect: implicit-call-tearoffs */
+  ({void Function() callback}) named = (callback: callback); /* expect: implicit-call-tearoffs */
+}
+
+Future<void Function()> asyncReturn(Callable callback) async => callback; /* expect: implicit-call-tearoffs */
+Iterable<void Function()> generatorReturn(Callable callback) sync* {
+  yield callback; /* expect: implicit-call-tearoffs */
+}
+
+void boundedCoercion<T extends Callable>(T callback) {
+  void Function() value = callback; /* expect: implicit-call-tearoffs */
+}
+
+class GenericCallable {
+  void call<T>(T value) {}
+}
+
+void acceptIntCallback(void Function(int) callback) {}
+
+void instantiatedCoercions(GenericCallable callback) {
+  Function functionContext = callback<int>; /* expect: implicit-call-tearoffs */
+  void Function(int) typedContext = callback<int>; /* expect: implicit-call-tearoffs */
+  acceptIntCallback(callback<int>); /* expect: implicit-call-tearoffs */
+  callback<int>; /* expect: implicit-call-tearoffs */
+  Function createdFunctionContext = GenericCallable()<int>; /* expect: implicit-call-tearoffs */
+  void Function(int) createdTypedContext = GenericCallable()<int>; /* expect: implicit-call-tearoffs */
+  acceptIntCallback(GenericCallable()<int>); /* expect: implicit-call-tearoffs */
+  GenericCallable()<int>; /* expect: implicit-call-tearoffs */
+}
+
+void acceptFutureOrCallback(FutureOr<void Function()> callback) {}
+
+void futureOrCoercion(Callable callback) {
+  acceptFutureOrCallback(callback); /* expect: implicit-call-tearoffs */
+}
+
+Stream<void Function()> asyncGeneratorReturn(Callable callback) async* {
+  yield callback; /* expect: implicit-call-tearoffs */
 }

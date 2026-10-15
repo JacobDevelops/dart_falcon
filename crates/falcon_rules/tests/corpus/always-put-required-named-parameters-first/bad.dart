@@ -23,3 +23,17 @@ void h() {
   local(b: 1);
   literal(b: 2);
 }
+
+class Base {
+  Base({required int b, int? a});
+}
+
+class Sub extends Base {
+  // Optional super parameters count as optional parameters.
+  Sub({super.a, required super.b}); /* expect: always-put-required-named-parameters-first */
+}
+
+class Widgetish extends Base {
+  final int child;
+  Widgetish({super.a, required this.child}) : super(b: 0); /* expect: always-put-required-named-parameters-first */
+}

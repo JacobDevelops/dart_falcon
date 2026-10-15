@@ -35,8 +35,6 @@ Future<void> f(List<int> list, Some some, bool foo, int? a, int b, Object o) asy
   list..add(1)..clear();
   some.computed;
   topGetter;
-  unknownName;
-  unknownPrefix.member;
   for (var i = 0; i < b; i++) {}
 }
 
@@ -53,3 +51,50 @@ void h(Object e) {
 }
 
 int arrow(int x) => x;
+
+void annotatedLocalFunctions() {
+  @pragma('vm:prefer-inline')
+  void local() {}
+  local();
+}
+
+abstract class GetterInterface {
+  int get value;
+}
+
+class ForwardingGetter implements GetterInterface {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => 0;
+}
+
+void inheritedGetter(ForwardingGetter value) {
+  value.value;
+}
+
+void functionReturnGetter(GetterInterface Function() create) {
+  final value = create();
+  value.value;
+}
+
+void declaredForUpdates() {
+  for (var i = 0; i < 1; i + 1) {}
+}
+
+extension<T> on Future<T> {
+  void get unawaited {}
+}
+
+void extensionGetter(Future<void> Function() work) {
+  // An extension getter may have side effects.
+  work().then((_) {}).unawaited;
+}
+
+class Box {}
+
+extension BoxEffects on Box {
+  void get effect {}
+}
+
+void localExtensionGetter(Box box) {
+  box.effect;
+}

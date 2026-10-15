@@ -86,3 +86,12 @@ void typedCollectionForAssertionRegression() {
   };
   print([list, map]);
 }
+
+// Initializing an `int?` local with an `int` promotes it to `int`; Dart 3.13.5
+// `dart analyze` reports unnecessary_type_check here.
+void testCheckPromotedOnInitialization() {
+  int? maybeInt = 5;
+  if (maybeInt is int) { /* expect: avoid-unnecessary-type-assertions */
+    print("maybeInt is int");
+  }
+}

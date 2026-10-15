@@ -22,3 +22,5 @@ enum Level with Logger { /* expect: prefer-mixin */
   low,
   high,
 }
+
+class LocalLoggerConsumer with Logger {} /* expect: prefer-mixin */

@@ -73,9 +73,17 @@ class BaseStringReceiver {
   set callback(Object value) {}
 }
 
+class OwnStringReceiver extends BaseStringReceiver {
+  @override
+  void accept(Object value) {}
+
+  void declaredMembersShadowTopLevel(Callable callable) {
+    accept(callable);
+  }
+}
+
 class ChildStringReceiver extends BaseStringReceiver {
   void inheritedMembersShadowTopLevel(Callable callable) {
-    accept(callable);
     this.accept(callable);
     callback = callable;
     this.callback = callable;
@@ -114,4 +122,22 @@ class CyclicB extends CyclicA {}
 
 void cyclicHierarchy(CyclicA value, Callable callback) {
   value.whatever(callback);
+}
+
+class GenericCallable {
+  void call<T>(T value) {}
+}
+
+void explicitCompositeTearoffs(
+  Callable first,
+  Callable second,
+  Callable? nullable,
+  GenericCallable generic,
+  bool condition,
+) {
+  void Function() conditional = condition ? first.call : second.call;
+  void Function() coalesced = nullable?.call ?? second.call;
+  void Function(int) instantiated = generic.call<int>;
+  var spread = <void Function()>[...[first.call]];
+  (void Function(), int) record = (first.call, 1);
 }

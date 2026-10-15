@@ -49,3 +49,34 @@ class G {
 
   G(int counter);
 }
+
+@Deprecated.extend()
+class ConsistentNamed {
+  @deprecated
+  ConsistentNamed();
+}
+
+class ConsistentField {
+  ConsistentField(@deprecated this.value);
+  @Deprecated('old')
+  final int value;
+}
+
+@Deprecated.new('old')
+class ExplicitUnnamed {
+  @Deprecated.new('old')
+  ExplicitUnnamed();
+}
+
+// Representation fields have no reportable field-fragment name offset.
+extension type DeprecatedRepresentationParameter(int value) {
+  DeprecatedRepresentationParameter.named(@deprecated this.value);
+}
+
+typedef Dep = Deprecated;
+
+@Dep('old')
+class ConsistentAlias {
+  @Dep('old')
+  ConsistentAlias();
+}

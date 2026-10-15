@@ -54,3 +54,27 @@ void scoped(List<String> values, List<String> texts) {
   final (String text,) = ('abc',);
   text.indexOf('x') >= 0; /* expect: prefer-contains */
 }
+
+const minusOne = -1;
+const zero = 0;
+
+bool startArguments(String text, String value) {
+  if (text.indexOf(value, 0) >= 0) return true; /* expect: prefer-contains */
+  if (text.indexOf(value, zero) >= 0) return true; /* expect: prefer-contains */
+  return text.indexOf('x', 1, 2) >= 0; /* expect: prefer-contains */
+}
+
+bool constants(List<int> values, String text, List<int>? maybe, Object other) {
+  if (values.indexOf(1) == minusOne) return true; /* expect: prefer-contains */
+  if (text.indexOf('x') >= zero) return true; /* expect: prefer-contains */
+  if (maybe?.indexOf(1) == -1) return true; /* expect: prefer-contains */
+  if ((other as List<int>).indexOf(1) == -1) return true; /* expect: prefer-contains */
+  return 0 > values.indexOf(1); /* expect: prefer-contains */
+}
+
+bool alwaysTrueOrFalse(String text) {
+  if (text.indexOf('x') < -1) return true; /* expect: prefer-contains */
+  if (text.indexOf('x') >= -1) return true; /* expect: prefer-contains */
+  if (text.indexOf('x') == -2) return true; /* expect: prefer-contains */
+  return text.indexOf('x') != -2; /* expect: prefer-contains */
+}

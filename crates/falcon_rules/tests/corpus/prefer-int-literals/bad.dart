@@ -29,3 +29,50 @@ void main() {
   for (double i = 0.0; i < 1; i++) {} /* expect: prefer-int-literals */
   print([local, list, inner]);
 }
+
+// Field formals resolve even when their fields follow a named constructor.
+class Insets {
+  const Insets.fromSTEB(this.start, this.top, this.end, this.bottom);
+  final double start, top, end, bottom;
+}
+
+class Matrix {
+  void setEntry(int row, int column, double value) {}
+}
+
+void constructorAndCascadeArguments(Matrix matrix) {
+  const Insets.fromSTEB(12.0, 4.0, 12.0, 4.0); /* expect: prefer-int-literals */ /* expect: prefer-int-literals */ /* expect: prefer-int-literals */ /* expect: prefer-int-literals */
+  matrix
+    ..setEntry(3, 2, -1.0) /* expect: prefer-int-literals */
+    ..setEntry(0, 0, 2.0); /* expect: prefer-int-literals */
+}
+
+// Super/redirect initializer arguments use the same resolved contexts as calls.
+class NumericBase {
+  final double pressure, elevation;
+  const NumericBase({required this.pressure, this.elevation = 0});
+  const NumericBase.named(this.pressure, {this.elevation = 0});
+}
+
+class NumericChild extends NumericBase {
+  const NumericChild() : super(pressure: 0.0, elevation: 8.0); /* expect: prefer-int-literals */ /* expect: prefer-int-literals */
+  const NumericChild.named() : super.named(-2.0, elevation: 4.0); /* expect: prefer-int-literals */ /* expect: prefer-int-literals */
+  const NumericChild.value(double value) : super(pressure: value);
+  const NumericChild.redirect() : this.value(9.0); /* expect: prefer-int-literals */
+}
+
+class GenericNumericBase<T> {
+  final T value;
+  const GenericNumericBase(this.value);
+  const GenericNumericBase.named({required this.value});
+}
+
+class GenericNumericChild extends GenericNumericBase<double> {
+  const GenericNumericChild() : super(5.0); /* expect: prefer-int-literals */
+  const GenericNumericChild.named() : super.named(value: 6.0); /* expect: prefer-int-literals */
+}
+
+class InitializedNumericChild extends NumericBase {
+  final int marker;
+  const InitializedNumericChild() : marker = 0, super(pressure: 10.0); /* expect: prefer-int-literals */
+}

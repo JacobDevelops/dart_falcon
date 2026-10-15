@@ -38,7 +38,7 @@ class FancyLabel extends Label<int> {
 const values = <int>[];
 
 /// Built by [Point.new], [Implicit.new], [Factory.new], [Tone.new],
-/// [Wrapper.new], and [Named.new].
+/// [Wrapper.new], [AbstractBase.new], and [Named.new].
 class Point {
   Point(this.x);
 
@@ -46,6 +46,8 @@ class Point {
 }
 
 class Implicit {}
+
+abstract class AbstractBase {}
 
 class Factory {
   Factory._();

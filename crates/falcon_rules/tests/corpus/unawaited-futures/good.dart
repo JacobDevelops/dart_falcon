@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:meta/meta.dart' show awaitNotRequired;
+import 'package:meta/meta.dart' as meta;
 
 Future<int> fetch() async => 1;
 
@@ -39,4 +41,22 @@ Future<void> assignment(Api api) async {
   Future<void> pending;
   pending = api.save();
   await pending;
+}
+
+FutureOr<int> maybeFetchOr() => 1;
+
+// Like the official rule, `FutureOr` results are not reported in async bodies.
+Future<void> callsFutureOr() async {
+  maybeFetchOr();
+}
+
+Future<void> annotatedLocalFunctions() async {
+  @awaitNotRequired
+  Future<void> handleError() async {}
+  handleError();
+  print('${handleError()}');
+
+  @meta.awaitNotRequired
+  Future<void> prefixed() async {}
+  prefixed();
 }

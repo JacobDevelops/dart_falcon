@@ -23,3 +23,10 @@ class Bar {
 extension BarX on Bar {
   Foo view() => Foo(this); /* expect: use-to-and-as-if-applicable */
 }
+
+class Negatable {
+  Negatable operator ~() => Wrapped(this); /* expect: use-to-and-as-if-applicable */
+}
+class Wrapped extends Negatable {
+  Wrapped(Negatable value);
+}

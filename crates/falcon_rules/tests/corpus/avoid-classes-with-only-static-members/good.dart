@@ -32,14 +32,6 @@ class Derived extends Base {
   static void helper() {}
 }
 
-// Mixed-in and implemented members.
-mixin Greets {
-  void greet() {}
-}
-
-class Greeter with Greets {
-  static void helper() {}
-}
 
 class Impl implements Base {
   @override
@@ -52,3 +44,36 @@ class Marker {}
 
 // Top-level functions instead of a static-only class.
 DateTime mostRecent(List<DateTime> dates) => dates.first;
+
+// A mixin class's instance members also provide a real interface.
+mixin class InstanceMixinClass {
+  void run() {}
+}
+
+class InheritsMixinClass extends InstanceMixinClass {
+  static void helper() {}
+}
+
+// One surviving class-owned member still exempts the class.
+class TwoMethods {
+  void first() {}
+  void second() {}
+}
+mixin ReplacesFirst {
+  void first() {}
+}
+class PartiallyReplaced extends TwoMethods with ReplacesFirst {
+  static void helper() {}
+}
+
+// Getter and setter ownership must remain separate.
+class AccessorParent {
+  int get value => 0;
+  set value(int value) {}
+}
+mixin ReplacesGetter {
+  int get value => 1;
+}
+class RetainsSetter extends AccessorParent with ReplacesGetter {
+  static void helper() {}
+}
