@@ -33,10 +33,15 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::Paren { .. }) {
+            falcon_syntax::visitor::walk_expr(self, node);
+            return;
+        }
         if let Some((identity, constructor, args)) = construction(node, self.model)
             && constructor == "new"
             && is_color(&identity)
-            && let Some(Expr::IntLit { value, span }) = args.positional.first()
+            && let Some(Expr::IntLit { value, span }) =
+                args.positional.first().map(Expr::unparenthesized)
             && !is_full_hex(value)
         {
             self.diags.push(self.ctx.diagnostic(
@@ -53,7 +58,7 @@ fn construction<'a>(
     expression: &'a Expr,
     model: &SemanticModel<'_>,
 ) -> Option<(DeclarationIdentity, &'a str, &'a ArgList)> {
-    match expression {
+    match expression.unparenthesized() {
         Expr::New {
             dart_type,
             constructor_name,

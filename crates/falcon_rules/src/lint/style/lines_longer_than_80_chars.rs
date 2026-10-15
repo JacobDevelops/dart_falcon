@@ -1,16 +1,18 @@
 //! Flags source lines longer than 80 characters.
 //!
 //! Long lines are harder to read and to review side by side. Line length is
-//! counted in UTF-16 code units, excluding the line break, and the diagnostic
-//! starts at the 81st character, where the line needs to wrap.
+//! counted in UTF-16 code units, excluding the line break and a leading byte
+//! order mark, and the diagnostic starts at the 81st character, where the line
+//! needs to wrap.
 //!
 //! Lines that cannot reasonably be wrapped are exempt:
 //!
 //! - every line covered by a multiline (triple-quoted) string literal;
 //! - a line where a single-line string literal starts whose text contains `/`
-//!   or `\` (a URI or path);
-//! - a comment line whose text contains `/` or `\`, and a `// ignore:`
-//!   comment line.
+//!   or `\` (a URI or path); as in the analyzer, string literals nested in an
+//!   interpolation are not considered;
+//! - a comment line (including comments inside interpolations) whose text
+//!   contains `/` or `\`, and a `// ignore:` comment line.
 //!
 //! ```dart
 //! // A comment that runs on and on and on and on and on and on and on and on.
@@ -21,13 +23,12 @@
 //!
 //! Adopted from the official `lines_longer_than_80_chars` lint.
 
-use crate::lint::string_lit::{decoded_text, literal_parts};
+use crate::lint::string_lit::decode_escapes;
+use crate::lint::tokens::{comment_tokens, visit_interpolation_tokens};
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::token::TokenKind;
-use falcon_syntax::visitor::Visitor;
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 const MAX_LENGTH: usize = 80;
 
@@ -55,7 +56,7 @@ impl Rule for LinesLongerThan80Chars {
             allowed: &mut allowed,
         };
         strings.visit_program(program);
-        allow_comment_lines(source, &lines, &mut allowed);
+        allow_comment_lines(ctx, &lines, &mut allowed);
 
         long_lines
             .into_iter()
@@ -81,8 +82,14 @@ struct Lines<'a> {
 impl<'a> Lines<'a> {
     fn new(source: &'a str) -> Self {
         let bytes = source.as_bytes();
-        let mut starts = vec![0];
-        let mut i = 0;
+        // The scanner drops a leading byte order mark.
+        let bom = if source.starts_with('\u{FEFF}') {
+            '\u{FEFF}'.len_utf8()
+        } else {
+            0
+        };
+        let mut starts = vec![bom];
+        let mut i = bom;
         while i < bytes.len() {
             match bytes[i] {
                 b'\r' if bytes.get(i + 1) == Some(&b'\n') => {
@@ -116,19 +123,20 @@ impl<'a> Lines<'a> {
     }
 
     fn line_of(&self, offset: usize) -> usize {
-        self.starts.partition_point(|&start| start <= offset) - 1
+        self.starts.partition_point(|&start| start <= offset).max(1) - 1
     }
 }
 
-/// The byte offset just past the first `units` UTF-16 code units of `text`,
-/// or `None` when `text` is not longer than that.
+/// The byte offset of the character holding UTF-16 code unit `units` (the
+/// first unit past the limit) of `text`, or `None` when `text` is not longer
+/// than `units`. A surrogate pair straddling the limit counts.
 fn byte_offset_after_utf16_units(text: &str, units: usize) -> Option<usize> {
     let mut seen = 0;
     for (offset, c) in text.char_indices() {
-        if seen >= units {
+        seen += c.len_utf16();
+        if seen > units {
             return Some(offset);
         }
-        seen += c.len_utf16();
     }
     None
 }
@@ -143,27 +151,59 @@ struct AllowedStrings<'a, 'b> {
 }
 
 impl Visitor for AllowedStrings<'_, '_> {
+    fn visit_expr(&mut self, node: &Expr) {
+        match node {
+            // The analyzer does not visit the expressions of interpolations.
+            Expr::StringLit(node) => self.visit_string_lit(node),
+            _ => walk_expr(self, node),
+        }
+    }
+
     fn visit_string_lit(&mut self, node: &StringLitNode) {
         for (lit, span) in node.segments() {
             let first = self.lines.line_of(span.start);
             if lit.triple {
                 let last = self.lines.line_of(span.end);
                 self.allowed[first..=last].fill(true);
-            } else if looks_like_uri_or_path(&decoded_text(&lit, &literal_parts(&lit))) {
+            } else if literal_contains_path(&lit) {
                 self.allowed[first] = true;
             }
         }
     }
 }
 
-fn allow_comment_lines(source: &str, lines: &Lines<'_>, allowed: &mut [bool]) {
-    for token in Lexer::new(source).tokenize() {
-        if !matches!(
-            token.kind,
-            TokenKind::LineComment | TokenKind::DocComment | TokenKind::BlockComment
-        ) {
-            continue;
+/// Only literal text counts: a path inside an interpolated expression does not.
+fn literal_contains_path(lit: &StringDelimiter<'_>) -> bool {
+    if lit.is_raw {
+        return looks_like_uri_or_path(lit.content);
+    }
+    let bytes = lit.content.as_bytes();
+    let mut text_start = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index += 2,
+            b'$' if bytes.get(index + 1) == Some(&b'{') => {
+                if looks_like_uri_or_path(&decode_escapes(&lit.content[text_start..index])) {
+                    return true;
+                }
+                let inner = index + 2;
+                let Some(close) = visit_interpolation_tokens(&lit.content[inner..], |_| {}) else {
+                    return false;
+                };
+                index = inner + close + 1;
+                text_start = index;
+            }
+            _ => index += 1,
         }
+    }
+    looks_like_uri_or_path(&decode_escapes(&lit.content[text_start..]))
+}
+
+/// Allow comment lines, including comments inside interpolations.
+fn allow_comment_lines(ctx: &AnalyzeContext, lines: &Lines<'_>, allowed: &mut [bool]) {
+    let source = ctx.source;
+    for token in comment_tokens(ctx) {
         let lexeme = token.text(source);
         let first = lines.line_of(token.offset);
         if let Some(text) = lexeme.strip_prefix("///") {
@@ -176,10 +216,9 @@ fn allow_comment_lines(source: &str, lines: &Lines<'_>, allowed: &mut [bool]) {
             }
         } else if let Some(text) = lexeme.strip_prefix("/*") {
             let text = text.strip_suffix("*/").unwrap_or(text);
-            let comment_lines = Lines::new(text);
-            for index in 0..comment_lines.starts.len() {
-                let (start, end) = comment_lines.content_range(index);
-                if looks_like_uri_or_path(&text[start..end])
+            let comment_lines = text.split("\r\n").flat_map(|line| line.split(['\r', '\n']));
+            for (index, text) in comment_lines.enumerate() {
+                if looks_like_uri_or_path(text)
                     && let Some(line) = allowed.get_mut(first + index)
                 {
                     *line = true;

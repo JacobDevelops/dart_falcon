@@ -1,9 +1,16 @@
 //! Explicitly tear off callable objects' call methods.
+//!
+//! Adopted from the official `implicit_call_tearoffs` lint.
+//! Reports each `ImplicitCallReference` the analyzer inserts. The coercion
+//! applies to the outermost expression of a conditional, `??`, or cascade (and to a type
+//! instantiation, `c<int>`), so their operands are not reported again.
 
-use falcon_analyze::{AnalyzeContext, MemberKind, ResolvedType, Rule};
+use std::collections::HashSet;
+
+use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
-use falcon_syntax::ast::Expr;
+use falcon_syntax::ast::{BinaryOp, Expr, Span};
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
@@ -18,6 +25,7 @@ impl Rule for ImplicitCallTearoffs {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
+            coerced: HashSet::new(),
         };
         visit_program(&mut collector, program, state);
         collector.diags
@@ -27,41 +35,49 @@ impl Rule for ImplicitCallTearoffs {
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    /// Operands whose value flows into an already coerced expression.
+    coerced: HashSet<Span>,
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        if matches!(node, Expr::Field { field, .. } if field.name == "call") {
+        let inside_coerced = self.coerced.contains(node.span());
+        if !inside_coerced && !state.implicit_call_tearoff(node) {
             return;
         }
-        let Some(expected) = state.expected() else {
-            return;
-        };
-        if !matches!(expected, ResolvedType::Function { .. })
-            && !expected.interface("dart:core", "Function")
-        {
+        match node {
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.coerced.insert(*then_expr.span());
+                self.coerced.insert(*else_expr.span());
+            }
+            Expr::Binary {
+                op: BinaryOp::NullCoalesce,
+                left,
+                right,
+                ..
+            } => {
+                self.coerced.insert(*left.span());
+                self.coerced.insert(*right.span());
+            }
+            Expr::Cascade { object, .. } => {
+                self.coerced.insert(*object.span());
+            }
+            Expr::GenericInstantiation { target, .. } => {
+                self.coerced.insert(*target.span());
+            }
+            _ => {}
+        }
+        if inside_coerced {
             return;
         }
-        let receiver = state.infer(node);
-        if matches!(
-            receiver,
-            ResolvedType::Function { .. } | ResolvedType::Unknown | ResolvedType::Dynamic
-        ) || !state
-            .signatures
-            .resolved_member_facts(&receiver, "call", &state.model)
-            .is_some_and(|facts| {
-                facts
-                    .iter()
-                    .any(|fact| fact.kind == MemberKind::Method && !fact.is_static)
-            })
-        {
-            return;
-        }
-        let span = node.span();
         self.diags.push(self.ctx.diagnostic(
             "implicit-call-tearoffs",
             "Explicitly tear off the 'call' method.",
-            *span,
+            *node.span(),
         ));
     }
 }

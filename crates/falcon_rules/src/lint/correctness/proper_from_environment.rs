@@ -51,6 +51,10 @@ impl Collector<'_> {
 
 impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::Paren { .. }) {
+            falcon_syntax::visitor::walk_expr(self, node);
+            return;
+        }
         if let Some((span, is_const_ctor)) = from_environment_invocation(node)
             && !is_const_ctor
             && !self.in_const
@@ -116,11 +120,11 @@ impl Visitor for Collector<'_> {
 /// `new`/`const` form. Returns the invocation span and whether it is a `const`
 /// construction.
 fn from_environment_invocation(expr: &Expr) -> Option<(&Span, bool)> {
-    match expr {
+    match expr.unparenthesized() {
         Expr::Call { callee, span, .. } => {
-            if let Expr::Field { object, field, .. } = callee.as_ref()
+            if let Expr::Field { object, field, .. } = callee.unparenthesized()
                 && field.name == "fromEnvironment"
-                && let Expr::Ident(id) = object.as_ref()
+                && let Expr::Ident(id) = object.unparenthesized()
                 && is_env_type(&id.name)
             {
                 return Some((span, false));

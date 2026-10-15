@@ -68,9 +68,9 @@ fn check_dispose_method(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &Analyz
 }
 
 fn is_super_dispose_call(expr: &Expr) -> bool {
-    if let Expr::Call { callee, .. } = expr
-        && let Expr::Field { object, field, .. } = callee.as_ref()
-        && matches!(object.as_ref(), Expr::Super { .. })
+    if let Expr::Call { callee, .. } = expr.unparenthesized()
+        && let Expr::Field { object, field, .. } = callee.unparenthesized()
+        && matches!(object.unparenthesized(), Expr::Super { .. })
         && field.name == "dispose"
     {
         return true;

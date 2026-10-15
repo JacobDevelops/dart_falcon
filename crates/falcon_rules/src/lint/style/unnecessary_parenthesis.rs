@@ -20,12 +20,17 @@
 //! access on a prefix/postfix expression, and where removing them would turn a
 //! set or map literal into a statement block.
 //!
-//! The parser drops parentheses from the AST, so they are recovered from the
-//! source text around each expression; positions falcon does not model are left
-//! alone. The official exemption for a parenthesized non-record argument to a
-//! record-typed parameter (a missing trailing comma) is not modeled; it only
-//! applies to code that does not compile. Nullable-type extensions are only
-//! known when declared in the same file.
+//! Generic constructor tear-offs need parentheses when type arguments are
+//! followed by invocation arguments (`(C.named)<T>()`), but not when the
+//! instantiated tear-off is used as a value (`(C.named)<T>`). When constructor
+//! signatures are unavailable, a type-qualified target is kept unless it is
+//! known to be a nonconstructor member.
+//!
+//! Explicit expression grouping is retained by the parser, including parentheses
+//! separated from their expression by comments. Pattern grouping is not an
+//! expression and is not reported. The official exemption for a parenthesized
+//! non-record argument to a record-typed parameter (a missing trailing comma)
+//! only applies to code that does not compile and is not modeled here.
 //!
 //! ```dart
 //! a = (b);          // flagged
@@ -38,15 +43,17 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, SemanticModel, resolve_call_constructor};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, for_each_expr, walk_class_member, walk_constructor_decl, walk_expr, walk_field_decl,
     walk_function_decl, walk_getter_decl, walk_method_decl, walk_setter_decl, walk_stmt,
-    walk_top_level_decl,
+    walk_switch_case, walk_top_level_decl,
 };
+
+use crate::lint::expressions::is_parenthesized;
 
 #[derive(Default)]
 pub struct UnnecessaryParenthesis;
@@ -55,6 +62,9 @@ impl Rule for UnnecessaryParenthesis {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             ctx,
+            model: ctx
+                .identities
+                .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types)),
             nullable_extension_members: nullable_extension_members(program),
             field_init_values: HashSet::new(),
             in_cascade: vec![false],
@@ -87,6 +97,7 @@ fn nullable_extension_members(program: &Program) -> HashSet<String> {
                 ClassMember::Getter(getter) => &getter.name,
                 ClassMember::Field(_)
                 | ClassMember::Constructor(_)
+                | ClassMember::PrimaryConstructorBody(_)
                 | ClassMember::Setter(_)
                 | ClassMember::Operator(_)
                 | ClassMember::Error(_) => continue,
@@ -137,6 +148,8 @@ enum Parent<'a> {
         name: &'a str,
         is_method: bool,
         under_prefix: bool,
+        /// Whether this access is itself null-aware.
+        null_aware: bool,
     },
     Prefix,
     NullAssert,
@@ -185,6 +198,7 @@ enum Inner<'a> {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
+    model: Option<SemanticModel<'a>>,
     nullable_extension_members: HashSet<String>,
     /// Spans of constructor field initializer values.
     field_init_values: HashSet<(usize, usize)>,
@@ -217,45 +231,23 @@ impl Collector<'_> {
         ));
     }
 
-    /// Spans of the parentheses directly wrapping `span`, innermost first.
-    fn paren_layers(&self, span: Span) -> Vec<Span> {
-        let source = self.ctx.source;
-        let mut layers = Vec::new();
-        let mut current = span;
-        while let (Some(before), Some(after)) =
-            (source.get(..current.start), source.get(current.end..))
-        {
-            let before = before.trim_end();
-            let after = after.trim_start();
-            if !before.ends_with('(') || !after.starts_with(')') {
-                break;
-            }
-            current = Span::new(before.len() - 1, source.len() - after.len() + 1);
-            layers.push(current);
-        }
-        layers
-    }
-
-    /// Checks the parentheses around `child`; `syntactic` counts the outer
-    /// layers that belong to the parent's own syntax (an argument list or a
-    /// statement condition).
-    fn check(&mut self, child: &Expr, parent: Parent<'_>, syntactic: usize) {
-        if matches!(child, Expr::Error { .. }) {
-            return;
-        }
-        let mut layers = self.paren_layers(*child.span());
-        layers.truncate(layers.len().saturating_sub(syntactic));
-        let Some((&outer, inner_layers)) = layers.split_last() else {
+    /// Check explicit grouping; surrounding grammar delimiters are not nodes.
+    fn check(&mut self, child: &Expr, parent: Parent<'_>) {
+        let Expr::Paren { expr, span } = child else {
             return;
         };
-        // A parenthesized expression directly inside parentheses.
-        for &layer in inner_layers {
-            self.report(layer);
+        let outer = *span;
+        let mut child = expr.as_ref();
+        let mut nested = false;
+        while let Expr::Paren { expr, span } = child {
+            self.report(*span);
+            child = expr;
+            nested = true;
         }
-        let inner = if inner_layers.is_empty() {
-            Inner::Expr(child)
-        } else {
+        let inner = if nested {
             Inner::Parenthesized
+        } else {
+            Inner::Expr(child)
         };
         if self.is_unnecessary(outer, inner, parent) {
             self.report(outer);
@@ -280,16 +272,37 @@ impl Collector<'_> {
             return true;
         }
         if let Some(expression) = expression {
-            if matches!(expression, Expr::Conditional { .. }) || is_type_literal(expression) {
+            if matches!(expression, Expr::Conditional { .. })
+                || is_type_literal(expression, self.model.as_ref())
+            {
+                return false;
+            }
+            // `C.named<T>()` is not constructor-invocation syntax: the
+            // parentheses make this an invocation of a generic tear-off.
+            if matches!(
+                parent,
+                Parent::InvokedFunction {
+                    has_type_arguments: true
+                }
+            ) && let Some(model) = self.model.as_ref()
+                && let Some((identity, name)) = resolve_call_constructor(expression, model, true)
+                && self.ctx.signatures.is_none_or(|signatures| {
+                    let identity = model.unaliased(identity);
+                    signatures.member(&identity, name).is_none()
+                        && signatures.declared_member_facts(&identity, name).is_empty()
+                })
+            {
                 return false;
             }
             let null_aware = contains_null_aware_invocation(expression);
             if is_one_token(expression) || null_aware {
                 return self.one_token_or_null_aware(expression, null_aware, parent);
             }
-            // `(C.new)` constructor tear-off.
-            if let Expr::Field { field, .. } = expression
-                && field.name == "new"
+            // Bare or instantiated constructor tear-offs.
+            if let Expr::Field { object, field, .. } = expression
+                && (field.name == "new"
+                    || matches!(object.as_ref(), Expr::GenericInstantiation { target, .. }
+                        if matches!(target.as_ref(), Expr::Ident(_))))
                 && !matches!(
                     parent,
                     Parent::InvokedFunction {
@@ -394,7 +407,10 @@ impl Collector<'_> {
     ) -> bool {
         match parent {
             Parent::MemberTarget {
-                name, is_method, ..
+                name,
+                is_method,
+                null_aware: access_null_aware,
+                ..
             } => {
                 let object_member = if is_method {
                     matches!(name, "noSuchMethod" | "toString")
@@ -403,8 +419,11 @@ impl Collector<'_> {
                 };
                 // The parentheses stop null-aware shorting, which is only valid
                 // when the member exists on a nullable receiver, i.e. an
-                // extension on a nullable type (possibly imported).
-                !object_member && !null_aware && !self.nullable_extension_members.contains(name)
+                // extension on a nullable type (possibly imported). A null-aware
+                // access does not require the receiver's member to accept null.
+                !object_member
+                    && !(null_aware && !access_null_aware)
+                    && !self.nullable_extension_members.contains(name)
             }
             Parent::NullAssert => false,
             Parent::Conditional { then_branch: true } | Parent::MapKey
@@ -430,29 +449,29 @@ impl Collector<'_> {
         let sole = args.positional.len() + args.named.len() == 1;
         for argument in &args.positional {
             if sole {
-                self.check(argument, Parent::SoleArgument, 1);
+                self.check(argument, Parent::SoleArgument);
             } else {
-                self.check(argument, Parent::Argument, 0);
+                self.check(argument, Parent::Argument);
             }
         }
         for argument in &args.named {
-            self.check(&argument.value, Parent::NamedArgument, 0);
+            self.check(&argument.value, Parent::NamedArgument);
         }
     }
 
     fn check_body(&mut self, body: Option<&FunctionBody>) {
         if let Some(FunctionBody::Arrow(expression, _)) = body {
-            self.check(expression, Parent::ExpressionBody, 0);
+            self.check(expression, Parent::ExpressionBody);
         }
     }
 
     fn check_condition(&mut self, condition: &IfCondition) {
         match condition {
-            IfCondition::Expr(expression) => self.check(expression, Parent::Condition, 1),
+            IfCondition::Expr(expression) => self.check(expression, Parent::Condition),
             IfCondition::Case(subject, _, guard) => {
-                self.check(subject, Parent::Condition, 0);
+                self.check(subject, Parent::Condition);
                 if let Some(guard) = guard {
-                    self.check(guard, Parent::OtherNode, 0);
+                    self.check(guard, Parent::OtherNode);
                 }
             }
         }
@@ -462,7 +481,7 @@ impl Collector<'_> {
         let record_typed = matches!(declared, Some(DartType::Record(_)));
         for declarator in declarators {
             if let Some(initializer) = &declarator.initializer {
-                self.check(initializer, Parent::VariableInitializer { record_typed }, 0);
+                self.check(initializer, Parent::VariableInitializer { record_typed });
             }
         }
     }
@@ -474,7 +493,7 @@ impl Collector<'_> {
         while let Some(element) = pending.pop() {
             match element {
                 CollectionElement::Expr(expression) => {
-                    self.check(expression, Parent::OtherExpression, 0);
+                    self.check(expression, Parent::OtherExpression);
                 }
                 CollectionElement::NullAware { .. } | CollectionElement::Spread { .. } => {}
                 CollectionElement::If {
@@ -502,10 +521,10 @@ impl Collector<'_> {
             match element {
                 MapElement::Entry(entry) => {
                     if !entry.key_null_aware {
-                        self.check(&entry.key, Parent::MapKey, 0);
+                        self.check(&entry.key, Parent::MapKey);
                     }
                     if !entry.value_null_aware {
-                        self.check(&entry.value, Parent::OtherNode, 0);
+                        self.check(&entry.value, Parent::OtherNode);
                     }
                 }
                 MapElement::Spread { .. } => {}
@@ -533,46 +552,47 @@ impl Collector<'_> {
                 if let Expr::Field { span, .. } | Expr::Call { span, .. } = operand.as_ref() {
                     self.under_prefix.insert(key(span));
                 }
-                self.check(operand, Parent::Prefix, 0);
+                self.check(operand, Parent::Prefix);
             }
             Expr::PostfixIncDec { operand, .. } => {
-                self.check(operand, Parent::OtherExpression, 0);
+                self.check(operand, Parent::OtherExpression);
             }
-            Expr::NullAssert { operand, .. } => self.check(operand, Parent::NullAssert, 0),
+            Expr::NullAssert { operand, .. } => self.check(operand, Parent::NullAssert),
             Expr::Binary { left, right, .. } => {
-                self.check(left, Parent::Binary, 0);
-                self.check(right, Parent::Binary, 0);
+                self.check(left, Parent::Binary);
+                self.check(right, Parent::Binary);
             }
-            Expr::Assign { value, .. } => self.check(value, Parent::AssignedValue, 0),
+            Expr::Assign { value, .. } => self.check(value, Parent::AssignedValue),
             Expr::Conditional {
                 condition,
                 then_expr,
                 else_expr,
                 ..
             } => {
-                self.check(condition, Parent::Conditional { then_branch: false }, 0);
-                self.check(then_expr, Parent::Conditional { then_branch: true }, 0);
-                self.check(else_expr, Parent::Conditional { then_branch: false }, 0);
+                self.check(condition, Parent::Conditional { then_branch: false });
+                self.check(then_expr, Parent::Conditional { then_branch: true });
+                self.check(else_expr, Parent::Conditional { then_branch: false });
             }
-            Expr::Is { expr, .. } => self.check(expr, Parent::Is, 0),
-            Expr::As { expr, .. } => self.check(expr, Parent::As, 0),
+            Expr::Is { expr, .. } => self.check(expr, Parent::Is),
+            Expr::As { expr, .. } => self.check(expr, Parent::As),
             Expr::Field {
                 object,
                 field,
+                is_null_safe,
                 span,
-                ..
             } if !self.method_callees.contains(&key(span)) => {
                 let parent = Parent::MemberTarget {
                     name: &field.name,
                     is_method: false,
                     under_prefix: self.under_prefix.contains(&key(span)),
+                    null_aware: *is_null_safe,
                 };
-                self.check(object, parent, 0);
+                self.check(object, parent);
             }
             Expr::Field { .. } => {}
             Expr::Index { object, index, .. } => {
-                self.check(object, Parent::OtherExpression, 0);
-                self.check(index, Parent::OtherExpression, 0);
+                self.check(object, Parent::OtherExpression);
+                self.check(index, Parent::OtherExpression);
             }
             Expr::Call {
                 callee,
@@ -580,28 +600,30 @@ impl Collector<'_> {
                 args,
                 span,
             } => {
+                // A wrapped callee is a function-expression invocation.
+                let parenthesized = is_parenthesized(callee);
                 match callee.as_ref() {
                     Expr::Field {
                         object,
                         field,
+                        is_null_safe,
                         span: callee_span,
-                        ..
-                    } => {
+                    } if !parenthesized => {
                         self.method_callees.insert(key(callee_span));
                         let parent = Parent::MemberTarget {
                             name: &field.name,
                             is_method: true,
                             under_prefix: self.under_prefix.contains(&key(span)),
+                            null_aware: *is_null_safe,
                         };
-                        self.check(object, parent, 0);
+                        self.check(object, parent);
                     }
-                    Expr::Ident(_) => {}
+                    Expr::Ident(_) if !parenthesized => {}
                     callee => self.check(
                         callee,
                         Parent::InvokedFunction {
                             has_type_arguments: !type_args.is_empty(),
                         },
-                        0,
                     ),
                 }
                 self.check_args(args);
@@ -610,17 +632,20 @@ impl Collector<'_> {
             Expr::Cascade {
                 object, sections, ..
             } => {
-                self.check(object, Parent::CascadeTarget, 0);
+                self.check(object, Parent::CascadeTarget);
                 for section in sections {
                     for op in &section.ops {
                         match op {
                             CascadeOp::Field { .. } => {}
                             CascadeOp::Index { index, .. } => {
-                                self.check(index, Parent::OtherExpression, 0);
+                                self.check(index, Parent::OtherExpression);
                             }
-                            CascadeOp::Call(_, _, args) => self.check_args(args),
-                            CascadeOp::Assign(_, _, value) => {
-                                self.check(value, Parent::AssignedValue, 0);
+                            CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) => {
+                                self.check_args(args);
+                            }
+                            CascadeOp::Assign(_, _, value)
+                            | CascadeOp::IndexAssign(_, _, value) => {
+                                self.check(value, Parent::AssignedValue);
                             }
                         }
                     }
@@ -632,27 +657,31 @@ impl Collector<'_> {
             Expr::Map { elements, .. } => self.check_entries(elements),
             Expr::Record { fields, .. } => {
                 for field in fields.iter().filter(|field| field.name.is_none()) {
-                    self.check(&field.value, Parent::RecordField, 0);
+                    self.check(&field.value, Parent::RecordField);
                 }
             }
             Expr::FuncExpr { body, .. } => self.check_body(Some(body)),
             Expr::Await { expr, .. } | Expr::Throw { expr, .. } => {
-                self.check(expr, Parent::OtherExpression, 0);
+                self.check(expr, Parent::OtherExpression);
+            }
+            Expr::GenericInstantiation { target, .. } => {
+                self.check(target, Parent::OtherExpression);
             }
             Expr::Switch { subject, arms, .. } => {
-                self.check(subject, Parent::Condition, 1);
+                self.check(subject, Parent::Condition);
                 for arm in arms {
                     if let Some(guard) = &arm.guard {
-                        self.check(guard, Parent::OtherNode, 0);
+                        self.check(guard, Parent::OtherNode);
                     }
-                    self.check(&arm.body, Parent::OtherNode, 0);
+                    self.check(&arm.body, Parent::OtherNode);
                 }
             }
             Expr::StringLit(string) => {
                 for interpolation in &string.interpolations {
-                    self.check(&interpolation.expr, Parent::Interpolation, 0);
+                    self.check(&interpolation.expr, Parent::Interpolation);
                 }
             }
+            Expr::Paren { .. } => {}
             Expr::IntLit { .. }
             | Expr::DoubleLit { .. }
             | Expr::BoolLit { .. }
@@ -662,13 +691,21 @@ impl Collector<'_> {
             | Expr::Super { .. }
             | Expr::DotShorthand { .. }
             | Expr::SymbolLit { .. }
-            | Expr::GenericInstantiation { .. }
             | Expr::Error { .. } => {}
         }
     }
 }
 
 impl Visitor for Collector<'_> {
+    fn visit_switch_case(&mut self, node: &SwitchCase) {
+        for case in &node.cases {
+            if let SwitchCaseKind::Expr(expression) = case {
+                self.check(expression, Parent::OtherNode);
+            }
+        }
+        walk_switch_case(self, node);
+    }
+
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         if let TopLevelDecl::Variable(variable) = node {
             self.check_declarators(variable.var_type.as_ref(), &variable.declarators);
@@ -715,14 +752,14 @@ impl Visitor for Collector<'_> {
                 | ConstructorInitializer::ThisCall { args, .. } => self.check_args(args),
                 ConstructorInitializer::FieldInit { value, .. } => {
                     self.field_init_values.insert(key(value.span()));
-                    self.check(value, Parent::FieldInitializer, 0);
+                    self.check(value, Parent::FieldInitializer);
                 }
                 ConstructorInitializer::Assert {
                     condition, message, ..
                 } => {
-                    self.check(condition, Parent::OtherNode, usize::from(message.is_none()));
+                    self.check(condition, Parent::OtherNode);
                     if let Some(message) = message {
-                        self.check(message, Parent::OtherNode, 0);
+                        self.check(message, Parent::OtherNode);
                     }
                 }
             }
@@ -739,33 +776,34 @@ impl Visitor for Collector<'_> {
         match node {
             Stmt::Expr(statement) => {
                 self.statement_start.push(Some(statement.span.start));
-                self.check(&statement.expr, Parent::ExpressionStatement, 0);
+                self.check(&statement.expr, Parent::ExpressionStatement);
             }
             _ => self.statement_start.push(None),
         }
         match node {
             Stmt::If(statement) => self.check_condition(&statement.condition),
-            Stmt::While(statement) => self.check(&statement.condition, Parent::Condition, 1),
-            Stmt::DoWhile(statement) => self.check(&statement.condition, Parent::Condition, 1),
-            Stmt::Switch(statement) => self.check(&statement.subject, Parent::Condition, 1),
+            Stmt::While(statement) => self.check(&statement.condition, Parent::Condition),
+            Stmt::DoWhile(statement) => self.check(&statement.condition, Parent::Condition),
+            Stmt::Switch(statement) => self.check(&statement.subject, Parent::Condition),
             Stmt::Return(statement) => {
                 if let Some(value) = &statement.value {
-                    self.check(value, Parent::Return, 0);
+                    self.check(value, Parent::Return);
                 }
             }
-            Stmt::Yield(statement) => self.check(&statement.value, Parent::Yield, 0),
-            Stmt::Throw(statement) => self.check(&statement.value, Parent::OtherExpression, 0),
+            Stmt::Yield(statement) => self.check(&statement.value, Parent::Yield),
+            Stmt::Throw(statement) => self.check(&statement.value, Parent::OtherExpression),
             Stmt::LocalVar(declaration) => {
                 self.check_declarators(declaration.var_type.as_ref(), &declaration.declarators);
             }
+            Stmt::PatternDecl(declaration) => {
+                // Pattern declarations are not ordinary variable declarations:
+                // retain the non-expression-parent whitespace exemptions.
+                self.check(&declaration.init, Parent::OtherNode);
+            }
             Stmt::Assert(statement) => {
-                self.check(
-                    &statement.condition,
-                    Parent::OtherNode,
-                    usize::from(statement.message.is_none()),
-                );
+                self.check(&statement.condition, Parent::OtherNode);
                 if let Some(message) = &statement.message {
-                    self.check(message, Parent::OtherNode, 0);
+                    self.check(message, Parent::OtherNode);
                 }
             }
             Stmt::LocalFunc(function) => self.check_body(Some(&function.body)),
@@ -818,13 +856,17 @@ fn starts_uppercase(name: &str) -> bool {
         .is_some_and(char::is_uppercase)
 }
 
-/// A type name used as an expression (`(String)`, `(List<int>)`); falcon cannot
-/// resolve names here, so a capitalized identifier is assumed to be a type.
-fn is_type_literal(expression: &Expr) -> bool {
+/// A written type literal; resolve lowercase type names (`int`) as well as
+/// generic types. Capitalization is only a fallback without resolved identity.
+fn is_type_literal(expression: &Expr, model: Option<&SemanticModel<'_>>) -> bool {
+    let is_type_name = |identifier: &Identifier| match model {
+        Some(model) => model.resolve_name(identifier.name.as_str()).is_some(),
+        None => starts_uppercase(&identifier.name),
+    };
     match expression {
-        Expr::Ident(identifier) => starts_uppercase(&identifier.name),
+        Expr::Ident(identifier) => is_type_name(identifier),
         Expr::GenericInstantiation { target, .. } => {
-            matches!(target.as_ref(), Expr::Ident(identifier) if starts_uppercase(&identifier.name))
+            matches!(target.as_ref(), Expr::Ident(identifier) if is_type_name(identifier))
         }
         _ => false,
     }

@@ -102,7 +102,7 @@ impl ValidUse<'_, '_> {
     fn mentions_exception(&self, expr: &Expr) -> bool {
         let mut found = false;
         for_each_expr(expr, &mut |node| {
-            found |= matches!(node, Expr::Ident(identifier) if identifier.name == self.exception);
+            found |= matches!(node.unparenthesized(), Expr::Ident(identifier) if identifier.name == self.exception);
         });
         found
     }
@@ -119,9 +119,14 @@ impl ValidUse<'_, '_> {
     }
 
     /// Whether a call hands its arguments on as an error.
-    fn forwards_error(&self, callee: &Expr, type_args: &[DartType]) -> bool {
-        if let Expr::Field { object, field, .. } = callee {
-            if let Expr::Ident(target) = object.as_ref() {
+    fn forwards_error(&self, callee: &Expr, type_args: &[DartType], args: &ArgList) -> bool {
+        if let Expr::Field { object, field, .. } = callee.unparenthesized() {
+            // `Future<T>.error(...)` names the class through an instantiation.
+            let class = match object.unparenthesized() {
+                Expr::GenericInstantiation { target, .. } => target.as_ref(),
+                other => other,
+            };
+            if let Expr::Ident(target) = class.unparenthesized() {
                 let is_class = |name: &str| target.name == name && !self.is_project_name(name);
                 if (field.name == "error" && is_class("Future"))
                     || (field.name == "reportError" && target.name == "FlutterError")
@@ -132,19 +137,20 @@ impl ValidUse<'_, '_> {
             }
             if field.name == "completeError" {
                 let receiver = self.state.infer(object);
-                if self
-                    .state
-                    .signatures
-                    .implements_sdk(&receiver, "dart:async", "Completer")
-                    != Truth::No
+                if self.state.signatures.interface_check_sdk(
+                    &receiver,
+                    "dart:async",
+                    "Completer",
+                    &self.state.model,
+                ) != Truth::No
                 {
                     return true;
                 }
             }
         }
         self.state
-            .call_signature(callee, type_args)
-            .is_some_and(|signature| matches!(signature.return_type, ResolvedType::Never))
+            .call_return_type(callee, type_args, args, None)
+            .is_some_and(|return_type| matches!(return_type, ResolvedType::Never))
     }
 
     fn is_project_name(&self, name: &str) -> bool {
@@ -195,7 +201,7 @@ impl Visitor for ValidUse<'_, '_> {
                 type_args,
                 args,
                 ..
-            } if self.forwards_error(callee, type_args) => self.check_arguments(args),
+            } if self.forwards_error(callee, type_args, args) => self.check_arguments(args),
             Expr::New {
                 dart_type: DartType::Named(named),
                 constructor_name: Some(constructor),

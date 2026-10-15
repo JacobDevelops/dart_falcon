@@ -18,9 +18,9 @@
 //!
 //! Fields and local variables whose type provably implements `Sink` (released
 //! by `close`) or `dart:io` `Socket` (released by `close` or `destroy`) are
-//! reported unless the file (fields) or enclosing function body (locals) calls
-//! or tears off the release method on them, passes them to a call, returns
-//! them, or hands them to another variable. Unresolved types stay silent.
+//! reported unless the file (fields) or enclosing function body (locals) holds
+//! an official valid-use/escape case. Constructor arguments and assignments
+//! into another local do not escape; unresolved types stay silent.
 //!
 //! Adopted from the official `close_sinks` lint.
 

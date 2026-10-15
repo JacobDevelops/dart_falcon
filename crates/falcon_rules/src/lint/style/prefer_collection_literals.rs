@@ -18,17 +18,18 @@
 //!   to `LinkedHashMap`/`LinkedHashSet`, so the constructor is required. This check
 //!   is purely syntactic and applies without a type index. Local functions and
 //!   operators use their own return annotations, never their enclosing function's.
-//! * **User-declared shadow** — a `List()`/`Map()`/`Set()`/… whose name is a
-//!   *user-declared* type in the [`TypeIndex`] (not `dart:core`). The literal would
-//!   construct the core collection, not the user's type. This one is type-index
-//!   driven: with no index attached, such a constructor keeps firing.
+//! * **Shadowed or unresolved identity** — a `List()`/`Map()`/`Set()`/… whose
+//!   resolved declaration is not the SDK collection, or whose library/import
+//!   graph cannot establish that identity. A literal could construct a different
+//!   type. Without an identity index, the rule remains syntactic and such a
+//!   constructor keeps firing.
 //!
 //! Everything else — including any `var`/unannotated context, and a concrete
 //! constructor reached only through a nested argument position — keeps firing.
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule, TypeIndex};
+use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -54,7 +55,6 @@ impl Rule for PreferCollectionLiterals {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
-            types: ctx.types,
             suppressed: &scan.suppressed,
         };
         collector.visit_program(program);
@@ -65,15 +65,28 @@ impl Rule for PreferCollectionLiterals {
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    types: Option<&'a TypeIndex>,
     suppressed: &'a HashSet<(usize, usize)>,
 }
 
 impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::Paren { .. }) {
+            falcon_syntax::visitor::walk_expr(self, node);
+            return;
+        }
         if let Some((span, name)) = default_collection_ctor(node) {
-            // Core collection names have no type_kind; user declarations do.
-            let user_shadow = self.types.is_some_and(|t| t.type_kind(name).is_some());
+            let user_shadow = match self.ctx.identities {
+                Some(identities) => identities
+                    .file(self.ctx.file_path)
+                    .and_then(|file| {
+                        identities.resolve_declaration(identities.library(file), name.into())
+                    })
+                    .is_none_or(|identity| {
+                        !identity.is_sdk("dart:core", name)
+                            && !identity.is_sdk("dart:collection", name)
+                    }),
+                None => false,
+            };
             let context_required = self.suppressed.contains(&(span.start, span.end));
             if !user_shadow && !context_required {
                 self.diags.push(self.ctx.diagnostic(
@@ -226,23 +239,25 @@ fn concrete_context(ty: &DartType) -> Option<&str> {
 }
 
 fn default_collection_ctor(expr: &Expr) -> Option<(&Span, &str)> {
-    match expr {
+    match expr.unparenthesized() {
         Expr::Call {
             callee, args, span, ..
         } => {
             if !args.positional.is_empty() || !args.named.is_empty() {
                 return None;
             }
-            match &**callee {
+            match callee.unparenthesized() {
                 Expr::Ident(id) if NAMES.contains(&id.name.as_str()) => {
                     Some((span, id.name.as_str()))
                 }
-                Expr::Field { object, field, .. } if field.name == "new" => match &**object {
-                    Expr::Ident(id) if NAMES.contains(&id.name.as_str()) => {
-                        Some((span, id.name.as_str()))
+                Expr::Field { object, field, .. } if field.name == "new" => {
+                    match object.unparenthesized() {
+                        Expr::Ident(id) if NAMES.contains(&id.name.as_str()) => {
+                            Some((span, id.name.as_str()))
+                        }
+                        _ => None,
                     }
-                    _ => None,
-                },
+                }
                 _ => None,
             }
         }
@@ -273,6 +288,7 @@ fn default_collection_ctor(expr: &Expr) -> Option<(&Span, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::TypeIndex;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::PathBuf;
@@ -287,10 +303,30 @@ mod tests {
 
     fn count_with_types(source: &str) -> usize {
         let program = parse(source).0;
-        let types = TypeIndex::from_program(&program);
+        let identities = falcon_analyze::IdentityIndex::from_project_files(
+            &[falcon_analyze::IdentitySource {
+                path: std::path::Path::new("t.dart"),
+                program: &program,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let types = TypeIndex::from_resolved_files(
+            [(
+                std::path::Path::new("t.dart"),
+                falcon_analyze::LibrarySource {
+                    program: &program,
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )],
+            &identities,
+        );
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config).with_types(&types);
+        let ctx = AnalyzeContext::new(&path, source, &config)
+            .with_types(&types)
+            .with_identities(&identities);
         PreferCollectionLiterals.analyze(&program, &ctx).len()
     }
 
@@ -396,5 +432,45 @@ mod tests {
     fn named_constructors_and_literals_never_fire() {
         let src = "void f() { var a = List.filled(3, 0); var b = <int>[]; var c = {}; }";
         assert_eq!(count_no_types(src), 0);
+    }
+
+    #[test]
+    fn incomplete_resolved_library_does_not_replace_shadowed_collections() {
+        use falcon_analyze::{IdentityIndex, IdentitySource, LibrarySource};
+        for source in [
+            "part 'missing.dart'; class Map {} void f() { var value = Map(); }",
+            "part 'missing.dart'; class Duration {} void f() { var value = Map(); }",
+        ] {
+            let (program, errors) = parse(source);
+            assert!(errors.is_empty());
+            let path = PathBuf::from("/project/t.dart");
+            let identities = IdentityIndex::from_project_files(
+                &[IdentitySource {
+                    path: &path,
+                    program: &program,
+                    has_parse_errors: false,
+                }],
+                &[],
+            );
+            let types = TypeIndex::from_resolved_files(
+                [(
+                    path.as_path(),
+                    LibrarySource {
+                        program: &program,
+                        has_parse_errors: false,
+                        has_unresolved_parts: true,
+                    },
+                )],
+                &identities,
+            );
+            let config = FalconConfig::default();
+            let ctx = AnalyzeContext::new(&path, source, &config)
+                .with_types(&types)
+                .with_identities(&identities);
+            assert!(
+                PreferCollectionLiterals.analyze(&program, &ctx).is_empty(),
+                "{source}"
+            );
+        }
     }
 }

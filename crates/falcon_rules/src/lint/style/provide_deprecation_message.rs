@@ -45,7 +45,7 @@ impl Visitor for Collector<'_> {
             // message that is an empty/whitespace-only string literal.
             "Deprecated" => match &node.args {
                 None => true,
-                Some(args) => match args.positional.first() {
+                Some(args) => match args.positional.first().map(Expr::unparenthesized) {
                     None => true,
                     Some(Expr::StringLit(s)) => s.value.trim().is_empty(),
                     Some(_) => false,

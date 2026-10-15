@@ -22,8 +22,8 @@ impl Rule for PreferIsNotOperator {
                 op: UnaryOp::Bang,
                 operand,
                 span,
-            } = node
-                && matches!(operand.as_ref(), Expr::Is { negated: false, .. })
+            } = node.unparenthesized()
+                && matches!(operand.unparenthesized(), Expr::Is { negated: false, .. })
             {
                 diags.push(ctx.diagnostic(
                     "prefer-is-not-operator",

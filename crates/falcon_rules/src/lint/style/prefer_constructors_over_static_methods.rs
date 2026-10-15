@@ -16,16 +16,13 @@
 //! }
 //! ```
 //!
-//! Only non-generic static methods of non-generic classes and extension types
-//! are checked, with the enclosing type (non-nullable) as declared return type
-//! and a constructor call of that type somewhere in the body.
+//! Only non-generic static methods and getters of non-generic classes and
+//! extension types are checked. As in the analyzer, the last visited constructor
+//! call determines whether the body creates the declared enclosing return type.
 //!
 //! Adopted from the official `prefer_constructors_over_static_methods` lint.
 
-use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel,
-    resolve_call_constructor,
-};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
@@ -51,7 +48,7 @@ impl Rule for PreferConstructorsOverStaticMethods {
                     &node.type_params,
                     &node.members,
                     Some(
-                        node.representation
+                        node.primary_constructor
                             .constructor_name
                             .as_ref()
                             .map_or("new", |name| name.name.as_str()),
@@ -83,13 +80,27 @@ impl Rule for PreferConstructorsOverStaticMethods {
                 constructors.push("new");
             }
             for member in members {
-                let ClassMember::Method(method) = member else {
+                let (name, return_type, body, is_static, generic) = match member {
+                    ClassMember::Method(method) => (
+                        &method.name,
+                        &method.return_type,
+                        &method.body,
+                        method.is_static,
+                        !method.type_params.is_empty(),
+                    ),
+                    ClassMember::Getter(getter) => (
+                        &getter.name,
+                        &getter.return_type,
+                        &getter.body,
+                        getter.is_static,
+                        false,
+                    ),
+                    _ => continue,
+                };
+                let (Some(return_type), Some(body)) = (return_type, body) else {
                     continue;
                 };
-                let (Some(return_type), Some(body)) = (&method.return_type, &method.body) else {
-                    continue;
-                };
-                if !method.is_static || !method.type_params.is_empty() {
+                if !is_static || generic {
                     continue;
                 }
                 let returns_owner = matches!(
@@ -110,7 +121,7 @@ impl Rule for PreferConstructorsOverStaticMethods {
                     diags.push(ctx.diagnostic(
                         "prefer-constructors-over-static-methods",
                         "Static method should be a constructor.",
-                        method.name.span,
+                        name.span,
                     ));
                 }
             }
@@ -129,20 +140,17 @@ struct InstanceCreation<'a> {
 
 impl Visitor for InstanceCreation<'_> {
     fn visit_expr(&mut self, node: &Expr) {
-        if self.found {
-            return;
+        if let Some((identity, constructor, _)) =
+            crate::lint::flutter::constructor_invocation(node, self.model)
+            && (matches!(node, Expr::New { .. })
+                || identity != *self.owner
+                || self.constructors.contains(&constructor))
+        {
+            self.found = identity == *self.owner;
+            if self.found {
+                return;
+            }
         }
-        self.found = match node {
-            Expr::New { dart_type, .. } => matches!(
-                self.model.resolve_type(dart_type),
-                ResolvedType::Interface { identity, .. } if identity == *self.owner
-            ),
-            Expr::Call { callee, .. } => resolve_call_constructor(callee, self.model, false)
-                .is_some_and(|(identity, constructor)| {
-                    identity == *self.owner && self.constructors.contains(&constructor)
-                }),
-            _ => false,
-        };
         walk_expr(self, node);
     }
 }

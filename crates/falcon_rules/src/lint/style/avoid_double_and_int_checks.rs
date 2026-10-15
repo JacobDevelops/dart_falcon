@@ -20,15 +20,19 @@
 //!
 //! Reported when an `if (x is double)` statement's `else` branch is directly
 //! `if (x is int)` on the same parameter or local variable, with both types
-//! resolving to the non-nullable `dart:core` classes.
+//! resolving to the non-nullable `dart:core` classes. Like the official lint,
+//! this matches `is!` tests too; it compares the types, not the test polarity.
 //!
 //! Adopted from the official `avoid_double_and_int_checks` lint.
+
+use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
+use crate::lint::lexical_usage::locally_bound_identifiers;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]
@@ -42,6 +46,7 @@ impl Rule for AvoidDoubleAndIntChecks {
         let mut collector = Collector {
             diagnostics: Vec::new(),
             ctx,
+            bindings: locally_bound_identifiers(program),
         };
         visit_program(&mut collector, program, state);
         collector.diagnostics
@@ -51,6 +56,7 @@ impl Rule for AvoidDoubleAndIntChecks {
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    bindings: HashSet<usize>,
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
@@ -64,33 +70,36 @@ impl SemanticRuleVisitor for Collector<'_> {
         let Stmt::If(else_if) = else_branch.as_ref() else {
             return;
         };
+        let (IfCondition::Expr(if_condition), IfCondition::Expr(else_condition)) =
+            (&statement.condition, &else_if.condition)
+        else {
+            return;
+        };
         let (
-            IfCondition::Expr(Expr::Is {
+            Expr::Is {
                 expr: if_subject,
                 dart_type: if_type,
-                negated: false,
                 ..
-            }),
-            IfCondition::Expr(
-                else_condition @ Expr::Is {
-                    expr: else_subject,
-                    dart_type: else_type,
-                    negated: false,
-                    ..
-                },
-            ),
-        ) = (&statement.condition, &else_if.condition)
+            },
+            Expr::Is {
+                expr: else_subject,
+                dart_type: else_type,
+                ..
+            },
+        ) = (
+            if_condition.unparenthesized(),
+            else_condition.unparenthesized(),
+        )
         else {
             return;
         };
         let (Expr::Ident(if_name), Expr::Ident(else_name)) =
-            (if_subject.as_ref(), else_subject.as_ref())
+            (if_subject.unparenthesized(), else_subject.unparenthesized())
         else {
             return;
         };
         if if_name.name != else_name.name
-            // Only parameters and local variables live in the environment.
-            || !state.environment.is_bound(&if_name.name)
+            || !self.bindings.contains(&if_name.span.start)
             || !is_core_type(if_type, "double", state)
             || !is_core_type(else_type, "int", state)
         {
@@ -99,7 +108,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         self.diagnostics.push(self.ctx.diagnostic(
             "avoid-double-and-int-checks",
             "Explicit check for double or int.",
-            *else_condition.span(),
+            *else_condition.unparenthesized().span(),
         ));
     }
 }

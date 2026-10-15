@@ -8,12 +8,15 @@
 //! is legal Dart that meaningfully restricts the constructor's parameter, and
 //! upstream (`nodeType.type == field.type`) does not report it.
 //!
-//! Falcon has no type resolver, so the comparison is made on the written type's
-//! source text after whitespace normalization: `int` matches `int`, `int` does
-//! not match `num`. Any case where the target type cannot be established
-//! file-locally — an inherited field, a superclass declared in another file, an
-//! untyped field — is skipped rather than guessed. Missing a lint is preferable
-//! to reporting valid Dart.
+//! Falcon limitation: this rule compares written types after whitespace
+//! normalization, not semantic type equality. Target types come from explicitly
+//! declared file-local fields and non-primary superclass constructors, including
+//! forwarded super parameters. Primary-constructor fields and extension-type
+//! representation fields are not visited. Missing or untyped targets are skipped.
+//! Superclass lookup uses only the final name segment, so a prefixed superclass
+//! can be confused with a local declaration. Likewise, identically spelled type
+//! parameters from different scopes can compare equal without representing the
+//! same type. A reported annotation is therefore not always safe to remove.
 
 use std::collections::HashMap;
 
@@ -238,9 +241,8 @@ fn find_ctor<'a>(class: &ClassInfo<'a>, name: Option<&str>) -> Option<&'a Constr
     })
 }
 
-/// Whether two written types are the same type, compared as source text with
-/// all whitespace removed. Sound in the direction that matters: differing text
-/// (`num` vs `int`) is never reported.
+/// Compares written type text with whitespace removed, without resolving scope
+/// or substituting type parameters. Equal spellings need not denote equal types.
 fn same_type(source: &str, a: &DartType, b: &DartType) -> bool {
     let text = |ty: &DartType| {
         let span = ty.span();

@@ -5,6 +5,7 @@
 //! variable makes the branching explicit. The rule reports any conditional
 //! expression that has another conditional as an ancestor (nesting level two or
 //! deeper), matching dart_code_linter's default acceptable level of one.
+//! Closure bodies restart the nesting count.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;

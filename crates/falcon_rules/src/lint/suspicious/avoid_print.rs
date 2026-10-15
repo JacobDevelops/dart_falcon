@@ -66,7 +66,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         let Expr::Call { callee, span, .. } = node else {
             return;
         };
-        let Expr::Ident(identifier) = callee.as_ref() else {
+        let Expr::Ident(identifier) = callee.unparenthesized() else {
             return;
         };
         if identifier.name != "print"

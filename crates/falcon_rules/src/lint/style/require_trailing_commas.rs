@@ -23,31 +23,36 @@
 //! arguments and parameters never get the exemption. Record literals, type
 //! argument lists, and extension type representation clauses are not checked.
 //!
+//! Delimiters inside string interpolations (`'${f(a, b)}'`) are matched like
+//! any others.
+//!
+//! Like the official lint, the rule is off in libraries at language version
+//! 3.7 or later, where the formatter's tall style owns trailing commas.
+//!
 //! Adopted from the official `require_trailing_commas` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_dart_parser::lexer::Lexer;
+use falcon_analyze::{AnalyzeContext, Feature, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::token::{Token, TokenKind};
 use falcon_syntax::visitor::{
-    Visitor, walk_annotation, walk_class_member, walk_constructor_decl, walk_dart_type,
-    walk_enum_decl, walk_expr, walk_formal_param, walk_function_decl, walk_method_decl, walk_stmt,
+    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_enum_decl, walk_expr,
+    walk_formal_param, walk_function_decl, walk_method_decl, walk_stmt,
 };
+
+use crate::lint::tokens::significant_tokens;
 
 #[derive(Default)]
 pub struct RequireTrailingCommas;
 
 impl Rule for RequireTrailingCommas {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let tokens: Vec<Token> = Lexer::new(ctx.source)
-            .tokenize()
-            .into_iter()
-            .filter(|token| !token.is_trivia() && token.kind != TokenKind::Eof)
-            .collect();
+        if ctx.language_version().supports(Feature::TallStyle) {
+            return Vec::new();
+        }
         let mut collector = Collector {
             ctx,
-            tokens,
+            tokens: significant_tokens(ctx),
             diags: Vec::new(),
         };
         collector.visit_program(program);
@@ -129,6 +134,11 @@ impl Collector<'_, '_> {
 
     fn end(&self, index: usize) -> usize {
         self.tokens[index].offset + self.tokens[index].len
+    }
+
+    /// Whether the significant source of `span` sits on one line.
+    fn on_one_line(&self, span: Span) -> bool {
+        self.same_line(span.start, span.end)
     }
 
     fn same_line(&self, start: usize, end: usize) -> bool {
@@ -236,17 +246,18 @@ impl Collector<'_, '_> {
 
     /// The analyzer's exemptions for a multi-line positional last element.
     fn is_exempt(&self, expr: &Expr) -> bool {
-        let span = expr.span();
-        if self.same_line(span.start, span.end) {
+        if self.on_one_line(*expr.span()) {
             return false;
         }
-        match expr {
+        match expr.unparenthesized() {
             Expr::FuncExpr { body, .. } => matches!(**body, FunctionBody::Block(_)),
             Expr::StringLit(_) | Expr::List { .. } | Expr::Set { .. } | Expr::Map { .. } => true,
             Expr::Call {
                 callee, args, span, ..
-            } if matches!(**callee, Expr::FuncExpr { .. }) && callee.span().start == span.start => {
-                self.same_line(args.span.start, args.span.end)
+            } if matches!((**callee).unparenthesized(), Expr::FuncExpr { .. })
+                && callee.span().start == span.start =>
+            {
+                self.on_one_line(args.span)
             }
             _ => false,
         }
@@ -259,7 +270,7 @@ impl Visitor for Collector<'_, '_> {
             Expr::Call { args, .. } | Expr::New { args, .. } => self.check_args(args),
             Expr::Cascade { sections, .. } => {
                 for op in sections.iter().flat_map(|section| &section.ops) {
-                    if let CascadeOp::Call(_, _, args) = op {
+                    if let CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) = op {
                         self.check_args(args);
                     }
                 }
@@ -289,9 +300,9 @@ impl Visitor for Collector<'_, '_> {
         walk_annotation(self, node);
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.check_param_list(&node.params);
-        for initializer in &node.initializers {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+        self.check_param_list(node.params);
+        for initializer in node.initializers {
             match initializer {
                 ConstructorInitializer::SuperCall { args, .. }
                 | ConstructorInitializer::ThisCall { args, .. } => self.check_args(args),
@@ -303,7 +314,6 @@ impl Visitor for Collector<'_, '_> {
                 ConstructorInitializer::FieldInit { .. } => {}
             }
         }
-        walk_constructor_decl(self, node);
     }
 
     fn visit_enum_decl(&mut self, node: &EnumDecl) {

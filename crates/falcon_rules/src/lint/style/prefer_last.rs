@@ -55,28 +55,28 @@ impl Visitor for Collector<'_> {
 
 /// Matches `ident[ident.length - 1]` where both idents are the same name.
 fn is_length_minus_one(object: &Expr, index: &Expr) -> bool {
-    let obj_name = match object {
+    let obj_name = match object.unparenthesized() {
         Expr::Ident(id) => &id.name,
         _ => return false,
     };
-    match index {
+    match index.unparenthesized() {
         Expr::Binary {
             op: BinaryOp::Sub,
             left,
             right,
             ..
         } => {
-            if !matches!(right.as_ref(), Expr::IntLit { value, .. } if value == "1") {
+            if !matches!(right.unparenthesized(), Expr::IntLit { value, .. } if value == "1") {
                 return false;
             }
-            match left.as_ref() {
+            match left.unparenthesized() {
                 Expr::Field {
                     object: len_obj,
                     field,
                     ..
                 } => {
                     field.name == "length"
-                        && matches!(len_obj.as_ref(), Expr::Ident(id) if &id.name == obj_name)
+                        && matches!(len_obj.unparenthesized(), Expr::Ident(id) if &id.name == obj_name)
                 }
                 _ => false,
             }

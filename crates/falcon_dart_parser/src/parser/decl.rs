@@ -1,5 +1,6 @@
 use falcon_syntax::ast::*;
-use falcon_syntax::token::TokenKind;
+use falcon_syntax::token::{Token, TokenKind};
+use falcon_syntax::{Feature, LanguageVersion};
 
 use super::{ParseError, Parser};
 use crate::lexer::{Lexer, filter_trivia, scan::interp_close};
@@ -284,11 +285,10 @@ impl<'src> Parser<'src> {
         start: usize,
     ) -> TopLevelDecl {
         self.expect(TokenKind::Class);
-        let name = self.expect_ident();
-        let type_params = self.parse_type_params();
+        let (name, type_params, primary_constructor) = self.parse_name_maybe_primary(false);
 
         // Mixin-application class: `class MA = Super with M [implements I];`
-        if self.eat(TokenKind::Eq).is_some() {
+        if primary_constructor.is_none() && self.eat(TokenKind::Eq).is_some() {
             let superclass = self.parse_type();
             // A mixin-application class requires a `with` clause; without it this is
             // not a valid class type alias.
@@ -311,20 +311,52 @@ impl<'src> Parser<'src> {
         let extends = self.eat(TokenKind::Extends).map(|_| self.parse_type());
         let with_clause = self.parse_type_clause(TokenKind::With);
         let implements = self.parse_type_clause(TokenKind::Implements);
-        self.expect(TokenKind::LBrace);
         let members = self.parse_class_body_in(Some(&self.src[name.span.start..name.span.end]));
-        self.expect(TokenKind::RBrace);
         TopLevelDecl::Class(ClassDecl {
             annotations,
             modifiers,
             name,
             type_params,
+            primary_constructor,
             extends,
             with_clause,
             implements,
             members,
             span: self.span_from(start),
         })
+    }
+
+    /// `<classNameMaybePrimary>`: `[const] Name<T>`, optionally followed by a
+    /// Dart 3.13 primary constructor `[.name](params)`.
+    fn parse_name_maybe_primary(
+        &mut self,
+        representation: bool,
+    ) -> (Identifier, Vec<TypeParam>, Option<PrimaryConstructor>) {
+        let start = self.cur().offset;
+        let is_const = self.eat(TokenKind::Const).is_some();
+        let name = self.expect_ident();
+        let type_params = self.parse_type_params();
+        let named = self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1);
+        if !(is_const || named || self.at(TokenKind::LParen)) {
+            return (name, type_params, None);
+        }
+        if !representation && !self.version.supports(Feature::PrimaryConstructors) {
+            self.error("This requires the 'primary-constructors' language feature");
+        }
+        let constructor_name = named.then(|| {
+            self.advance(); // .
+            self.expect_ctor_name()
+        });
+        let params = self.parse_formal_param_list();
+        let span = Span::new(start, params.span.end);
+        let primary_constructor = PrimaryConstructor {
+            is_const,
+            name_span: name.span,
+            constructor_name,
+            params,
+            span,
+        };
+        (name, type_params, Some(primary_constructor))
     }
 
     fn parse_mixin(
@@ -338,9 +370,7 @@ impl<'src> Parser<'src> {
         let type_params = self.parse_type_params();
         let on_clause = self.parse_type_clause(TokenKind::On);
         let implements = self.parse_type_clause(TokenKind::Implements);
-        self.expect(TokenKind::LBrace);
         let members = self.parse_class_body_in(None);
-        self.expect(TokenKind::RBrace);
         MixinDecl {
             annotations,
             is_base,
@@ -361,20 +391,18 @@ impl<'src> Parser<'src> {
         start: usize,
     ) -> MixinClassDecl {
         self.expect(TokenKind::Class);
-        let name = self.expect_ident();
-        let type_params = self.parse_type_params();
+        let (name, type_params, primary_constructor) = self.parse_name_maybe_primary(false);
         let extends = self.eat(TokenKind::Extends).map(|_| self.parse_type());
         let with_clause = self.parse_type_clause(TokenKind::With);
         let implements = self.parse_type_clause(TokenKind::Implements);
-        self.expect(TokenKind::LBrace);
         let members = self.parse_class_body_in(Some(&self.src[name.span.start..name.span.end]));
-        self.expect(TokenKind::RBrace);
         MixinClassDecl {
             annotations,
             is_abstract,
             is_base,
             name,
             type_params,
+            primary_constructor,
             extends,
             with_clause,
             implements,
@@ -441,12 +469,25 @@ impl<'src> Parser<'src> {
         members
     }
 
-    /// Parse a class body with the enclosing-constructor-name context set (and
-    /// restored afterwards). `ctor_name` is `Some(type name)` when the enclosing
-    /// declaration may declare constructors, or `None` for mixins/extensions
-    /// whose untyped members are always methods.
+    /// Parse a braced class body with the enclosing-constructor-name context
+    /// set (and restored afterwards). `ctor_name` is `Some(type name)` when the
+    /// enclosing declaration may declare constructors, or `None` for
+    /// mixins/extensions whose untyped members are always methods. Dart 3.13
+    /// also accepts `;` for an empty body (`abstract class Marker;`).
     fn parse_class_body_in(&mut self, ctor_name: Option<&'src str>) -> Vec<ClassMember> {
-        self.with_ctx(|ctx| ctx.ctor_name = ctor_name, Self::parse_class_body)
+        if let Some(semicolon) = self.eat(TokenKind::Semicolon) {
+            if !self.version.supports(Feature::PrimaryConstructors) {
+                self.error_at(
+                    semicolon.offset,
+                    "This requires the 'primary-constructors' language feature",
+                );
+            }
+            return Vec::new();
+        }
+        self.expect(TokenKind::LBrace);
+        let members = self.with_ctx(|ctx| ctx.ctor_name = ctor_name, Self::parse_class_body);
+        self.expect(TokenKind::RBrace);
+        members
     }
 
     fn parse_member_modifiers(&mut self) -> MemberModifiers {
@@ -558,20 +599,60 @@ impl<'src> Parser<'src> {
             return ClassMember::Operator(self.parse_operator(annotations, modifiers, None, start));
         }
 
-        // Factory constructor. `factory` is a built-in identifier, so shipped code
-        // also uses it as a plain member name (`late final factory = 1;`, a method
-        // `factory() {}`, a getter `factory<T>`). A real factory keyword is always
-        // followed by the enclosing type name; when it is followed by
-        // `=`/`;`/`,`/`(`/`<` instead it is the member's own name.
-        if self.at(TokenKind::Factory)
-            && !matches!(
+        // Body part of a primary constructor: `this : x = 1 { ... }`, `this;`.
+        if self.at(TokenKind::This)
+            && self.ctx.ctor_name.is_some()
+            && matches!(
                 self.peek(1).kind,
-                TokenKind::Eq
-                    | TokenKind::Semicolon
-                    | TokenKind::Comma
-                    | TokenKind::LParen
-                    | TokenKind::Lt
+                TokenKind::Colon | TokenKind::LBrace | TokenKind::Semicolon | TokenKind::Arrow
             )
+        {
+            if !self.version.supports(Feature::PrimaryConstructors) {
+                self.error("This requires the 'primary-constructors' language feature");
+            }
+            let this_token = self.advance();
+            let this_span = Span::new(this_token.offset, this_token.offset + this_token.len);
+            let initializers = self.parse_constructor_initializers();
+            let body = self.parse_function_body(AsyncMarker::Sync);
+            return ClassMember::PrimaryConstructorBody(PrimaryConstructorBody {
+                annotations,
+                this_span,
+                initializers,
+                body,
+                span: self.span_from(start),
+            });
+        }
+
+        // Dart 3.13 generative constructor syntax: `new(...)`, `new name(...)`,
+        // with the usual `const`/`external` modifiers.
+        if self.at(TokenKind::New) && self.ctx.ctor_name.is_some() {
+            if !self.version.supports(Feature::PrimaryConstructors) {
+                self.error("This requires the 'primary-constructors' language feature");
+            }
+            return ClassMember::Constructor(self.parse_new_constructor(
+                annotations,
+                modifiers,
+                start,
+            ));
+        }
+
+        // Factory constructor. `factory` is a built-in identifier, so shipped code
+        // also uses it as a plain member name (`late final factory = 1;`, a getter
+        // `factory<T>`). A real factory keyword is followed by the enclosing type
+        // name, by a constructor name (`factory name(`), or — in a type that
+        // declares constructors, from Dart 3.13 (the `factory()` head of the
+        // primary-constructors feature) — directly by its parameters
+        // (`factory(`); when it is followed by `=`/`;`/`,`/`<` (or by `(`
+        // otherwise) it is the member's own name.
+        if self.at(TokenKind::Factory)
+            && match self.peek(1).kind {
+                TokenKind::Eq | TokenKind::Semicolon | TokenKind::Comma | TokenKind::Lt => false,
+                TokenKind::LParen => {
+                    self.ctx.ctor_name.is_some()
+                        && self.version.supports(Feature::PrimaryConstructors)
+                }
+                _ => true,
+            }
         {
             return ClassMember::Constructor(self.parse_factory_constructor(
                 annotations,
@@ -641,7 +722,8 @@ impl<'src> Parser<'src> {
         GetterDecl {
             annotations,
             is_static,
-            is_abstract,
+            // Like methods, a body-less non-external getter is abstract.
+            is_abstract: is_abstract || (body.is_none() && !is_external),
             is_external,
             async_marker,
             return_type,
@@ -669,24 +751,41 @@ impl<'src> Parser<'src> {
         // A setter's single value parameter accepts the same leading modifiers as
         // any formal (`set x(covariant final T v)`) and a trailing comma
         // (`set x(int a,)`), which method parameter lists already allow.
+        let param_annotations = self.parse_annotations();
         let _ = self.eat(TokenKind::Covariant);
         let _ = self.eat(TokenKind::Final);
         let _ = self.eat(TokenKind::Var);
-        let param_type = if self.peek(1).kind != TokenKind::RParen {
+        let mut param_type = if self.peek(1).kind != TokenKind::RParen {
             self.try_parse_type_followed_by(TokenKind::is_identifier_like)
         } else {
             None
         };
         let param = self.expect_ident();
+        let type_params = self.parse_type_params();
+        if self.at(TokenKind::LParen) {
+            let params = self.parse_formal_param_list();
+            let is_nullable = self.eat(TokenKind::Qmark).is_some();
+            let type_start = param_type
+                .as_ref()
+                .map_or(param.span.start, |ty| ty.span().start);
+            param_type = Some(DartType::Function(Box::new(FunctionType {
+                return_type: param_type.map(Box::new),
+                type_params,
+                params: Self::formals_to_function_type_params(&params),
+                is_nullable,
+                span: self.span_from(type_start),
+            })));
+        }
         self.eat(TokenKind::Comma); // optional trailing comma
         self.expect(TokenKind::RParen);
         let body = self.parse_function_body(AsyncMarker::Sync);
         SetterDecl {
             annotations,
             is_static,
-            is_abstract,
+            is_abstract: is_abstract || (body.is_none() && !is_external),
             is_external,
             param_type,
+            param_annotations,
             name,
             param,
             body,
@@ -744,9 +843,8 @@ impl<'src> Parser<'src> {
             is_const,
             ..
         } = modifiers;
-        self.advance(); // factory
-        let name = self.expect_ident();
-        let constructor_name = self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
+        let keyword = self.advance(); // factory
+        let (name, constructor_name) = self.parse_declared_ctor_name(&keyword);
         let params = self.parse_formal_param_list();
         // Redirecting factory: `factory C() = D;` / `= D.named;` / `= D<int>;`.
         let redirect = if self.at(TokenKind::Eq) {
@@ -774,6 +872,61 @@ impl<'src> Parser<'src> {
             body,
             span: self.span_from(start),
         }
+    }
+
+    /// `new(...)` / `new name(...)`: a generative constructor in Dart 3.13
+    /// syntax, mapped onto the classic `C(...)` / `C.name(...)` shape.
+    fn parse_new_constructor(
+        &mut self,
+        annotations: Vec<Annotation>,
+        modifiers: MemberModifiers,
+        start: usize,
+    ) -> ConstructorDecl {
+        let MemberModifiers {
+            is_external,
+            is_const,
+            ..
+        } = modifiers;
+        let keyword = self.advance(); // new
+        let (name, constructor_name) = self.parse_declared_ctor_name(&keyword);
+        let params = self.parse_formal_param_list();
+        let initializers = self.parse_constructor_initializers();
+        let body = self.parse_function_body(AsyncMarker::Sync);
+        ConstructorDecl {
+            annotations,
+            is_const,
+            is_factory: false,
+            is_external,
+            name,
+            constructor_name,
+            params,
+            initializers,
+            redirect: None,
+            body,
+            span: self.span_from(start),
+        }
+    }
+
+    /// The type and constructor names after a `new`/`factory` keyword. Classic
+    /// syntax spells the enclosing type (`factory C(`, `factory C.name(`); Dart
+    /// 3.13 syntax omits it (`new(`, `new name(`, `factory(`, `factory name(`),
+    /// in which case the type name is the enclosing type's, spanning the keyword.
+    fn parse_declared_ctor_name(&mut self, keyword: &Token) -> (Identifier, Option<Identifier>) {
+        if let Some(type_name) = self.ctx.ctor_name {
+            let implicit = Identifier::new(type_name, Self::tok_span(keyword));
+            if self.at(TokenKind::LParen) {
+                return (implicit, None);
+            }
+            if self.cur().kind.is_identifier_like()
+                && self.cur_text() != type_name
+                && self.peek(1).kind != TokenKind::Dot
+            {
+                return (implicit, Some(self.expect_ident()));
+            }
+        }
+        let name = self.expect_ident();
+        let constructor_name = self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
+        (name, constructor_name)
     }
 
     /// Parse a redirecting-factory target after `=`: `Type[.name]`.
@@ -853,10 +1006,7 @@ impl<'src> Parser<'src> {
             let name = self.expect_ident();
             return ClassMember::Field(self.finish_field(
                 annotations,
-                MemberModifiers {
-                    is_abstract: false,
-                    ..modifiers
-                },
+                modifiers,
                 field_type,
                 name,
                 start,
@@ -1151,20 +1301,23 @@ impl<'src> Parser<'src> {
 
     fn parse_enum(&mut self, annotations: Vec<Annotation>, start: usize) -> EnumDecl {
         self.expect(TokenKind::Enum);
-        let name = self.expect_ident();
-        let type_params = self.parse_type_params();
+        let (name, type_params, primary_constructor) = self.parse_name_maybe_primary(false);
         let with_clause = self.parse_type_clause(TokenKind::With);
         let implements = self.parse_type_clause(TokenKind::Implements);
-        self.expect(TokenKind::LBrace);
-
-        let ctor_name = &self.src[name.span.start..name.span.end];
-        let (variants, members) =
-            self.with_ctx(|ctx| ctx.ctor_name = Some(ctor_name), Self::parse_enum_body);
-        self.expect(TokenKind::RBrace);
+        let (variants, members) = if self.eat(TokenKind::Semicolon).is_some() {
+            (Vec::new(), Vec::new())
+        } else {
+            self.expect(TokenKind::LBrace);
+            let ctor_name = &self.src[name.span.start..name.span.end];
+            let body = self.with_ctx(|ctx| ctx.ctor_name = Some(ctor_name), Self::parse_enum_body);
+            self.expect(TokenKind::RBrace);
+            body
+        };
         EnumDecl {
             annotations,
             name,
             type_params,
+            primary_constructor,
             with_clause,
             implements,
             variants,
@@ -1227,9 +1380,7 @@ impl<'src> Parser<'src> {
         let type_params = self.parse_type_params();
         self.eat(TokenKind::On);
         let on_type = self.parse_type();
-        self.expect(TokenKind::LBrace);
         let members = self.parse_class_body_in(None);
-        self.expect(TokenKind::RBrace);
         ExtensionDecl {
             annotations,
             name,
@@ -1247,33 +1398,28 @@ impl<'src> Parser<'src> {
     ) -> ExtensionTypeDecl {
         self.expect(TokenKind::Extension);
         self.expect(TokenKind::Type);
-        let is_const = self.eat(TokenKind::Const).is_some();
-        let name = self.expect_ident();
-        let type_params = self.parse_type_params();
-        // Optional named representation constructor: `extension type Name._(int it)`.
-        let rep_start = self.cur().offset;
-        let constructor_name = self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
-        // representation: (Type fieldName)
-        self.expect(TokenKind::LParen);
-        let field_type = self.parse_type();
-        let field_name = self.expect_ident();
-        self.expect(TokenKind::RParen);
-        let representation = ExtensionTypeRepresentation {
-            constructor_name,
-            field_type,
-            field_name,
-            span: self.span_from(rep_start),
-        };
+        let (name, type_params, primary_constructor) = self.parse_name_maybe_primary(true);
+        // The representation constructor is mandatory; recover with an empty one.
+        let primary_constructor = primary_constructor.unwrap_or_else(|| {
+            self.error("expected representation constructor");
+            PrimaryConstructor {
+                is_const: false,
+                name_span: name.span,
+                constructor_name: None,
+                params: FormalParamList {
+                    params: Vec::new(),
+                    span: self.cur_span(),
+                },
+                span: self.cur_span(),
+            }
+        });
         let implements = self.parse_type_clause(TokenKind::Implements);
-        self.expect(TokenKind::LBrace);
         let members = self.parse_class_body_in(Some(&self.src[name.span.start..name.span.end]));
-        self.expect(TokenKind::RBrace);
         ExtensionTypeDecl {
             annotations,
-            is_const,
             name,
             type_params,
-            representation,
+            primary_constructor,
             implements,
             members,
             span: self.span_from(start),
@@ -1296,6 +1442,7 @@ impl<'src> Parser<'src> {
                     name,
                     type_params,
                     aliased,
+                    legacy_params: None,
                     span: self.span_from(start),
                 };
             }
@@ -1318,11 +1465,11 @@ impl<'src> Parser<'src> {
         };
         let params = self.parse_formal_param_list();
         self.expect(TokenKind::Semicolon);
-        let fn_span = Span::new(ty_start, self.cur().offset);
+        let fn_span = Span::new(ty_start, params.span.end);
         let aliased = DartType::Function(Box::new(FunctionType {
             return_type: return_type.map(Box::new),
             type_params: Vec::new(),
-            params: Self::formals_to_function_type_params(params),
+            params: Self::formals_to_function_type_params(&params),
             is_nullable: false,
             span: fn_span,
         }));
@@ -1331,6 +1478,7 @@ impl<'src> Parser<'src> {
             name,
             type_params,
             aliased,
+            legacy_params: Some(params),
             span: self.span_from(start),
         }
     }
@@ -1375,13 +1523,16 @@ impl<'src> Parser<'src> {
 
     /// Convert a formal parameter list into function-type parameters for a
     /// synthesized function type (legacy typedefs, etc.).
-    fn formals_to_function_type_params(params: FormalParamList) -> Vec<FunctionTypeParam> {
+    fn formals_to_function_type_params(params: &FormalParamList) -> Vec<FunctionTypeParam> {
         params
             .params
-            .into_iter()
+            .iter()
             .map(|p| FunctionTypeParam {
-                name: Some(p.name),
-                param_type: p.param_type.unwrap_or(DartType::Dynamic { span: p.span }),
+                name: Some(p.name.clone()),
+                param_type: p
+                    .param_type
+                    .clone()
+                    .unwrap_or(DartType::Dynamic { span: p.span }),
                 is_required: matches!(
                     p.kind,
                     ParamKind::Positional | ParamKind::Named { required: true }
@@ -1506,7 +1657,8 @@ impl<'src> Parser<'src> {
             self.error("expected string literal");
         }
         let interpolations = if is_string_lit {
-            let (interps, interp_errors) = scan_interpolations(self.src, tok.offset, raw);
+            let (interps, interp_errors) =
+                scan_interpolations(self.src, tok.offset, raw, self.version);
             // Surface any interpolation sub-parse diagnostics to the enclosing
             // program (their offsets are already absolute).
             self.errors.extend(interp_errors);
@@ -1543,6 +1695,7 @@ fn scan_interpolations(
     src: &str,
     lit_start: usize,
     raw: &str,
+    version: LanguageVersion,
 ) -> (Vec<StringInterpolation>, Vec<ParseError>) {
     let bytes = raw.as_bytes();
     if bytes.first() == Some(&b'r') {
@@ -1570,7 +1723,7 @@ fn scan_interpolations(
                 if let Some(close) = interp_close(bytes, i + 1, content_end) {
                     let inner_start = i + 2;
                     let (interp, interp_errs) =
-                        parse_interp_expr(src, lit_start + inner_start, lit_start + close);
+                        parse_interp_expr(src, lit_start + inner_start, lit_start + close, version);
                     if let Some(interp) = interp {
                         out.push(interp);
                     }
@@ -1609,6 +1762,7 @@ fn parse_interp_expr(
     src: &str,
     start: usize,
     end: usize,
+    version: LanguageVersion,
 ) -> (Option<StringInterpolation>, Vec<ParseError>) {
     if start >= end {
         return (None, Vec::new());
@@ -1619,7 +1773,7 @@ fn parse_interp_expr(
         tok.offset += start;
     }
     let tokens = filter_trivia(tokens);
-    let mut sub = Parser::new(tokens, src);
+    let mut sub = Parser::new(tokens, src, version);
     let expr = sub.parse_expr();
     if !sub.errors.is_empty() || !sub.at(TokenKind::Eof) || matches!(expr, Expr::Error { .. }) {
         return (None, sub.errors);

@@ -1560,7 +1560,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("avoid_bool_literals_in_conditional_expressions"),
     ),
-    RuleMeta::file::<lint::correctness::literal_only_boolean_expressions::LiteralOnlyBooleanExpressions>(
+    RuleMeta::resolved::<lint::correctness::literal_only_boolean_expressions::LiteralOnlyBooleanExpressions>(
         "literal-only-boolean-expressions",
         RuleGroup::Correctness,
         NONE,
@@ -1588,7 +1588,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("one_member_abstracts"),
     ),
-    RuleMeta::file::<lint::style::prefer_asserts_in_initializer_lists::PreferAssertsInInitializerLists>(
+    RuleMeta::resolved::<lint::style::prefer_asserts_in_initializer_lists::PreferAssertsInInitializerLists>(
         "prefer-asserts-in-initializer-lists",
         RuleGroup::Style,
         NONE,
@@ -1658,7 +1658,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("omit_local_variable_types"),
     ),
-    RuleMeta::file::<lint::style::prefer_const_declarations::PreferConstDeclarations>(
+    RuleMeta::resolved::<lint::style::prefer_const_declarations::PreferConstDeclarations>(
         "prefer-const-declarations",
         RuleGroup::Style,
         NONE,
@@ -1735,7 +1735,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("throw_in_finally"),
     ),
-    RuleMeta::file::<lint::style::unnecessary_parenthesis::UnnecessaryParenthesis>(
+    RuleMeta::resolved::<lint::style::unnecessary_parenthesis::UnnecessaryParenthesis>(
         "unnecessary-parenthesis",
         RuleGroup::Style,
         NONE,
@@ -1763,7 +1763,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("tighten_type_of_initializing_formals"),
     ),
-    RuleMeta::file::<lint::complexity::avoid_classes_with_only_static_members::AvoidClassesWithOnlyStaticMembers>(
+    RuleMeta::resolved::<lint::complexity::avoid_classes_with_only_static_members::AvoidClassesWithOnlyStaticMembers>(
         "avoid-classes-with-only-static-members",
         RuleGroup::Complexity,
         NONE,
@@ -1805,7 +1805,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("avoid_returning_this"),
     ),
-    RuleMeta::file::<lint::style::deprecated_consistency::DeprecatedConsistency>(
+    RuleMeta::resolved::<lint::style::deprecated_consistency::DeprecatedConsistency>(
         "deprecated-consistency",
         RuleGroup::Style,
         NONE,
@@ -2079,7 +2079,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("use_string_buffers"),
     ),
-    RuleMeta::file::<lint::correctness::invalid_case_patterns::InvalidCasePatterns>(
+    RuleMeta::resolved::<lint::correctness::invalid_case_patterns::InvalidCasePatterns>(
         "invalid-case-patterns",
         RuleGroup::Correctness,
         NONE,
@@ -2183,7 +2183,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("deprecated_member_use_from_same_package"),
     ),
-    RuleMeta::file::<lint::style::do_not_use_environment::DoNotUseEnvironment>(
+    RuleMeta::resolved::<lint::style::do_not_use_environment::DoNotUseEnvironment>(
         "do-not-use-environment",
         RuleGroup::Style,
         NONE,

@@ -5,10 +5,10 @@
 //! behavior — delete it and the inherited implementation stays in force. The
 //! rule is deliberately conservative: it only considers members annotated
 //! `@override` (the annotation stands in for real override resolution), and it
-//! leaves an override alone when it carries an extra annotation or declares
-//! parameter defaults or `covariant`, since those signal an intentional
-//! contract change. Forwarding methods (`super.m(args)`), getters (`super.x`),
-//! and setters (`super.x = v`) are all checked; operator overrides are not.
+//! leaves an override alone when it carries an extra annotation. Methods with
+//! parameter defaults or `covariant` are also exempt, since those signal an
+//! intentional contract change. Forwarding methods (`super.m(args)`), getters
+//! (`super.x`), and setters (`super.x = v`) are checked; operators are not.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
@@ -77,7 +77,7 @@ fn args_match_params(args: &ArgList, params: &FormalParamList) -> bool {
         return false;
     }
     for (arg, expected) in args.positional.iter().zip(positional) {
-        match arg {
+        match arg.unparenthesized() {
             Expr::Ident(id) if id.name == expected => {}
             _ => return false,
         }
@@ -89,7 +89,7 @@ fn args_match_params(args: &ArgList, params: &FormalParamList) -> bool {
         let Some(na) = args.named.iter().find(|na| na.name.name == np.name.name) else {
             return false;
         };
-        match &na.value {
+        match na.value.unparenthesized() {
             Expr::Ident(id) if id.name == np.name.name => {}
             _ => return false,
         }
@@ -98,7 +98,7 @@ fn args_match_params(args: &ArgList, params: &FormalParamList) -> bool {
 }
 
 fn is_super(expr: &Expr) -> bool {
-    matches!(expr, Expr::Super { .. })
+    matches!(expr.unparenthesized(), Expr::Super { .. })
 }
 
 /// The single expression a body forwards, if the body is exactly one
@@ -122,8 +122,8 @@ fn method_forwards(m: &MethodDecl) -> bool {
     let Some(expr) = single_expr(&m.body) else {
         return false;
     };
-    match expr {
-        Expr::Call { callee, args, .. } => match &**callee {
+    match expr.unparenthesized() {
+        Expr::Call { callee, args, .. } => match callee.unparenthesized() {
             Expr::Field { object, field, .. } => {
                 is_super(object) && field.name == m.name.name && args_match_params(args, &m.params)
             }
@@ -137,7 +137,7 @@ fn getter_forwards(g: &GetterDecl) -> bool {
     let Some(expr) = single_expr(&g.body) else {
         return false;
     };
-    match expr {
+    match expr.unparenthesized() {
         Expr::Field { object, field, .. } => is_super(object) && field.name == g.name.name,
         _ => false,
     }
@@ -147,7 +147,7 @@ fn setter_forwards(s: &SetterDecl) -> bool {
     let Some(expr) = single_expr(&s.body) else {
         return false;
     };
-    match expr {
+    match expr.unparenthesized() {
         Expr::Assign {
             target,
             op: AssignOp::Eq,
@@ -155,10 +155,11 @@ fn setter_forwards(s: &SetterDecl) -> bool {
             ..
         } => {
             let target_ok = matches!(
-                &**target,
+                target.unparenthesized(),
                 Expr::Field { object, field, .. } if is_super(object) && field.name == s.name.name
             );
-            let value_ok = matches!(&**value, Expr::Ident(id) if id.name == s.param.name);
+            let value_ok =
+                matches!(value.unparenthesized(), Expr::Ident(id) if id.name == s.param.name);
             target_ok && value_ok
         }
         _ => false,

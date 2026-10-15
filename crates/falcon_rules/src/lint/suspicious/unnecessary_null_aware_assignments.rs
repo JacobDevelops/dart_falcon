@@ -38,7 +38,7 @@ impl Visitor for Collector<'_> {
             span,
             ..
         } = node
-            && matches!(value.as_ref(), Expr::NullLit { .. })
+            && matches!(value.unparenthesized(), Expr::NullLit { .. })
         {
             self.diags.push(self.ctx.diagnostic(
                 "unnecessary-null-aware-assignments",

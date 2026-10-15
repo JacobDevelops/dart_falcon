@@ -18,10 +18,8 @@
 //! Adopted from the official `join_return_with_assignment` lint.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::token::TokenKind;
 use falcon_syntax::visitor::{StatementListKind, for_each_stmt_list};
 
 #[derive(Default)]
@@ -39,19 +37,11 @@ impl Rule for JoinReturnWithAssignment {
             };
             let Stmt::Return(ReturnStmt {
                 value: Some(returned),
-                span,
+                ..
             }) = last
             else {
                 return;
             };
-            // The analyzer compares the returned node without unwrapping it.
-            // Falcon erases parentheses, so preserve that distinction lexically.
-            let prefix = &ctx.source[span.start..returned.span().start];
-            if Lexer::new(prefix).tokenize().into_iter().any(|token| {
-                !token.is_trivia() && token.kind != TokenKind::Eof && token.text(prefix) != "return"
-            }) {
-                return;
-            }
             let Some(assigned) = assignment_target(second_last) else {
                 return;
             };
@@ -82,7 +72,7 @@ fn assignment_target(stmt: &Stmt) -> Option<&Expr> {
     let Stmt::Expr(statement) = stmt else {
         return None;
     };
-    match &statement.expr {
+    match statement.expr.unparenthesized() {
         Expr::Assign { target, .. } => Some(target),
         Expr::Unary { operand, .. }
         | Expr::PostfixIncDec { operand, .. }
@@ -98,7 +88,7 @@ fn assignment_target(stmt: &Stmt) -> Option<&Expr> {
 /// identifier chain and never matches, as in the analyzer.
 fn same_element(mut left: &Expr, mut right: &Expr) -> bool {
     loop {
-        match (left, right) {
+        match (left.unparenthesized(), right.unparenthesized()) {
             (Expr::Ident(left), Expr::Ident(right)) => return left.name == right.name,
             (
                 Expr::Field {

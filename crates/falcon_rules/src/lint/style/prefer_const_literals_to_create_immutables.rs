@@ -1,12 +1,14 @@
 //! Prefers `const` list, set, and map literals as arguments to constructors of `@immutable` classes.
 //!
-//! An instance of an `@immutable` class (every Flutter `Widget` is one) should
-//! not hold a mutable collection. A non-const collection literal passed
+//! An instance of an `@immutable` class should not hold a mutable collection.
+//! A non-const collection literal passed
 //! directly to such a constructor — or nested only inside other collection
 //! literals in that argument — is flagged when it could be `const`: every
-//! element is a provable constant. Literals already in a constant context are
-//! implicitly const and are left alone, as are arguments to classes whose
-//! immutability cannot be established.
+//! element is a provable constant and set elements and map keys have primitive
+//! equality. A class is immutable when it or a class on its `extends` chain is
+//! annotated `@immutable` or `@Immutable(...)` from `package:meta`.
+//! Literals already in a constant context are implicitly const and are left
+//! alone, as are arguments to classes whose immutability cannot be established.
 //!
 //! ```dart
 //! @immutable
@@ -21,12 +23,12 @@
 //!
 //! Adopted from the official `prefer_const_literals_to_create_immutables` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Truth};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
-use crate::lint::const_eval::{ConstContexts, constant_in_context};
+use crate::lint::const_eval::{ConstContexts, constant_in_context, deferred_prefixes};
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]
@@ -39,6 +41,7 @@ impl Rule for PreferConstLiteralsToCreateImmutables {
         };
         let mut collector = Collector {
             contexts: ConstContexts::of(program),
+            deferred: deferred_prefixes(program),
             ctx,
             diags: Vec::new(),
         };
@@ -49,6 +52,7 @@ impl Rule for PreferConstLiteralsToCreateImmutables {
 
 struct Collector<'a> {
     contexts: ConstContexts,
+    deferred: Vec<&'a str>,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
@@ -63,7 +67,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         else {
             return;
         };
-        if !is_immutable(&identity, state, self.ctx) {
+        if !is_immutable(&identity, state) {
             return;
         }
         let arguments = args
@@ -71,7 +75,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             .iter()
             .chain(args.named.iter().map(|argument| &argument.value));
         for literal in arguments.flat_map(collection_literals) {
-            if constant_in_context(literal, state) {
+            if constant_in_context(literal, &self.deferred, state) {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-const-literals-to-create-immutables",
                     "Use 'const' literals as arguments to constructors of '@immutable' classes.",
@@ -82,31 +86,30 @@ impl SemanticRuleVisitor for Collector<'_> {
     }
 }
 
-/// Whether the class or a class it extends is annotated `@immutable` (as
-/// Flutter's `Widget` is). Mixins and interfaces do not count.
-fn is_immutable(
-    identity: &DeclarationIdentity,
-    state: &SemanticState<'_>,
-    ctx: &AnalyzeContext<'_>,
-) -> bool {
-    let annotated = state.signatures.declaration(identity).is_some_and(|facts| {
-        facts
-            .annotations
-            .iter()
-            .any(|annotation| annotation.is_package("meta", "immutable"))
-    });
-    let declared_immutable = || {
-        matches!(identity, DeclarationIdentity::Project { name, .. }
-            if ctx.types.is_some_and(|types| types.superclass_chain_is_immutable(name) == Truth::Yes))
+/// Whether the class or a class on its superclass chain (`extends` only, not
+/// mixins or interfaces) has meta's `@immutable` or `@Immutable(...)` annotation.
+fn is_immutable(identity: &DeclarationIdentity, state: &SemanticState<'_>) -> bool {
+    let signatures = &state.signatures;
+    let annotated = |identity: &DeclarationIdentity| {
+        signatures.declaration(identity).is_some_and(|facts| {
+            facts
+                .annotations
+                .iter()
+                .any(DeclarationIdentity::is_meta_immutable)
+        })
     };
-    let widget = || {
-        state.signatures.is_subtype_of(
-            &ResolvedType::interface_identity(identity.clone()),
-            &DeclarationIdentity::flutter("Widget"),
-            &state.model,
-        ) == Truth::Yes
-    };
-    annotated || declared_immutable() || widget()
+    // A cyclic (erroneous) hierarchy ends the walk after a bounded depth.
+    let mut current = identity;
+    for _ in 0..64 {
+        if annotated(current) {
+            return true;
+        }
+        match signatures.superclass(current) {
+            Some(ResolvedType::Interface { identity, .. }) => current = identity,
+            Some(_) | None => break,
+        }
+    }
+    false
 }
 
 /// Non-const collection literals reachable from an argument through
@@ -114,14 +117,14 @@ fn is_immutable(
 fn collection_literals(argument: &Expr) -> Vec<&Expr> {
     let mut literals = Vec::new();
     if !matches!(
-        argument,
+        argument.unparenthesized(),
         Expr::List { .. } | Expr::Set { .. } | Expr::Map { .. }
     ) {
         return literals;
     }
     let mut pending = vec![argument];
     while let Some(expression) = pending.pop() {
-        match expression {
+        match expression.unparenthesized() {
             Expr::List {
                 is_const: false,
                 elements,

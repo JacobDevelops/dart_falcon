@@ -512,7 +512,11 @@ fn test_parenthesised_collection_with_complex_element() {
     // taken for a pattern assignment.
     let stmt = only_stmt("({if (a) b = c});");
     match stmt {
-        Stmt::Expr(e) => assert!(matches!(e.expr, Expr::Set { .. }), "{:?}", e.expr),
+        Stmt::Expr(e) => assert!(
+            matches!(e.expr.unparenthesized(), Expr::Set { .. }),
+            "{:?}",
+            e.expr
+        ),
         other => panic!("expected expression statement, got {other:?}"),
     }
 }
@@ -698,4 +702,62 @@ fn test_await_for_accepted_in_async_function() {
         "expected await-for, got {:?}",
         block.stmts[0]
     );
+}
+
+#[test]
+fn annotated_local_function_keeps_metadata_and_body() {
+    let (stmts, errors) = body_stmts(
+        "@pragma('vm:prefer-inline') void round(int i) { i; } round(1);",
+        "",
+    );
+    assert_eq!(errors, 0);
+    assert_eq!(stmts.len(), 2);
+    let Stmt::LocalFunc(function) = &stmts[0] else {
+        panic!("expected local function: {:?}", stmts[0]);
+    };
+    assert_eq!(function.name.name, "round");
+    assert_eq!(function.annotations.len(), 1);
+    assert_eq!(function.params.params.len(), 1);
+}
+
+#[test]
+fn annotated_local_variable_keeps_metadata() {
+    let (stmts, errors) = body_stmts("@a @b final int x = 1; @c var y = 2; @d int z = 3;", "");
+    assert_eq!(errors, 0);
+    let counts: Vec<usize> = stmts
+        .iter()
+        .map(|stmt| match stmt {
+            Stmt::LocalVar(decl) => decl.annotations.len(),
+            other => panic!("expected local variable: {other:?}"),
+        })
+        .collect();
+    assert_eq!(counts, [2, 1, 1]);
+}
+
+#[test]
+fn object_pattern_assignment_statement() {
+    let (stmts, errors) = body_stmts(
+        "AsyncError(:error, :stackTrace) = intercept(); p.Box<int>(:value) = box; f(x) == y;",
+        "",
+    );
+    assert_eq!(errors, 0);
+    assert!(
+        matches!(&stmts[0], Stmt::PatternAssign(assign) if matches!(assign.pattern, Pattern::Object(_)))
+    );
+    assert!(matches!(&stmts[1], Stmt::PatternAssign(_)));
+    assert!(matches!(&stmts[2], Stmt::Expr(_)));
+}
+
+#[test]
+fn test_misplaced_await_in_sync_body_is_await_expression() {
+    // The front end parses `await operand` in a sync body as a (misplaced)
+    // await expression rather than a dangling identifier.
+    let (stmts, errors) = sync_body_stmts(
+        "await SystemChrome.reset(<int>[]); await f() + 1; await = 1;",
+        "",
+    );
+    assert_eq!(errors, 0, "{stmts:?}");
+    assert!(matches!(&stmts[0], Stmt::Expr(e) if matches!(e.expr, Expr::Await { .. })));
+    assert!(matches!(&stmts[1], Stmt::Expr(e) if matches!(e.expr, Expr::Binary { .. })));
+    assert!(matches!(&stmts[2], Stmt::Expr(e) if matches!(e.expr, Expr::Assign { .. })));
 }

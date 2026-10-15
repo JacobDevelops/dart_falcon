@@ -13,13 +13,12 @@
 //! class Worker with Logging {}  // preferred
 //! ```
 //!
-//! Only project classes that resolve to a unique plain `class` declaration are
-//! reported; unresolved or SDK types are left alone.
+//! Resolved plain classes are reported regardless of their declaring library.
 //!
 //! Adopted from the official `prefer_mixin` lint.
 
 use falcon_analyze::resolve::TypeKind;
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -28,7 +27,7 @@ pub struct PreferMixin;
 
 impl Rule for PreferMixin {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let (Some(identities), Some(types)) = (ctx.identities, ctx.types) else {
+        let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
             return Vec::new();
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
@@ -42,13 +41,12 @@ impl Rule for PreferMixin {
                 _ => continue,
             };
             for mixin in with_clause {
-                let is_plain_class = matches!(
-                    model.resolve_type(mixin),
-                    ResolvedType::Interface {
-                        identity: DeclarationIdentity::Project { name, .. },
-                        ..
-                    } if types.type_kind(&name) == Some(TypeKind::Class)
-                );
+                let is_plain_class = match model.resolve_type(mixin) {
+                    ResolvedType::Interface { identity, .. } => {
+                        signatures.type_kind(&identity) == Some(TypeKind::Class)
+                    }
+                    _ => false,
+                };
                 if is_plain_class {
                     diags.push(ctx.diagnostic(
                         "prefer-mixin",
@@ -59,5 +57,88 @@ impl Rule for PreferMixin {
             }
         }
         diags
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::{IdentityIndex, IdentitySource, LibrarySource, TypeIndex};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::PathBuf;
+
+    /// Mixed-in types resolve through declaration identities across files.
+    fn reports(source: &str, imported: &str) -> Vec<String> {
+        let path = PathBuf::from("/project/lib/main.dart");
+        let imported_path = PathBuf::from("/project/lib/imported.dart");
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let (dependency, errors) = parse(imported);
+        assert!(errors.is_empty(), "{errors:?}");
+        let sources = [
+            IdentitySource {
+                path: &path,
+                program: &program,
+                has_parse_errors: false,
+            },
+            IdentitySource {
+                path: &imported_path,
+                program: &dependency,
+                has_parse_errors: false,
+            },
+        ];
+        let identities = IdentityIndex::from_project_files(&sources, &[]);
+        let types = TypeIndex::from_resolved_files(
+            sources.iter().map(|source| {
+                (
+                    source.path,
+                    LibrarySource {
+                        program: source.program,
+                        has_parse_errors: false,
+                        has_unresolved_parts: false,
+                    },
+                )
+            }),
+            &identities,
+        );
+        let signatures = falcon_analyze::SignatureIndex::from_project_files(
+            &[
+                (path.clone(), &program),
+                (imported_path.clone(), &dependency),
+            ],
+            &identities,
+            &types,
+        );
+        let config = FalconConfig::default();
+        let context = AnalyzeContext::new(&path, source, &config)
+            .with_identities(&identities)
+            .with_types(&types)
+            .with_signatures(&signatures);
+        PreferMixin
+            .analyze(&program, &context)
+            .into_iter()
+            .map(|diagnostic| {
+                source[diagnostic.span.start..diagnostic.span.end]
+                    .trim()
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn imported_plain_class_is_reported_by_identity() {
+        let imported = "class Logger {}\nmixin Logging {}\nmixin class Tracing {}\n";
+        let source =
+            "import 'imported.dart';\nclass A with Logger {}\nclass B with Logging, Tracing {}\n";
+        assert_eq!(reports(source, imported), ["Logger"]);
+    }
+
+    #[test]
+    fn prefixed_import_resolves_to_the_declaring_library() {
+        let imported = "class Logger {}\n";
+        let source =
+            "import 'imported.dart' as lib;\nmixin Logger {}\nclass A with lib.Logger, Logger {}\n";
+        assert_eq!(reports(source, imported), ["lib.Logger"]);
     }
 }

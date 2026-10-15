@@ -29,13 +29,13 @@ fn is_negated_where_is_empty(expr: &Expr) -> Option<Span> {
         op: UnaryOp::Bang,
         operand,
         span,
-    } = expr
-        && let Expr::Field { object, field, .. } = &**operand
+    } = expr.unparenthesized()
+        && let Expr::Field { object, field, .. } = operand.unparenthesized()
         && field.name == "isEmpty"
-        && let Expr::Call { callee, .. } = &**object
+        && let Expr::Call { callee, .. } = object.unparenthesized()
         && let Expr::Field {
             field: where_field, ..
-        } = &**callee
+        } = callee.unparenthesized()
         && where_field.name == "where"
     {
         return Some(Span {
@@ -52,25 +52,26 @@ fn is_where_length_eq_length(expr: &Expr) -> Option<Span> {
         left,
         right,
         span,
-    } = expr
+        ..
+    } = expr.unparenthesized()
         && let Expr::Field {
             object: left_obj,
             field: left_field,
             ..
-        } = &**left
+        } = left.unparenthesized()
         && left_field.name == "length"
         && let Expr::Call {
             callee: left_callee,
             ..
-        } = &**left_obj
+        } = left_obj.unparenthesized()
         && let Expr::Field {
             field: left_where_field,
             ..
-        } = &**left_callee
+        } = left_callee.unparenthesized()
         && left_where_field.name == "where"
         && let Expr::Field {
             field: right_field, ..
-        } = &**right
+        } = right.unparenthesized()
         && right_field.name == "length"
     {
         return Some(Span {
@@ -90,6 +91,10 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::Paren { .. }) {
+            falcon_syntax::visitor::walk_expr(self, node);
+            return;
+        }
         if let Some(span) =
             is_negated_where_is_empty(node).or_else(|| is_where_length_eq_length(node))
         {

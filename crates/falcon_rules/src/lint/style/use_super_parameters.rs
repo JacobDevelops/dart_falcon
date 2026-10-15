@@ -96,7 +96,7 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
         if param.initializing.is_some() {
             continue;
         }
-        if let Some(Expr::Ident(id)) = super_args.positional.get(i)
+        if let Some(Expr::Ident(id)) = super_args.positional.get(i).map(Expr::unparenthesized)
             && id.name == param.name.name
             && used_once(&param.name.name)
         {
@@ -115,7 +115,7 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
         }
         let forwarded = super_args.named.iter().any(|n| {
             n.name.name == param.name.name
-                && matches!(&n.value, Expr::Ident(id) if id.name == param.name.name)
+                && matches!(n.value.unparenthesized(), Expr::Ident(id) if id.name == param.name.name)
         });
         if forwarded && used_once(&param.name.name) {
             diags.push(ctx.diagnostic(

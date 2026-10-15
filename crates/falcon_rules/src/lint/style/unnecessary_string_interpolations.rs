@@ -101,7 +101,17 @@ mod tests {
             }],
             &[],
         );
-        let types = TypeIndex::from_program(&program);
+        let types = TypeIndex::from_resolved_files(
+            [(
+                path,
+                falcon_analyze::LibrarySource {
+                    program: &program,
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )],
+            &identities,
+        );
         let model = SemanticModel::new(path, &identities, Some(&types));
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
@@ -118,7 +128,7 @@ mod tests {
         impl SemanticRuleVisitor for Probe {
             fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
                 if let Expr::Call { callee, args, .. } = node
-                    && matches!(callee.as_ref(), Expr::Ident(id) if id.name == "probe")
+                    && matches!(callee.unparenthesized(), Expr::Ident(id) if id.name == "probe")
                 {
                     self.0
                         .extend(args.positional.iter().map(|expr| state.infer(expr)));

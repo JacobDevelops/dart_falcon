@@ -2,7 +2,7 @@
 //! Adopted from package:lints `prefer_iterable_whereType`.
 //!
 //! Filtering an iterable with an `is` test is exactly what `Iterable.whereType`
-//! does, but the getter also narrows the element type, yielding an
+//! does, but the method also narrows the element type, yielding an
 //! `Iterable<T>` instead of leaving the original element type in place. Using
 //! `whereType<T>()` is shorter, avoids the throwaway closure, and removes the
 //! casts or checks that a bare `where` filter would still require downstream.
@@ -11,14 +11,12 @@
 //! the form `param is T` — the test must be non-negated and applied to the
 //! closure's own parameter.
 //!
-//! Type knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context
-//! and the receiver's static type is *positively proven* to be a concrete type
-//! that (a) is definitely not an `Iterable` (`is_subtype … No`) and (b)
-//! definitely has no `whereType` member (`member_lookup … Absent`), then
-//! `.whereType<T>()` does not exist on the receiver and rewriting would be wrong,
-//! so the diagnostic is withheld. A user type carrying its own `whereType` keeps
-//! firing (the rewrite is valid there), and an `Unknown` receiver — the common
-//! case, and every receiver when no type index is attached — keeps firing.
+//! Semantic analysis requires declaration identities. Once available, an
+//! unknown receiver still triggers the lint. A `TypeIndex` can suppress it only
+//! when the receiver is proven not to be an `Iterable` and to have no
+//! `whereType` member; source-resolved members and subtypes take precedence.
+//! A user type carrying its own `whereType` keeps firing. Without a type index,
+//! negative proofs are unavailable, but source-derived types are still inferred.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
@@ -53,7 +51,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         let Expr::Call { callee, args, .. } = node else {
             return;
         };
-        let Expr::Field { object, field, .. } = callee.as_ref() else {
+        let Expr::Field { object, field, .. } = callee.unparenthesized() else {
             return;
         };
         if field.name == "where"
@@ -72,7 +70,7 @@ impl SemanticRuleVisitor for Collector<'_> {
 }
 
 fn is_is_check_closure(expr: &Expr) -> bool {
-    let Expr::FuncExpr { params, body, .. } = expr else {
+    let Expr::FuncExpr { params, body, .. } = expr.unparenthesized() else {
         return false;
     };
     let [param] = params.params.as_slice() else {
@@ -87,8 +85,8 @@ fn is_is_check_closure(expr: &Expr) -> bool {
             expr: tested,
             negated: false,
             ..
-        } = &**inner
-        && let Expr::Ident(id) = &**tested
+        } = inner.unparenthesized()
+        && let Expr::Ident(id) = tested.unparenthesized()
     {
         return &id.name == param_name;
     }
@@ -125,7 +123,6 @@ mod tests {
 
     fn count_with_types(source: &str) -> usize {
         let program = parse(source).0;
-        let types = TypeIndex::from_program(&program);
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
         let identities = IdentityIndex::from_project_files(
@@ -135,6 +132,17 @@ mod tests {
                 has_parse_errors: false,
             }],
             &[],
+        );
+        let types = TypeIndex::from_resolved_files(
+            [(
+                path.as_path(),
+                falcon_analyze::LibrarySource {
+                    program: &program,
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )],
+            &identities,
         );
         let model = SemanticModel::new(&path, &identities, Some(&types));
         let signatures = SignatureIndex::from_program(&program, &model);

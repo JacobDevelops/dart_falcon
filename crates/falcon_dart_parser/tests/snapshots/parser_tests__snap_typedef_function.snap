@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1638
 expression: "prog.declarations[0]"
 ---
 TypeAlias(
@@ -19,7 +20,7 @@ TypeAlias(
                     Void {
                         span: Span {
                             start: 19,
-                            end: 24,
+                            end: 23,
                         },
                     },
                 ),
@@ -46,7 +47,7 @@ TypeAlias(
                                 },
                             },
                         ),
-                        is_required: false,
+                        is_required: true,
                         is_named: false,
                     },
                 ],
@@ -57,6 +58,7 @@ TypeAlias(
                 },
             },
         ),
+        legacy_params: None,
         span: Span {
             start: 0,
             end: 38,

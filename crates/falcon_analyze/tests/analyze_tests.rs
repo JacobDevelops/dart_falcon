@@ -48,15 +48,7 @@ fn test_mock_rule_analyze_empty() {
     let rule = NoOpRule;
     let (program, _) = falcon_dart_parser::parse("void main() {}");
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext {
-        file_path: Path::new("test.dart"),
-        source: "void main() {}",
-        config: &config,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), "void main() {}", &config);
 
     let diagnostics = rule.analyze(&program, &ctx);
     assert!(diagnostics.is_empty());
@@ -69,15 +61,7 @@ fn test_registry_register_and_run_all_empty() {
 
     let (program, _) = falcon_dart_parser::parse("void main() {}");
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext {
-        file_path: Path::new("test.dart"),
-        source: "void main() {}",
-        config: &config,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), "void main() {}", &config);
 
     let diagnostics = registry.run_all(&program, &ctx);
     assert!(diagnostics.is_empty());
@@ -90,15 +74,7 @@ fn test_registry_run_all_emits_diagnostic() {
 
     let (program, _) = falcon_dart_parser::parse("void main() {}");
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext {
-        file_path: Path::new("test.dart"),
-        source: "void main() {}",
-        config: &config,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), "void main() {}", &config);
 
     let diagnostics = registry.run_all(&program, &ctx);
     assert_eq!(diagnostics.len(), 1);
@@ -115,15 +91,7 @@ fn test_registry_multiple_rules() {
 
     let (program, _) = falcon_dart_parser::parse("void main() {}");
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext {
-        file_path: Path::new("test.dart"),
-        source: "void main() {}",
-        config: &config,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("test.dart"), "void main() {}", &config);
 
     let diagnostics = registry.run_all(&program, &ctx);
     // NoOpRule: 0, AlwaysErrorRule: 1, CountFunctionDeclsRule: 2
@@ -136,15 +104,7 @@ fn test_analyze_context_fields() {
     let source = "void main() {}";
     let path = Path::new("test.dart");
 
-    let ctx = AnalyzeContext {
-        file_path: path,
-        source,
-        config: &config,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(path, source, &config);
 
     assert_eq!(ctx.file_path, path);
     assert_eq!(ctx.source, source);
@@ -267,15 +227,7 @@ fn test_end_to_end_parse_analyze_serialize() {
     registry.register("always_error", Box::new(AlwaysErrorRule));
 
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext {
-        file_path: Path::new("foo.dart"),
-        source,
-        config: &config,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("foo.dart"), source, &config);
 
     let diagnostics = registry.run_all(&program, &ctx);
     assert_eq!(
@@ -301,4 +253,36 @@ fn test_context_diagnostic_uses_file_and_warning_default() {
     assert_eq!(diagnostic.file_path, "foo.dart");
     assert_eq!(diagnostic.severity, Severity::Warning);
     assert_eq!(diagnostic.span, Span { start: 1, end: 3 });
+}
+
+#[test]
+fn context_reuses_per_file_analysis_facts() {
+    let source = "int value = 0; void main() { while (value < 2) { value++; } }";
+    let (program, errors) = falcon_dart_parser::parse(source);
+    assert!(errors.is_empty(), "{errors:?}");
+    let config = FalconConfig::default();
+    let path = Path::new("test.dart");
+    let identities = falcon_analyze::resolve::IdentityIndex::from_project_files(
+        &[falcon_analyze::resolve::IdentitySource {
+            path,
+            program: &program,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let ctx = AnalyzeContext::new(path, source, &config).with_identities(&identities);
+    assert!(std::ptr::eq(
+        ctx.flow_writes(&program),
+        ctx.flow_writes(&program)
+    ));
+    assert!(std::ptr::eq(ctx.globals(&program), ctx.globals(&program)));
+    assert!(ctx.globals(&program).contains_key("value"));
+    assert!(std::ptr::eq(ctx.tokens().as_ptr(), ctx.tokens().as_ptr()));
+    assert!(!ctx.tokens().is_empty());
+
+    let second = AnalyzeContext::new(path, source, &config).with_identities(&identities);
+    assert!(!std::ptr::eq(
+        ctx.flow_writes(&program),
+        second.flow_writes(&program)
+    ));
 }

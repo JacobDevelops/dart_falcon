@@ -108,9 +108,9 @@ fn check_stmts(
                 counts.clear();
                 continue;
             }
-            let eligible = match init {
+            let eligible = match init.unparenthesized() {
                 Expr::Field { .. } => true,
-                Expr::Call { callee, .. } => matches!(callee.as_ref(), Expr::Field { .. }),
+                Expr::Call { callee, .. } => matches!(callee.unparenthesized(), Expr::Field { .. }),
                 _ => false,
             };
             let calls = eligible
@@ -130,7 +130,7 @@ fn check_stmts(
                     ));
                 }
             } else if !matches!(
-                init,
+                init.unparenthesized(),
                 Expr::IntLit { .. }
                     | Expr::DoubleLit { .. }
                     | Expr::BoolLit { .. }
@@ -139,7 +139,7 @@ fn check_stmts(
                     | Expr::This { .. }
                     | Expr::Super { .. }
                     | Expr::FuncExpr { .. }
-            ) && !matches!(init, Expr::StringLit(literal) if literal.interpolations.is_empty())
+            ) && !matches!(init.unparenthesized(), Expr::StringLit(literal) if literal.interpolations.is_empty())
             {
                 counts.clear();
             }
@@ -210,7 +210,7 @@ impl Visitor for ChainProbe<'_, '_> {
             Expr::GenericInstantiation { target, .. } => Some(*target.span()),
             Expr::Call { callee, .. } => {
                 self.has_call = true;
-                self.valid = matches!(callee.as_ref(), Expr::Field { field, .. } if field.name != "new")
+                self.valid = matches!(callee.unparenthesized(), Expr::Field { field, .. } if field.name != "new")
                     && !self.model.is_some_and(|model| {
                         falcon_analyze::resolve_call_constructor(callee, model, true).is_some_and(
                             |(identity, name)| {
@@ -302,9 +302,9 @@ impl Visitor for LateDeclarations<'_> {
             let span = declaration.name.span;
             let deferred_effects = node.is_late && declaration.initializer.as_ref()
                 .is_some_and(|expr| {
-                    !matches!(expr, Expr::IntLit { .. } | Expr::DoubleLit { .. }
+                    !matches!(expr.unparenthesized(), Expr::IntLit { .. } | Expr::DoubleLit { .. }
                         | Expr::BoolLit { .. } | Expr::NullLit { .. } | Expr::FuncExpr { .. })
-                        && !matches!(expr, Expr::StringLit(literal) if literal.interpolations.is_empty())
+                        && !matches!(expr.unparenthesized(), Expr::StringLit(literal) if literal.interpolations.is_empty())
                         && chain_calls(expr, None, None) != Some(false)
                 });
             self.has_deferred_effects |= deferred_effects;

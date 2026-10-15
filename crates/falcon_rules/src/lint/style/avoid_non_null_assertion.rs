@@ -33,7 +33,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         let Expr::NullAssert { operand, span } = node else {
             return;
         };
-        if let Expr::Index { object, .. } = operand.as_ref() {
+        if let Expr::Index { object, .. } = operand.unparenthesized() {
             let receiver = state.infer(object);
             if state
                 .signatures

@@ -13,6 +13,8 @@
 //!
 //! Each out-of-place constructor is reported at its name. Enum values are not
 //! members, so they never count as preceding declarations.
+//! Primary constructor headers do not participate in body ordering; their
+//! explicit `this` bodies do, and are reported at the `this` keyword.
 //!
 //! Adopted from the official `sort_constructors_first` lint.
 
@@ -41,6 +43,16 @@ impl Rule for SortConstructorsFirst {
                                 "Constructor declarations should be before non-constructor \
                                  declarations.",
                                 constructor_name_range(constructor),
+                            ));
+                        }
+                    }
+                    ClassMember::PrimaryConstructorBody(body) => {
+                        if other {
+                            diags.push(ctx.diagnostic(
+                                "sort-constructors-first",
+                                "Constructor declarations should be before non-constructor \
+                                 declarations.",
+                                body.this_span,
                             ));
                         }
                     }

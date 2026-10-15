@@ -1,6 +1,6 @@
 /// Return the newline index or `end`, leaving the newline unconsumed.
 pub(crate) fn skip_line(bytes: &[u8], mut pos: usize, end: usize) -> usize {
-    while pos < end && bytes[pos] != b'\n' {
+    while pos < end && !matches!(bytes[pos], b'\n' | b'\r') {
         pos += 1;
     }
     pos

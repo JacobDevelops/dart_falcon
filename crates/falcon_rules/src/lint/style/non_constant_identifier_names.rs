@@ -18,9 +18,8 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_constructor_decl, walk_field_decl, walk_formal_param, walk_function_decl,
-    walk_getter_decl, walk_method_decl, walk_pattern, walk_setter_decl, walk_stmt,
-    walk_top_level_decl,
+    Visitor, walk_field_decl, walk_formal_param, walk_function_decl, walk_getter_decl,
+    walk_method_decl, walk_pattern, walk_setter_decl, walk_stmt, walk_top_level_decl,
 };
 
 #[derive(Default)]
@@ -102,11 +101,10 @@ impl Visitor for Collector<'_> {
 
     /// Only the named part of a constructor is an identifier; the leading type
     /// name is governed by `camel-case-types`.
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
         if let Some(named) = &node.constructor_name {
             self.check(named);
         }
-        walk_constructor_decl(self, node);
     }
 
     fn visit_field_decl(&mut self, node: &FieldDecl) {
@@ -135,7 +133,12 @@ impl Visitor for Collector<'_> {
             Stmt::LocalFunc(lf) => self.check(&lf.name),
             // Local declarations and pattern bindings use their dedicated hooks.
             Stmt::For(f) => {
-                if let Some(ForInit::ForIn { name, .. }) = &f.header.init {
+                if let Some(ForInit::ForIn {
+                    declares_variable: true,
+                    name,
+                    ..
+                }) = &f.header.init
+                {
                     self.check(name);
                 }
             }

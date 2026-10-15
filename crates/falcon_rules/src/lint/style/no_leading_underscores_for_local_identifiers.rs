@@ -83,7 +83,12 @@ impl Visitor for Collector<'_> {
         match node {
             // Local declarations and pattern bindings use their dedicated hooks.
             Stmt::For(f) => {
-                if let Some(ForInit::ForIn { name, .. }) = &f.header.init {
+                if let Some(ForInit::ForIn {
+                    declares_variable: true,
+                    name,
+                    ..
+                }) = &f.header.init
+                {
                     self.check(name);
                 }
             }

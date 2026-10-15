@@ -5,7 +5,10 @@
 //! inspects the statements directly in the body of a `for`, `while` or
 //! `do`-`while` loop (and plain nested blocks). It reports `s += ...` when `s` is
 //! a `String` variable declared outside that body, and reports `s` in
-//! `s = s + ...` or `s = '$s...'`, where the right-hand side starts with `s`.
+//! `s = s + ...` or `s = '$s...'` (parentheses aside), where the right-hand
+//! side starts with `s` and `s` is a local variable or parameter: for a field
+//! or top-level variable the analyzer compares the setter written with the
+//! getter read, which never match.
 //!
 //! Adopted from the official `use_string_buffers` lint.
 
@@ -44,7 +47,7 @@ struct Collector<'a> {
 fn starts_with_identifier(expr: &Expr, name: &str, source: &str) -> bool {
     let mut current = expr;
     loop {
-        match current {
+        match current.unparenthesized() {
             Expr::Binary {
                 op: BinaryOp::Add,
                 left,
@@ -59,9 +62,16 @@ fn starts_with_identifier(expr: &Expr, name: &str, source: &str) -> bool {
                     return false;
                 };
                 let content_start = literal.span.start + delimiter.content_offset;
-                // The interpolation must open the string: `$s...` or `${s}...`.
-                let prefix = source.get(content_start..first.span.start);
-                if !matches!(prefix, Some("$" | "${")) {
+                // The interpolation must open the string: `$s...` or `${s}...`,
+                // possibly parenthesized (`${(s)}...`).
+                let Some(prefix) = source.get(content_start..first.span.start) else {
+                    return false;
+                };
+                let opens = prefix == "$"
+                    || prefix.strip_prefix("${").is_some_and(|parens| {
+                        parens.chars().all(|c| c == '(' || c.is_whitespace())
+                    });
+                if !opens {
                     return false;
                 }
                 current = &first.expr;
@@ -86,8 +96,10 @@ impl Collector<'_> {
                             if identity.is_sdk("dart:core", "String"))
                     });
                     locals.extend(declaration.declarators.iter().map(|declarator| {
-                        let is_string = declared_string
-                            .unwrap_or(matches!(declarator.initializer, Some(Expr::StringLit(_))));
+                        let is_string = declared_string.unwrap_or(matches!(
+                            declarator.initializer.as_ref().map(Expr::unparenthesized),
+                            Some(Expr::StringLit(_))
+                        ));
                         (declarator.name.name.as_str(), is_string)
                     }));
                 }
@@ -108,11 +120,11 @@ impl Collector<'_> {
             op,
             value,
             span,
-        } = expr
+        } = expr.unparenthesized()
         else {
             return;
         };
-        let Expr::Ident(identifier) = target.as_ref() else {
+        let Expr::Ident(identifier) = target.unparenthesized() else {
             return;
         };
         if !matches!(op, AssignOp::PlusEq | AssignOp::Eq) {
@@ -128,7 +140,15 @@ impl Collector<'_> {
             AssignOp::PlusEq if local.is_none() => {
                 self.report(*span);
             }
-            AssignOp::Eq if starts_with_identifier(value, &identifier.name, self.ctx.source) => {
+            AssignOp::Eq
+                if (local.is_some()
+                    // Fields are bound in the root scope; locals and parameters below it.
+                    || state
+                        .environment
+                        .binding_depth(&identifier.name)
+                        .is_some_and(|depth| depth > 0))
+                    && starts_with_identifier(value, &identifier.name, self.ctx.source) =>
+            {
                 self.report(identifier.span);
             }
             _ => {}

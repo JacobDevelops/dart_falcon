@@ -16,8 +16,9 @@
 //! the return and parameter types written directly in a function type, type
 //! arguments of empty collection literals (`<Null>[]`), `extension on Null`,
 //! extension type representations, and return types of members overriding a
-//! member that does not return `void`. When an override's inherited member
-//! cannot be resolved the rule stays silent.
+//! member that does not return `void`.
+//! Overrides whose external declarations are unavailable are conservatively
+//! exempt; an unresolved source superclass is not evidence of an override.
 //!
 //! Adopted from the official `prefer_void_to_null` lint.
 
@@ -119,7 +120,10 @@ impl<'a> NullTypes<'a> {
             return true;
         };
         let Some(inherited) = self.signatures.inherited_member_facts(owner, name) else {
-            return true;
+            return !enclosing
+                .supertypes
+                .iter()
+                .any(|ty| matches!(ty, ResolvedType::Unknown));
         };
         let overrides = inherited.iter().any(|fact| {
             if getter {
@@ -140,7 +144,7 @@ impl<'a> NullTypes<'a> {
             } else {
                 self.signatures
                     .resolved_member(supertype, name, self.model)
-                    .map(|(signature, _)| signature.return_type)
+                    .map(|(signature, _)| signature.return_type.clone())
             };
             match returned {
                 Some(ty) if is_void_like(&ty) => overrides_void = true,
@@ -169,7 +173,7 @@ fn is_void_like(ty: &ResolvedType) -> bool {
             ..
         } => {
             identity.is_sdk("dart:async", "FutureOr")
-                && matches!(arguments.as_slice(), [ResolvedType::Void])
+                && matches!(arguments.as_ref(), [ResolvedType::Void])
         }
         _ => false,
     }
@@ -191,7 +195,11 @@ impl<'a> Visitor for NullTypes<'a> {
                 self.enclosing = saved;
             }
             TopLevelDecl::ExtensionType(extension_type) => {
-                self.exempt(Some(&extension_type.representation.field_type));
+                self.exempt(
+                    extension_type
+                        .representation()
+                        .and_then(|representation| representation.param_type.as_ref()),
+                );
                 let enclosing = Enclosing {
                     owner: owner(&extension_type.name),
                     supertypes: resolve_all(model, extension_type.implements.iter()),

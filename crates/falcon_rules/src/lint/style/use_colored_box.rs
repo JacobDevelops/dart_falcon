@@ -1,12 +1,11 @@
 //! Prefers `ColoredBox` over a `Container` that only paints a color behind its child.
 //!
-//! A `Container` whose only arguments are a non-nullable `color` and a `child`
-//! (plus an optional `key`) builds the same tree as a `ColoredBox`, which is
-//! lighter and has a `const` constructor. Only invocations that resolve to
-//! Flutter's `Container` are considered. A `color` that may be `null` keeps the
-//! `Container` (a `ColoredBox` requires a color), so the rule only fires when
-//! the color is provably non-nullable: a non-nullable static type, a
-//! constructor invocation, or a `Colors.<name>` constant.
+//! A `Container` whose only arguments are `color` and `child` (plus an optional
+//! `key`) can be replaced by the lighter, const-capable `ColoredBox`. Only
+//! invocations that resolve to Flutter's `Container` are considered. Matching
+//! the analyzer's nullability-suffix check, a color with a nullable static type
+//! is excluded, but `dynamic` and `Null` still qualify. When the type is unknown,
+//! a constructor invocation or a Flutter `Colors.<name>` access also qualifies.
 //!
 //! ```dart
 //! Container(color: Colors.blue, child: child);  // BAD
@@ -48,7 +47,9 @@ impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Some((identity, "new", args)) =
             crate::lint::flutter::constructor_invocation(node, &state.model)
-            && identity == DeclarationIdentity::flutter("Container")
+            && self.ctx.identities.is_some_and(|index| {
+                index.is_package_declaration(&identity, "flutter", "Container")
+            })
             && only_colors_child(args, state)
         {
             self.diags.push(self.ctx.diagnostic(
@@ -74,17 +75,21 @@ fn only_colors_child(args: &ArgList, state: &SemanticState<'_>) -> bool {
     args.positional.is_empty() && has_child && has_color
 }
 
+/// The analyzer's `staticType.nullabilitySuffix != question`: `dynamic` and
+/// `Null` (as for a `null` literal) carry no `?` suffix.
 fn non_nullable_color(color: &Expr, state: &SemanticState<'_>) -> bool {
     match state.infer(color) {
         ResolvedType::Unknown => {}
-        ty => return !ty.nullable() || ty == ResolvedType::Dynamic,
+        ty => {
+            return !ty.nullable() || matches!(ty, ResolvedType::Dynamic | ResolvedType::Null);
+        }
     }
     if crate::lint::flutter::constructor_invocation(color, &state.model).is_some() {
         return true;
     }
     // Every static member of Flutter's `Colors` is a non-nullable color.
     matches!(
-        color,
+        color.unparenthesized(),
         Expr::Field { object, is_null_safe: false, .. }
             if matches!(object.as_ref(), Expr::Ident(prefix)
                 if !state.environment.is_bound(&prefix.name)

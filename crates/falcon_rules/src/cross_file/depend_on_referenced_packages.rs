@@ -3,6 +3,7 @@
 //! Imports from `lib/` and `bin/` must name a regular dependency. Imports from
 //! development-only locations such as `test/` and `tool/` may also name a
 //! dev-dependency. SDK imports and imports of the package itself are ignored.
+//! Like the analyzer, only the primary URI is checked, not conditional alternatives.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -48,14 +49,8 @@ impl CrossFileRule for DependOnReferencedPackages {
             };
             let regular_dependency_required = is_public_or_executable(&file.path, &pubspec);
 
-            let import_uris = file.program.imports.iter().flat_map(|directive| {
-                std::iter::once(&directive.uri)
-                    .chain(directive.configurable_uris.iter().map(|uri| &uri.uri))
-            });
-            let export_uris = file.program.exports.iter().flat_map(|directive| {
-                std::iter::once(&directive.uri)
-                    .chain(directive.configurable_uris.iter().map(|uri| &uri.uri))
-            });
+            let import_uris = file.program.imports.iter().map(|directive| &directive.uri);
+            let export_uris = file.program.exports.iter().map(|directive| &directive.uri);
             for uri in import_uris.chain(export_uris) {
                 let Some(package) = imported_package(&uri.value) else {
                     continue;

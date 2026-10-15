@@ -118,16 +118,16 @@ fn test_extension_type_const_named_ctor() {
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &prog.declarations[0] {
         TopLevelDecl::ExtensionType(e) => {
-            assert!(e.is_const);
+            assert!(e.primary_constructor.is_const);
             assert_eq!(e.name.name, "Foo");
             assert_eq!(
-                e.representation
+                e.primary_constructor
                     .constructor_name
                     .as_ref()
                     .map(|i| i.name.as_str()),
                 Some("_")
             );
-            assert_eq!(e.representation.field_name.name, "x");
+            assert_eq!(e.representation().map(|p| p.name.name.as_str()), Some("x"));
         }
         other => panic!("expected extension type, got {other:?}"),
     }
@@ -575,6 +575,24 @@ fn test_getter_preserves_all_body_markers() {
 }
 
 #[test]
+fn test_body_less_accessors_are_abstract_unless_external() {
+    let (prog, errors) = parse(
+        "abstract class C { int get a; set a(int v); int get b => 0; set b(int v) {} external int get c; external set c(int v); }",
+    );
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let abstractness: Vec<_> = only_class(&prog)
+        .members
+        .iter()
+        .map(|member| match member {
+            ClassMember::Getter(getter) => getter.is_abstract,
+            ClassMember::Setter(setter) => setter.is_abstract,
+            other => panic!("expected accessor, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(abstractness, [true, true, false, false, false, false]);
+}
+
+#[test]
 fn test_for_in_preserves_variable_keyword() {
     for (source_keyword, expected) in [
         ("var", VarKeyword::Var),
@@ -594,10 +612,40 @@ fn test_for_in_preserves_variable_keyword() {
         let Stmt::For(statement) = &body.stmts[0] else {
             panic!("expected for statement");
         };
-        let Some(ForInit::ForIn { keyword, .. }) = &statement.header.init else {
+        let Some(ForInit::ForIn {
+            keyword,
+            declares_variable,
+            ..
+        }) = &statement.header.init
+        else {
             panic!("expected for-in header");
         };
         assert_eq!(*keyword, expected);
+        assert!(*declares_variable);
+    }
+}
+
+#[test]
+fn test_for_in_distinguishes_assignment_from_declaration() {
+    for (header, expected) in [("x", false), ("var x", true), ("int x", true)] {
+        let (program, errors) = parse(&format!("void f() {{ for ({header} in xs) {{}} }}"));
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            panic!("expected function");
+        };
+        let Some(FunctionBody::Block(body)) = &function.body else {
+            panic!("expected block");
+        };
+        let Stmt::For(statement) = &body.stmts[0] else {
+            panic!("expected for");
+        };
+        let Some(ForInit::ForIn {
+            declares_variable, ..
+        }) = &statement.header.init
+        else {
+            panic!("expected for-in");
+        };
+        assert_eq!(*declares_variable, expected, "{header}");
     }
 }
 
@@ -675,7 +723,7 @@ fn test_operator_consumes_body_markers() {
         }
         assert_eq!(
             &source[operator.span.start..operator.span.end],
-            &source[10..source.len() - 1]
+            &source[10..source.len() - 2]
         );
     }
 }
@@ -709,4 +757,132 @@ fn test_declarator_spans_start_at_each_name() {
             );
         }
     }
+}
+
+#[test]
+fn test_primary_constructor_class() {
+    let source = "class const C.named(var int x, final y, z) { @deprecated this : assert(z > 0); }";
+    let (prog, errors) = parse(source);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let class = only_class(&prog);
+    let primary = class
+        .primary_constructor
+        .as_ref()
+        .expect("primary constructor");
+    assert!(primary.is_const);
+    assert_eq!(
+        primary.constructor_name.as_ref().map(|n| n.name.as_str()),
+        Some("named")
+    );
+    let declaring: Vec<_> = class
+        .element_members()
+        .declaring_params()
+        .map(|p| p.name.name.as_str())
+        .collect();
+    assert_eq!(declaring, ["x", "y"]);
+    assert!(primary.params.params[0].param_type.is_some());
+    assert!(matches!(
+        class.members[0],
+        ClassMember::PrimaryConstructorBody(_)
+    ));
+    let ClassMember::PrimaryConstructorBody(body) = &class.members[0] else {
+        unreachable!()
+    };
+    assert_eq!(&source[body.this_span.start..body.this_span.end], "this");
+    assert!(body.span.start < body.this_span.start);
+    let members = class.element_members();
+    let fields = members.declaring_params().count();
+    let ctors = members.constructors().count();
+    assert_eq!((fields, ctors), (2, 1));
+}
+
+#[test]
+fn primary_constructor_declared_body_name_excludes_annotations() {
+    let source = "class C() { @deprecated this {} }";
+    let (program, errors) = parse(source);
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let mut names = Vec::new();
+    falcon_syntax::visitor::for_each_declared_body(&program, source, &mut |_, name, _| {
+        names.push(&source[name.start..name.end]);
+    });
+    assert_eq!(names, ["this"]);
+}
+
+#[test]
+fn test_primary_constructor_enum_and_empty_body() {
+    let (prog, errors) = parse("enum E(final int x) { a(1); }\nclass D(dynamic a);");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert!(
+        matches!(&prog.declarations[0], TopLevelDecl::Enum(e) if e.primary_constructor.is_some())
+    );
+    assert!(
+        matches!(&prog.declarations[1], TopLevelDecl::Class(c) if c.primary_constructor.is_some() && c.members.is_empty())
+    );
+}
+
+#[test]
+fn test_function_named_old_style_formal() {
+    let (prog, errors) = parse("class C { void map(int Function(dynamic p)) {} }");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    match &only_class(&prog).members[0] {
+        ClassMember::Method(m) => {
+            let p = &m.params.params[0];
+            assert_eq!(p.name.name, "Function");
+            assert!(p.function_params.is_some());
+            assert!(p.param_type.is_some());
+        }
+        other => panic!("expected method, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_optional_group_must_be_last() {
+    let (_, errors) = parse("void f3(x, [y], {z}) {}");
+    assert!(!errors.is_empty());
+}
+
+#[test]
+fn test_legacy_typedef_keeps_formals() {
+    let (prog, errors) = parse("typedef String Type2(final value);");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    match &prog.declarations[0] {
+        TopLevelDecl::TypeAlias(a) => {
+            let params = a.legacy_params.as_ref().expect("legacy params");
+            assert!(params.params[0].is_final);
+            assert!(params.params[0].param_type.is_none());
+        }
+        other => panic!("expected typedef, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_factory_paren_is_method_before_3_13() {
+    let (prog, errors) = parse("// @dart = 3.12\nclass B { factory (A) => B._(); B._(); }");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    assert!(matches!(
+        only_class(&prog).members[0],
+        ClassMember::Method(_)
+    ));
+    let (prog, _) = parse("class B { factory () => B._(); B._(); }");
+    assert!(matches!(
+        only_class(&prog).members[0],
+        ClassMember::Constructor(_)
+    ));
+}
+
+#[test]
+fn test_pre_patterns_case_is_expression() {
+    let (prog, errors) =
+        parse("// @dart = 2.19\nvoid f(Object o) { switch (o) { case 1 + 2: break; } }");
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let TopLevelDecl::Function(f) = &prog.declarations[0] else {
+        panic!()
+    };
+    let Some(FunctionBody::Block(b)) = &f.body else {
+        panic!()
+    };
+    let Stmt::Switch(s) = &b.stmts[0] else {
+        panic!()
+    };
+    assert!(matches!(s.cases[0].cases[0], SwitchCaseKind::Expr(_)));
 }

@@ -50,5 +50,5 @@ impl Visitor for Collector<'_> {
 
 /// True for the integer literal `0`.
 fn is_zero(expr: &Expr) -> bool {
-    matches!(expr, Expr::IntLit { value, .. } if value == "0")
+    matches!(expr.unparenthesized(), Expr::IntLit { value, .. } if value == "0")
 }

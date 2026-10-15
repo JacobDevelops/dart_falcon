@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1631
 expression: "prog.declarations[0]"
 ---
 Enum(
@@ -13,6 +14,7 @@ Enum(
             },
         },
         type_params: [],
+        primary_constructor: None,
         with_clause: [],
         implements: [],
         variants: [
@@ -64,7 +66,7 @@ Enum(
                 args: None,
                 span: Span {
                     start: 25,
-                    end: 30,
+                    end: 29,
                 },
             },
         ],

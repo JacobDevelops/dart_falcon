@@ -31,7 +31,7 @@ pub(crate) struct FunctionBodyInfo {
     /// The declared return type; closures and constructors never have one.
     pub(crate) return_type: Option<DartType>,
     pub(crate) span: Span,
-    /// The expression of an `=>` body.
+    /// The unparenthesized expression of an `=>` body.
     pub(crate) arrow_expression: Option<Span>,
 }
 
@@ -94,7 +94,9 @@ impl FunctionBodies {
                 return_type: return_type.cloned(),
                 span: *body.span(),
                 arrow_expression: match body {
-                    FunctionBody::Arrow(expression, _) => Some(*expression.span()),
+                    FunctionBody::Arrow(expression, _) => {
+                        Some(*expression.unparenthesized().span())
+                    }
                     FunctionBody::Block(_) | FunctionBody::Native(..) => None,
                 },
             });
@@ -201,6 +203,16 @@ impl Visitor for FunctionBodies {
             node.body.as_ref(),
         );
         walk_constructor_decl(self, node);
+    }
+
+    fn visit_primary_constructor_body(&mut self, node: &PrimaryConstructorBody) {
+        self.push(
+            BodyOwner::Constructor,
+            AsyncMarker::Sync,
+            None,
+            node.body.as_ref(),
+        );
+        falcon_syntax::visitor::walk_primary_constructor_body(self, node);
     }
 
     fn visit_class_member(&mut self, node: &ClassMember) {

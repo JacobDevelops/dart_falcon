@@ -68,10 +68,10 @@ impl Visitor for Collector<'_> {
 fn to_list_call_span(expr: &Expr) -> Option<&Span> {
     if let Expr::Call {
         callee, args, span, ..
-    } = expr
+    } = expr.unparenthesized()
         && args.positional.is_empty()
         && args.named.is_empty()
-        && let Expr::Field { field, .. } = &**callee
+        && let Expr::Field { field, .. } = callee.unparenthesized()
         && field.name == "toList"
     {
         return Some(span);

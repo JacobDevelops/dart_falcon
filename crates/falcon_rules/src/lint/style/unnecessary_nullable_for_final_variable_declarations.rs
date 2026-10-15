@@ -54,7 +54,8 @@ impl Collector<'_> {
         // nullable when *all* of them are provably non-null.
         if !declarators.iter().all(|d| {
             d.initializer.as_ref().is_some_and(|expr| {
-                is_provably_non_null(expr) || matches!(expr, Expr::FuncExpr { .. })
+                is_provably_non_null(expr)
+                    || matches!(expr.unparenthesized(), Expr::FuncExpr { .. })
             })
         }) {
             return;

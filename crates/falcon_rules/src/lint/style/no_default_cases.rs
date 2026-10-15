@@ -49,11 +49,10 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn is_enum_or_enum_like(&self, identity: &DeclarationIdentity, state: &SemanticState) -> bool {
-        if let DeclarationIdentity::Project { name, .. } = identity
-            && self
-                .ctx
-                .types
-                .is_some_and(|types| types.type_kind(name) == Some(TypeKind::Enum))
+        if self
+            .ctx
+            .types
+            .is_some_and(|types| types.type_kind_identity(identity) == Some(TypeKind::Enum))
         {
             return true;
         }
@@ -75,6 +74,7 @@ impl Collector<'_> {
                         .as_ref()
                         .map_or(pattern.span().end, |guard| guard.span().end),
                 ),
+                SwitchCaseKind::Expr(expr) => Some(expr.span().end),
                 SwitchCaseKind::Default => None,
             })
             .unwrap_or(case.span.start);

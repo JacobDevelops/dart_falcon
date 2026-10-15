@@ -49,7 +49,7 @@ impl Collector<'_> {
             return;
         }
         if let Some(FunctionBody::Arrow(expr, _)) = body
-            && matches!(expr.as_ref(), Expr::NullLit { .. })
+            && matches!(expr.unparenthesized(), Expr::NullLit { .. })
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-returning-null-for-void",
@@ -116,7 +116,10 @@ impl Visitor for Collector<'_> {
         match node {
             Stmt::Return(r) => {
                 if self.void_stack.last() == Some(&true)
-                    && matches!(&r.value, Some(Expr::NullLit { .. }))
+                    && matches!(
+                        r.value.as_ref().map(Expr::unparenthesized),
+                        Some(Expr::NullLit { .. })
+                    )
                 {
                     self.diags.push(self.ctx.diagnostic(
                         "avoid-returning-null-for-void",

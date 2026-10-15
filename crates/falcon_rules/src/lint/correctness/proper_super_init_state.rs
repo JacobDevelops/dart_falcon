@@ -68,7 +68,7 @@ fn is_super_init_state_statement(statement: &Stmt) -> bool {
     let Stmt::Expr(ExprStmt { expr, .. }) = statement else {
         return false;
     };
-    matches!(expr,
+    matches!(expr.unparenthesized(),
         Expr::Call { callee, args, .. }
             if args.positional.is_empty()
                 && args.named.is_empty()

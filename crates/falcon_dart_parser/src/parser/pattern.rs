@@ -250,10 +250,29 @@ impl<'src> Parser<'src> {
 
         // String literal. Adjacent string literals are implicitly concatenated
         // into one constant string, legal wherever a constant pattern appears.
+        // A member access on it (`"Lax".length`) is a constant expression the
+        // front end accepts as a constant pattern too.
         if self.at(TokenKind::StringLit) {
             let node = self.parse_adjacent_strings();
-            return Pattern::Literal(LiteralPattern {
-                value: LiteralPatternValue::String(node),
+            if !(self.at(TokenKind::Dot) && self.peek(1).kind.is_identifier_like()) {
+                return Pattern::Literal(LiteralPattern {
+                    value: LiteralPatternValue::String(node),
+                    span: self.span_from(start),
+                });
+            }
+            let mut expr = Expr::StringLit(node);
+            while self.at(TokenKind::Dot) && self.peek(1).kind.is_identifier_like() {
+                self.advance(); // .
+                let field = self.expect_ident();
+                expr = Expr::Field {
+                    object: Box::new(expr),
+                    field,
+                    is_null_safe: false,
+                    span: self.span_from(start),
+                };
+            }
+            return Pattern::Const(ConstPattern {
+                value: ConstPatternValue::Expr(Box::new(expr)),
                 span: self.span_from(start),
             });
         }
@@ -379,10 +398,10 @@ impl<'src> Parser<'src> {
             })
         } else {
             // Single element → parenthesised pattern
-            self.expect(TokenKind::RParen);
+            let close = self.expect(TokenKind::RParen);
             Pattern::ParenPattern {
                 inner: Box::new(first),
-                span: self.span_from(start),
+                span: Span::new(start, close.offset + close.len),
             }
         }
     }
@@ -664,6 +683,12 @@ impl<'src> Parser<'src> {
                     })
                 }
             }
+            // `dynamic` is a built-in DartType, but its bare pattern is a type
+            // literal just like a named type, not a recovery/error pattern.
+            DartType::Dynamic { span } => Pattern::Const(ConstPattern {
+                value: ConstPatternValue::Name(vec![Identifier::new("dynamic", span)]),
+                span: self.span_from(start),
+            }),
             _ => Pattern::Error {
                 span: self.span_from(start),
             },
@@ -680,11 +705,15 @@ impl<'src> Parser<'src> {
     }
 }
 
-/// The bound name of a `:name`-shorthand record field, taken from the inner
-/// variable/wildcard pattern.
+/// The bound name of a `:name`-shorthand record or object field, taken from the
+/// inner variable pattern, possibly wrapped in a cast, null-check, or
+/// null-assert pattern (`:final x?`, `:x!`, `:var x as T`).
 fn binding_pattern_name(pattern: &Pattern) -> Option<Identifier> {
     match pattern {
         Pattern::Variable { name, .. } => Some(name.clone()),
+        Pattern::Cast { inner, .. }
+        | Pattern::NullCheck { inner, .. }
+        | Pattern::NullAssert { inner, .. } => binding_pattern_name(inner),
         _ => None,
     }
 }

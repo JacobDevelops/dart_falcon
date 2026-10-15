@@ -21,7 +21,7 @@ impl Rule for PreferSpreadCollections {
         for_each_expr_in_program(program, |node| {
             if let Expr::Cascade {
                 object, sections, ..
-            } = node
+            } = node.unparenthesized()
                 && is_collection_literal(object)
             {
                 for section in sections {
@@ -49,7 +49,7 @@ impl Rule for PreferSpreadCollections {
 
 fn is_collection_literal(expr: &Expr) -> bool {
     matches!(
-        expr,
+        expr.unparenthesized(),
         Expr::List { .. } | Expr::Set { .. } | Expr::Map { .. }
     )
 }

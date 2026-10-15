@@ -6,6 +6,8 @@
 //! `if` has no `else` and its then-branch is that single call (optionally in a
 //! block), or the conditional's else branch is `null`, and the call's function
 //! is `<expr>!` with `<expr>` textually equal to the tested expression.
+//! Parenthesized conditions, nulls, calls and callees do not match; compared
+//! operands retain their parentheses, as in the official rule.
 //!
 //! Adopted from the official `prefer_null_aware_method_calls` lint.
 
@@ -14,7 +16,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
-use crate::lint::expressions::text;
+use crate::lint::expressions::{is_parenthesized, paren_text};
 
 #[derive(Default)]
 pub struct PreferNullAwareMethodCalls;
@@ -35,28 +37,33 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-/// The tested expression of `<expr> != null`.
-fn not_null_operand(condition: &Expr) -> Option<&Expr> {
-    match condition {
-        Expr::Binary {
-            op: BinaryOp::NotEq,
-            left,
-            right,
-            ..
-        } if matches!(right.as_ref(), Expr::NullLit { .. }) => Some(left),
-        _ => None,
-    }
-}
-
 impl Collector<'_> {
+    /// The tested expression of `<expr> != null`, without a wrapped null.
+    fn not_null_operand<'e>(&self, condition: &'e Expr) -> Option<&'e Expr> {
+        match condition {
+            Expr::Binary {
+                op: BinaryOp::NotEq,
+                left,
+                right,
+                ..
+            } if matches!(right.as_ref(), Expr::NullLit { .. }) && !is_parenthesized(right) => {
+                Some(left)
+            }
+            _ => None,
+        }
+    }
     fn check(&mut self, call: &Expr, tested: &Expr) {
+        let source = self.ctx.source;
+        if is_parenthesized(call) {
+            return;
+        }
         let Expr::Call { callee, span, .. } = call else {
             return;
         };
         let Expr::NullAssert { operand, .. } = callee.as_ref() else {
             return;
         };
-        if text(operand, self.ctx.source) == text(tested, self.ctx.source) {
+        if !is_parenthesized(callee) && paren_text(operand, source) == paren_text(tested, source) {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-null-aware-method-calls",
                 "Use a null-aware invocation of the 'call' method rather than explicitly testing for null.",
@@ -74,7 +81,8 @@ impl Visitor for Collector<'_> {
             else_branch: None,
             ..
         }) = node
-            && let Some(tested) = not_null_operand(condition)
+            && !matches!(condition, Expr::Paren { .. })
+            && let Some(tested) = self.not_null_operand(condition)
         {
             let then = match then_branch.as_ref() {
                 Stmt::Block(block) if block.stmts.len() == 1 => &block.stmts[0],
@@ -95,7 +103,9 @@ impl Visitor for Collector<'_> {
             ..
         } = node
             && matches!(else_expr.as_ref(), Expr::NullLit { .. })
-            && let Some(tested) = not_null_operand(condition)
+            && !is_parenthesized(else_expr)
+            && !is_parenthesized(condition)
+            && let Some(tested) = self.not_null_operand(condition)
         {
             self.check(then_expr, tested);
         }

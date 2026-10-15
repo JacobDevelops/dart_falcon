@@ -592,19 +592,17 @@ fn test_factory_constructor_still_parses() {
 }
 
 #[test]
-fn test_private_named_initializing_formal_rejected() {
-    // `{required this._x}` needs the `private-named-parameters` experiment; the
-    // pinned front end rejects it as a syntax error.
+fn test_private_named_initializing_formal_accepted() {
+    // `{required this._x}` is valid from language 3.12 (private named
+    // parameters); the parser accepts it regardless of language version.
     let (_prog, errors) = parse("class C { final int _x; C({required this._x}); }");
-    assert_eq!(errors.len(), 1, "errors: {errors:?}");
-    assert!(errors[0].message.contains("private-named-parameters"));
+    assert_clean(&errors);
 }
 
 #[test]
-fn test_private_named_super_formal_rejected() {
+fn test_private_named_super_formal_accepted() {
     let (_prog, errors) = parse("class C extends B { C({super._x}); }");
-    assert_eq!(errors.len(), 1, "errors: {errors:?}");
-    assert!(errors[0].message.contains("private-named-parameters"));
+    assert_clean(&errors);
 }
 
 #[test]
@@ -724,8 +722,8 @@ fn test_leading_async_method_splits_await_and_operand_statements() {
     };
     assert_eq!(body.stmts.len(), 2, "{body:?}");
     for (stmt, name, expr_span, stmt_span) in [
-        (&body.stmts[0], "await", (31, 36), (31, 37)),
-        (&body.stmts[1], "x", (37, 38), (37, 40)),
+        (&body.stmts[0], "await", (31, 36), (31, 36)),
+        (&body.stmts[1], "x", (37, 38), (37, 39)),
     ] {
         let Stmt::Expr(stmt) = stmt else {
             panic!("expected identifier expression statement: {stmt:?}");
@@ -808,4 +806,145 @@ fn test_async_constructor_initializer_keeps_synchronous_body() {
     };
     assert_eq!(identifier.name, "await");
     assert_eq!(&src[identifier.span.start..identifier.span.end], "await");
+}
+
+/// Dart 3.13 constructor syntax omits the type name: `new(`, `new name(`,
+/// `factory(`, `factory name(`. Each maps onto the classic constructor shape,
+/// with the enclosing type name spanning the keyword.
+fn only_ctor(src: &str) -> ConstructorDecl {
+    let (prog, errors) = parse(src);
+    assert_clean(&errors);
+    match &only_class(&prog).members[0] {
+        ClassMember::Constructor(ctor) => ctor.clone(),
+        other => panic!("expected constructor, got {other:?}"),
+    }
+}
+
+fn ctor_name(ctor: &ConstructorDecl) -> Option<&str> {
+    ctor.constructor_name.as_ref().map(|n| n.name.as_str())
+}
+
+#[test]
+fn test_new_unnamed_constructor() {
+    let src = "class C { new(this.x) : assert(x > 0); final int x; }";
+    let ctor = only_ctor(src);
+    assert!(!ctor.is_factory && !ctor.is_const);
+    assert_eq!(ctor.name.name, "C");
+    assert_eq!(&src[ctor.name.span.start..ctor.name.span.end], "new");
+    assert_eq!(ctor_name(&ctor), None);
+    assert_eq!(ctor.params.params.len(), 1);
+    assert_eq!(ctor.initializers.len(), 1);
+}
+
+#[test]
+fn test_const_new_constructor() {
+    let ctor = only_ctor("class C { const new() : super(); }");
+    assert!(ctor.is_const && !ctor.is_factory);
+    assert_eq!(ctor.name.name, "C");
+    assert!(ctor.body.is_none());
+}
+
+#[test]
+fn test_new_named_constructor() {
+    let ctor = only_ctor("class C { new internal(int x) : this.other(x); C.other(int x); }");
+    assert_eq!(ctor.name.name, "C");
+    assert_eq!(ctor_name(&ctor), Some("internal"));
+}
+
+#[test]
+fn test_factory_unnamed_constructor() {
+    let ctor = only_ctor("class C { factory(int x) => C._(); C._(); }");
+    assert!(ctor.is_factory);
+    assert_eq!(ctor.name.name, "C");
+    assert_eq!(ctor_name(&ctor), None);
+}
+
+#[test]
+fn test_factory_named_constructor() {
+    let ctor = only_ctor("class C { factory make(String m) => C._(); C._(); }");
+    assert!(ctor.is_factory);
+    assert_eq!(ctor.name.name, "C");
+    assert_eq!(ctor_name(&ctor), Some("make"));
+}
+
+#[test]
+fn test_const_redirecting_factory_named_constructor() {
+    let ctor = only_ctor("class C { const factory make() = C._; const C._(); }");
+    assert!(ctor.is_factory && ctor.is_const && ctor.redirect.is_some());
+    assert_eq!(ctor_name(&ctor), Some("make"));
+}
+
+#[test]
+fn test_classic_factory_keeps_type_name() {
+    let ctor = only_ctor("class C { factory C(int x) => C._(); C._(); }");
+    assert_eq!(ctor.name.name, "C");
+    assert_eq!(ctor_name(&ctor), None);
+}
+
+#[test]
+fn test_factory_in_mixin_is_method() {
+    let (prog, errors) = parse("mixin M { factory() {} }");
+    assert_clean(&errors);
+    assert!(
+        matches!(&prog.declarations[0], TopLevelDecl::Mixin(m) if matches!(m.members[0], ClassMember::Method(_)))
+    );
+}
+
+#[test]
+fn test_semicolon_empty_class_body() {
+    let (prog, errors) = parse("abstract class Marker;\nmixin M;\nclass After {}");
+    assert_clean(&errors);
+    assert!(only_class_named(&prog, "Marker").members.is_empty());
+    assert_eq!(prog.declarations.len(), 3);
+}
+
+fn only_class_named<'a>(prog: &'a Program, name: &str) -> &'a ClassDecl {
+    prog.declarations
+        .iter()
+        .find_map(|decl| match decl {
+            TopLevelDecl::Class(class) if class.name.name == name => Some(class),
+            _ => None,
+        })
+        .expect("class")
+}
+
+#[test]
+fn test_native_member_bodies() {
+    let (prog, errors) = parse("class C { int get length native; void f() native \"g\"; }");
+    assert_clean(&errors);
+    let ClassMember::Getter(getter) = &only_class(&prog).members[0] else {
+        panic!("expected getter: {prog:?}");
+    };
+    assert!(matches!(getter.body, Some(FunctionBody::Native(None, _))));
+}
+
+#[test]
+fn test_setter_parameter_metadata_and_function_type() {
+    let (prog, errors) =
+        parse("class C { set length(@nullCheck int v) {} set onPause(void handler()?) {} }");
+    assert_clean(&errors);
+    assert_eq!(only_class(&prog).members.len(), 2);
+    let ClassMember::Setter(setter) = &only_class(&prog).members[0] else {
+        panic!("expected setter: {prog:?}");
+    };
+    assert_eq!(setter.param_annotations.len(), 1);
+    assert_eq!(setter.param_annotations[0].name[0].name, "nullCheck");
+    let ClassMember::Setter(setter) = &only_class(&prog).members[1] else {
+        panic!("expected function-typed setter");
+    };
+    let Some(DartType::Function(function)) = &setter.param_type else {
+        panic!("expected function type, got {:?}", setter.param_type);
+    };
+    assert!(function.is_nullable);
+    assert!(function.params.is_empty());
+    assert!(matches!(
+        function.return_type.as_deref(),
+        Some(DartType::Void { .. })
+    ));
+}
+
+#[test]
+fn test_extension_type_representation_trailing_comma() {
+    let (_prog, errors) = parse("extension type E(\n  p.T _value,\n) implements Object {}");
+    assert_clean(&errors);
 }

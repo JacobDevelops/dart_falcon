@@ -95,7 +95,10 @@ fn check_declarators(
     prefixes: &[String],
 ) {
     for d in declarators {
-        if matches!(&d.initializer, Some(Expr::BoolLit { .. })) {
+        if matches!(
+            d.initializer.as_ref().map(Expr::unparenthesized),
+            Some(Expr::BoolLit { .. })
+        ) {
             check_name(&d.name, diags, ctx, prefixes);
         }
     }

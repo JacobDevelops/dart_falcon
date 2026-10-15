@@ -17,9 +17,9 @@
 //!
 //! Fields and local variables whose type provably implements
 //! `StreamSubscription` are reported unless the file (fields) or enclosing
-//! function body (locals) calls or tears off `cancel` on them, passes them to a
-//! call, returns them, or hands them to another variable. Unresolved types stay
-//! silent.
+//! function body (locals) holds an official valid-use/escape case. Constructor
+//! arguments and assignments into another local do not escape; references to
+//! shadowing variables never cancel the original. Unresolved types stay silent.
 //!
 //! Adopted from the official `cancel_subscriptions` lint.
 

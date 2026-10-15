@@ -2,7 +2,7 @@
 //!
 //! A switch with many cases is often better modeled as a map lookup,
 //! polymorphism, or a sealed type with exhaustive handling. The rule counts
-//! non-default (pattern) cases — the `default` clause is not counted — and
+//! non-default cases — the `default` clause is not counted — and
 //! reports at the switch when the count exceeds the threshold. Nested switches
 //! are checked independently.
 //!
@@ -36,7 +36,7 @@ fn count_non_default_cases(switch_stmt: &SwitchStmt) -> usize {
         .cases
         .iter()
         .flat_map(|case| &case.cases)
-        .filter(|kind| matches!(kind, SwitchCaseKind::Pattern(..)))
+        .filter(|kind| matches!(kind, SwitchCaseKind::Pattern(..) | SwitchCaseKind::Expr(..)))
         .count()
 }
 

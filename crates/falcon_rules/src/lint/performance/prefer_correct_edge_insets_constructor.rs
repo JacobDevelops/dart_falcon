@@ -32,8 +32,8 @@ fn check_edge_insets_only_call(
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    if let Expr::Field { object, field, .. } = callee
-        && let Expr::Ident(ident) = object.as_ref()
+    if let Expr::Field { object, field, .. } = callee.unparenthesized()
+        && let Expr::Ident(ident) = object.unparenthesized()
         && ident.name == "EdgeInsets"
         && field.name == "only"
     {

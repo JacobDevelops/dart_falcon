@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1754
 expression: "prog.declarations[0]"
 ---
 Function(
@@ -15,6 +16,7 @@ Function(
                         kind: Positional,
                         is_covariant: false,
                         is_final: false,
+                        is_var: false,
                         initializing: None,
                         param_type: Some(
                             Named(
@@ -52,7 +54,7 @@ Function(
                                     is_nullable: false,
                                     span: Span {
                                         start: 18,
-                                        end: 28,
+                                        end: 27,
                                     },
                                 },
                             ),
@@ -75,7 +77,7 @@ Function(
                 ],
                 span: Span {
                     start: 17,
-                    end: 32,
+                    end: 31,
                 },
             },
         ),
@@ -115,7 +117,7 @@ Function(
                     is_nullable: false,
                     span: Span {
                         start: 0,
-                        end: 10,
+                        end: 9,
                     },
                 },
             ),
@@ -139,6 +141,8 @@ Function(
                             header: ForHeader {
                                 init: Some(
                                     ForIn {
+                                        annotations: [],
+                                        declares_variable: true,
                                         keyword: Final,
                                         var_type: None,
                                         name: Identifier {
@@ -165,6 +169,10 @@ Function(
                             element: Expr(
                                 Binary {
                                     op: Mul,
+                                    op_span: Span {
+                                        start: 58,
+                                        end: 59,
+                                    },
                                     left: Ident(
                                         Identifier {
                                             name: "x",

@@ -36,11 +36,12 @@ impl SemanticRuleVisitor for Collector<'_> {
             left,
             right,
             span,
+            ..
         } = node
         else {
             return;
         };
-        let operand = match (left.as_ref(), right.as_ref()) {
+        let operand = match (left.unparenthesized(), right.unparenthesized()) {
             (Expr::BoolLit { .. }, operand) | (operand, Expr::BoolLit { .. }) => operand,
             _ => return,
         };

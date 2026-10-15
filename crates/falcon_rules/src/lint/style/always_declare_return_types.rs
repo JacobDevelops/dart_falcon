@@ -5,7 +5,7 @@
 //! Top-level and local functions, getters, methods, operators, and legacy
 //! `typedef F(...)` aliases are checked. Setters and `operator []=` never
 //! declare a return type and are skipped, as are `test_*`/`solo_test_*`
-//! methods in a package's `test/` directory (reflective test runners).
+//! methods in a package-root test directory (reflective test runners).
 //!
 //! ```dart
 //! main() {}      // flagged
@@ -14,13 +14,13 @@
 //!
 //! Adopted from the official `always_declare_return_types` lint.
 
-use std::path::Path;
-
-use falcon_analyze::{AnalyzeContext, Rule, canonical_or_lexical};
+use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_class_member, walk_stmt, walk_top_level_decl};
+
+use crate::lint::declarations::in_test_directory;
 
 const RULE: &str = "always-declare-return-types";
 
@@ -37,24 +37,6 @@ impl Rule for AlwaysDeclareReturnTypes {
         collector.visit_program(program);
         collector.diags
     }
-}
-
-/// Whether `path` lies under the `test/` directory of its enclosing package.
-fn in_test_directory(path: &Path) -> bool {
-    let Some(pubspec) = crate::cross_file::enclosing_pubspec(path) else {
-        return false;
-    };
-    let Some(root) = pubspec.parent() else {
-        return false;
-    };
-    canonical_or_lexical(path)
-        .strip_prefix(root)
-        .is_ok_and(|relative| {
-            relative
-                .components()
-                .next()
-                .is_some_and(|first| first.as_os_str() == "test")
-        })
 }
 
 struct Collector<'a, 'ctx> {

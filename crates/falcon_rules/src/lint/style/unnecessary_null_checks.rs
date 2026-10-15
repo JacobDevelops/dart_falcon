@@ -6,15 +6,14 @@
 //! fires on `!` whose value directly is:
 //!
 //! - the initializer of a variable or field declared with a nullable type;
-//! - the right side of a plain `=` assignment to a nullable non-local target
-//!   (locals, parameters, and private fields are skipped because the `!`
-//!   may promote them);
+//! - the right side of a plain `=` assignment to a nullable target other than
+//!   a local variable or parameter (the `!` may promote those), unless the
+//!   asserted operand is the assigned name itself (`x = x!`);
 //! - an argument for a nullable parameter, except `Future.value(x!)` and
 //!   `completer.complete(x!)`;
-//! - returned (`return x!` or `=> x!`) from a synchronous function with a
-//!   declared nullable return type (method bodies are not checked, as in the
-//!   official lint, and neither are closures: a function literal's return
-//!   type is inferred from its body, not taken from its context);
+//! - returned from a top-level or local function (including async functions
+//!   and top-level getters), or yielded to a nullable stream/iterable element,
+//!   including `yield*` (matching the analyzer's element-type check);
 //! - an element of a list or set literal, or a key or value of a map
 //!   literal, whose element types are nullable;
 //!
@@ -22,13 +21,14 @@
 //! value is nullable. In declarations, `for` loops, and `case` clauses the
 //! `!` narrows the bound variables, so it is never flagged there.
 //!
-//! falcon needs the context type proven nullable; unresolved contexts are
-//! skipped. `!` under `await`, on `yield`ed values, and on the right operand of
-//! user-defined operators is not checked.
+//! `dynamic` and `void` accept null too. Unresolved contexts stay silent.
+//! Index writes and right-hand operator operands use their instantiated
+//! parameter types, not the enclosing expression's result context.
+//! Grouping parentheses preserve the nullable context of the inner assertion.
 //!
 //! Adopted from the official `unnecessary_null_checks` lint.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
@@ -36,6 +36,7 @@ use falcon_syntax::ast::*;
 
 use crate::lint::declarations::members_of;
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
+use crate::lint::lexical_usage::locally_bound_identifiers;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]
@@ -53,6 +54,7 @@ impl Rule for UnnecessaryNullChecks {
             contextual: declaration_initializers(program),
             fixed: HashMap::new(),
             pattern_assignments: Vec::new(),
+            locals: locally_bound_identifiers(program),
         };
         visit_program(&mut collector, program, state);
         collector.diags
@@ -61,7 +63,7 @@ impl Rule for UnnecessaryNullChecks {
 
 /// Initializers of top-level variables and fields; the walker supplies their
 /// declared type as the expected type.
-fn declaration_initializers(program: &Program) -> Vec<Span> {
+pub(crate) fn declaration_initializers(program: &Program) -> Vec<Span> {
     let mut spans = Vec::new();
     for declaration in &program.declarations {
         if let TopLevelDecl::Variable(variable) = declaration {
@@ -80,8 +82,8 @@ fn null_assert_initializers(declarators: &[VarDeclarator]) -> impl Iterator<Item
     declarators
         .iter()
         .filter_map(|declarator| declarator.initializer.as_ref())
-        .filter(|initializer| matches!(initializer, Expr::NullAssert { .. }))
-        .map(|initializer| *initializer.span())
+        .filter(|initializer| matches!(initializer.unparenthesized(), Expr::NullAssert { .. }))
+        .map(|initializer| *initializer.unparenthesized().span())
 }
 
 struct Collector<'a> {
@@ -93,20 +95,21 @@ struct Collector<'a> {
     /// `x!` collection elements with the element type of their literal.
     fixed: HashMap<(usize, usize), ResolvedType>,
     pattern_assignments: Vec<Span>,
+    /// Start offsets of identifiers that resolve to a local or parameter.
+    locals: HashSet<usize>,
 }
 
-/// Whether `ty` is written nullable; `dynamic` and unresolved types are not proof.
+/// Analyzer nullability includes `dynamic` and `void`, but not unresolved types.
 fn explicitly_nullable(ty: &ResolvedType) -> bool {
     match ty {
-        ResolvedType::Null => true,
+        ResolvedType::Null | ResolvedType::Dynamic | ResolvedType::Void => true,
         ResolvedType::Interface { nullable, .. }
         | ResolvedType::TypeParameter { nullable, .. }
         | ResolvedType::Function { nullable, .. }
         | ResolvedType::Record { nullable, .. } => *nullable,
-        ResolvedType::Unknown
-        | ResolvedType::Dynamic
-        | ResolvedType::Void
-        | ResolvedType::Never => false,
+        ResolvedType::Unknown | ResolvedType::Never | ResolvedType::NonNullTypeParameter { .. } => {
+            false
+        }
     }
 }
 
@@ -115,13 +118,13 @@ fn key(span: &Span) -> (usize, usize) {
 }
 
 fn is_null_assert(expression: &Expr) -> bool {
-    matches!(expression, Expr::NullAssert { .. })
+    matches!(expression.unparenthesized(), Expr::NullAssert { .. })
 }
 
 fn is_future_value(node: &Expr, state: &SemanticState<'_>) -> bool {
     let future =
         |identity: &falcon_analyze::DeclarationIdentity| identity.is_sdk("dart:async", "Future");
-    match node {
+    match node.unparenthesized() {
         Expr::New {
             dart_type,
             constructor_name: Some(constructor),
@@ -131,18 +134,17 @@ fn is_future_value(node: &Expr, state: &SemanticState<'_>) -> bool {
                 && matches!(state.model.resolve_type(dart_type),
                     ResolvedType::Interface { identity, .. } if future(&identity))
         }
-        Expr::Call { callee, .. } => match callee.as_ref() {
-            Expr::Field { object, field, .. } => match object.as_ref() {
-                Expr::Ident(name) => {
-                    field.name == "value"
-                        && !state.environment.is_bound(&name.name)
-                        && state
-                            .model
-                            .resolve_name(name.name.as_str())
-                            .is_some_and(|identity| future(&identity))
-                }
-                _ => false,
-            },
+        Expr::Call { callee, .. } => match callee.unparenthesized() {
+            Expr::Field { object, field, .. } if field.name == "value" => {
+                falcon_analyze::expression_segments(object, true)
+                    .filter(|segments| {
+                        segments
+                            .first()
+                            .is_some_and(|head| !state.environment.is_bound(head))
+                    })
+                    .and_then(|segments| state.model.resolve_dotted(&segments))
+                    .is_some_and(|identity| future(&identity))
+            }
             _ => false,
         },
         _ => false,
@@ -151,12 +153,18 @@ fn is_future_value(node: &Expr, state: &SemanticState<'_>) -> bool {
 
 /// `completer.complete(...)` on a `dart:async` `Completer`.
 fn is_completer_complete(callee: &Expr, state: &SemanticState<'_>) -> bool {
-    let Expr::Field { object, field, .. } = callee else {
+    let Expr::Field { object, field, .. } = callee.unparenthesized() else {
         return false;
     };
     field.name == "complete"
         && matches!(state.infer(object), ResolvedType::Interface { identity, .. }
             if identity.is_sdk("dart:async", "Completer"))
+}
+
+#[derive(Clone, Copy)]
+enum ValueContext {
+    Return,
+    Yield,
 }
 
 impl Collector<'_> {
@@ -177,21 +185,53 @@ impl Collector<'_> {
                 .iter()
                 .chain(args.named.iter().map(|argument| &argument.value))
                 .filter(|argument| is_null_assert(argument))
-                .map(|argument| *argument.span()),
+                .map(|argument| *argument.unparenthesized().span()),
         );
     }
 
-    /// Whether `x!` at `span` is returned from a synchronous top-level or local
-    /// function. Closures are excluded: their inferred return type comes from
-    /// the returned expressions, so `() => x!` returns a non-nullable type even
-    /// where a nullable function type is expected.
-    fn returned_from_function(&self, span: &Span) -> bool {
-        self.bodies.enclosing(span).is_some_and(|body| {
-            matches!(
-                body.owner,
-                BodyOwner::TopLevelFunction | BodyOwner::LocalFunction
-            ) && body.async_marker == AsyncMarker::Sync
-        })
+    /// Only function declarations have independently declared return types;
+    /// method bodies and inferred closures are excluded by the official lint.
+    fn return_context(
+        &self,
+        span: &Span,
+        state: &SemanticState<'_>,
+        context: ValueContext,
+        awaited: bool,
+    ) -> Option<ResolvedType> {
+        let body = self.bodies.enclosing(span)?;
+        if !matches!(
+            body.owner,
+            BodyOwner::TopLevelFunction | BodyOwner::LocalFunction
+        ) && !(body.owner == BodyOwner::Getter && state.enclosing_type.is_none())
+        {
+            return None;
+        }
+        let ty = state
+            .model
+            .resolve_type_in(body.return_type.as_ref()?, &state.type_parameters);
+        if matches!(context, ValueContext::Yield) {
+            (ty.interface("dart:core", "Iterable") || ty.interface("dart:async", "Stream"))
+                .then(|| ty.type_argument(0))
+                .flatten()
+        } else if awaited || body.async_marker == AsyncMarker::Async {
+            (ty.interface("dart:async", "Future") || ty.interface("dart:async", "FutureOr"))
+                .then(|| ty.type_argument(0))
+                .flatten()
+        } else {
+            Some(ty)
+        }
+    }
+
+    fn fix_return(&mut self, value: &Expr, state: &SemanticState<'_>, context: ValueContext) {
+        let (value, awaited) = match value.unparenthesized() {
+            Expr::Await { expr, .. } => (expr.unparenthesized(), true),
+            value => (value, false),
+        };
+        if is_null_assert(value)
+            && let Some(ty) = self.return_context(value.span(), state, context, awaited)
+        {
+            self.fixed.insert(key(value.span()), ty);
+        }
     }
 
     fn fix_elements(&mut self, elements: &[CollectionElement], element: &ResolvedType) {
@@ -199,7 +239,8 @@ impl Collector<'_> {
             if let CollectionElement::Expr(expression) = item
                 && is_null_assert(expression)
             {
-                self.fixed.insert(key(expression.span()), element.clone());
+                self.fixed
+                    .insert(key(expression.unparenthesized().span()), element.clone());
             }
         }
     }
@@ -208,10 +249,12 @@ impl Collector<'_> {
         match item {
             MapElement::Entry(entry) => {
                 if is_null_assert(&entry.key) {
-                    self.fixed.insert(key(entry.key.span()), key_type.clone());
+                    self.fixed
+                        .insert(key(entry.key.unparenthesized().span()), key_type.clone());
                 }
                 if is_null_assert(&entry.value) {
-                    self.fixed.insert(key(entry.value.span()), value.clone());
+                    self.fixed
+                        .insert(key(entry.value.unparenthesized().span()), value.clone());
                 }
             }
             MapElement::If {
@@ -234,7 +277,7 @@ impl Collector<'_> {
         explicit: &[DartType],
         sdk_names: &[&str],
         state: &SemanticState<'_>,
-    ) -> Option<Vec<ResolvedType>> {
+    ) -> Option<std::sync::Arc<[ResolvedType]>> {
         if !explicit.is_empty() {
             return Some(
                 explicit
@@ -260,7 +303,7 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
-    fn visit_stmt(&mut self, node: &Stmt, _state: &SemanticState<'_>) {
+    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         match node {
             Stmt::LocalVar(declaration) => {
                 self.contextual
@@ -268,8 +311,11 @@ impl SemanticRuleVisitor for Collector<'_> {
             }
             Stmt::Return(ReturnStmt {
                 value: Some(value), ..
-            }) if is_null_assert(value) && self.returned_from_function(value.span()) => {
-                self.contextual.push(*value.span());
+            }) => {
+                self.fix_return(value, state, ValueContext::Return);
+            }
+            Stmt::Yield(statement) => {
+                self.fix_return(&statement.value, state, ValueContext::Yield);
             }
             Stmt::PatternAssign(assignment) => {
                 self.pattern_assignments.push(*assignment.pattern.span());
@@ -279,16 +325,21 @@ impl SemanticRuleVisitor for Collector<'_> {
     }
 
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        if matches!(node, Expr::Paren { .. }) {
+            return;
+        }
         match node {
             Expr::NullAssert { span, .. } => {
                 let context = if let Some(ty) = self.fixed.get(&key(span)) {
                     Some(ty.clone())
-                } else if self.contextual.contains(span)
-                    || self.bodies.enclosing(span).is_some_and(|body| {
-                        body.arrow_expression == Some(*span) && self.returned_from_function(span)
-                    })
-                {
+                } else if self.contextual.contains(span) {
                     state.expected().cloned()
+                } else if self
+                    .bodies
+                    .enclosing(span)
+                    .is_some_and(|body| body.arrow_expression == Some(*span))
+                {
+                    self.return_context(span, state, ValueContext::Return, false)
                 } else {
                     None
                 };
@@ -296,24 +347,72 @@ impl SemanticRuleVisitor for Collector<'_> {
                     self.report(span);
                 }
             }
+            Expr::Await { .. }
+                if self
+                    .bodies
+                    .enclosing(node.span())
+                    .is_some_and(|body| body.arrow_expression == Some(*node.span())) =>
+            {
+                self.fix_return(node, state, ValueContext::Return);
+            }
+            Expr::Binary { op, right, .. }
+                if is_null_assert(right)
+                    && !matches!(op, BinaryOp::NullCoalesce | BinaryOp::And | BinaryOp::Or) =>
+            {
+                self.contextual.push(*right.unparenthesized().span());
+            }
             Expr::Assign {
                 target,
                 op: AssignOp::Eq,
                 value,
                 ..
             } if is_null_assert(value) => {
-                let promotable = match target.as_ref() {
-                    Expr::Ident(name) => {
-                        state.environment.is_bound(&name.name) || name.name.starts_with('_')
+                // As in the official lint, the `!` may promote a local or a
+                // parameter. Fields never qualify: a promotable field is final
+                // and not `late`, so it cannot be assigned.
+                let promotable = match (target.unparenthesized(), value.unparenthesized()) {
+                    (Expr::Ident(name), Expr::NullAssert { operand, .. }) => {
+                        self.locals.contains(&name.span.start)
+                            || matches!(operand.unparenthesized(), Expr::Ident(asserted) if asserted.name == name.name)
                     }
                     _ => false,
                 };
                 if !promotable {
-                    self.contextual.push(*value.span());
+                    self.contextual.push(*value.unparenthesized().span());
                 }
             }
-            Expr::Call { callee, args, .. } => {
+            Expr::Call {
+                callee,
+                type_args,
+                args,
+                ..
+            } if args.positional.iter().any(is_null_assert)
+                || args
+                    .named
+                    .iter()
+                    .any(|argument| is_null_assert(&argument.value)) =>
+            {
                 if !is_future_value(node, state) && !is_completer_complete(callee, state) {
+                    // A call's result context must not widen the argument type
+                    // (notably dart:math min/max in nullable assignments).
+                    if let Some(mut signature) = state.call_signature(callee, type_args, args, None)
+                    {
+                        for (argument, expected) in args.positional.iter().zip(signature.positional)
+                        {
+                            if is_null_assert(argument) {
+                                self.fixed
+                                    .insert(key(argument.unparenthesized().span()), expected);
+                            }
+                        }
+                        for argument in &args.named {
+                            if is_null_assert(&argument.value)
+                                && let Some(expected) = signature.named.remove(&argument.name.name)
+                            {
+                                self.fixed
+                                    .insert(key(argument.value.unparenthesized().span()), expected);
+                            }
+                        }
+                    }
                     self.contextual_arguments(args);
                 }
             }
@@ -335,7 +434,7 @@ impl SemanticRuleVisitor for Collector<'_> {
                     &["Set", "Iterable"]
                 };
                 if let Some(arguments) = Self::literal_arguments(explicit, names, state)
-                    && let [element] = arguments.as_slice()
+                    && let [element] = arguments.as_ref()
                 {
                     self.fix_elements(elements, element);
                 }
@@ -346,7 +445,7 @@ impl SemanticRuleVisitor for Collector<'_> {
                 ..
             } => {
                 if let Some(arguments) = Self::literal_arguments(type_args, &["Map"], state)
-                    && let [key_type, value] = arguments.as_slice()
+                    && let [key_type, value] = arguments.as_ref()
                 {
                     for element in elements {
                         self.fix_map_entry(element, key_type, value);

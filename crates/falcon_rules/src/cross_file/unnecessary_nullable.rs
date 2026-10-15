@@ -59,14 +59,6 @@ impl CrossFileRule for UnnecessaryNullable {
                     .map(|file| (file.path.clone(), &file.program))
                     .collect();
                 let grouping = group_libraries(&project_files);
-                let types =
-                    TypeIndex::from_library_files(files.iter().enumerate().map(|(index, file)| {
-                        LibrarySource {
-                            program: &file.program,
-                            has_parse_errors: file.has_parse_errors,
-                            has_unresolved_parts: grouping.is_unresolved(index),
-                        }
-                    }));
                 let sources: Vec<_> = files
                     .iter()
                     .map(|file| IdentitySource {
@@ -78,6 +70,19 @@ impl CrossFileRule for UnnecessaryNullable {
                 let packages =
                     crate::package_identities(files.iter().map(|file| file.path.as_path()));
                 let identities = IdentityIndex::from_project_files(&sources, &packages);
+                let types = TypeIndex::from_resolved_files(
+                    files.iter().enumerate().map(|(index, file)| {
+                        (
+                            file.path.as_path(),
+                            LibrarySource {
+                                program: &file.program,
+                                has_parse_errors: file.has_parse_errors,
+                                has_unresolved_parts: grouping.is_unresolved(index),
+                            },
+                        )
+                    }),
+                    &identities,
+                );
                 let signatures =
                     SignatureIndex::from_project_files(&project_files, &identities, &types);
                 owned_indexes = SemanticIndexes {
@@ -283,7 +288,7 @@ fn make_param(p: &FormalParam, slot: ParamSlot) -> Option<NullableParam> {
     if !ty.is_nullable() {
         return None;
     }
-    let default_is_null = match &p.default_value {
+    let default_is_null = match p.default_value.as_ref().map(Expr::unparenthesized) {
         None => true,
         Some(Expr::NullLit { .. }) => true,
         Some(_) => false,
@@ -361,7 +366,7 @@ impl CallInfo {
 }
 
 fn is_null_expr(e: &Expr) -> bool {
-    matches!(e, Expr::NullLit { .. })
+    matches!(e.unparenthesized(), Expr::NullLit { .. })
 }
 
 fn call_info(name: String, args: &ArgList, collector: &CallCollector<'_>) -> CallInfo {
@@ -385,7 +390,7 @@ fn call_info(name: String, args: &ArgList, collector: &CallCollector<'_>) -> Cal
 }
 
 fn callee_name(callee: &Expr) -> Option<String> {
-    match callee {
+    match callee.unparenthesized() {
         Expr::Ident(id) => Some(id.name.clone()),
         Expr::Field { field, .. } => Some(field.name.clone()),
         _ => None,
@@ -502,7 +507,7 @@ impl Visitor for CallCollector<'_> {
                 }
                 // Recurse into the callee's receiver (but not the callee name
                 // itself) and the arguments.
-                match &**callee {
+                match callee.unparenthesized() {
                     Expr::Ident(_) => {}
                     Expr::Field { object, .. } => self.visit_expr(object),
                     other => self.visit_expr(other),
@@ -530,10 +535,19 @@ impl Visitor for CallCollector<'_> {
                                     self.visit_expr(&a.value);
                                 }
                             }
+                            CascadeOp::Invoke(_, args) => {
+                                for argument in &args.positional {
+                                    self.visit_expr(argument);
+                                }
+                                for argument in &args.named {
+                                    self.visit_expr(&argument.value);
+                                }
+                            }
                             CascadeOp::Index { index, .. } => {
                                 self.visit_expr(index);
                             }
-                            CascadeOp::Assign(target, _, value) => {
+                            CascadeOp::Assign(target, _, value)
+                            | CascadeOp::IndexAssign(target, _, value) => {
                                 self.visit_expr(target);
                                 self.visit_expr(value);
                             }
@@ -575,7 +589,7 @@ impl Visitor for NullAssignFinder {
             value,
             ..
         } = node
-            && let Expr::Ident(id) = &**target
+            && let Expr::Ident(id) = target.unparenthesized()
             && is_null_expr(value)
         {
             self.names.insert(id.name.clone());
@@ -604,6 +618,22 @@ mod tests {
                 None,
             )
             .len()
+    }
+
+    #[test]
+    fn invoked_callback_results_preserve_private_function_escape_evidence() {
+        for invocation in ["holder..callback()(null)", "holder.callback()(null)"] {
+            let source = format!(
+                "void _take(int? value) {{}} \
+                 class Holder {{ void Function(int?) callback() => _take; }} \
+                 void use(Holder holder) {{ _take(1); {invocation}; }}"
+            );
+            assert_eq!(count(&source), 0, "{invocation}");
+        }
+        assert_eq!(
+            count("void _take(int? value) {} void use() { _take(1); }"),
+            1
+        );
     }
 
     #[test]
@@ -642,7 +672,10 @@ mod tests {
                     &config,
                     true,
                     true,
-                    &packages,
+                    falcon_analyze::Workspace {
+                        packages: &packages,
+                        environment: None,
+                    },
                 );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
             let (program, errors) = parse("");

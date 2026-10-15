@@ -11,12 +11,8 @@
 //! void g({required int b, int? a}) {}   // fine
 //! ```
 //!
-//! An optional named super parameter (`super.x`) does not count as an optional
-//! parameter when it is the only named super parameter, mirroring the
-//! analyzer's allowance for super parameters forwarded in the super
-//! constructor's order. With several named super parameters falcon cannot see
-//! the super constructor's order and keeps the same allowance rather than
-//! guess.
+//! Optional named super parameters (`{super.key, required this.child}`) count
+//! as optional parameters like any other.
 //!
 //! Adopted from the official `always_put_required_named_parameters_first` lint.
 
@@ -24,8 +20,8 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_constructor_decl, walk_dart_type, walk_expr,
-    walk_formal_param, walk_function_decl, walk_method_decl, walk_stmt,
+    Visitor, walk_class_member, walk_dart_type, walk_expr, walk_formal_param, walk_function_decl,
+    walk_method_decl, walk_stmt, walk_type_alias_decl,
 };
 
 const RULE: &str = "always-put-required-named-parameters-first";
@@ -64,9 +60,6 @@ fn has_required_annotation(annotations: &[Annotation]) -> bool {
 
 impl Collector<'_, '_> {
     fn check(&mut self, params: &FormalParamList) {
-        // The analyzer exempts in-order super parameters; with at most one named
-        // super parameter the order is trivially kept, and with more falcon
-        // cannot see the super constructor, so the allowance always applies.
         let mut optional_seen = false;
         for param in params.named() {
             let required = matches!(param.kind, ParamKind::Named { required: true })
@@ -76,7 +69,7 @@ impl Collector<'_, '_> {
                     self.diags
                         .push(self.ctx.diagnostic(RULE, MESSAGE, param.name.span));
                 }
-            } else if param.initializing != Some(InitializingFormal::Super) {
+            } else {
                 optional_seen = true;
             }
         }
@@ -96,9 +89,17 @@ impl Visitor for Collector<'_, '_> {
         walk_method_decl(self, node);
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.check(&node.params);
-        walk_constructor_decl(self, node);
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+        self.check(node.params);
+    }
+
+    fn visit_type_alias_decl(&mut self, node: &TypeAliasDecl) {
+        // The shared alias callback visits legacy formals once, separately
+        // from the return type and modern function-type syntax.
+        if let Some(params) = &node.legacy_params {
+            self.check(params);
+        }
+        walk_type_alias_decl(self, node);
     }
 
     fn visit_class_member(&mut self, node: &ClassMember) {

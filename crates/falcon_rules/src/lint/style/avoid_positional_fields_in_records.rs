@@ -31,7 +31,7 @@ impl Rule for AvoidPositionalFieldsInRecords {
 const MESSAGE: &str = "Avoid positional fields in records. Use named fields instead.";
 
 fn record_literal_has_positional(expr: &Expr) -> bool {
-    matches!(expr, Expr::Record { fields, .. } if fields.iter().any(|f| f.name.is_none()))
+    matches!(expr.unparenthesized(), Expr::Record { fields, .. } if fields.iter().any(|f| f.name.is_none()))
 }
 
 // Explicit types are checked separately; do not also report their initializer.

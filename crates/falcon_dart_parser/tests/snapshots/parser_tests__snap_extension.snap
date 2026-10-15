@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1666
 expression: "prog.declarations[0]"
 ---
 Extension(
@@ -30,7 +31,7 @@ Extension(
                 is_nullable: false,
                 span: Span {
                     start: 21,
-                    end: 28,
+                    end: 27,
                 },
             },
         ),
@@ -58,7 +59,7 @@ Extension(
                                 is_nullable: false,
                                 span: Span {
                                     start: 30,
-                                    end: 35,
+                                    end: 34,
                                 },
                             },
                         ),
@@ -74,6 +75,10 @@ Extension(
                         Arrow(
                             Binary {
                                 op: EqEq,
+                                op_span: Span {
+                                    start: 57,
+                                    end: 59,
+                                },
                                 left: Ident(
                                     Identifier {
                                         name: "length",
@@ -97,13 +102,13 @@ Extension(
                             },
                             Span {
                                 start: 47,
-                                end: 63,
+                                end: 62,
                             },
                         ),
                     ),
                     span: Span {
                         start: 30,
-                        end: 63,
+                        end: 62,
                     },
                 },
             ),

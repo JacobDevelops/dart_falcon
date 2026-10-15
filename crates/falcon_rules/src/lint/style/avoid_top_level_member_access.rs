@@ -120,11 +120,19 @@ impl ScopeCollector {
                 }
                 self.suppress_next_local_var_binding = true;
             }
-            ForInit::ForIn { name, .. } => self.bind(name, statement.body.span()),
+            ForInit::ForIn {
+                declares_variable: true,
+                name,
+                ..
+            } => self.bind(name, statement.body.span()),
             ForInit::PatternForIn { pattern, .. } => {
                 self.bind_pattern(pattern, statement.body.span());
             }
-            ForInit::Exprs(_) => {}
+            ForInit::ForIn {
+                declares_variable: false,
+                ..
+            }
+            | ForInit::Exprs(_) => {}
         }
     }
 }
@@ -219,6 +227,8 @@ impl Visitor for ScopeCollector {
                             }
                             let scope = Span::new(pattern.span().end, case.span.end);
                             self.bind_pattern(pattern, &scope);
+                        } else if let SwitchCaseKind::Expr(expression) = kind {
+                            self.visit_expr(expression);
                         }
                     }
                     self.with_statement_list(&case.body, &case.span);

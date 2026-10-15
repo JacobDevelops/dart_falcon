@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1770
 expression: "prog.declarations[0]"
 ---
 Enum(
@@ -13,6 +14,7 @@ Enum(
             },
         },
         type_params: [],
+        primary_constructor: None,
         with_clause: [],
         implements: [],
         variants: [
@@ -92,7 +94,7 @@ Enum(
                                 is_nullable: false,
                                 span: Span {
                                     start: 31,
-                                    end: 36,
+                                    end: 35,
                                 },
                             },
                         ),
@@ -108,10 +110,14 @@ Enum(
                         Arrow(
                             Binary {
                                 op: NotEq,
+                                op_span: Span {
+                                    start: 58,
+                                    end: 60,
+                                },
                                 left: This {
                                     span: Span {
                                         start: 53,
-                                        end: 58,
+                                        end: 57,
                                     },
                                 },
                                 right: Field {
@@ -144,13 +150,13 @@ Enum(
                             },
                             Span {
                                 start: 50,
-                                end: 74,
+                                end: 73,
                             },
                         ),
                     ),
                     span: Span {
                         start: 31,
-                        end: 74,
+                        end: 73,
                     },
                 },
             ),

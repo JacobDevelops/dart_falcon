@@ -15,8 +15,7 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_constructor_decl, walk_dart_type, walk_expr, walk_function_decl,
-    walk_method_decl, walk_stmt,
+    Visitor, walk_dart_type, walk_expr, walk_function_decl, walk_method_decl, walk_stmt,
 };
 
 #[derive(Default)]
@@ -73,9 +72,8 @@ impl Visitor for Collector<'_> {
         walk_function_decl(self, node);
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.check_formals(&node.params, &node.span);
-        walk_constructor_decl(self, node);
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+        self.check_formals(node.params, &node.span);
     }
 
     fn visit_method_decl(&mut self, node: &MethodDecl) {

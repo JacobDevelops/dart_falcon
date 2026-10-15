@@ -70,7 +70,8 @@ impl<'src> Lexer<'src> {
         Token::new(kind, start, self.pos - start)
     }
 
-    fn next_token(&mut self) -> Token {
+    /// Read one token, returning `Eof` after the source is exhausted.
+    pub fn next_token(&mut self) -> Token {
         let start = self.pos;
 
         // A shebang is trivia only at the logical start, including after a BOM.
@@ -85,14 +86,17 @@ impl<'src> Lexer<'src> {
         };
 
         match c {
-            ' ' | '\t' | '\r' => {
-                while matches!(self.cur(), Some(' ' | '\t' | '\r')) {
+            ' ' | '\t' => {
+                while matches!(self.cur(), Some(' ' | '\t')) {
                     self.advance();
                 }
                 self.make(TokenKind::Whitespace, start)
             }
-            '\n' => {
+            '\n' | '\r' => {
                 self.advance();
+                if c == '\r' && self.cur() == Some('\n') {
+                    self.advance();
+                }
                 self.make(TokenKind::Newline, start)
             }
             '/' => self.lex_slash(start),
@@ -151,7 +155,7 @@ impl<'src> Lexer<'src> {
         loop {
             match self.cur() {
                 None => return self.make(TokenKind::Error, start),
-                Some('\n') if !triple => return self.make(TokenKind::Error, start),
+                Some('\n' | '\r') if !triple => return self.make(TokenKind::Error, start),
                 Some('\\') if !raw => {
                     self.advance();
                     self.advance();

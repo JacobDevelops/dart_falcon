@@ -953,3 +953,28 @@ fn test_bom_then_shebang_is_script_directive() {
         "BOM + shebang must lex clean: {tokens:?}"
     );
 }
+
+#[test]
+fn line_comments_end_at_every_dart_line_ending() {
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = format!(
+            "/// docs{newline}void documented() {{}}{newline}// ordinary{newline}void visible() {{}}"
+        );
+        let tokens = Lexer::new(&source).tokenize();
+        let doc = tokens
+            .iter()
+            .find(|token| token.kind == TokenKind::DocComment)
+            .unwrap();
+        assert_eq!(doc.text(&source), "/// docs");
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| token.kind == TokenKind::Newline)
+                .count(),
+            3
+        );
+        let (program, errors) = parse(&source);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(program.declarations.len(), 2);
+    }
+}

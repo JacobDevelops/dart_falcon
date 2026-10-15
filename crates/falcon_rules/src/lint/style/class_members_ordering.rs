@@ -81,7 +81,7 @@ fn member_category(member: &ClassMember) -> u8 {
                 4
             }
         }
-        ClassMember::Constructor(_) => 5,
+        ClassMember::Constructor(_) | ClassMember::PrimaryConstructorBody(_) => 5,
         ClassMember::Getter(g) => {
             if g.name.name.starts_with('_') {
                 8

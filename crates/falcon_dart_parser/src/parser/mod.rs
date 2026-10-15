@@ -6,25 +6,41 @@ mod pattern;
 mod stmt;
 mod types;
 
+use falcon_syntax::LanguageVersion;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::{Token, TokenKind};
 use tracing::debug;
 
 use crate::lexer::{Lexer, filter_trivia};
 
-/// Parse Dart 3.x into an AST and recoverable errors on a depth-bounded worker
-/// stack, so deeply nested input cannot exhaust the caller's stack.
+/// Parse Dart into an AST and recoverable errors at the language version of a
+/// file outside any package: its `// @dart` override, else
+/// [`LanguageVersion::CURRENT`].
 pub fn parse(source: &str) -> (Program, Vec<ParseError>) {
+    parse_for_package(source, None)
+}
+
+/// Parse Dart into an AST and recoverable errors at the file's effective
+/// language version — its `// @dart` override, else `package_version`, else
+/// [`LanguageVersion::CURRENT`] — on a depth-bounded worker stack, so deeply
+/// nested input cannot exhaust the caller's stack.
+pub fn parse_for_package(
+    source: &str,
+    package_version: Option<LanguageVersion>,
+) -> (Program, Vec<ParseError>) {
+    let version = LanguageVersion::file_override(source)
+        .or(package_version)
+        .unwrap_or(LanguageVersion::CURRENT);
     std::thread::scope(|scope| {
         match std::thread::Builder::new()
             .stack_size(PARSER_STACK_SIZE)
-            .spawn_scoped(scope, || parse_inner(source))
+            .spawn_scoped(scope, || parse_inner(source, version))
         {
             Ok(handle) => handle.join().expect("parser thread panicked"),
             // Spawn can fail under thread/memory exhaustion; parsing on the
             // current stack is still protected by the MAX_PARSE_DEPTH guard,
             // just with less headroom — better than aborting the process.
-            Err(_) => parse_inner(source),
+            Err(_) => parse_inner(source, version),
         }
     })
 }
@@ -34,11 +50,11 @@ pub fn parse(source: &str) -> (Program, Vec<ParseError>) {
 /// (that ceiling costs well under 16 MB of native stack).
 const PARSER_STACK_SIZE: usize = 256 * 1024 * 1024;
 
-fn parse_inner(source: &str) -> (Program, Vec<ParseError>) {
+fn parse_inner(source: &str, version: LanguageVersion) -> (Program, Vec<ParseError>) {
     debug!("parsing file");
     let raw_tokens = Lexer::new(source).tokenize();
     let tokens = filter_trivia(raw_tokens);
-    let mut p = Parser::new(tokens, source);
+    let mut p = Parser::new(tokens, source, version);
     let program = p.parse_program();
     let error_count = p.errors.len();
     debug!(errors = error_count, "parse complete");
@@ -84,6 +100,9 @@ pub(super) struct Parser<'src> {
     pub(super) tokens: Vec<Token>,
     pub(super) pos: usize,
     pub(super) src: &'src str,
+    /// The language version the source is parsed at; gates grammar that
+    /// changed meaning between versions.
+    pub(super) version: LanguageVersion,
     pub(super) errors: Vec<ParseError>,
     pub(super) ctx: Ctx<'src>,
     /// Undo log for the in-place `>>`/`>>>` → `>` splits that [`parse_type_args`]
@@ -99,19 +118,24 @@ pub(super) struct Parser<'src> {
     /// stack and aborting the process.
     pub(super) depth: usize,
     pub(super) depth_limit_hit: bool,
+    /// Token index of the `Function` keyword of the most recently completed
+    /// function type; after a type parse, that of its outermost function type.
+    pub(super) last_function_keyword: Option<usize>,
 }
 
 impl<'src> Parser<'src> {
-    pub(super) fn new(tokens: Vec<Token>, src: &'src str) -> Self {
+    pub(super) fn new(tokens: Vec<Token>, src: &'src str, version: LanguageVersion) -> Self {
         Self {
             tokens,
             pos: 0,
             src,
+            version,
             errors: Vec::new(),
             ctx: Ctx::default(),
             gt_undo: Vec::new(),
             depth: 0,
             depth_limit_hit: false,
+            last_function_keyword: None,
         }
     }
 
@@ -308,7 +332,11 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn error(&mut self, msg: impl Into<String>) {
-        let offset = self.cur().offset;
+        self.error_at(self.cur().offset, msg);
+    }
+
+    /// Report a diagnostic at a retained token or AST span after consuming it.
+    pub(super) fn error_at(&mut self, offset: usize, msg: impl Into<String>) {
         self.errors.push(ParseError {
             message: msg.into(),
             offset,
@@ -323,7 +351,28 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn span_from(&self, start: usize) -> Span {
-        Span::new(start, self.cur().offset)
+        // Nested type arguments consume a `>` from a shift token without
+        // advancing the cursor. Each undo entry at this position records one
+        // consumed closing delimiter; the rest of the token remains pending.
+        let end = if self
+            .gt_undo
+            .last()
+            .is_some_and(|(index, _)| *index == self.pos)
+        {
+            self.cur().offset
+                + self
+                    .gt_undo
+                    .iter()
+                    .rev()
+                    .take_while(|(index, _)| *index == self.pos)
+                    .count()
+        } else {
+            self.pos.checked_sub(1).map_or(start, |index| {
+                let token = &self.tokens[index];
+                token.offset + token.len
+            })
+        };
+        Span::new(start, end.max(start))
     }
 
     pub(super) fn cur_span(&self) -> Span {
@@ -474,6 +523,18 @@ impl<'src> Parser<'src> {
             TokenKind::Semicolon => {
                 parser.advance();
                 None
+            }
+            // SDK-internal `native` bodies: `int get length native;`,
+            // `void f() native "name";`.
+            TokenKind::Ident if parser.cur_text() == "native" => {
+                let start = parser.cur().offset;
+                parser.advance();
+                let name = parser
+                    .at(TokenKind::StringLit)
+                    .then(|| parser.parse_adjacent_strings());
+                let span = parser.span_from(start);
+                parser.expect(TokenKind::Semicolon);
+                Some(FunctionBody::Native(name, span))
             }
             _ => None,
         })
@@ -700,7 +761,7 @@ mod tests {
     #[test]
     fn failed_type_probe_discards_only_speculative_diagnostics() {
         let src = "Map<int, +>;";
-        let mut parser = Parser::new(Lexer::new(src).tokenize(), src);
+        let mut parser = Parser::new(Lexer::new(src).tokenize(), src, LanguageVersion::CURRENT);
         parser.error("retained");
         assert!(
             parser
@@ -716,7 +777,7 @@ mod tests {
 
     #[test]
     fn speculative_depth_limit_does_not_suppress_real_error() {
-        let mut parser = Parser::new(Lexer::new("x").tokenize(), "x");
+        let mut parser = Parser::new(Lexer::new("x").tokenize(), "x", LanguageVersion::CURRENT);
         parser.depth = Parser::MAX_PARSE_DEPTH;
         let result: Option<()> = parser.speculate(|parser| {
             parser.parse_expr();

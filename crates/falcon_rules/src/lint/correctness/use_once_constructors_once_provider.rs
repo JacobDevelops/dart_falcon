@@ -46,7 +46,7 @@ impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if !self.in_const
             && let Expr::Call { callee, .. } = node
-            && let Expr::Ident(id) = callee.as_ref()
+            && let Expr::Ident(id) = callee.unparenthesized()
             && ONCE_PROVIDERS.contains(&id.name.as_str())
         {
             self.diags.push(self.ctx.diagnostic(

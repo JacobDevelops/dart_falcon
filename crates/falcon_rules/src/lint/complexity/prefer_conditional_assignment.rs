@@ -39,11 +39,11 @@ fn eq_null_operand(cond: &Expr) -> Option<&Expr> {
         left,
         right,
         ..
-    } = cond
+    } = cond.unparenthesized()
     else {
         return None;
     };
-    match (left.as_ref(), right.as_ref()) {
+    match (left.unparenthesized(), right.unparenthesized()) {
         (Expr::NullLit { .. }, other) | (other, Expr::NullLit { .. }) => Some(other),
         _ => None,
     }
@@ -71,7 +71,7 @@ impl Visitor for Collector<'_> {
                 target,
                 op: AssignOp::Eq,
                 ..
-            } = &es.expr
+            } = es.expr.unparenthesized()
             && text(target, self.source) == text(checked, self.source)
         {
             self.diags.push(self.ctx.diagnostic(

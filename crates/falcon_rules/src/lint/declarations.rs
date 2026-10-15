@@ -1,7 +1,56 @@
-//! Borrowed member extraction shared by declaration-agnostic lint scans.
-//! Declaration-specific policies still inspect names, bases, and type parameters themselves.
+//! Borrowed member extraction and declaration-header positions shared by
+//! declaration-agnostic lint scans. Declaration-specific policies still
+//! inspect names, bases, and type parameters themselves.
 
-use falcon_syntax::ast::{ClassMember, TopLevelDecl};
+use std::collections::HashSet;
+
+use falcon_syntax::ast::{Annotation, ClassMember, OperatorDecl, Span, TopLevelDecl};
+
+/// Whether metadata has the given terminal name, for syntax-only consumers.
+pub(crate) fn annotation(annotations: &[Annotation], name: &str) -> bool {
+    annotations
+        .iter()
+        .any(|annotation| annotation.name.last().is_some_and(|part| part.name == name))
+}
+
+/// Resolve metadata rather than accepting an annotation from another library.
+pub(crate) fn has_meta_annotation(
+    annotations: &[Annotation],
+    name: &str,
+    model: &falcon_analyze::SemanticModel<'_>,
+) -> bool {
+    annotations.iter().any(|annotation| {
+        let Some(qualified) = falcon_analyze::QualifiedName::from_identifiers(&annotation.name)
+        else {
+            return false;
+        };
+        model
+            .resolve_value(qualified)
+            .or_else(|| model.resolve_name(qualified))
+            .or_else(|| model.resolve_imported_member(qualified))
+            .is_some_and(|identity| identity.is_package("meta", name))
+    })
+}
+
+/// Whether a file is in one of the analyzer's package-root test directories.
+pub(crate) fn in_test_directory(path: &std::path::Path) -> bool {
+    let Some(pubspec) = crate::cross_file::enclosing_pubspec(path) else {
+        return false;
+    };
+    let Some(root) = pubspec.parent() else {
+        return false;
+    };
+    falcon_analyze::canonical_or_lexical(path)
+        .strip_prefix(root)
+        .is_ok_and(|relative| {
+            relative.components().next().is_some_and(|first| {
+                matches!(
+                    first.as_os_str().to_str(),
+                    Some("test" | "integration_test" | "test_driver" | "testing")
+                )
+            })
+        })
+}
 
 pub(crate) fn members_of(declaration: &TopLevelDecl) -> Option<&[ClassMember]> {
     match declaration {
@@ -13,6 +62,95 @@ pub(crate) fn members_of(declaration: &TopLevelDecl) -> Option<&[ClassMember]> {
         TopLevelDecl::ExtensionType(node) => Some(&node.members),
         _ => None,
     }
+}
+
+/// Names of the fields, methods, getters, and setters `members` declare: the
+/// names that shadow library declarations inside the declaration's body.
+pub(crate) fn member_names(members: &[ClassMember]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for member in members {
+        match member {
+            ClassMember::Field(field) => {
+                names.extend(
+                    field
+                        .declarators
+                        .iter()
+                        .map(|declarator| declarator.name.name.clone()),
+                );
+            }
+            ClassMember::Method(method) => {
+                names.insert(method.name.name.clone());
+            }
+            ClassMember::Getter(getter) => {
+                names.insert(getter.name.name.clone());
+            }
+            ClassMember::Setter(setter) => {
+                names.insert(setter.name.name.clone());
+            }
+            ClassMember::Constructor(_)
+            | ClassMember::PrimaryConstructorBody(_)
+            | ClassMember::Operator(_)
+            | ClassMember::Error(_) => {}
+        }
+    }
+    names
+}
+
+/// Identifies a top-level declaration by its address in the visited program,
+/// for side tables keyed by declaration.
+pub(crate) fn declaration_key(declaration: &TopLevelDecl) -> usize {
+    std::ptr::from_ref(declaration).addr()
+}
+
+/// The span of the operator token (`==`, `[]=`) after the `operator` keyword
+/// of `operator`; the declaration's span when the keyword is not found.
+pub(crate) fn operator_token_span(operator: &OperatorDecl, source: &str) -> Span {
+    let header_start = operator
+        .annotations
+        .last()
+        .map_or(operator.span.start, |annotation| annotation.span.end);
+    source
+        .get(header_start..operator.params.span.start)
+        .and_then(|header| {
+            let tokens = falcon_dart_parser::lexer::Lexer::new(header).tokenize();
+            let keyword = tokens
+                .iter()
+                .position(|token| token.kind == falcon_syntax::TokenKind::Operator)?;
+            let token = tokens[keyword + 1..]
+                .iter()
+                .find(|token| !token.is_trivia())?;
+            let offset = header_start + token.offset;
+            Some(Span::new(offset, offset + operator.op.len()))
+        })
+        .unwrap_or(operator.span)
+}
+
+/// Offset of a declaration's first token after its annotations (the
+/// analyzer's `firstTokenAfterCommentAndMetadata`), skipping whitespace and
+/// comments; `span` is the declaration's span.
+pub(crate) fn first_token_after_annotations(
+    annotations: &[Annotation],
+    span: Span,
+    source: &str,
+) -> usize {
+    let mut offset = annotations
+        .iter()
+        .map(|annotation| annotation.span.end)
+        .fold(span.start, usize::max);
+    let bytes = source.as_bytes();
+    while offset < span.end {
+        let rest = &source[offset..];
+        if bytes[offset].is_ascii_whitespace() {
+            offset += 1;
+        } else if rest.starts_with("//") {
+            offset += rest.find('\n').unwrap_or(rest.len());
+        } else if rest.starts_with("/*") {
+            offset += rest.find("*/").map_or(rest.len(), |end| end + 2);
+        } else {
+            break;
+        }
+    }
+    offset.min(span.end)
 }
 
 #[cfg(test)]

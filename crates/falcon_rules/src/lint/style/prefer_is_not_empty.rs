@@ -13,14 +13,12 @@
 //! comparison also has to account for a `null` receiver, so `isNotEmpty` is not
 //! a drop-in replacement.
 //!
-//! Type knowledge only ever *suppresses*. When a [`TypeIndex`] is on the context
-//! and the receiver's static type is *positively proven* to be a concrete type
-//! that (a) definitely has no `isNotEmpty` member (`member_lookup …
-//! Absent`) and (b) is definitely not a core collection/string
-//! (`is_subtype … No` for `Iterable`, `String`, `Map`), suggesting
-//! `isNotEmpty` would be wrong, so the diagnostic is withheld. An `Unknown`
-//! receiver — the common case, and every receiver when no type index is
-//! attached — keeps firing.
+//! Semantic analysis requires declaration identities. Once available, an
+//! unknown receiver still triggers the lint. A `TypeIndex` can suppress it only
+//! when the receiver is proven to have no `isNotEmpty` member and not to be an
+//! `Iterable`, `String`, or `Map`; source-resolved members and subtypes take
+//! precedence. Without a type index, those negative proofs are unavailable,
+//! but source-derived receiver types are still inferred.
 
 use super::collection_checks::{Emptiness, analyze_emptiness};
 use falcon_analyze::{AnalyzeContext, Rule};
@@ -64,11 +62,9 @@ mod tests {
         PreferIsNotEmpty.analyze(&program, &ctx).len()
     }
 
-    /// Diagnostic count with a single-file `TypeIndex` attached (production shape
-    /// for a resolver-dependent rule in degraded single-file mode).
+    /// Diagnostic count with the production identity-keyed index attached.
     fn count_with_types(source: &str) -> usize {
         let program = parse(source).0;
-        let types = TypeIndex::from_program(&program);
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
         let identities = IdentityIndex::from_project_files(
@@ -78,6 +74,17 @@ mod tests {
                 has_parse_errors: false,
             }],
             &[],
+        );
+        let types = TypeIndex::from_resolved_files(
+            [(
+                path.as_path(),
+                falcon_analyze::LibrarySource {
+                    program: &program,
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )],
+            &identities,
         );
         let model = SemanticModel::new(&path, &identities, Some(&types));
         let signatures = SignatureIndex::from_program(&program, &model);

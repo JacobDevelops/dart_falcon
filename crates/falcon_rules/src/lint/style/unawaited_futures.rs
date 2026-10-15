@@ -38,7 +38,7 @@ impl Rule for UnawaitedFutures {
                 name: "unawaited-futures",
                 in_async_bodies: true,
                 future_message: "Missing an 'await' for the 'Future' computed by this expression.",
-                future_or_message: "Missing an 'await' for the 'FutureOr' computed by this expression.",
+                future_or_message: None,
             },
         )
     }

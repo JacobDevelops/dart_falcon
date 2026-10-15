@@ -157,7 +157,7 @@ fn member_category(member: &ClassMember) -> u8 {
         }
         ClassMember::Field(f) if f.is_static => 1,
         ClassMember::Field(_) => 2,
-        ClassMember::Constructor(_) => 3,
+        ClassMember::Constructor(_) | ClassMember::PrimaryConstructorBody(_) => 3,
         ClassMember::Method(m) if m.is_static => 4,
         ClassMember::Getter(g) if g.is_static => 4,
         ClassMember::Setter(s) if s.is_static => 4,

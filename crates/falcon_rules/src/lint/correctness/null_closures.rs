@@ -1,10 +1,27 @@
 //! Reject literal `null` in the closure slots of curated SDK APIs.
+//!
+//! Mirrors the official `null_closures` lists: the constructors `Future()`,
+//! `Future.microtask`, `Future.sync`, `Timer()`, `Timer.periodic`, and
+//! `List.generate`; statics on classes named `Future` (`doWhile`, `forEach`,
+//! `wait(cleanUp:)`) and `Timer` (`run`), regardless of their library; and
+//! instance methods of `Iterable`, `Map`, `List`, `Set`, `Queue`, `String`, and `Future` invoked
+//! on a receiver whose static type is, or has as a supertype, that SDK class
+//! (project overrides of those methods included). Invocations without an
+//! explicit target — the top-level `scheduleMicrotask`, implicit-`this` calls,
+//! and cascade sections — are never checked, as in the official lint.
+//! Parenthesized nulls do not match. Named arguments are reported as a whole;
+//! positional indexes count named arguments too, matching analyzer source order.
+//! Static callback APIs match the receiver's class name, even outside the SDK.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
+use falcon_analyze::resolve::TypeKind;
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, resolve_new_constructor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
+use crate::lint::expressions::is_parenthesized;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]
@@ -43,27 +60,37 @@ impl Collector<'_> {
             .is_some()
     }
 
-    fn report_null(&mut self, expression: &Expr) {
-        if !matches!(expression, Expr::NullLit { .. }) {
-            return;
-        }
-        let span = expression.span();
+    fn report(&mut self, span: Span) {
         self.diagnostics.push(self.ctx.diagnostic(
             "null-closures",
             "Pass a closure instead of null.",
-            *span,
+            span,
         ));
     }
 
     fn check_arguments(&mut self, args: &ArgList, positional: &[usize], named: &[&str]) {
-        for index in positional {
-            if let Some(argument) = args.positional.get(*index) {
-                self.report_null(argument);
+        for argument in &args.positional {
+            if !matches!(argument, Expr::NullLit { .. }) || is_parenthesized(argument) {
+                continue;
+            }
+            let start = argument.span().start;
+            let index = args
+                .positional
+                .iter()
+                .map(|other| other.span().start)
+                .chain(args.named.iter().map(|other| other.span.start))
+                .filter(|&other| other < start)
+                .count();
+            if positional.contains(&index) {
+                self.report(*argument.span());
             }
         }
         for argument in &args.named {
-            if named.contains(&argument.name.name.as_str()) {
-                self.report_null(&argument.value);
+            if named.contains(&argument.name.name.as_str())
+                && matches!(argument.value, Expr::NullLit { .. })
+                && !is_parenthesized(&argument.value)
+            {
+                self.report(argument.span);
             }
         }
     }
@@ -91,36 +118,8 @@ impl Collector<'_> {
         state.model.resolve_dotted(&segments)
     }
 
-    fn applicable_non_sdk_member(
-        &self,
-        receiver: &ResolvedType,
-        method: &str,
-        state: &SemanticState<'_>,
-    ) -> bool {
-        if matches!(
-            state
-                .signatures
-                .resolved_member_owner(receiver, method, &state.model),
-            Some(DeclarationIdentity::Project { .. })
-        ) {
-            return true;
-        }
-        state
-            .signatures
-            .has_applicable_extension_member(receiver, method, &state.model)
-    }
-
     fn check_call(&mut self, callee: &Expr, args: &ArgList, state: &SemanticState<'_>) {
-        if let Expr::Ident(identifier) = callee {
-            if !state.environment.is_bound(&identifier.name)
-                && let Some(DeclarationIdentity::Sdk { library, name }) =
-                    state.model.resolve_sdk_member(&identifier.name)
-                && library == "dart:async"
-                && name == "scheduleMicrotask"
-            {
-                self.check_arguments(args, &[0], &[]);
-                return;
-            }
+        if let Expr::Ident(_) = callee {
             if let Some(identity) = self.sdk_type(callee, state) {
                 self.check_constructor(&identity, None, args);
             }
@@ -133,24 +132,28 @@ impl Collector<'_> {
             if self.check_constructor(&identity, Some(&field.name), args) {
                 return;
             }
-            if let DeclarationIdentity::Sdk { library, name } = identity {
-                match (library, name, field.name.as_str()) {
-                    ("dart:async", "Future", "doWhile") => self.check_arguments(args, &[0], &[]),
-                    ("dart:async", "Future", "forEach") => self.check_arguments(args, &[1], &[]),
-                    ("dart:async", "Future", "wait") => {
-                        self.check_arguments(args, &[], &["cleanUp"])
-                    }
-                    ("dart:async", "Timer", "run") => self.check_arguments(args, &[0], &[]),
+            // Static calls match a class name, not its declaring library.
+            let is_class = match state.signatures.type_kind(&identity) {
+                Some(kind) => matches!(kind, TypeKind::Class | TypeKind::MixinClass),
+                None => matches!(identity, DeclarationIdentity::Sdk { .. }),
+            };
+            if is_class {
+                match (identity.name(), field.name.as_str()) {
+                    ("Future", "doWhile") => self.check_arguments(args, &[0], &[]),
+                    ("Future", "forEach") => self.check_arguments(args, &[1], &[]),
+                    ("Future", "wait") => self.check_arguments(args, &[], &["cleanUp"]),
+                    ("Timer", "run") => self.check_arguments(args, &[0], &[]),
                     _ => {}
                 }
             }
             return;
         }
-        let receiver = state.infer(object);
+        let receiver = if matches!(object.as_ref(), Expr::Super { .. }) {
+            state.infer_receiver(object)
+        } else {
+            state.infer(object)
+        };
         let method = field.name.as_str();
-        if self.applicable_non_sdk_member(&receiver, method, state) {
-            return;
-        }
         if self.is_sdk_instance(&receiver, "dart:core", "Iterable", state) {
             match method {
                 "any" | "every" | "expand" | "map" | "reduce" | "skipWhile" | "takeWhile"
@@ -184,8 +187,12 @@ impl Collector<'_> {
                 _ => {}
             }
         }
-        if self.is_sdk_instance(&receiver, "dart:async", "Future", state) && method == "then" {
-            self.check_arguments(args, &[0], &["onError"]);
+        if self.is_sdk_instance(&receiver, "dart:async", "Future", state) {
+            match method {
+                "then" => self.check_arguments(args, &[0], &["onError"]),
+                "complete" => self.check_arguments(args, &[0], &[]),
+                _ => {}
+            }
         }
     }
 
@@ -198,13 +205,9 @@ impl Collector<'_> {
         let DeclarationIdentity::Sdk { library, name } = identity else {
             return false;
         };
-        match (*library, *name, constructor) {
+        match (library.as_str(), name.as_str(), constructor) {
             ("dart:async", "Future", None | Some("microtask") | Some("sync")) => {
                 self.check_arguments(args, &[0], &[]);
-                true
-            }
-            ("dart:async", "Future", Some("delayed")) => {
-                self.check_arguments(args, &[1], &[]);
                 true
             }
             ("dart:async", "Timer", None | Some("periodic")) => {
@@ -230,15 +233,11 @@ impl SemanticRuleVisitor for Collector<'_> {
                 args,
                 ..
             } => {
-                let resolved = state
-                    .model
-                    .resolve_type_in(dart_type, &state.type_parameters);
-                if let ResolvedType::Interface { identity, .. } = resolved {
-                    self.check_constructor(
-                        &identity,
-                        constructor_name.as_ref().map(|name| name.name.as_str()),
-                        args,
-                    );
+                if let Some((identity, constructor)) =
+                    resolve_new_constructor(dart_type, constructor_name.as_ref(), &state.model)
+                {
+                    let constructor = (constructor != "new").then_some(constructor);
+                    self.check_constructor(&identity, constructor, args);
                 }
             }
             _ => {}

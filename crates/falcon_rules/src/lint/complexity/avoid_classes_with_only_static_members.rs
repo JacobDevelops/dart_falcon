@@ -16,12 +16,14 @@
 //!
 //! A class holding only `static const` fields (a group of constants) is
 //! allowed, as are sealed classes and classes with a non-default constructor.
-//! Classes with any supertype other than `Object` are skipped, since an
-//! inherited instance member would make the class a real type.
+//! Like the analyzer, a class is skipped when its merged interface contains an
+//! instance member owned by a class other than `Object`; members replaced by
+//! mixin declarations do not count. Without resolution, only local mixins are
+//! considered member-free supertypes.
 //!
 //! Adopted from the official `avoid_classes_with_only_static_members` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, SemanticModel, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -30,32 +32,98 @@ pub struct AvoidClassesWithOnlyStaticMembers;
 
 impl Rule for AvoidClassesWithOnlyStaticMembers {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let model = ctx
+            .identities
+            .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types));
         program
             .declarations
             .iter()
-            .filter_map(|decl| match decl {
-                TopLevelDecl::Class(class) if only_static_members(class) => Some(ctx.diagnostic(
+            .filter_map(|decl| {
+                let (name, sealed, extends, with_clause, implements, members) = match decl {
+                    TopLevelDecl::Class(class) => (
+                        &class.name,
+                        class.modifiers.restriction == Some(ClassRestriction::Sealed),
+                        class.extends.as_ref(),
+                        &class.with_clause[..],
+                        &class.implements[..],
+                        &class.members[..],
+                    ),
+                    TopLevelDecl::MixinClass(class) => (
+                        &class.name,
+                        false,
+                        class.extends.as_ref(),
+                        &class.with_clause[..],
+                        &class.implements[..],
+                        &class.members[..],
+                    ),
+                    _ => return None,
+                };
+                let elements = match decl {
+                    TopLevelDecl::Class(class) => Some(class.element_members()),
+                    TopLevelDecl::MixinClass(class) => Some(class.element_members()),
+                    _ => None,
+                };
+                let primary = match decl {
+                    TopLevelDecl::Class(class) => class.primary_constructor.as_ref(),
+                    TopLevelDecl::MixinClass(class) => class.primary_constructor.as_ref(),
+                    _ => None,
+                };
+                if elements.is_some_and(|elements| elements.declaring_params().next().is_some())
+                    || primary.is_some_and(|primary| {
+                        primary.constructor_name.is_some()
+                            || primary.params.params.iter().any(|param| {
+                                !matches!(
+                                    param.kind,
+                                    ParamKind::OptionalPositional
+                                        | ParamKind::Named { required: false }
+                                )
+                            })
+                    })
+                {
+                    return None;
+                }
+                if sealed || !only_static_members(members) {
+                    return None;
+                }
+                let has_supertypes = extends.is_some_and(|ty| !is_object(ty))
+                    || !with_clause.is_empty()
+                    || !implements.is_empty();
+                if has_supertypes {
+                    let inherits = match (&model, ctx.signatures) {
+                        (Some(model), Some(signatures)) => model
+                            .resolve_name(&*name.name)
+                            .map_or(Truth::Unknown, |identity| {
+                                signatures.inherits_class_instance_member(&identity, model)
+                            }),
+                        _ if extends.is_none_or(is_object)
+                            && implements.is_empty()
+                            && with_clause.iter().all(|ty| is_local_mixin(ty, program)) =>
+                        {
+                            Truth::No
+                        }
+                        _ => Truth::Unknown,
+                    };
+                    if inherits != Truth::No {
+                        return None;
+                    }
+                }
+                Some(ctx.diagnostic(
                     "avoid-classes-with-only-static-members",
                     "Classes should define instance members.",
-                    class.name.span,
-                )),
-                _ => None,
+                    name.span,
+                ))
             })
             .collect()
     }
 }
 
-fn only_static_members(class: &ClassDecl) -> bool {
-    if class.modifiers.restriction == Some(ClassRestriction::Sealed)
-        || !class.with_clause.is_empty()
-        || !class.implements.is_empty()
-        || class.extends.as_ref().is_some_and(|ty| !is_object(ty))
-    {
-        return false;
-    }
+/// Whether the declared members are all static, constructors are default
+/// ones, and there is a static method or a non-const (possibly synthetic)
+/// static field.
+fn only_static_members(members: &[ClassMember]) -> bool {
     let mut has_method = false;
     let mut has_non_const_field = false;
-    for member in &class.members {
+    for member in members {
         match member {
             ClassMember::Constructor(constructor) => {
                 if !is_default_constructor(constructor) {
@@ -82,10 +150,19 @@ fn only_static_members(class: &ClassDecl) -> bool {
                 }
                 has_non_const_field |= field.keyword != VarKeyword::Const;
             }
-            ClassMember::Operator(_) | ClassMember::Error(_) => return false,
+            // A primary constructor body completes a declared constructor.
+            ClassMember::Operator(_)
+            | ClassMember::PrimaryConstructorBody(_)
+            | ClassMember::Error(_) => return false,
         }
     }
     has_method || has_non_const_field
+}
+
+fn is_local_mixin(ty: &DartType, program: &Program) -> bool {
+    matches!(ty, DartType::Named(named) if matches!(named.segments.as_slice(), [name]
+        if program.declarations.iter().any(|decl| matches!(decl,
+            TopLevelDecl::Mixin(mixin) if mixin.name.name == name.name))))
 }
 
 /// `extends Object` adds no supertype members.

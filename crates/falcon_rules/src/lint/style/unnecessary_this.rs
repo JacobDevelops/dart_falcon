@@ -107,9 +107,16 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
     fn for_init(&mut self, init: &ForInit) {
         match init {
             ForInit::VarDecl(declaration) => self.local(declaration),
-            ForInit::ForIn { name, iterable, .. } => {
+            ForInit::ForIn {
+                declares_variable,
+                name,
+                iterable,
+                ..
+            } => {
                 self.visit_expr(iterable);
-                self.scopes.declare(&name.name);
+                if *declares_variable {
+                    self.scopes.declare(&name.name);
+                }
             }
             ForInit::PatternForIn {
                 pattern, iterable, ..
@@ -203,6 +210,8 @@ impl Visitor for Collector<'_, '_> {
                             if let Some(guard) = guard.as_ref() {
                                 self.visit_expr(guard);
                             }
+                        } else if let SwitchCaseKind::Expr(expression) = kind {
+                            self.visit_expr(expression);
                         }
                     }
                     for statement in &case.body {
@@ -244,7 +253,7 @@ impl Visitor for Collector<'_, '_> {
 
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::Field { object, field, .. } = node
-            && matches!(object.as_ref(), Expr::This { .. })
+            && matches!(object.unparenthesized(), Expr::This { .. })
             && !self.scopes.bound(&field.name)
         {
             let span = object.span();

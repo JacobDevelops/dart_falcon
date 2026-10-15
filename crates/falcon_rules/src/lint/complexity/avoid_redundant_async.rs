@@ -3,8 +3,9 @@
 //! When a function does nothing with the awaited value but return it, the
 //! `async`/`await` round-trip is redundant: returning the `Future` directly is
 //! equivalent and skips an extra microtask hop and stack frame. The rule fires
-//! on a function or method marked `async` whose block body is exactly one
-//! statement of the form `return await <expr>;`.
+//! on a top-level function or method marked `async` whose block body is exactly
+//! one statement of the form `return await <expr>;`. Local functions and
+//! anonymous closures are not checked.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
@@ -88,9 +89,9 @@ fn is_redundant_async_body(body: &Option<FunctionBody>) -> bool {
                 && matches!(
                     &block.stmts[0],
                     Stmt::Return(ReturnStmt {
-                        value: Some(Expr::Await { .. }),
+                        value: Some(value),
                         ..
-                    })
+                    }) if matches!(value.unparenthesized(), Expr::Await { .. })
                 )
         }
         _ => false,

@@ -2,8 +2,11 @@
 //!
 //! An unannotated parameter is already `dynamic` (or inferred from an
 //! override), so writing `dynamic` adds noise. This covers regular, field
-//! (`this.x`), and super (`super.x`) formals, setter parameters, and the
-//! parameters of function types.
+//! (`this.x`), and super (`super.x`) formals, function-typed formals whose
+//! return type is `dynamic` (`dynamic f()`), setter parameters, and the
+//! parameters of function types. `dynamic` must resolve through `dart:core`:
+//! a file that imports `dart:core` only with a prefix sees `core.dynamic`,
+//! not a bare `dynamic`.
 //!
 //! ```dart
 //! void log(dynamic value) {} // flagged
@@ -18,6 +21,8 @@ use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_dart_type, walk_formal_param, walk_setter_decl};
 
+use crate::lint::core_imports::CoreImports;
+
 const RULE: &str = "avoid-annotating-with-dynamic";
 const MESSAGE: &str = "Unnecessary 'dynamic' type annotation.";
 
@@ -28,6 +33,7 @@ impl Rule for AvoidAnnotatingWithDynamic {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut collector = Collector {
             ctx,
+            core: CoreImports::new(program),
             diags: Vec::new(),
         };
         collector.visit_program(program);
@@ -37,6 +43,7 @@ impl Rule for AvoidAnnotatingWithDynamic {
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
+    core: CoreImports<'a>,
     diags: Vec<Diagnostic>,
 }
 
@@ -48,9 +55,10 @@ impl Collector<'_, '_> {
 
 impl Visitor for Collector<'_, '_> {
     fn visit_formal_param(&mut self, node: &FormalParam) {
-        // `dynamic f()` is a function-typed formal; `dynamic` is its return type.
-        if node.function_params.is_none()
-            && matches!(node.param_type, Some(DartType::Dynamic { .. }))
+        if node
+            .param_type
+            .as_ref()
+            .is_some_and(|ty| self.core.is_dynamic(ty))
         {
             self.report(node.span);
         }
@@ -58,7 +66,9 @@ impl Visitor for Collector<'_, '_> {
     }
 
     fn visit_setter_decl(&mut self, node: &SetterDecl) {
-        if let Some(ty @ DartType::Dynamic { .. }) = &node.param_type {
+        if let Some(ty) = &node.param_type
+            && self.core.is_dynamic(ty)
+        {
             self.report(ty.span().merge(&node.param.span));
         }
         walk_setter_decl(self, node);
@@ -67,19 +77,19 @@ impl Visitor for Collector<'_, '_> {
     fn visit_dart_type(&mut self, node: &DartType) {
         if let DartType::Function(function) = node {
             for param in &function.params {
-                // Legacy typedefs synthesize `dynamic` for untyped parameters;
-                // only a written `dynamic` keyword counts.
-                if let DartType::Dynamic { span } = &param.param_type
-                    && self
-                        .ctx
-                        .source
-                        .get(span.start..span.end)
-                        .is_some_and(|text| text.trim_end() == "dynamic")
-                {
+                let ty = &param.param_type;
+                // Legacy typedefs (`typedef F(event);`) synthesize `dynamic` for
+                // untyped parameters, spanning the whole parameter; a written
+                // type always ends before the name.
+                let synthesized = param
+                    .name
+                    .as_ref()
+                    .is_some_and(|name| ty.span().end > name.span.start);
+                if !synthesized && self.core.is_dynamic(ty) {
                     let span = param
                         .name
                         .as_ref()
-                        .map_or(*span, |name| span.merge(&name.span));
+                        .map_or(*ty.span(), |name| ty.span().merge(&name.span));
                     self.report(span);
                 }
             }

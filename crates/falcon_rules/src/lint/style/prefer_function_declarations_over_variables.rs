@@ -38,7 +38,9 @@ impl Visitor for Collector<'_, '_> {
     fn visit_local_var(&mut self, local: &LocalVarDecl) {
         if local.keyword != falcon_syntax::ast::VarKeyword::Var {
             for decl in &local.declarators {
-                if let Some(Expr::FuncExpr { .. }) = &decl.initializer {
+                if let Some(Expr::FuncExpr { .. }) =
+                    decl.initializer.as_ref().map(Expr::unparenthesized)
+                {
                     self.diags.push(self.ctx.diagnostic(
                         "prefer-function-declarations-over-variables",
                         "Use a function declaration to bind a function to a name.".to_string(),

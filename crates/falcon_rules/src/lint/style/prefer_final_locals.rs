@@ -6,8 +6,11 @@
 //! whole enclosing body, including closures, so a variable assigned anywhere
 //! in its scope is left alone. Pattern declarations (`var (a, b) = r;`),
 //! variables bound by `for (var (a, b) in pairs)`, and variable patterns in
-//! `if`-case clauses and `switch` statement cases are covered too; variable
-//! patterns in `switch` expressions are not.
+//! `if`-case clauses, `switch` statement cases, and `switch` expression arms
+//! are covered too. Like the analyzer, patterns outside any function body (in
+//! top-level variable and field initializers) are not reported.
+//! Local diagnostics use the AST keyword or type span, excluding matching words
+//! in documentation and annotation arguments.
 //!
 //! ```dart
 //! void f() {
@@ -20,11 +23,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Feature, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, bound_names, walk_expr, walk_local_var, walk_pattern, walk_stmt,
+    Visitor, bound_names, walk_class_member, walk_expr, walk_local_var, walk_pattern, walk_stmt,
+    walk_top_level_decl,
 };
 
 use crate::lint::lexical_usage::{find_word, local_writes};
@@ -37,7 +41,7 @@ pub struct PreferFinalLocals;
 
 impl Rule for PreferFinalLocals {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mutated: HashSet<usize> = local_writes(program, ctx.source)
+        let mutated: HashSet<usize> = local_writes(program)
             .into_iter()
             .map(|write| write.declaration)
             .collect();
@@ -46,6 +50,7 @@ impl Rule for PreferFinalLocals {
             mutated,
             case_roots: HashMap::new(),
             case_variables: None,
+            outside_body: false,
             diagnostics: Vec::new(),
         };
         collector.visit_program(program);
@@ -73,16 +78,19 @@ struct CaseRoot {
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
     mutated: HashSet<usize>,
-    /// Root patterns of `if`-case clauses and `switch` statement cases, keyed
-    /// by address. Switch-expression arms, pattern declarations, and pattern
-    /// assignments are never registered, so their variables are not reported
-    /// here.
+    /// Root patterns of `if`-case clauses, `switch` statement cases, and
+    /// `switch` expression arms, keyed by address. Pattern declarations and
+    /// pattern assignments are never registered, so their variables are not
+    /// reported here.
     case_roots: HashMap<*const Pattern, CaseRoot>,
     /// Variables declared by the case clause being walked, grouped by name so
     /// joined variables (`case A(:var x) || B(:var x)`, or several `case`
     /// labels sharing one body) report once.
     case_variables: Option<Vec<(String, Vec<CaseVariable>)>>,
     diagnostics: Vec<Diagnostic>,
+    /// Whether the walk is in a top-level variable or field initializer,
+    /// outside any function body.
+    outside_body: bool,
 }
 
 impl Collector<'_, '_> {
@@ -96,6 +104,9 @@ impl Collector<'_, '_> {
     }
 
     fn register_case_clause<'p>(&mut self, roots: impl IntoIterator<Item = &'p Pattern>) {
+        if self.outside_body {
+            return;
+        }
         let roots: Vec<&Pattern> = roots.into_iter().collect();
         let count = roots.len();
         for (index, root) in roots.into_iter().enumerate() {
@@ -181,6 +192,9 @@ impl Collector<'_, '_> {
     }
 
     fn check_for_header(&mut self, header: &ForHeader) {
+        if self.outside_body {
+            return;
+        }
         if let Some(ForInit::PatternForIn {
             keyword, pattern, ..
         }) = &header.init
@@ -193,7 +207,11 @@ impl Collector<'_, '_> {
         if declaration.keyword != VarKeyword::Var
             || declaration.declarators.iter().any(|declarator| {
                 declarator.initializer.is_none()
-                    || declarator.name.name == "_"
+                    || (declarator.name.name == "_"
+                        && self
+                            .ctx
+                            .language_version()
+                            .supports(Feature::WildcardVariables))
                     || self.is_mutated(&declarator.name)
             })
         {
@@ -202,14 +220,10 @@ impl Collector<'_, '_> {
         let Some(first) = declaration.declarators.first() else {
             return;
         };
-        let span = find_word(
-            self.ctx.source,
-            declaration.span.start,
-            first.name.span.start,
-            "var",
-        )
-        .or_else(|| declaration.var_type.as_ref().map(|ty| *ty.span()))
-        .unwrap_or(first.name.span);
+        let span = declaration
+            .keyword_span
+            .or_else(|| declaration.var_type.as_ref().map(|ty| *ty.span()))
+            .unwrap_or(first.name.span);
         self.report(span);
     }
 
@@ -223,14 +237,7 @@ impl Collector<'_, '_> {
         {
             return;
         }
-        let span = find_word(
-            self.ctx.source,
-            declaration.span.start,
-            declaration.pattern.span().start,
-            "var",
-        )
-        .unwrap_or(*declaration.pattern.span());
-        self.report(span);
+        self.report(declaration.keyword_span);
     }
 
     fn check_for_each_pattern(&mut self, keyword: VarKeyword, pattern: &Pattern) {
@@ -249,6 +256,24 @@ impl Collector<'_, '_> {
 }
 
 impl Visitor for Collector<'_, '_> {
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        let outside = std::mem::replace(
+            &mut self.outside_body,
+            matches!(node, TopLevelDecl::Variable(_)),
+        );
+        walk_top_level_decl(self, node);
+        self.outside_body = outside;
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) {
+        let outside = std::mem::replace(
+            &mut self.outside_body,
+            matches!(node, ClassMember::Field(_)),
+        );
+        walk_class_member(self, node);
+        self.outside_body = outside;
+    }
+
     fn visit_local_var(&mut self, node: &LocalVarDecl) {
         self.check_local_var(node);
         walk_local_var(self, node);
@@ -265,7 +290,7 @@ impl Visitor for Collector<'_, '_> {
             for case in &statement.cases {
                 self.register_case_clause(case.cases.iter().filter_map(|kind| match kind {
                     SwitchCaseKind::Pattern(pattern, _) => Some(pattern.as_ref()),
-                    SwitchCaseKind::Default => None,
+                    SwitchCaseKind::Expr(_) | SwitchCaseKind::Default => None,
                 }));
             }
         }
@@ -283,6 +308,15 @@ impl Visitor for Collector<'_, '_> {
             for element in elements {
                 self.register_map_element(element);
             }
+        } else if let Expr::Switch { arms, .. } = node {
+            for arm in arms {
+                self.register_case_clause([&arm.pattern]);
+            }
+        } else if let Expr::FuncExpr { .. } = node {
+            let outside = std::mem::replace(&mut self.outside_body, false);
+            walk_expr(self, node);
+            self.outside_body = outside;
+            return;
         }
         walk_expr(self, node);
     }
@@ -410,5 +444,33 @@ mod tests {
             lines("void f() { var a = 1; (int a) { a = 2; }; print(a); }").len(),
             1
         );
+    }
+
+    #[test]
+    fn local_keyword_and_type_spans_ignore_var_in_documentation_and_metadata() {
+        let source = r#"void f() {
+  /// var belongs to the documentation.
+  @pragma('var')
+  var inferred = 1;
+  /// var is not the keyword of this typed declaration.
+  @pragma('var')
+  int typed = 2;
+  /// var belongs to the pattern documentation.
+  @pragma('var')
+  var [first, second] = [inferred, typed];
+  print(first + second);
+}"#;
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config);
+        let diagnostics = PreferFinalLocals.analyze(&program, &ctx);
+        assert_eq!(diagnostics.len(), 3, "{diagnostics:?}");
+        let keyword = source.find("var inferred").unwrap();
+        let ty = source.find("int typed").unwrap();
+        let pattern = source.find("var [first").unwrap();
+        assert_eq!(diagnostics[0].span, Span::new(keyword, keyword + 3).into());
+        assert_eq!(diagnostics[1].span, Span::new(ty, ty + 3).into());
+        assert_eq!(diagnostics[2].span, Span::new(pattern, pattern + 3).into());
     }
 }

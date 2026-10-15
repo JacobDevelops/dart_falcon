@@ -1,7 +1,9 @@
+use falcon_syntax::Feature;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
 
 use super::{Parser, expr::Brackets};
+use crate::lexer::Lexer;
 
 impl<'src> Parser<'src> {
     pub(super) fn parse_block(&mut self) -> Block {
@@ -193,21 +195,29 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_for_clauses(&mut self) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
-        // Metadata may annotate the loop variable in every for form:
-        // `for (@meta var x in xs)`, `for (@meta final (a, b) in xs)`,
-        // `for (@meta var i = 0; ...)`. No AST slot carries it, so consume it.
-        if self.at(TokenKind::At) {
-            self.parse_annotations();
+        let annotations = self.parse_annotations();
+        let (mut init, condition, updates) = self.parse_unannotated_for_clauses();
+        match &mut init {
+            Some(ForInit::VarDecl(decl)) => decl.annotations = annotations,
+            Some(
+                ForInit::ForIn {
+                    annotations: metadata,
+                    ..
+                }
+                | ForInit::PatternForIn {
+                    annotations: metadata,
+                    ..
+                },
+            ) => *metadata = annotations,
+            _ => {}
         }
+        (init, condition, updates)
+    }
 
+    fn parse_unannotated_for_clauses(&mut self) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
         // Empty for (;;)
         if self.at(TokenKind::Semicolon) {
-            self.advance();
-            let cond = self.parse_optional_expr_before(TokenKind::Semicolon);
-            self.expect(TokenKind::Semicolon);
-            let update = self.parse_expr_list_until(TokenKind::RParen);
-            self.expect(TokenKind::RParen);
-            return (None, cond, update);
+            return self.finish_for_clauses(None);
         }
 
         // Dart 3 pattern for-in: `for (final (a, b) in xs)`. The keyword must be
@@ -229,6 +239,7 @@ impl<'src> Parser<'src> {
                 p.expect(TokenKind::RParen);
                 Some((
                     Some(ForInit::PatternForIn {
+                        annotations: Vec::new(),
                         keyword,
                         pattern: Box::new(pattern),
                         iterable: Box::new(iterable),
@@ -245,6 +256,7 @@ impl<'src> Parser<'src> {
 
         // var / final / const → definitely a decl
         if self.at_any(&[TokenKind::Var, TokenKind::Final, TokenKind::Const]) {
+            let keyword_span = Some(self.cur_span());
             let is_const = self.at(TokenKind::Const);
             let is_final = self.at(TokenKind::Final);
             self.advance();
@@ -255,6 +267,8 @@ impl<'src> Parser<'src> {
                 self.expect(TokenKind::RParen);
                 return (
                     Some(ForInit::ForIn {
+                        annotations: Vec::new(),
+                        declares_variable: true,
                         keyword: Self::var_keyword(is_const, is_final),
                         var_type,
                         name,
@@ -264,23 +278,36 @@ impl<'src> Parser<'src> {
                     Vec::new(),
                 );
             }
-            let (decl, cond, update) =
-                self.finish_c_style_for(false, is_final, is_const, var_type, name);
-            return (Some(ForInit::VarDecl(decl)), cond, update);
+            return self.finish_c_style_for(
+                false,
+                is_final,
+                is_const,
+                var_type,
+                keyword_span,
+                name,
+            );
         }
 
         // late final Type name in / late final Type name = ...
         if self.at(TokenKind::Late) {
             let is_late = true;
             self.advance();
+            let keyword_span = self
+                .at_any(&[TokenKind::Var, TokenKind::Final, TokenKind::Const])
+                .then(|| self.cur_span());
             let is_const = self.eat(TokenKind::Const).is_some();
             let is_final = !is_const && self.eat(TokenKind::Final).is_some();
             let _ = self.eat(TokenKind::Var);
             let var_type = self.try_parse_type_followed_by(TokenKind::is_identifier_like);
             let name = self.expect_ident();
-            let (decl, cond, update) =
-                self.finish_c_style_for(is_late, is_final, is_const, var_type, name);
-            return (Some(ForInit::VarDecl(decl)), cond, update);
+            return self.finish_c_style_for(
+                is_late,
+                is_final,
+                is_const,
+                var_type,
+                keyword_span,
+                name,
+            );
         }
 
         // Try `Type name in` — typed for-in without var/final
@@ -293,6 +320,8 @@ impl<'src> Parser<'src> {
                     self.expect(TokenKind::RParen);
                     return (
                         Some(ForInit::ForIn {
+                            annotations: Vec::new(),
+                            declares_variable: true,
                             keyword: VarKeyword::Var,
                             var_type: Some(ty),
                             name,
@@ -303,9 +332,7 @@ impl<'src> Parser<'src> {
                     );
                 }
                 // C-style with type+name
-                let (decl, cond, update) =
-                    self.finish_c_style_for(false, false, false, Some(ty), name);
-                return (Some(ForInit::VarDecl(decl)), cond, update);
+                return self.finish_c_style_for(false, false, false, Some(ty), None, name);
             }
             // Rollback — couldn't parse as decl
             self.rewind_to(saved);
@@ -325,6 +352,8 @@ impl<'src> Parser<'src> {
             self.expect(TokenKind::RParen);
             return (
                 Some(ForInit::ForIn {
+                    annotations: Vec::new(),
+                    declares_variable: false,
                     keyword: VarKeyword::Var,
                     var_type: None,
                     name,
@@ -339,12 +368,7 @@ impl<'src> Parser<'src> {
         while self.eat(TokenKind::Comma).is_some() {
             exprs.push(self.parse_expr());
         }
-        self.expect(TokenKind::Semicolon);
-        let cond = self.parse_optional_expr_before(TokenKind::Semicolon);
-        self.expect(TokenKind::Semicolon);
-        let update = self.parse_expr_list_until(TokenKind::RParen);
-        self.expect(TokenKind::RParen);
-        (Some(ForInit::Exprs(exprs)), cond, update)
+        self.finish_for_clauses(Some(ForInit::Exprs(exprs)))
     }
 
     fn finish_c_style_for(
@@ -353,27 +377,34 @@ impl<'src> Parser<'src> {
         is_final: bool,
         is_const: bool,
         var_type: Option<DartType>,
+        keyword_span: Option<Span>,
         first_name: Identifier,
-    ) -> (LocalVarDecl, Option<Expr>, Vec<Expr>) {
+    ) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
         let decl_start = first_name.span.start;
         let declarators = self.parse_declarators(first_name);
         let span = self.span_from(decl_start);
+        self.finish_for_clauses(Some(ForInit::VarDecl(LocalVarDecl {
+            annotations: Vec::new(),
+            keyword: Self::var_keyword(is_const, is_final),
+            keyword_span,
+            is_late,
+            var_type,
+            declarators,
+            span,
+        })))
+    }
+
+    /// Finish a C-style header after its initializer, starting at the first `;`.
+    fn finish_for_clauses(
+        &mut self,
+        init: Option<ForInit>,
+    ) -> (Option<ForInit>, Option<Expr>, Vec<Expr>) {
         self.expect(TokenKind::Semicolon);
         let cond = self.parse_optional_expr_before(TokenKind::Semicolon);
         self.expect(TokenKind::Semicolon);
         let update = self.parse_expr_list_until(TokenKind::RParen);
         self.expect(TokenKind::RParen);
-        (
-            LocalVarDecl {
-                keyword: Self::var_keyword(is_const, is_final),
-                is_late,
-                var_type,
-                declarators,
-                span,
-            },
-            cond,
-            update,
-        )
+        (init, cond, update)
     }
 
     fn parse_optional_expr_before(&mut self, stop: TokenKind) -> Option<Expr> {
@@ -448,14 +479,22 @@ impl<'src> Parser<'src> {
                 }
                 if self.at(TokenKind::Case) {
                     self.advance();
-                    let pattern = self.parse_pattern();
-                    let guard = if self.eat(TokenKind::When).is_some() {
-                        Some(Box::new(self.parse_expr()))
+                    // Before patterns (Dart < 3.0) a case operand is a constant
+                    // expression, not a pattern: `case 1 + 2:`, `case -x:`.
+                    if !self.version.supports(Feature::Patterns) {
+                        let expr = self.parse_expr();
+                        self.expect(TokenKind::Colon);
+                        case_kinds.push(SwitchCaseKind::Expr(Box::new(expr)));
                     } else {
-                        None
-                    };
-                    self.expect(TokenKind::Colon);
-                    case_kinds.push(SwitchCaseKind::Pattern(Box::new(pattern), guard));
+                        let pattern = self.parse_pattern();
+                        let guard = if self.eat(TokenKind::When).is_some() {
+                            Some(Box::new(self.parse_expr()))
+                        } else {
+                            None
+                        };
+                        self.expect(TokenKind::Colon);
+                        case_kinds.push(SwitchCaseKind::Pattern(Box::new(pattern), guard));
+                    }
                 } else if self.at(TokenKind::Default) {
                     self.advance();
                     self.expect(TokenKind::Colon);
@@ -619,23 +658,69 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_expr_or_local_decl_stmt(&mut self) -> Stmt {
+        let start_index = self.pos;
         let start = self.cur().offset;
 
         let mut annotations = Vec::new();
         while self.at(TokenKind::At) {
             annotations.extend(self.parse_annotations());
         }
+        let unannotated = annotations.is_empty();
+        let mut stmt = self.parse_local_decl_or_expr_stmt(start, unannotated);
+        // Metadata belongs to the local variable or function it precedes.
+        match &mut stmt {
+            Stmt::LocalVar(decl) => {
+                decl.annotations = annotations;
+                if let Some(start) = self.local_documentation_start(start_index) {
+                    decl.span.start = start;
+                }
+            }
+            Stmt::LocalFunc(decl) => decl.annotations = annotations,
+            Stmt::PatternDecl(decl) => decl.annotations = annotations,
+            _ => {}
+        }
+        stmt
+    }
 
-        // Dart 3 pattern-variable declaration: `(var|final) <pattern> = expr;`
-        // (e.g. `final (a, b) = row;`). Only when the keyword is directly
-        // followed by a `(`/`[`/`{` that opens a destructuring pattern — and the
-        // pattern is followed by `=` (otherwise it is a record-typed var decl
-        // such as `final (int, String) rec = ..`).
+    /// Recover attached documentation from the already skipped trivia before a
+    /// local declaration. Only this bounded gap is re-lexed, without allocation.
+    fn local_documentation_start(&self, declaration_index: usize) -> Option<usize> {
+        let trivia_start = declaration_index.checked_sub(1).map_or(0, |index| {
+            let token = &self.tokens[index];
+            token.offset + token.len
+        });
+        let trivia_end = self.tokens[declaration_index].offset;
+        let trivia = &self.src[trivia_start..trivia_end];
+        let mut lexer = Lexer::new(trivia);
+        let mut start = None;
+        let mut previous_block = false;
+        loop {
+            let token = lexer.next_token();
+            if token.kind == TokenKind::Eof {
+                break;
+            }
+            if token.kind == TokenKind::DocComment {
+                let is_block = token.text(trivia).starts_with("/**");
+                // Each block doc is its own group; line docs form a group even
+                // when ordinary comments occur between them.
+                if is_block || previous_block || start.is_none() {
+                    start = Some(trivia_start + token.offset);
+                }
+                previous_block = is_block;
+            }
+        }
+        start
+    }
+
+    fn parse_local_decl_or_expr_stmt(&mut self, start: usize, unannotated: bool) -> Stmt {
+        // Dart 3 pattern-variable declaration: `(var|final) <pattern> = expr;`.
+        // Destructuring starts with a group or an object-pattern type; require
+        // `=` after the pattern to distinguish record-typed variable declarations.
         if self.at_any(&[TokenKind::Final, TokenKind::Var])
-            && matches!(
+            && (matches!(
                 self.peek(1).kind,
                 TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
-            )
+            ) || self.object_pattern_assign_ahead(self.pos + 1))
             && let Some(stmt) = self.try_parse_pattern_declaration(start)
         {
             return stmt;
@@ -645,8 +730,10 @@ impl<'src> Parser<'src> {
         // `(`/`[` destructuring pattern (no `var`/`final`) followed by `=`. The
         // trailing single `=` distinguishes it from a record/list expression
         // statement; without it we restore and fall through to expression parsing.
-        if annotations.is_empty()
-            && self.at_any(&[TokenKind::LParen, TokenKind::LBracket])
+        // An object pattern destructures too: `AsyncError(:error) = result;`.
+        if unannotated
+            && (self.at_any(&[TokenKind::LParen, TokenKind::LBracket])
+                || self.object_pattern_assign_ahead(self.pos))
             && let Some(stmt) = self.try_parse_pattern_assign(start)
         {
             return stmt;
@@ -664,11 +751,6 @@ impl<'src> Parser<'src> {
         // does (constructor/collection), fall through to expression parsing.
         if self.at(TokenKind::Const) && !self.const_starts_expr() {
             return self.parse_local_var_decl(start);
-        }
-
-        if !annotations.is_empty() {
-            // Annotations must precede a declaration
-            return self.parse_local_var_or_func_after_annotations(start);
         }
 
         // Try to parse as typed local decl or function.
@@ -690,6 +772,7 @@ impl<'src> Parser<'src> {
                     let async_marker = p.parse_async_marker();
                     let body = p.parse_function_body(async_marker)?;
                     Some(Stmt::LocalFunc(LocalFuncDecl {
+                        annotations: Vec::new(),
                         return_type: Some(ty),
                         name,
                         type_params,
@@ -706,7 +789,9 @@ impl<'src> Parser<'src> {
                     }
                     p.eat(TokenKind::Semicolon);
                     Some(Stmt::LocalVar(LocalVarDecl {
+                        annotations: Vec::new(),
                         keyword: VarKeyword::Var,
+                        keyword_span: None,
                         is_late: false,
                         var_type: Some(ty),
                         declarators,
@@ -783,6 +868,9 @@ impl<'src> Parser<'src> {
 
     fn parse_local_var_decl(&mut self, start: usize) -> Stmt {
         let is_late = self.eat(TokenKind::Late).is_some();
+        let keyword_span = self
+            .at_any(&[TokenKind::Var, TokenKind::Final, TokenKind::Const])
+            .then(|| self.cur_span());
         let is_const = self.eat(TokenKind::Const).is_some();
         let is_final = !is_const && self.eat(TokenKind::Final).is_some();
         let _ = self.eat(TokenKind::Var);
@@ -793,7 +881,9 @@ impl<'src> Parser<'src> {
         let declarators = self.parse_declarators(name);
         self.eat(TokenKind::Semicolon);
         Stmt::LocalVar(LocalVarDecl {
+            annotations: Vec::new(),
             keyword: Self::var_keyword(is_const, is_final),
+            keyword_span,
             is_late,
             var_type,
             declarators,
@@ -809,6 +899,7 @@ impl<'src> Parser<'src> {
         self.speculate(|p| {
             let errors = p.errors.len();
             let is_final = p.at(TokenKind::Final);
+            let keyword_span = p.cur_span();
             p.advance();
             let pattern = p.parse_binding_pattern();
             if p.errors.len() > errors
@@ -820,32 +911,13 @@ impl<'src> Parser<'src> {
             let init = p.parse_expr();
             p.eat(TokenKind::Semicolon);
             Some(Stmt::PatternDecl(PatternDeclaration {
+                annotations: Vec::new(),
                 keyword: Self::var_keyword(false, is_final),
+                keyword_span,
                 pattern,
                 init,
                 span: p.span_from(start),
             }))
-        })
-    }
-
-    fn parse_local_var_or_func_after_annotations(&mut self, start: usize) -> Stmt {
-        if let Some(ty) = self.try_parse_type_followed_by(TokenKind::is_identifier_like) {
-            let name = self.expect_ident();
-            let declarators = self.parse_declarators(name);
-            self.eat(TokenKind::Semicolon);
-            return Stmt::LocalVar(LocalVarDecl {
-                keyword: VarKeyword::Var,
-                is_late: false,
-                var_type: Some(ty),
-                declarators,
-                span: self.span_from(start),
-            });
-        }
-        let expr = self.parse_expr();
-        self.eat(TokenKind::Semicolon);
-        Stmt::Expr(ExprStmt {
-            expr,
-            span: self.span_from(start),
         })
     }
 
@@ -899,6 +971,34 @@ impl<'src> Parser<'src> {
         })
     }
 
+    /// Balanced lookahead for `Type[.Type][<args>](...) =` (not `==`): an
+    /// object-pattern assignment rather than a call statement.
+    fn object_pattern_assign_ahead(&self, start: usize) -> bool {
+        if !self.kind_at(start).is_identifier_like() {
+            return false;
+        }
+        let mut i = start + 1;
+        while self.kind_at(i) == TokenKind::Dot
+            && self
+                .tokens
+                .get(i + 1)
+                .is_some_and(|t| t.kind.is_identifier_like())
+        {
+            i += 2;
+        }
+        if self.kind_at(i) == TokenKind::Lt {
+            let Some(close) = self.matching_angle_close(i, |_| true, None) else {
+                return false;
+            };
+            i = close + 1;
+        }
+        if self.kind_at(i) != TokenKind::LParen {
+            return false;
+        }
+        self.matching_close(i, Brackets::Mixed, |_| false, None)
+            .is_some_and(|close| self.kind_at(close + 1) == TokenKind::Eq)
+    }
+
     // Balanced lookahead avoids mistaking calls containing closures for local functions.
     fn untyped_local_func_ahead(&self) -> bool {
         let mut i = self.pos + 1;
@@ -936,6 +1036,7 @@ impl<'src> Parser<'src> {
             let async_marker = p.parse_async_marker();
             let body = p.parse_function_body(async_marker)?;
             Some(Stmt::LocalFunc(LocalFuncDecl {
+                annotations: Vec::new(),
                 async_marker,
                 return_type: None,
                 name,

@@ -1,4 +1,4 @@
-//! Disallow declared parameters that are never used.
+//! Disallow declared parameters that are never used, excluding primary constructors.
 
 /// The `avoid-unused-parameters` rule.
 pub use dcl::AvoidUnusedParameters;
@@ -7,9 +7,7 @@ mod dcl {
     use falcon_analyze::{AnalyzeContext, Rule};
     use falcon_diagnostics::Diagnostic;
     use falcon_syntax::ast::*;
-    use falcon_syntax::visitor::{
-        Visitor, walk_constructor_decl, walk_function_decl, walk_method_decl, walk_stmt,
-    };
+    use falcon_syntax::visitor::{Visitor, walk_function_decl, walk_method_decl, walk_stmt};
 
     use crate::lint::lexical_usage::{used_constructor_parameters, used_parameters};
 
@@ -78,15 +76,12 @@ mod dcl {
             walk_method_decl(self, node);
         }
 
-        fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-            if node.body.is_none() && node.initializers.is_empty() {
-                walk_constructor_decl(self, node);
+        fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+            if node.is_primary || (node.body.is_none() && node.initializers.is_empty()) {
                 return;
             }
-            let used =
-                used_constructor_parameters(&node.params, &node.initializers, node.body.as_ref());
-            self.report(&node.params, &used);
-            walk_constructor_decl(self, node);
+            let used = used_constructor_parameters(node.params, node.initializers, node.body);
+            self.report(node.params, &used);
         }
 
         fn visit_stmt(&mut self, node: &Stmt) {

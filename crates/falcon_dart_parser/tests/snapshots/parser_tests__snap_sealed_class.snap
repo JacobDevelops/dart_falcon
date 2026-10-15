@@ -35,6 +35,7 @@ Class(
                 },
             },
         ],
+        primary_constructor: None,
         extends: None,
         with_clause: [],
         implements: [],

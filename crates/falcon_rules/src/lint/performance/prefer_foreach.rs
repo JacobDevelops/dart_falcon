@@ -6,12 +6,16 @@
 //! a single statement) is one function or method call taking exactly that
 //! variable as its only positional argument. A method call whose receiver
 //! mentions the loop variable (`e.add(e)`) is not a candidate, and neither is a
-//! constructor invocation.
+//! constructor invocation or a call whose argument is implicitly torn off as
+//! `e.call` (a callable object passed where a function is expected).
 //!
 //! falcon must prove the callee is a function or method rather than a
-//! constructor, so calls through unresolved names are skipped.
+//! constructor, so calls through unresolved names are skipped; the analyzer
+//! also reports calls to undefined functions.
 //!
 //! Adopted from the official `prefer_foreach` lint.
+
+use std::collections::HashMap;
 
 use falcon_analyze::{AnalyzeContext, NameIdentity, QualifiedName, Rule};
 use falcon_diagnostics::Diagnostic;
@@ -36,6 +40,7 @@ impl Rule for PreferForeach {
                 .iter()
                 .filter_map(|import| import.as_name.as_ref().map(|name| name.name.clone()))
                 .collect(),
+            pending: HashMap::new(),
         };
         visit_program(&mut collector, program, state);
         collector.diags
@@ -46,6 +51,9 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
     import_prefixes: Vec<String>,
+    /// Candidate loops, keyed by their call argument's start: the argument's
+    /// context decides whether it is implicitly torn off.
+    pending: HashMap<usize, Span>,
 }
 
 /// Whether `expr` mentions the identifier `name` anywhere.
@@ -79,7 +87,7 @@ impl Collector<'_> {
         if let Some(receiver) = &state.enclosing_type
             && state
                 .signatures
-                .resolved_member(receiver, name, &state.model)
+                .resolved_member_facts(receiver, name, &state.model)
                 .is_some()
         {
             return true;
@@ -91,13 +99,13 @@ impl Collector<'_> {
     /// Whether `callee(arg)` is a function or method invocation, not a
     /// constructor call.
     fn is_invocation(&self, callee: &Expr, loop_variable: &str, state: &SemanticState<'_>) -> bool {
-        match callee {
+        match callee.unparenthesized() {
             Expr::Ident(identifier) => self.is_function_name(&identifier.name, state),
             Expr::Field { object, field, .. } => {
                 if mentions(object, loop_variable) {
                     return false;
                 }
-                match object.as_ref() {
+                match object.unparenthesized() {
                     Expr::Ident(prefix) if !state.environment.is_bound(&prefix.name) => {
                         if self.import_prefixes.contains(&prefix.name) {
                             return state
@@ -131,34 +139,31 @@ impl Collector<'_> {
     }
 
     fn check(&mut self, statement: &ForStmt, state: &SemanticState<'_>) {
-        let Some(ForInit::ForIn { name, .. }) = &statement.header.init else {
+        let Some(ForInit::ForIn {
+            declares_variable: true,
+            name,
+            ..
+        }) = &statement.header.init
+        else {
             return;
         };
-        // `for (x in xs)` assigns an existing variable; only a loop that
-        // declares its variable (`var`, `final` or a type) is a candidate.
-        let header = self
-            .ctx
-            .source
-            .get(statement.span.start..name.span.start)
-            .unwrap_or_default();
-        let declares = header
-            .split_once('(')
-            .is_some_and(|(_, before_name)| !before_name.trim().is_empty());
-        if !declares {
-            return;
-        }
         let body = match statement.body.as_ref() {
             Stmt::Block(block) if block.stmts.len() == 1 => &block.stmts[0],
             other => other,
         };
         let Stmt::Expr(ExprStmt {
-            expr: Expr::Call { callee, args, .. },
-            ..
+            expr: invocation, ..
         }) = body
         else {
             return;
         };
-        let [Expr::Ident(argument)] = args.positional.as_slice() else {
+        let Expr::Call { callee, args, .. } = invocation.unparenthesized() else {
+            return;
+        };
+        let [argument] = args.positional.as_slice() else {
+            return;
+        };
+        let Expr::Ident(argument) = argument.unparenthesized() else {
             return;
         };
         if !args.named.is_empty()
@@ -167,11 +172,7 @@ impl Collector<'_> {
         {
             return;
         }
-        self.diags.push(self.ctx.diagnostic(
-            "prefer-foreach",
-            "Use 'forEach' and a tear-off rather than a 'for' loop to apply a function to every element.",
-            statement.span,
-        ));
+        self.pending.insert(argument.span.start, statement.span);
     }
 }
 
@@ -179,6 +180,19 @@ impl SemanticRuleVisitor for Collector<'_> {
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         if let Stmt::For(statement) = node {
             self.check(statement, state);
+        }
+    }
+
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        if let Expr::Ident(argument) = node
+            && let Some(span) = self.pending.remove(&argument.span.start)
+            && !state.implicit_call_tearoff(node)
+        {
+            self.diags.push(self.ctx.diagnostic(
+                "prefer-foreach",
+                "Use 'forEach' and a tear-off rather than a 'for' loop to apply a function to every element.",
+                span,
+            ));
         }
     }
 }

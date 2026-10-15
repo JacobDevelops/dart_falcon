@@ -22,6 +22,8 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
 
+use crate::lint::expressions::is_parenthesized;
+
 #[derive(Default)]
 pub struct TestTypesInEquals;
 
@@ -71,7 +73,7 @@ impl Rule for TestTypesInEquals {
     }
 }
 
-/// Collects `<parameter> as T` casts.
+/// Collects bare `<parameter> as T` casts, not `(parameter) as T`.
 struct ParameterCasts<'a> {
     name: &'a str,
     spans: Vec<Span>,
@@ -81,6 +83,7 @@ impl Visitor for ParameterCasts<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::As { expr, span, .. } = node
             && matches!(&**expr, Expr::Ident(identifier) if identifier.name == self.name)
+            && !is_parenthesized(expr)
         {
             self.spans.push(*span);
         }

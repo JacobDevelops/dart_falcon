@@ -31,14 +31,14 @@ fn is_where_is_not_empty(expr: &Expr) -> Option<Span> {
         field,
         span,
         ..
-    } = expr
+    } = expr.unparenthesized()
         && field.name == "isNotEmpty"
-        && let Expr::Call { callee, .. } = &**object
+        && let Expr::Call { callee, .. } = object.unparenthesized()
         && let Expr::Field {
             object: _where_object,
             field: where_field,
             ..
-        } = &**callee
+        } = callee.unparenthesized()
         && where_field.name == "where"
     {
         return Some(*span);
@@ -55,6 +55,10 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::Paren { .. }) {
+            falcon_syntax::visitor::walk_expr(self, node);
+            return;
+        }
         if let Some(span) = is_where_is_not_empty(node) {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-iterable-any",

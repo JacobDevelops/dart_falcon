@@ -57,6 +57,23 @@ fn behaves_like_enum(class: &ClassDecl, index: usize, program: &Program) -> bool
     }
     let public = !class.name.name.starts_with('_');
     let mut generative: Vec<(&str, bool)> = Vec::new();
+    if let Some(primary) = &class.primary_constructor {
+        let name = primary
+            .constructor_name
+            .as_ref()
+            .map_or("new", |name| name.name.as_str());
+        if !primary.is_const
+            || (public && !name.starts_with('_'))
+            || primary
+                .params
+                .params
+                .iter()
+                .any(|param| is_reserved(&param.name.name))
+        {
+            return false;
+        }
+        generative.push((name, true));
+    }
     for member in &class.members {
         match member {
             ClassMember::Operator(op) if op.op == "==" => return false,
@@ -129,9 +146,7 @@ fn behaves_like_enum(class: &ClassDecl, index: usize, program: &Program) -> bool
         allowed: &candidates,
         found: false,
     };
-    for member in &class.members {
-        finder.visit_class_member(member);
-    }
+    finder.visit_class_decl(class);
     for (other_index, decl) in program.declarations.iter().enumerate() {
         if other_index == index {
             continue;
@@ -183,7 +198,7 @@ fn inherits_from(decl: &TopLevelDecl, name: &str) -> bool {
 
 /// The constructor a creation expression of class `name` invokes.
 fn creation<'a>(expr: &'a Expr, name: &str) -> Option<&'a str> {
-    match expr {
+    match expr.unparenthesized() {
         Expr::New {
             dart_type: DartType::Named(named),
             constructor_name,
@@ -196,13 +211,24 @@ fn creation<'a>(expr: &'a Expr, name: &str) -> Option<&'a str> {
             ([class, ctor], None) if class.name == name => Some(ctor.name.as_str()),
             _ => None,
         },
-        Expr::Call { callee, .. } => match &**callee {
-            Expr::Ident(identifier) if identifier.name == name => Some("new"),
-            Expr::Field { object, field, .. } if matches!(&**object, Expr::Ident(identifier) if identifier.name == name) => {
-                Some(field.name.as_str())
+        Expr::Call { callee, .. } => {
+            // `C<int>(...)` and `C<int>.named(...)` name the class through a
+            // generic instantiation.
+            let names_class = |expr: &Expr| match expr.unparenthesized() {
+                Expr::GenericInstantiation { target, .. } => {
+                    matches!(target.unparenthesized(), Expr::Ident(identifier) if identifier.name == name)
+                }
+                Expr::Ident(identifier) => identifier.name == name,
+                _ => false,
+            };
+            match callee.unparenthesized() {
+                Expr::Field { object, field, .. } if names_class(object) => {
+                    Some(field.name.as_str())
+                }
+                callee if names_class(callee) => Some("new"),
+                _ => None,
             }
-            _ => None,
-        },
+        }
         _ => None,
     }
 }
@@ -219,11 +245,15 @@ struct StrayCreation<'a> {
 
 impl Visitor for StrayCreation<'_> {
     fn visit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::Paren { .. }) {
+            falcon_syntax::visitor::walk_expr(self, node);
+            return;
+        }
         if self.found {
             return;
         }
         let invoked = creation(node, self.name).or(match node {
-            Expr::Call { callee, .. } => match &**callee {
+            Expr::Call { callee, .. } => match callee.unparenthesized() {
                 Expr::DotShorthand { name, .. } => Some(name.name.as_str()),
                 _ => None,
             },

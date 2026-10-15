@@ -466,6 +466,9 @@ pub fn build_reference_graph(
     adj
 }
 
+#[cfg(test)]
+use crate::inference;
+
 /// Test support for per-file rules whose behaviour depends on the enclosing
 /// package: runs a rule over every Dart file of `corpus/<rule>/project/` at its
 /// real path (so `pubspec.yaml` discovery works) and checks the
@@ -495,16 +498,25 @@ pub(crate) fn assert_project_fixture(rule_name: &str, rule: &dyn falcon_analyze:
     let mut files = Vec::new();
     dart_files(&project, &mut files);
     let config = falcon_config::FalconConfig::default();
+    let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+        files.iter().map(PathBuf::as_path),
+        |_| None,
+    );
     let marker = format!("/* expect: {rule_name} */");
     let mut expected_total = 0;
     let mut failures = Vec::new();
     for path in files {
         let source = std::fs::read_to_string(&path).unwrap();
         let (program, _) = falcon_dart_parser::parser::parse(&source);
-        let ctx = falcon_analyze::AnalyzeContext::new(&path, &source, &config);
+        let ctx = falcon_analyze::AnalyzeContext::new(&path, &source, &config)
+            .with_environment(Some(&environment));
         let line_of = |offset: usize| source[..offset].matches('\n').count() + 1;
-        let mut actual: Vec<usize> = rule
-            .analyze(&program, &ctx)
+        let diagnostics = if inference::requires_sdk(&path) {
+            inference::analyze(rule, &path, &source, &config)
+        } else {
+            rule.analyze(&program, &ctx)
+        };
+        let mut actual: Vec<usize> = diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.rule == rule_name)
             .map(|diagnostic| line_of(diagnostic.span.start))

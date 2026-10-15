@@ -1,4 +1,7 @@
 /// Byte-range span for source attribution.
+///
+/// Parsed syntax uses half-open byte offsets ending at the last consumed token,
+/// excluding following whitespace and comments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Span {
     pub start: usize,
@@ -91,7 +94,8 @@ impl StringLitNode {
     }
 }
 
-fn parse_string_delimiter(raw: &str) -> Option<StringDelimiter<'_>> {
+/// Split one source string literal (`r`, quotes, content) into its parts.
+pub fn parse_string_delimiter(raw: &str) -> Option<StringDelimiter<'_>> {
     let is_raw = raw.starts_with('r');
     let prefix = usize::from(is_raw);
     let rest = &raw[prefix..];
@@ -264,10 +268,142 @@ pub struct ClassDecl {
     pub modifiers: ClassModifiers,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,
+    /// Dart 3.13 primary constructor in the header: `class C(var int x)`.
+    pub primary_constructor: Option<PrimaryConstructor>,
     pub extends: Option<DartType>,
     pub with_clause: Vec<DartType>,
     pub implements: Vec<DartType>,
     pub members: Vec<ClassMember>,
+    pub span: Span,
+}
+
+/// A primary constructor declared in a type header (the analyzer's
+/// `PrimaryConstructorDeclaration`): `[const] Name<T>[.name](params)` in
+/// `class`, `mixin class`, `enum` and `extension type` declarations.
+///
+/// Its `var`/`final` parameters ([`FormalParam::is_var`],
+/// [`FormalParam::is_final`]) are *declaring*: each also declares an instance
+/// field of the same name and type. An extension type's single representation
+/// parameter always declares its representation field.
+#[derive(Debug, Clone)]
+pub struct PrimaryConstructor {
+    pub is_const: bool,
+    /// The declaring type's identifier, excluding `const` and type parameters.
+    pub name_span: Span,
+    /// `.name` of a named primary constructor: `class C.named(int x)`.
+    pub constructor_name: Option<Identifier>,
+    pub params: FormalParamList,
+    /// From `const` (or the type name) through the closing `)`.
+    pub span: Span,
+}
+
+/// Borrowed element-model inputs, without synthesizing or copying AST nodes.
+#[derive(Clone, Copy)]
+pub struct EffectiveMembers<'a> {
+    pub declared: &'a [ClassMember],
+    pub primary: Option<&'a PrimaryConstructor>,
+    pub representation: bool,
+}
+
+impl<'a> EffectiveMembers<'a> {
+    pub fn declared(members: &'a [ClassMember]) -> Self {
+        Self {
+            declared: members,
+            primary: None,
+            representation: false,
+        }
+    }
+
+    /// Header parameters that also declare instance fields.
+    pub fn declaring_params(self) -> impl Iterator<Item = &'a FormalParam> {
+        self.primary
+            .into_iter()
+            .flat_map(|primary| &primary.params.params)
+            .filter(move |param| self.representation || param.is_var || param.is_final)
+    }
+
+    pub fn constructors(self) -> impl Iterator<Item = ConstructorRef<'a>> {
+        self.declared
+            .iter()
+            .filter_map(|member| match member {
+                ClassMember::Constructor(constructor) => Some(ConstructorRef {
+                    annotations: &constructor.annotations,
+                    is_const: constructor.is_const,
+                    is_factory: constructor.is_factory,
+                    is_external: constructor.is_external,
+                    is_primary: false,
+                    constructor_name: constructor.constructor_name.as_ref(),
+                    params: &constructor.params,
+                    initializers: &constructor.initializers,
+                    redirect: constructor.redirect.as_ref(),
+                    body: constructor.body.as_ref(),
+                    name_span: constructor.name.span,
+                    span: constructor.span,
+                }),
+                _ => None,
+            })
+            .chain(self.primary.map(|primary| {
+                let body = self.declared.iter().find_map(|member| match member {
+                    ClassMember::PrimaryConstructorBody(body) => Some(body),
+                    _ => None,
+                });
+                ConstructorRef {
+                    annotations: body.map_or(&[][..], |body| body.annotations.as_slice()),
+                    is_const: primary.is_const,
+                    is_factory: false,
+                    is_external: false,
+                    is_primary: true,
+                    constructor_name: primary.constructor_name.as_ref(),
+                    params: &primary.params,
+                    initializers: body.map_or(&[][..], |body| body.initializers.as_slice()),
+                    redirect: None,
+                    body: body.and_then(|body| body.body.as_ref()),
+                    name_span: primary.name_span,
+                    span: primary.span,
+                }
+            }))
+    }
+}
+
+/// Shared constructor facts borrowed from ordinary or primary declarations.
+#[derive(Clone, Copy)]
+pub struct ConstructorRef<'a> {
+    pub annotations: &'a [Annotation],
+    pub is_const: bool,
+    pub is_factory: bool,
+    pub is_external: bool,
+    pub is_primary: bool,
+    pub constructor_name: Option<&'a Identifier>,
+    pub params: &'a FormalParamList,
+    pub initializers: &'a [ConstructorInitializer],
+    pub redirect: Option<&'a RedirectedConstructor>,
+    pub body: Option<&'a FunctionBody>,
+    pub name_span: Span,
+    pub span: Span,
+}
+
+impl ClassDecl {
+    /// Declared members plus the constructor and fields of the primary
+    /// constructor, if any — see [`PrimaryConstructor`].
+    pub fn element_members(&self) -> EffectiveMembers<'_> {
+        EffectiveMembers {
+            primary: self.primary_constructor.as_ref(),
+            declared: &self.members,
+            representation: false,
+        }
+    }
+}
+
+/// The body part of a primary constructor, a class member starting with
+/// `this` (the analyzer's `PrimaryConstructorBody`): `this : x = 1 { ... }`.
+#[derive(Debug, Clone)]
+pub struct PrimaryConstructorBody {
+    pub annotations: Vec<Annotation>,
+    /// The `this` keyword, excluding preceding annotations.
+    pub this_span: Span,
+    pub initializers: Vec<ConstructorInitializer>,
+    /// `None` for a `;` body.
+    pub body: Option<FunctionBody>,
     pub span: Span,
 }
 
@@ -295,6 +431,7 @@ pub enum ClassMember {
     Getter(GetterDecl),
     Setter(SetterDecl),
     Operator(OperatorDecl),
+    PrimaryConstructorBody(PrimaryConstructorBody),
     Error(ErrorNode),
 }
 
@@ -307,6 +444,7 @@ impl ClassMember {
             ClassMember::Getter(x) => &x.span,
             ClassMember::Setter(x) => &x.span,
             ClassMember::Operator(x) => &x.span,
+            ClassMember::PrimaryConstructorBody(x) => &x.span,
             ClassMember::Error(x) => &x.span,
         }
     }
@@ -442,6 +580,7 @@ pub struct SetterDecl {
     pub is_abstract: bool,
     pub is_external: bool,
     pub param_type: Option<DartType>,
+    pub param_annotations: Vec<Annotation>,
     pub name: Identifier,
     pub param: Identifier,
     pub body: Option<FunctionBody>,
@@ -458,6 +597,18 @@ pub struct OperatorDecl {
     pub async_marker: AsyncMarker,
     pub body: Option<FunctionBody>,
     pub span: Span,
+}
+
+impl OperatorDecl {
+    /// The member name the operator is looked up by: unary minus is `unary-`,
+    /// distinct from binary `-`.
+    pub fn lookup_name(&self) -> &str {
+        if self.op == "-" && self.params.params.is_empty() {
+            "unary-"
+        } else {
+            &self.op
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -479,6 +630,7 @@ pub struct MixinClassDecl {
     pub is_base: bool,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,
+    pub primary_constructor: Option<PrimaryConstructor>,
     pub extends: Option<DartType>,
     pub with_clause: Vec<DartType>,
     pub implements: Vec<DartType>,
@@ -491,6 +643,8 @@ pub struct EnumDecl {
     pub annotations: Vec<Annotation>,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,
+    /// Dart 3.13 primary constructor in the header: `enum E(final int x)`.
+    pub primary_constructor: Option<PrimaryConstructor>,
     pub with_clause: Vec<DartType>,
     pub implements: Vec<DartType>,
     pub variants: Vec<EnumVariant>,
@@ -523,23 +677,52 @@ pub struct ExtensionDecl {
 #[derive(Debug, Clone)]
 pub struct ExtensionTypeDecl {
     pub annotations: Vec<Annotation>,
-    /// `extension type const Name(...)` — the representation constructor is const.
-    pub is_const: bool,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,
-    pub representation: ExtensionTypeRepresentation,
+    /// The representation constructor: `extension type const E._(int it)`.
+    pub primary_constructor: PrimaryConstructor,
     pub implements: Vec<DartType>,
     pub members: Vec<ClassMember>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
-pub struct ExtensionTypeRepresentation {
-    /// Named representation constructor: `extension type Name._(int it)`.
-    pub constructor_name: Option<Identifier>,
-    pub field_type: DartType,
-    pub field_name: Identifier,
-    pub span: Span,
+impl MixinClassDecl {
+    /// Declared members plus those of the primary constructor, if any.
+    pub fn element_members(&self) -> EffectiveMembers<'_> {
+        EffectiveMembers {
+            primary: self.primary_constructor.as_ref(),
+            declared: &self.members,
+            representation: false,
+        }
+    }
+}
+
+impl EnumDecl {
+    /// Declared members plus those of the primary constructor, if any.
+    pub fn element_members(&self) -> EffectiveMembers<'_> {
+        EffectiveMembers {
+            primary: self.primary_constructor.as_ref(),
+            declared: &self.members,
+            representation: false,
+        }
+    }
+}
+
+impl ExtensionTypeDecl {
+    /// Declared members plus the representation constructor and field.
+    pub fn element_members(&self) -> EffectiveMembers<'_> {
+        EffectiveMembers {
+            primary: Some(&self.primary_constructor),
+            declared: &self.members,
+            representation: true,
+        }
+    }
+
+    /// The representation field's declaring parameter (`int it` in
+    /// `extension type E(int it)`); `None` only for malformed declarations.
+    pub fn representation(&self) -> Option<&FormalParam> {
+        self.primary_constructor.params.params.first()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -587,7 +770,13 @@ pub struct TypeAliasDecl {
     pub annotations: Vec<Annotation>,
     pub name: Identifier,
     pub type_params: Vec<TypeParam>,
+    /// The aliased type. For a legacy `typedef R F(params);` this is the
+    /// function type synthesized from the signature.
     pub aliased: DartType,
+    /// The formal parameters of a legacy `typedef R F(params);` as written
+    /// (the analyzer's `FunctionTypeAlias.parameters`); `None` for the
+    /// `typedef F = Type;` form.
+    pub legacy_params: Option<FormalParamList>,
     pub span: Span,
 }
 
@@ -643,6 +832,7 @@ pub struct FunctionType {
 pub struct FunctionTypeParam {
     pub name: Option<Identifier>,
     pub param_type: DartType,
+    /// True for required positional parameters and explicitly required named parameters.
     pub is_required: bool,
     pub is_named: bool,
 }
@@ -708,6 +898,8 @@ pub struct FormalParam {
     pub kind: ParamKind,
     pub is_covariant: bool,
     pub is_final: bool,
+    /// Written with `var` (`C(var x)`); declaring in a primary constructor.
+    pub is_var: bool,
     pub initializing: Option<InitializingFormal>,
     pub param_type: Option<DartType>,
     pub name: Identifier,
@@ -842,6 +1034,9 @@ pub struct ForStmt {
 pub enum ForInit {
     VarDecl(LocalVarDecl),
     ForIn {
+        annotations: Vec<Annotation>,
+        /// False for `for (x in xs)`, which assigns an existing binding.
+        declares_variable: bool,
         keyword: VarKeyword,
         var_type: Option<DartType>,
         name: Identifier,
@@ -851,6 +1046,7 @@ pub enum ForInit {
     /// identifiers in `pattern` (modeled as [`Pattern::Variable`]) are the loop
     /// bindings.
     PatternForIn {
+        annotations: Vec<Annotation>,
         keyword: VarKeyword,
         pattern: Box<Pattern>,
         iterable: Box<Expr>,
@@ -901,6 +1097,9 @@ pub struct SwitchCase {
 pub enum SwitchCaseKind {
     /// `case <pattern> [when <guard>]:`
     Pattern(Box<Pattern>, Option<Box<Expr>>),
+    /// `case <expression>:` in a library whose language version predates
+    /// patterns (< 3.0) — the analyzer's `SwitchCase`.
+    Expr(Box<Expr>),
     /// `default:`
     Default,
 }
@@ -948,7 +1147,12 @@ pub struct ContinueStmt {
 
 #[derive(Debug, Clone)]
 pub struct LocalVarDecl {
+    /// Metadata on a local declaration statement (`@pragma('x') final y = 1;`).
+    pub annotations: Vec<Annotation>,
     pub keyword: VarKeyword,
+    /// Exact token span of an explicit `var`, `final`, or `const` keyword.
+    /// Keywordless typed declarations have no keyword span.
+    pub keyword_span: Option<Span>,
     pub is_late: bool,
     pub var_type: Option<DartType>,
     pub declarators: Vec<VarDeclarator>,
@@ -958,7 +1162,10 @@ pub struct LocalVarDecl {
 /// Dart 3 pattern-variable declaration: `(var|final) <pattern> = <init>`.
 #[derive(Debug, Clone)]
 pub struct PatternDeclaration {
+    pub annotations: Vec<Annotation>,
     pub keyword: VarKeyword,
+    /// Exact token span of the required `var` or `final` keyword.
+    pub keyword_span: Span,
     pub pattern: Pattern,
     pub init: Expr,
     pub span: Span,
@@ -982,6 +1189,7 @@ pub struct LabeledStmt {
 
 #[derive(Debug, Clone)]
 pub struct LocalFuncDecl {
+    pub annotations: Vec<Annotation>,
     pub async_marker: AsyncMarker,
     pub return_type: Option<DartType>,
     pub name: Identifier,
@@ -1030,6 +1238,10 @@ pub enum Expr {
         span: Span,
     },
     Ident(Identifier),
+    Paren {
+        expr: Box<Expr>,
+        span: Span,
+    },
     This {
         span: Span,
     },
@@ -1049,6 +1261,7 @@ pub enum Expr {
     },
     Binary {
         op: BinaryOp,
+        op_span: Span,
         left: Box<Expr>,
         right: Box<Expr>,
         span: Span,
@@ -1191,6 +1404,15 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// The underlying expression, ignoring only explicit grouping parentheses.
+    pub fn unparenthesized(&self) -> &Self {
+        let mut expr = self;
+        while let Self::Paren { expr: inner, .. } = expr {
+            expr = inner;
+        }
+        expr
+    }
+
     pub fn span(&self) -> &Span {
         match self {
             Expr::IntLit { span, .. }
@@ -1203,6 +1425,7 @@ impl Expr {
             Expr::StringLit(x) => &x.span,
             Expr::Ident(x) => &x.span,
             Expr::Unary { span, .. }
+            | Expr::Paren { span, .. }
             | Expr::PostfixIncDec { span, .. }
             | Expr::Binary { span, .. }
             | Expr::Assign { span, .. }
@@ -1270,6 +1493,33 @@ pub enum BinaryOp {
     NullCoalesce,
 }
 
+impl BinaryOp {
+    /// The name of the user-definable operator method this operator invokes;
+    /// `None` for `&&`, `||` and `??`. `!=` invokes `==`.
+    pub fn method_name(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
+            Self::Mod => "%",
+            Self::IntDiv => "~/",
+            Self::EqEq | Self::NotEq => "==",
+            Self::Lt => "<",
+            Self::Gt => ">",
+            Self::LtEq => "<=",
+            Self::GtEq => ">=",
+            Self::BitAnd => "&",
+            Self::BitOr => "|",
+            Self::BitXor => "^",
+            Self::Shl => "<<",
+            Self::Shr => ">>",
+            Self::UShr => ">>>",
+            Self::And | Self::Or | Self::NullCoalesce => return None,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssignOp {
     Eq,
@@ -1288,12 +1538,34 @@ pub enum AssignOp {
     NullCoalesceEq,
 }
 
+impl AssignOp {
+    /// The binary operator a compound assignment applies; `None` for `=`.
+    pub fn binary(self) -> Option<BinaryOp> {
+        Some(match self {
+            Self::Eq => return None,
+            Self::PlusEq => BinaryOp::Add,
+            Self::MinusEq => BinaryOp::Sub,
+            Self::MulEq => BinaryOp::Mul,
+            Self::DivEq => BinaryOp::Div,
+            Self::ModEq => BinaryOp::Mod,
+            Self::IntDivEq => BinaryOp::IntDiv,
+            Self::AndEq => BinaryOp::BitAnd,
+            Self::OrEq => BinaryOp::BitOr,
+            Self::XorEq => BinaryOp::BitXor,
+            Self::ShlEq => BinaryOp::Shl,
+            Self::ShrEq => BinaryOp::Shr,
+            Self::UShrEq => BinaryOp::UShr,
+            Self::NullCoalesceEq => BinaryOp::NullCoalesce,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CascadeSection {
     /// The selector chain in one `..`/`?..` section, e.g. `a.b()` in `..a.b()`.
     /// A plain single-selector section (`..a`) holds one op; chained selectors
     /// (`..a.b()`, `..m().n()`) hold one op per link, in source order. Any
-    /// trailing assignment is the final `CascadeOp::Assign`.
+    /// trailing assignment is the final `CascadeOp::Assign` or `CascadeOp::IndexAssign`.
     pub ops: Vec<CascadeOp>,
     pub span: Span,
 }
@@ -1307,9 +1579,14 @@ pub enum CascadeOp {
     Index {
         index: Box<Expr>,
         is_null_aware: bool,
+        /// Complete bracket selector, including its closing delimiter.
+        span: Span,
     },
     Call(Identifier, Vec<DartType>, ArgList),
+    /// Invoke the value produced by the preceding cascade selector.
+    Invoke(Vec<DartType>, ArgList),
     Assign(Box<Expr>, AssignOp, Box<Expr>),
+    IndexAssign(Box<Expr>, AssignOp, Box<Expr>),
 }
 
 #[derive(Debug, Clone)]

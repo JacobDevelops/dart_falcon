@@ -3,7 +3,7 @@
 //! A property that can be written but not read is surprising: `a.x = 1;`
 //! compiles, but `a.x` does not. Each setter of a class, enum, or extension
 //! type needs a getter of the same name, declared alongside it (a getter or a
-//! field) or inherited from a superclass:
+//! field) or, except for extension types, inherited from a superclass:
 //!
 //! ```dart
 //! class A {
@@ -14,14 +14,12 @@
 //! }
 //! ```
 //!
-//! Setters that override an inherited setter are not reported. Inheritance is
-//! resolved through falcon's project index; when a supertype cannot be
-//! resolved the rule stays silent, and any inherited getter — even one only
-//! inherited from an interface — counts as a match.
+//! Setters that override an inherited setter are not reported. Only concrete
+//! inherited getters count as a corresponding getter.
 //!
 //! Adopted from the official `avoid_setters_without_getters` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, SemanticModel, SignatureIndex};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -56,8 +54,9 @@ impl Rule for AvoidSettersWithoutGetters {
             check_members(
                 &name.name,
                 members,
-                &state.model,
-                &state.signatures,
+                program,
+                matches!(declaration, TopLevelDecl::ExtensionType(_)),
+                &state,
                 ctx,
                 &mut diags,
             );
@@ -74,6 +73,7 @@ fn declares_getter(members: &[ClassMember], name: &str) -> bool {
             .iter()
             .any(|declarator| declarator.name.name == name),
         ClassMember::Constructor(_)
+        | ClassMember::PrimaryConstructorBody(_)
         | ClassMember::Method(_)
         | ClassMember::Setter(_)
         | ClassMember::Operator(_)
@@ -84,12 +84,13 @@ fn declares_getter(members: &[ClassMember], name: &str) -> bool {
 fn check_members(
     owner: &str,
     members: &[ClassMember],
-    model: &SemanticModel<'_>,
-    signatures: &SignatureIndex,
+    program: &Program,
+    extension_type: bool,
+    state: &SemanticState<'_>,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let owner = model.resolve_name(owner);
+    let owner = state.model.resolve_name(owner);
     for member in members {
         let ClassMember::Setter(setter) = member else {
             continue;
@@ -102,15 +103,28 @@ fn check_members(
         if overrides || declares_getter(members, name) || OBJECT_GETTERS.contains(&name) {
             continue;
         }
-        let Some(inherited) = owner
+        let inherited = owner
             .as_ref()
-            .and_then(|owner| signatures.inherited_member_facts(owner, name))
-        else {
-            continue;
-        };
+            .filter(|_| !extension_type)
+            .and_then(|owner| state.signatures.inherited_member_facts(owner, name))
+            .unwrap_or_default();
         let has_inherited = inherited
             .iter()
-            .any(|fact| fact.kind.has_setter() || fact.kind.has_getter());
+            .any(|fact| fact.kind.has_setter() || (fact.kind.has_getter() && !fact.is_abstract
+                && !program.declarations.iter().any(|declaration| {
+                    let (declared_name, declared_members) = match declaration {
+                        TopLevelDecl::Class(class) => (&class.name, &class.members),
+                        TopLevelDecl::MixinClass(class) => (&class.name, &class.members),
+                        TopLevelDecl::Mixin(mixin) => (&mixin.name, &mixin.members),
+                        _ => return false,
+                    };
+                    matches!((owner.as_ref(), &fact.declaring_type),
+                        (Some(DeclarationIdentity::Project { library: own_library, .. }),
+                         DeclarationIdentity::Project { library, name: declaring_name })
+                            if own_library == library && declaring_name == &declared_name.name)
+                        && declared_members.iter().any(|member| matches!(member,
+                            ClassMember::Getter(getter) if getter.name.name == name && getter.body.is_none()))
+                })));
         if !has_inherited {
             diags.push(ctx.diagnostic(
                 "avoid-setters-without-getters",

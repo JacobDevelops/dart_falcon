@@ -4,6 +4,7 @@
 //! for `||`, `&`, `|`, and `^`. The literal is only redundant when the other
 //! operand is provably a non-nullable `bool`; a `bool?` compared to `true` is a
 //! meaningful null check and is left alone.
+//! Parenthesized literals are separate expressions and are not reported.
 //!
 //! ```dart
 //! if (done == true) {} // flagged
@@ -17,6 +18,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::{BinaryOp, Expr};
 
+use crate::lint::expressions::is_parenthesized;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]
@@ -42,7 +44,7 @@ struct Collector<'a> {
 }
 
 fn non_nullable_bool(expression: &Expr, state: &SemanticState<'_>) -> bool {
-    let ty = state.infer(expression);
+    let ty = state.infer_invocation(expression);
     ty.interface("dart:core", "bool") && !ty.nullable()
 }
 
@@ -64,14 +66,15 @@ impl SemanticRuleVisitor for Collector<'_> {
         else {
             return;
         };
-        let literal = match (left.as_ref(), right.as_ref()) {
-            (operand, literal @ Expr::BoolLit { .. }) if non_nullable_bool(operand, state) => {
-                literal
-            }
-            (literal @ Expr::BoolLit { .. }, operand) if non_nullable_bool(operand, state) => {
-                literal
-            }
-            _ => return,
+        // A parenthesized literal is not a BooleanLiteral operand.
+        let is_literal =
+            |operand: &Expr| matches!(operand, Expr::BoolLit { .. }) && !is_parenthesized(operand);
+        let literal = if is_literal(right) && non_nullable_bool(left, state) {
+            right
+        } else if is_literal(left) && non_nullable_bool(right, state) {
+            left
+        } else {
+            return;
         };
         self.diags.push(self.ctx.diagnostic(
             "no-literal-bool-comparisons",

@@ -10,6 +10,13 @@
 //! The analyzer also exempts increments/decrements of optional parameters
 //! without defaults, and this rule retains that exception.
 //!
+//! Like the analyzer's visitor, the search does not descend into an assignment
+//! expression unless that assignment itself writes the parameter and the
+//! parameter defaults to `null`: writes nested in any other assignment
+//! (`target[offset++] = v`, `x = p++`, `c.onCancel = () { p = 0; }`,
+//! `a..v = (p = 2)`) are not reported. A constructor's parameters are searched
+//! for in its body only, not in its initializer list.
+//!
 //! ```dart
 //! void f(int x) { x = 2; } // flagged
 //! void g([int? x]) { x ??= 2; } // ok
@@ -23,7 +30,7 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_function_decl,
+    Visitor, for_each_expr_in_program, walk_class_member, walk_expr, walk_function_decl,
     walk_method_decl, walk_setter_decl, walk_stmt,
 };
 
@@ -37,15 +44,40 @@ pub struct ParameterAssignments;
 impl Rule for ParameterAssignments {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut writes: HashMap<usize, Vec<LocalWrite>> = HashMap::new();
-        for write in local_writes(program, ctx.source) {
+        let mut assignment_targets = HashMap::new();
+        for write in local_writes(program) {
+            if let LocalWriteKind::Assign(_) = write.kind {
+                assignment_targets.insert(write.span, write.declaration);
+            }
             writes.entry(write.declaration).or_default().push(write);
         }
         if writes.is_empty() {
             return Vec::new();
         }
+        let mut assignments = Vec::new();
+        for_each_expr_in_program(program, |expr| match expr {
+            Expr::Assign { span, .. } => assignments.push(*span),
+            // A cascade section ending in an assignment is an assignment
+            // expression to the analyzer.
+            Expr::Cascade { sections, .. } => assignments.extend(
+                sections
+                    .iter()
+                    .filter(|section| {
+                        matches!(
+                            section.ops.last(),
+                            Some(CascadeOp::Assign(..) | CascadeOp::IndexAssign(..))
+                        )
+                    })
+                    .map(|section| section.span),
+            ),
+            _ => {}
+        });
+        assignments.sort_unstable_by_key(|span| span.start);
         let mut collector = Collector {
             ctx,
             writes,
+            assignments,
+            assignment_targets,
             diagnostics: Vec::new(),
         };
         collector.visit_program(program);
@@ -56,16 +88,46 @@ impl Rule for ParameterAssignments {
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
     writes: HashMap<usize, Vec<LocalWrite>>,
+    /// Spans of every assignment expression, sorted by start.
+    assignments: Vec<Span>,
+    /// The local declaration each assignment writes, when its target is one.
+    assignment_targets: HashMap<Span, usize>,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl Collector<'_, '_> {
-    fn check_param(&mut self, name: &Identifier, defaults_to_null: bool) {
+    /// Whether the analyzer's per-parameter visitor never reaches `write`: an
+    /// enclosing assignment inside the parameter's function stops its descent
+    /// unless it writes the parameter itself and the parameter defaults to
+    /// `null`.
+    fn is_hidden(&self, write: &LocalWrite, defaults_to_null: bool) -> bool {
+        let first = self
+            .assignments
+            .partition_point(|span| span.start <= write.declaration);
+        let last = self
+            .assignments
+            .partition_point(|span| span.start <= write.span.start);
+        self.assignments[first..last].iter().any(|span| {
+            *span != write.span
+                && span.end >= write.span.end
+                && !(defaults_to_null
+                    && self.assignment_targets.get(span) == Some(&write.declaration))
+        })
+    }
+
+    /// Reports the writes of parameter `name` inside `scope` (the whole
+    /// function when `None`).
+    fn check_param(&mut self, name: &Identifier, defaults_to_null: bool, scope: Option<Span>) {
         let Some(writes) = self.writes.remove(&name.span.start) else {
             return;
         };
         let mut defaulted = false;
         for write in writes {
+            let outside = scope
+                .is_some_and(|scope| write.span.start < scope.start || write.span.end > scope.end);
+            if outside || self.is_hidden(&write, defaults_to_null) {
+                continue;
+            }
             let report = match write.kind {
                 LocalWriteKind::Assign(AssignOp::NullCoalesceEq) if defaults_to_null => {
                     std::mem::replace(&mut defaulted, true)
@@ -86,13 +148,17 @@ impl Collector<'_, '_> {
         }
     }
 
-    fn check(&mut self, params: &FormalParamList) {
+    fn check(&mut self, params: &FormalParamList, scope: Option<Span>) {
         for param in &params.params {
             let optional = match param.kind {
                 ParamKind::Positional | ParamKind::Named { required: true } => false,
                 ParamKind::OptionalPositional | ParamKind::Named { required: false } => true,
             };
-            self.check_param(&param.name, optional && param.default_value.is_none());
+            self.check_param(
+                &param.name,
+                optional && param.default_value.is_none(),
+                scope,
+            );
         }
     }
 }
@@ -100,43 +166,45 @@ impl Collector<'_, '_> {
 impl Visitor for Collector<'_, '_> {
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         if let Some(params) = node.params() {
-            self.check(params);
+            self.check(params, None);
         }
         walk_function_decl(self, node);
     }
 
     fn visit_method_decl(&mut self, node: &MethodDecl) {
-        self.check(&node.params);
+        self.check(&node.params, None);
         walk_method_decl(self, node);
     }
 
     fn visit_setter_decl(&mut self, node: &SetterDecl) {
-        self.check_param(&node.param, false);
+        self.check_param(&node.param, false, None);
         walk_setter_decl(self, node);
     }
 
     fn visit_class_member(&mut self, node: &ClassMember) {
         if let ClassMember::Operator(operator) = node {
-            self.check(&operator.params);
+            self.check(&operator.params, None);
         }
         walk_class_member(self, node);
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.check(&node.params);
-        walk_constructor_decl(self, node);
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+        let body = node
+            .body
+            .map_or(Span::new(node.span.end, node.span.end), |body| *body.span());
+        self.check(node.params, Some(body));
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {
         if let Stmt::LocalFunc(function) = node {
-            self.check(&function.params);
+            self.check(&function.params, None);
         }
         walk_stmt(self, node);
     }
 
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::FuncExpr { params, .. } = node {
-            self.check(params);
+            self.check(params, None);
         }
         walk_expr(self, node);
     }

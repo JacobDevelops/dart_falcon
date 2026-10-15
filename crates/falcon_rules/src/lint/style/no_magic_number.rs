@@ -79,7 +79,7 @@ mod dcl {
     }
 
     fn root_name(expr: &Expr) -> Option<&str> {
-        match expr {
+        match expr.unparenthesized() {
             Expr::Ident(id) => Some(&id.name),
             Expr::Field { object, .. } => root_name(object),
             _ => None,
@@ -94,11 +94,11 @@ mod dcl {
     }
 
     fn direct_literal_span(expr: &Expr) -> Option<usize> {
-        let literal = match expr {
+        let literal = match expr.unparenthesized() {
             Expr::Unary { operand, .. } => operand.as_ref(),
             _ => expr,
         };
-        match literal {
+        match literal.unparenthesized() {
             Expr::IntLit { span, .. } | Expr::DoubleLit { span, .. } => Some(span.start),
             _ => None,
         }
@@ -205,7 +205,8 @@ mod dcl {
                 Expr::Cascade { sections, .. } => {
                     let spans = sections.iter().flat_map(|section| {
                         section.ops.iter().filter_map(|op| match op {
-                            CascadeOp::Index { index, .. } => direct_literal_span(index),
+                            CascadeOp::Index { index, .. }
+                            | CascadeOp::IndexAssign(index, _, _) => direct_literal_span(index),
                             _ => None,
                         })
                     });

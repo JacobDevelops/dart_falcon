@@ -43,7 +43,7 @@ impl Visitor for Collector<'_> {
         {
             for named in &args.named {
                 if named.name.name == "children"
-                    && let Expr::List { elements, .. } = &named.value
+                    && let Expr::List { elements, .. } = named.value.unparenthesized()
                     && elements.len() == 1
                     && matches!(elements[0], CollectionElement::Expr(_))
                 {

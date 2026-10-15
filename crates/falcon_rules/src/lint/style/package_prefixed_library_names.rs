@@ -13,11 +13,14 @@
 //! ```
 //!
 //! Files with no enclosing `pubspec.yaml`, or whose manifest has no `name`, are
-//! not checked.
+//! not checked. As in the upstream `createLibraryNamePrefix`, a file directly
+//! in the package root gets the prefix `<package>..`, so its named library is
+//! always reported.
 //!
-//! Adopted from the official `package_prefixed_library_names` lint (whose
-//! analyzer port lost its project information and currently reports nothing;
-//! falcon implements the documented behaviour).
+//! UPSTREAM-NOOP: the official `package_prefixed_library_names` lint returns
+//! immediately because the analyzer no longer provides project information
+//! (dart-lang/linter#3395). Falcon implements its documented, formerly shipped
+//! behaviour.
 
 use std::path::{Component, Path};
 
@@ -84,6 +87,11 @@ fn library_name_prefix(path: &Path) -> Option<String> {
             _ => None,
         });
     let mut first = segments.next();
+    if first.is_none() {
+        // `path.relative` yields `.` for the root, which becomes `..`.
+        prefix.push_str("..");
+        return Some(prefix);
+    }
     if first == Some("lib") {
         first = segments.next();
     }
@@ -135,6 +143,7 @@ mod tests {
             "lib/src/parser/good_nested.dart",
             "test/good_test_dir.dart",
             "tool/bad_tool.dart",
+            "bad_package_root.dart",
         ] {
             let path = project.join(file);
             assert_eq!(diagnostic_lines(&path), expected_lines(&path), "{file}");
@@ -156,6 +165,10 @@ mod tests {
         assert_eq!(
             library_name_prefix(&project.join("test/good_test_dir.dart")).as_deref(),
             Some("prefixed_pkg.test")
+        );
+        assert_eq!(
+            library_name_prefix(&project.join("bad_package_root.dart")).as_deref(),
+            Some("prefixed_pkg..")
         );
     }
 }

@@ -12,23 +12,35 @@
 //! int count = 0;           // ok
 //! ```
 //!
-//! Raw generic types are only reported for types whose type parameters are
-//! known: SDK collection and async types, and classes, mixins, enums, and type
-//! aliases declared in the same file. `is` checks, `FutureOr`, and types
-//! annotated `@optionalTypeArgs` are exempt.
+//! Raw generic interface types (classes, mixins, enums, extension types, and
+//! `FutureOr`) and their generic typedefs need explicit arguments in
+//! annotations, inheritance clauses, casts, object patterns (also in pattern
+//! assignments), constructor invocations, and type literals (`print(Box)`,
+//! `'$Box'`, `case Box:`). `is` checks, constructor tear-offs, static member
+//! accesses, and declarations with `@optionalTypeArgs` are exempt. Loaded
+//! declaration metadata supplies generic arity; SDK-free analysis retains the
+//! existing identity fallback.
 //!
 //! Adopted from the official `always_specify_types` lint.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, NameIdentity, QualifiedName, ResolvedType, Rule,
+    resolve_call_constructor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_dart_type, walk_expr, walk_field_decl, walk_formal_param, walk_local_var,
-    walk_pattern, walk_setter_decl, walk_stmt, walk_top_level_decl,
+    Visitor, walk_class_member, walk_dart_type, walk_expr, walk_field_decl, walk_for_header,
+    walk_formal_param, walk_local_var, walk_pattern, walk_setter_decl, walk_stmt,
+    walk_top_level_decl,
 };
+
+use crate::lint::declarations::{member_names, members_of};
+use crate::lint::lexical_usage::locally_bound_identifiers;
+use crate::lint::semantic_scope::SemanticState;
 
 const RULE: &str = "always-specify-types";
 const MESSAGE: &str = "Missing type annotation.";
@@ -38,13 +50,21 @@ pub struct AlwaysSpecifyTypes;
 
 impl Rule for AlwaysSpecifyTypes {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let state = SemanticState::new(program, ctx);
+        let locals = if state.is_some() {
+            locally_bound_identifiers(program)
+        } else {
+            HashSet::new()
+        };
         let mut collector = Collector {
             ctx,
-            model: ctx
-                .identities
-                .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types)),
-            local_generics: local_generic_types(program),
+            state,
+            locals,
+            members: HashSet::new(),
+            type_parameters: Vec::new(),
             is_type_test: None,
+            reference: None,
+            assigned_pattern: false,
             diags: Vec::new(),
         };
         collector.visit_program(program);
@@ -52,131 +72,192 @@ impl Rule for AlwaysSpecifyTypes {
     }
 }
 
+/// The type parameters a top-level declaration scopes over its body.
+fn declared_type_parameters(node: &TopLevelDecl) -> &[TypeParam] {
+    match node {
+        TopLevelDecl::Class(node) => &node.type_params,
+        TopLevelDecl::Mixin(node) => &node.type_params,
+        TopLevelDecl::MixinClass(node) => &node.type_params,
+        TopLevelDecl::Enum(node) => &node.type_params,
+        TopLevelDecl::Extension(node) => &node.type_params,
+        TopLevelDecl::ExtensionType(node) => &node.type_params,
+        TopLevelDecl::Function(node) => &node.type_params,
+        TopLevelDecl::ClassTypeAlias(node) => &node.type_params,
+        TopLevelDecl::TypeAlias(node) => &node.type_params,
+        TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => &[],
+    }
+}
+
 /// The number of type parameters of an SDK or allowlisted package type, which
 /// the resolver models by identity only.
 pub(crate) fn known_type_arity(identity: &DeclarationIdentity) -> Option<usize> {
     match identity {
-        DeclarationIdentity::Sdk { library, name } => Some(match (*library, *name) {
-            (
-                "dart:core",
-                "Comparable" | "Iterable" | "Iterator" | "List" | "Set" | "Expando"
-                | "WeakReference" | "Finalizer",
-            )
-            | ("dart:async", "Future" | "FutureOr" | "Completer" | "StreamController")
-            | (
-                "dart:collection",
-                "Queue" | "ListQueue" | "DoubleLinkedQueue" | "HashSet" | "LinkedHashSet"
-                | "SplayTreeSet",
-            )
-            | ("dart:js_interop", "JSArray" | "JSPromise") => 1,
-            ("dart:core", "Map" | "MapEntry")
-            | ("dart:collection", "HashMap" | "LinkedHashMap" | "SplayTreeMap") => 2,
-            _ => 0,
-        }),
-        DeclarationIdentity::Package { package, name } => {
-            Some(usize::from(*package == "flutter" && *name == "State"))
+        DeclarationIdentity::Sdk { library, name } => {
+            Some(match (library.as_str(), name.as_str()) {
+                (
+                    "dart:core",
+                    "Comparable" | "Iterable" | "Iterator" | "List" | "Set" | "Expando"
+                    | "WeakReference" | "Finalizer",
+                )
+                | ("dart:async", "Future" | "FutureOr" | "Completer" | "StreamController")
+                | (
+                    "dart:collection",
+                    "Queue" | "ListQueue" | "DoubleLinkedQueue" | "HashSet" | "LinkedHashSet"
+                    | "SplayTreeSet",
+                )
+                | ("dart:js_interop", "JSArray" | "JSPromise") => 1,
+                ("dart:core", "Map" | "MapEntry")
+                | ("dart:collection", "HashMap" | "LinkedHashMap" | "SplayTreeMap") => 2,
+                _ => 0,
+            })
         }
+        DeclarationIdentity::Package { package, name } => Some(usize::from(
+            package.as_str() == "flutter" && name.as_str() == "State",
+        )),
         DeclarationIdentity::Project { .. } => None,
     }
 }
 
-/// SDK and package generics the lint exempts: `FutureOr` is not an interface
-/// type, and Flutter's `State` and the `dart:js_interop` generics are
-/// `@optionalTypeArgs`-style types whose arguments are commonly omitted.
-fn exempt_known_generic(identity: &DeclarationIdentity) -> bool {
-    matches!(
-        identity,
-        DeclarationIdentity::Sdk {
-            library: "dart:async",
-            name: "FutureOr"
-        } | DeclarationIdentity::Sdk {
-            library: "dart:js_interop",
-            ..
-        } | DeclarationIdentity::Package { .. }
-    )
-}
-
-#[derive(Default)]
-struct LocalGeneric<'p> {
-    constructors: Vec<&'p str>,
-    has_unnamed_constructor: bool,
-}
-
-/// Generic types declared in this file without `@optionalTypeArgs`.
-fn local_generic_types(program: &Program) -> HashMap<&str, LocalGeneric<'_>> {
-    let optional = |annotations: &[Annotation]| {
-        annotations.iter().any(|annotation| {
-            annotation
-                .name
-                .last()
-                .is_some_and(|name| name.name == "optionalTypeArgs")
+/// Whether the resolved declaration opts out of explicit type arguments.
+fn optional_type_args(identity: &DeclarationIdentity, state: &SemanticState<'_>) -> bool {
+    identity.is_package("flutter", "State")
+        || state.signatures.declaration(identity).is_some_and(|facts| {
+            facts
+                .annotations
+                .iter()
+                .any(|annotation| annotation.is_package("meta", "optionalTypeArgs"))
         })
-    };
-    let mut generics = HashMap::new();
-    for declaration in &program.declarations {
-        let (name, annotations, type_params, members): (_, _, _, &[ClassMember]) = match declaration
-        {
-            TopLevelDecl::Class(c) => (&c.name, &c.annotations, &c.type_params, &c.members),
-            TopLevelDecl::MixinClass(c) => (&c.name, &c.annotations, &c.type_params, &c.members),
-            TopLevelDecl::Mixin(m) => (&m.name, &m.annotations, &m.type_params, &m.members),
-            TopLevelDecl::Enum(e) => (&e.name, &e.annotations, &e.type_params, &[]),
-            TopLevelDecl::TypeAlias(alias) if matches!(alias.aliased, DartType::Named(_)) => {
-                (&alias.name, &alias.annotations, &alias.type_params, &[])
-            }
-            _ => continue,
-        };
-        if type_params.is_empty() || optional(annotations) {
-            continue;
-        }
-        let mut generic = LocalGeneric::default();
-        let mut declares_constructor = false;
-        for member in members {
-            if let ClassMember::Constructor(constructor) = member {
-                declares_constructor = true;
-                match &constructor.constructor_name {
-                    Some(named) => generic.constructors.push(named.name.as_str()),
-                    None => generic.has_unnamed_constructor = true,
-                }
-            }
-        }
-        generic.has_unnamed_constructor |=
-            !declares_constructor && matches!(declaration, TopLevelDecl::Class(_));
-        generics.insert(name.name.as_str(), generic);
-    }
-    generics
 }
 
-struct Collector<'a, 'ctx, 'p> {
-    ctx: &'a AnalyzeContext<'ctx>,
-    model: Option<SemanticModel<'ctx>>,
-    local_generics: HashMap<&'p str, LocalGeneric<'p>>,
+fn is_just_underscores(name: &str) -> bool {
+    name.bytes().all(|byte| byte == b'_')
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    state: Option<SemanticState<'a>>,
+    /// Start offsets of identifiers that name a local, never a type.
+    locals: HashSet<usize>,
+    /// Members of the enclosing declaration, which shadow library types.
+    members: HashSet<String>,
+    /// Names of the enclosing declarations' type parameters, which shadow
+    /// library types.
+    type_parameters: Vec<String>,
     /// The type tested by the innermost `is` expression, which may stay raw.
     is_type_test: Option<Span>,
+    /// The callee or member-access target of the expression being visited:
+    /// a constructor call or tear-off, or a static access, not a type literal.
+    reference: Option<Span>,
+    /// Inside the pattern of a pattern assignment, whose variables are
+    /// assigned rather than declared.
+    assigned_pattern: bool,
     diags: Vec<Diagnostic>,
 }
 
-impl Collector<'_, '_, '_> {
+impl Collector<'_> {
     fn report(&mut self, span: Span) {
         self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, span));
     }
 
-    /// Whether a type name without type arguments leaves generic parameters
-    /// to default.
-    fn is_raw_generic(&self, segments: &[Identifier]) -> bool {
-        if let [segment] = segments
-            && self.local_generics.contains_key(segment.name.as_str())
-        {
-            return true;
-        }
-        let Some(model) = &self.model else {
+    /// Whether `identity` is generic and does not opt out of its arguments.
+    fn is_generic(&self, identity: &DeclarationIdentity) -> bool {
+        let Some(state) = &self.state else {
             return false;
         };
+        let ResolvedType::Interface { .. } = state.model.declared_type(identity) else {
+            return false;
+        };
+        let arity = state
+            .model
+            .type_alias_parameter_count(identity)
+            .or_else(|| state.signatures.type_parameter_count(identity))
+            .or_else(|| known_type_arity(identity))
+            .unwrap_or(0);
+        arity > 0 && !optional_type_args(identity, state)
+    }
+
+    /// Whether a type name without type arguments leaves generic parameters
+    /// to default; an enclosing type parameter's name shadows library types.
+    fn is_raw_generic(&self, segments: &[Identifier]) -> bool {
+        let Some(state) = &self.state else {
+            return false;
+        };
+        if let [name] = segments
+            && self.type_parameters.contains(&name.name)
+        {
+            return false;
+        }
         let Some(name) = falcon_analyze::QualifiedName::from_identifiers(segments) else {
             return false;
         };
-        model.resolve_name(name).is_some_and(|identity| {
-            !exempt_known_generic(&identity) && known_type_arity(&identity).is_some_and(|n| n > 0)
-        })
+        state
+            .model
+            .resolve_name(name)
+            .is_some_and(|identity| self.is_generic(&identity))
+    }
+
+    /// Whether `identity` declares the constructor `name` (`new` for the
+    /// unnamed one, implicit when no constructor is written). Unindexed
+    /// declarations answer no.
+    fn declares_constructor(&self, identity: &DeclarationIdentity, name: &str) -> bool {
+        let Some(state) = &self.state else {
+            return false;
+        };
+        let ResolvedType::Interface { identity, .. } = state.model.declared_type(identity) else {
+            return false;
+        };
+        state.signatures.has_constructor(&identity, name)
+    }
+
+    /// Visit within the scope of `parameters`.
+    fn with_type_parameters(&mut self, parameters: &[TypeParam], visit: impl FnOnce(&mut Self)) {
+        let previous = self.type_parameters.len();
+        self.type_parameters.extend(
+            parameters
+                .iter()
+                .map(|parameter| parameter.name.name.clone()),
+        );
+        visit(self);
+        self.type_parameters.truncate(previous);
+    }
+
+    /// Whether `name`, read as an expression, is a type literal of a raw
+    /// generic type: a library type that neither a local, a type parameter,
+    /// nor a member of the enclosing declaration shadows. `head` is its first
+    /// identifier.
+    fn names_raw_generic(&self, head: &Identifier, name: QualifiedName<'_>) -> bool {
+        let Some(state) = &self.state else {
+            return false;
+        };
+        !self.locals.contains(&head.span.start)
+            && !self.members.contains(&head.name)
+            && !self.type_parameters.contains(&head.name)
+            && state.model.name_identity(name) == NameIdentity::Type
+            && state
+                .model
+                .resolve_name(name)
+                .is_some_and(|identity| self.is_generic(&identity))
+    }
+
+    /// `Box` / `p.Box` as an expression naming a raw generic type.
+    fn raw_type_literal(&self, node: &Expr) -> Option<Span> {
+        match node {
+            Expr::Ident(identifier) => self
+                .names_raw_generic(identifier, (&identifier.name).into())
+                .then_some(identifier.span),
+            Expr::Field {
+                object,
+                field,
+                is_null_safe: false,
+                span,
+            } => match object.as_ref() {
+                Expr::Ident(prefix) => self
+                    .names_raw_generic(prefix, QualifiedName::prefixed(&prefix.name, &field.name))
+                    .then_some(*span),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// The `var`/`final`/`const` keyword within `start..end`.
@@ -244,33 +325,57 @@ impl Collector<'_, '_, '_> {
         }
     }
 
+    /// A parameter without a type, including a function-typed formal without
+    /// a return type (`void f(cb())`); `_`-only names are exempt.
     fn check_untyped_param(&mut self, node: &FormalParam) {
         if node.param_type.is_none()
             && node.initializing.is_none()
-            && node.function_params.is_none()
-            && !node.name.name.chars().all(|c| c == '_')
+            && !is_just_underscores(&node.name.name)
         {
             self.report(node.name.span);
         }
     }
 
-    /// `Box(1)` / `Box.named(1)`: a constructor of a generic class declared
-    /// in this file, invoked without type arguments.
+    /// `Box(1)` / `Box.named(1)` / `p.Box(1)`: an invocation of a generic
+    /// class's constructor without type arguments; the span of its type name.
     fn raw_generic_construction(&self, callee: &Expr) -> Option<Span> {
-        let (class, constructor) = match callee {
-            Expr::Ident(class) => (class, None),
-            Expr::Field { object, field, .. } => match object.as_ref() {
-                Expr::Ident(class) => (class, Some(field.name.as_str())),
-                _ => return None,
-            },
-            _ => return None,
-        };
-        let generic = self.local_generics.get(class.name.as_str())?;
-        let constructs = match constructor {
-            None => generic.has_unnamed_constructor,
-            Some(name) => generic.constructors.contains(&name),
-        };
-        constructs.then_some(class.span)
+        let state = self.state.as_ref()?;
+        let (identity, constructor) = resolve_call_constructor(callee, &state.model, false)?;
+        if !self.is_generic(&identity) || !self.declares_constructor(&identity, constructor) {
+            return None;
+        }
+        match callee {
+            Expr::Field { object, .. } if constructor != "new" => Some(*object.span()),
+            _ => Some(*callee.span()),
+        }
+    }
+
+    /// `const p.Box.named(1)` parses its type as `p.Box.named` without a
+    /// separate constructor name: when the full name is no type, its last
+    /// segment names the constructor.
+    fn raw_generic_new(&self, named: &NamedType) -> Option<Span> {
+        let state = self.state.as_ref()?;
+        let (constructor, type_segments) = named.segments.split_last()?;
+        if type_segments.is_empty()
+            || !named.type_args.is_empty()
+            || falcon_analyze::QualifiedName::from_identifiers(&named.segments)
+                .and_then(|name| state.model.resolve_name(name))
+                .is_some()
+        {
+            return None;
+        }
+        let identity =
+            state
+                .model
+                .resolve_name(falcon_analyze::QualifiedName::from_identifiers(
+                    type_segments,
+                )?)?;
+        (self.is_generic(&identity) && self.declares_constructor(&identity, &constructor.name))
+            .then(|| {
+                type_segments[0]
+                    .span
+                    .merge(&type_segments[type_segments.len() - 1].span)
+            })
     }
 
     fn check_pattern_shorthands(&mut self, pattern: &Pattern) {
@@ -284,34 +389,33 @@ impl Collector<'_, '_, '_> {
     }
 }
 
-impl Visitor for Collector<'_, '_, '_> {
+impl Visitor for Collector<'_> {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        match node {
-            TopLevelDecl::Variable(variable) => self.check_declaration(
+        if let TopLevelDecl::Variable(variable) = node {
+            self.check_declaration(
                 &variable.annotations,
                 variable.span,
                 variable.var_type.as_ref(),
                 &variable.declarators,
-            ),
-            // Legacy `typedef F(x);` parameters without a type get a synthesized
-            // `dynamic` spanning the parameter itself.
-            TopLevelDecl::TypeAlias(alias) => {
-                if let DartType::Function(function) = &alias.aliased
-                    && function.span.start <= alias.name.span.start
-                {
-                    for param in &function.params {
-                        if let (DartType::Dynamic { span }, Some(name)) =
-                            (&param.param_type, &param.name)
-                            && span.start == name.span.start
-                        {
-                            self.report(name.span);
-                        }
-                    }
-                }
-            }
-            _ => {}
+            );
         }
-        walk_top_level_decl(self, node);
+        if self.state.is_some()
+            && let Some(members) = members_of(node)
+        {
+            self.members = member_names(members);
+        }
+        self.with_type_parameters(declared_type_parameters(node), |collector| {
+            walk_top_level_decl(collector, node);
+        });
+        self.members.clear();
+    }
+
+    fn visit_class_member(&mut self, node: &ClassMember) {
+        let parameters = match node {
+            ClassMember::Method(method) => method.type_params.as_slice(),
+            _ => &[],
+        };
+        self.with_type_parameters(parameters, |collector| walk_class_member(collector, node));
     }
 
     fn visit_field_decl(&mut self, node: &FieldDecl) {
@@ -325,7 +429,12 @@ impl Visitor for Collector<'_, '_, '_> {
     }
 
     fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        self.check_declaration(&[], node.span, node.var_type.as_ref(), &node.declarators);
+        self.check_declaration(
+            &node.annotations,
+            node.span,
+            node.var_type.as_ref(),
+            &node.declarators,
+        );
         walk_local_var(self, node);
     }
 
@@ -335,43 +444,69 @@ impl Visitor for Collector<'_, '_, '_> {
     }
 
     fn visit_setter_decl(&mut self, node: &SetterDecl) {
-        if node.param_type.is_none() {
+        if node.param_type.is_none() && !is_just_underscores(&node.param.name) {
             self.report(node.param.span);
         }
         walk_setter_decl(self, node);
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {
-        match node {
-            Stmt::For(ForStmt {
-                header:
-                    ForHeader {
-                        init: Some(ForInit::ForIn { var_type, name, .. }),
-                        ..
-                    },
-                ..
-            }) => self.check_for_in(var_type.as_ref(), name),
-            // `(a, b) = r;` assigns existing variables; nothing is declared.
-            Stmt::PatternAssign(assign) => {
-                self.visit_expr(&assign.value);
-                return;
-            }
-            _ => {}
+        // `(a, b) = r;` assigns existing variables; nothing is declared, but
+        // the types its patterns name still need their arguments.
+        if let Stmt::PatternAssign(assign) = node {
+            self.assigned_pattern = true;
+            self.visit_pattern(&assign.pattern);
+            self.assigned_pattern = false;
+            self.visit_expr(&assign.value);
+            return;
+        }
+        if let Stmt::LocalFunc(function) = node {
+            self.with_type_parameters(&function.type_params, |collector| {
+                walk_stmt(collector, node);
+            });
+            return;
         }
         walk_stmt(self, node);
     }
 
-    fn visit_pattern(&mut self, node: &Pattern) {
-        if let Pattern::Variable {
-            type_: None,
+    /// Loop variables of `for` statements and collection `for` elements.
+    fn visit_for_header(&mut self, node: &ForHeader) {
+        if let Some(ForInit::ForIn {
+            declares_variable: true,
+            var_type,
             name,
-            span,
-        } = node
-            && name.name != "_"
+            ..
+        }) = &node.init
         {
-            self.report(*span);
+            self.check_for_in(var_type.as_ref(), name);
         }
-        self.check_pattern_shorthands(node);
+        walk_for_header(self, node);
+    }
+
+    fn visit_pattern(&mut self, node: &Pattern) {
+        if !self.assigned_pattern {
+            if let Pattern::Variable {
+                type_: None,
+                name,
+                span,
+            } = node
+                && name.name != "_"
+            {
+                self.report(*span);
+            }
+            self.check_pattern_shorthands(node);
+        }
+        if let Pattern::Const(constant) = node
+            && let ConstPatternValue::Name(name) = &constant.value
+            && let (Some(head), Some(last), Some(qualified)) = (
+                name.first(),
+                name.last(),
+                QualifiedName::from_identifiers(name),
+            )
+            && self.names_raw_generic(head, qualified)
+        {
+            self.report(head.span.merge(&last.span));
+        }
         walk_pattern(self, node);
     }
 
@@ -383,10 +518,44 @@ impl Visitor for Collector<'_, '_, '_> {
         {
             self.report(named.span);
         }
-        walk_dart_type(self, node);
+        if let DartType::Function(function) = node {
+            self.with_type_parameters(&function.type_params, |collector| {
+                walk_dart_type(collector, node);
+            });
+        } else {
+            walk_dart_type(self, node);
+        }
     }
 
     fn visit_expr(&mut self, node: &Expr) {
+        let previous_type_test = self.is_type_test;
+        let previous_reference = self.reference;
+        if self.reference != Some(*node.span())
+            && let Some(span) = self.raw_type_literal(node)
+        {
+            self.report(span);
+        }
+        self.reference = match node {
+            Expr::Call { callee, .. } => Some(*callee.span()),
+            Expr::Field { object, .. } if !matches!(object.as_ref(), Expr::Paren { .. }) => {
+                Some(*object.span())
+            }
+            Expr::GenericInstantiation { target, .. } => Some(*target.span()),
+            _ => None,
+        };
+        if let Expr::FuncExpr { type_params, .. } = node {
+            let previous = self.type_parameters.len();
+            self.type_parameters.extend(
+                type_params
+                    .iter()
+                    .map(|parameter| parameter.name.name.clone()),
+            );
+            walk_expr(self, node);
+            self.type_parameters.truncate(previous);
+            self.is_type_test = previous_type_test;
+            self.reference = previous_reference;
+            return;
+        }
         match node {
             Expr::List {
                 type_arg: None,
@@ -410,8 +579,19 @@ impl Visitor for Collector<'_, '_, '_> {
                     self.report(span);
                 }
             }
+            Expr::New {
+                dart_type: DartType::Named(named),
+                constructor_name: None,
+                ..
+            } => {
+                if let Some(span) = self.raw_generic_new(named) {
+                    self.report(span);
+                }
+            }
             _ => {}
         }
         walk_expr(self, node);
+        self.is_type_test = previous_type_test;
+        self.reference = previous_reference;
     }
 }

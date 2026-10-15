@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, bound_names, walk_class_member, walk_expr, walk_function_body, walk_pattern,
+    Visitor, bound_names, walk_class_member, walk_collection_element, walk_expr,
+    walk_function_body, walk_map_element, walk_pattern,
 };
 
 pub(crate) struct NameScopes(Vec<HashSet<String>>);
@@ -71,6 +72,36 @@ pub(crate) fn used_constructor_parameters(
     collector.used
 }
 
+/// Primary parameters are also in scope in eager instance field initializers,
+/// but not in late/static fields or other members of the enclosing type.
+pub(crate) fn used_primary_constructor_parameters(
+    primary: &PrimaryConstructor,
+    members: &[ClassMember],
+) -> HashSet<usize> {
+    let mut collector = UsageCollector::new(&primary.params);
+    for member in members {
+        match member {
+            ClassMember::PrimaryConstructorBody(body) => {
+                collector.visit_initializers(&body.initializers);
+                if let Some(body) = &body.body {
+                    collector.push_scope();
+                    walk_function_body(&mut collector, body);
+                    collector.pop_scope();
+                }
+            }
+            ClassMember::Field(field) if !field.is_static && !field.is_late => {
+                for declarator in &field.declarators {
+                    if let Some(initializer) = &declarator.initializer {
+                        collector.visit_expr(initializer);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    collector.used
+}
+
 /// How a local binding is written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LocalWriteKind {
@@ -102,71 +133,72 @@ pub(crate) struct LocalWrite {
 /// binding shadows the name, so the declarations named here are exactly the
 /// analyzer's "potentially mutated in scope" set. Writes to names with no local
 /// binding (fields, top-level variables) are not reported.
-pub(crate) fn local_writes(program: &Program, source: &str) -> Vec<LocalWrite> {
+pub(crate) fn local_writes(program: &Program) -> Vec<LocalWrite> {
     let mut collector = UsageCollector {
         scopes: vec![HashMap::new()],
         used: HashSet::new(),
         writes: Some(Vec::new()),
-        source: Some(source),
         bound_uses: None,
     };
     collector.visit_program(program);
     collector.writes.unwrap_or_default()
 }
 
-/// Start offsets of every identifier expression in `program` that resolves to a
-/// lexically scoped local — a variable, parameter, loop, pattern or catch
-/// variable, or local function — instead of a member or top-level declaration.
+/// Start offsets of identifier expressions and constant-pattern name heads in
+/// `program` that resolve to a lexically scoped local — a variable, parameter,
+/// loop, pattern or catch variable, or local function — instead of a member or
+/// top-level declaration.
 pub(crate) fn locally_bound_identifiers(program: &Program) -> HashSet<usize> {
     let mut collector = UsageCollector {
         scopes: vec![HashMap::new()],
         used: HashSet::new(),
         writes: None,
-        source: None,
-        bound_uses: Some(HashSet::new()),
+        bound_uses: Some(HashMap::new()),
     };
     collector.visit_program(program);
-    collector.bound_uses.unwrap_or_default()
+    collector
+        .bound_uses
+        .unwrap_or_default()
+        .into_keys()
+        .collect()
 }
 
-/// Whether a for-in header declares its loop variable. `for (x in xs)` parses
-/// as [`ForInit::ForIn`] with [`VarKeyword::Var`] and no type, exactly like
-/// `for (var x in xs)`; only the source distinguishes the two.
-pub(crate) fn for_in_declares_variable(
-    keyword: VarKeyword,
-    var_type: Option<&DartType>,
-    name: &Identifier,
-    source: &str,
-) -> bool {
-    if keyword != VarKeyword::Var || var_type.is_some() {
-        return true;
-    }
-    let before = source.get(..name.span.start).unwrap_or_default().trim_end();
-    before.strip_suffix("var").is_some_and(|rest| {
-        !rest
-            .chars()
-            .next_back()
-            .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$')
-    })
+/// The declaration (declaring name's span start) of every identifier expression
+/// and constant-pattern name head in `program` that resolves to a lexically
+/// scoped local, keyed by the identifier's span start. Identifiers absent from
+/// the map name members or top-level declarations.
+pub(crate) fn local_declarations(program: &Program) -> HashMap<usize, usize> {
+    let mut collector = UsageCollector {
+        scopes: vec![HashMap::new()],
+        used: HashSet::new(),
+        writes: Some(Vec::new()),
+        bound_uses: Some(HashMap::new()),
+    };
+    collector.visit_program(program);
+    collector
+        .bound_uses
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(usage, declaration)| Some((usage, declaration?)))
+        .collect()
 }
 
-struct UsageCollector<'s> {
+struct UsageCollector {
     scopes: Vec<HashMap<String, Binding>>,
     used: HashSet<usize>,
     /// `Some` when every local binding is tracked and writes are recorded.
     writes: Option<Vec<LocalWrite>>,
-    source: Option<&'s str>,
-    /// `Some` when identifier expressions that resolve to a local are recorded.
-    bound_uses: Option<HashSet<usize>>,
+    /// `Some` when identifier expressions and constant-pattern name heads that
+    /// resolve to a local are recorded, with their declaration in write mode.
+    bound_uses: Option<HashMap<usize, Option<usize>>>,
 }
 
-impl UsageCollector<'_> {
+impl UsageCollector {
     fn new(params: &FormalParamList) -> Self {
         let mut collector = Self {
             scopes: vec![HashMap::new()],
             used: HashSet::new(),
             writes: None,
-            source: None,
             bound_uses: None,
         };
         for param in &params.params {
@@ -203,6 +235,19 @@ impl UsageCollector<'_> {
         }
     }
 
+    fn use_identifier(&mut self, identifier: &Identifier) {
+        if let Some(binding) = self.lookup(&identifier.name)
+            && let Some(bound) = self.bound_uses.as_mut()
+        {
+            let declaration = match binding {
+                Binding::Target(declaration) => Some(declaration),
+                Binding::Other => None,
+            };
+            bound.insert(identifier.span.start, declaration);
+        }
+        self.use_name(&identifier.name);
+    }
+
     /// Declares a local binding; tracked as a write target in write mode.
     fn bind(&mut self, name: &Identifier) {
         let binding = if self.writes.is_some() {
@@ -229,7 +274,7 @@ impl UsageCollector<'_> {
     }
 
     fn record_target_write(&mut self, target: &Expr, kind: LocalWriteKind, span: Span) {
-        if let Expr::Ident(identifier) = target {
+        if let Expr::Ident(identifier) = target.unparenthesized() {
             self.record_write(&identifier.name, kind, span);
         }
     }
@@ -312,27 +357,24 @@ impl UsageCollector<'_> {
         match init {
             ForInit::VarDecl(declaration) => self.visit_local_declaration(declaration),
             ForInit::ForIn {
-                keyword,
-                var_type,
+                declares_variable,
                 name,
                 iterable,
+                ..
             } => {
                 self.visit_expr(iterable);
-                match self.source {
-                    Some(source)
-                        if !for_in_declares_variable(*keyword, var_type.as_ref(), name, source) =>
-                    {
-                        self.use_name(&name.name);
-                        self.record_write(&name.name, LocalWriteKind::ForIn, name.span);
-                    }
-                    _ => self.bind(name),
+                if *declares_variable {
+                    self.bind(name);
+                } else {
+                    self.use_name(&name.name);
+                    self.record_write(&name.name, LocalWriteKind::ForIn, name.span);
                 }
             }
             ForInit::PatternForIn {
                 pattern, iterable, ..
             } => {
                 self.visit_expr(iterable);
-                walk_pattern(self, pattern);
+                self.visit_pattern(pattern);
                 self.bind_pattern(pattern);
             }
             ForInit::Exprs(expressions) => {
@@ -354,41 +396,26 @@ impl UsageCollector<'_> {
             self.visit_expr(update);
         }
     }
+}
 
+impl Visitor for UsageCollector {
     fn visit_collection_element(&mut self, element: &CollectionElement) {
         match element {
-            CollectionElement::Expr(expression)
-            | CollectionElement::NullAware {
-                expr: expression, ..
-            }
-            | CollectionElement::Spread {
-                expr: expression, ..
-            } => self.visit_expr(expression),
             CollectionElement::If {
-                condition,
+                condition: IfCondition::Case(expression, pattern, guard),
                 then_elem,
                 else_elem,
                 ..
             } => {
-                match condition {
-                    IfCondition::Expr(expression) => self.visit_expr(expression),
-                    IfCondition::Case(expression, pattern, guard) => {
-                        self.visit_expr(expression);
-                        self.push_scope();
-                        walk_pattern(self, pattern);
-                        self.bind_pattern(pattern);
-                        if let Some(guard) = guard {
-                            self.visit_expr(guard);
-                        }
-                        self.visit_collection_element(then_elem);
-                        self.pop_scope();
-                        if let Some(else_element) = else_elem {
-                            self.visit_collection_element(else_element);
-                        }
-                        return;
-                    }
+                self.visit_expr(expression);
+                self.push_scope();
+                self.visit_pattern(pattern);
+                self.bind_pattern(pattern);
+                if let Some(guard) = guard {
+                    self.visit_expr(guard);
                 }
                 self.visit_collection_element(then_elem);
+                self.pop_scope();
                 if let Some(else_element) = else_elem {
                     self.visit_collection_element(else_element);
                 }
@@ -401,41 +428,27 @@ impl UsageCollector<'_> {
                 self.visit_collection_element(element);
                 self.pop_scope();
             }
+            _ => walk_collection_element(self, element),
         }
     }
 
     fn visit_map_element(&mut self, element: &MapElement) {
         match element {
-            MapElement::Entry(entry) => {
-                self.visit_expr(&entry.key);
-                self.visit_expr(&entry.value);
-            }
-            MapElement::Spread { expr, .. } => self.visit_expr(expr),
             MapElement::If {
-                condition,
+                condition: IfCondition::Case(expression, pattern, guard),
                 then_entry,
                 else_entry,
                 ..
             } => {
-                match condition {
-                    IfCondition::Expr(expression) => self.visit_expr(expression),
-                    IfCondition::Case(expression, pattern, guard) => {
-                        self.visit_expr(expression);
-                        self.push_scope();
-                        walk_pattern(self, pattern);
-                        self.bind_pattern(pattern);
-                        if let Some(guard) = guard {
-                            self.visit_expr(guard);
-                        }
-                        self.visit_map_element(then_entry);
-                        self.pop_scope();
-                        if let Some(else_entry) = else_entry {
-                            self.visit_map_element(else_entry);
-                        }
-                        return;
-                    }
+                self.visit_expr(expression);
+                self.push_scope();
+                self.visit_pattern(pattern);
+                self.bind_pattern(pattern);
+                if let Some(guard) = guard {
+                    self.visit_expr(guard);
                 }
                 self.visit_map_element(then_entry);
+                self.pop_scope();
                 if let Some(else_entry) = else_entry {
                     self.visit_map_element(else_entry);
                 }
@@ -446,11 +459,10 @@ impl UsageCollector<'_> {
                 self.visit_map_element(entry);
                 self.pop_scope();
             }
+            _ => walk_map_element(self, element),
         }
     }
-}
 
-impl Visitor for UsageCollector<'_> {
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         self.visit_declared_function(node.params(), node.body.as_ref());
     }
@@ -522,11 +534,11 @@ impl Visitor for UsageCollector<'_> {
             Stmt::LocalVar(declaration) => self.visit_local_declaration(declaration),
             Stmt::PatternDecl(declaration) => {
                 self.visit_expr(&declaration.init);
-                walk_pattern(self, &declaration.pattern);
+                self.visit_pattern(&declaration.pattern);
                 self.bind_pattern(&declaration.pattern);
             }
             Stmt::PatternAssign(assignment) => {
-                walk_pattern(self, &assignment.pattern);
+                self.visit_pattern(&assignment.pattern);
                 // Pattern-assignment targets are writes, not reads, but the names
                 // are declared elsewhere — counting them as uses keeps
                 // unused-variable rules from flagging a variable this writes to.
@@ -550,7 +562,7 @@ impl Visitor for UsageCollector<'_> {
                 IfCondition::Case(value, pattern, guard) => {
                     self.visit_expr(value);
                     self.push_scope();
-                    walk_pattern(self, pattern);
+                    self.visit_pattern(pattern);
                     self.bind_pattern(pattern);
                     if let Some(guard) = guard {
                         self.visit_expr(guard);
@@ -582,11 +594,13 @@ impl Visitor for UsageCollector<'_> {
                     self.push_scope();
                     for kind in &case.cases {
                         if let SwitchCaseKind::Pattern(pattern, guard) = kind {
-                            walk_pattern(self, pattern);
+                            self.visit_pattern(pattern);
                             self.bind_pattern(pattern);
                             if let Some(guard) = guard.as_ref() {
                                 self.visit_expr(guard);
                             }
+                        } else if let SwitchCaseKind::Expr(expression) = kind {
+                            self.visit_expr(expression);
                         }
                     }
                     for statement in &case.body {
@@ -657,16 +671,21 @@ impl Visitor for UsageCollector<'_> {
         }
     }
 
+    fn visit_pattern(&mut self, node: &Pattern) {
+        if let Pattern::Const(ConstPattern {
+            value: ConstPatternValue::Name(name),
+            ..
+        }) = node
+            && let Some(head) = name.first()
+        {
+            self.use_identifier(head);
+        }
+        walk_pattern(self, node);
+    }
+
     fn visit_expr(&mut self, node: &Expr) {
         match node {
-            Expr::Ident(identifier) => {
-                if self.lookup(&identifier.name).is_some()
-                    && let Some(bound) = self.bound_uses.as_mut()
-                {
-                    bound.insert(identifier.span.start);
-                }
-                self.use_name(&identifier.name)
-            }
+            Expr::Ident(identifier) => self.use_identifier(identifier),
             Expr::FuncExpr { params, body, .. } => self.visit_nested_function(params, body),
             Expr::List { elements, .. } | Expr::Set { elements, .. } => {
                 for element in elements {
@@ -682,7 +701,7 @@ impl Visitor for UsageCollector<'_> {
                 self.visit_expr(subject);
                 for arm in arms {
                     self.push_scope();
-                    walk_pattern(self, &arm.pattern);
+                    self.visit_pattern(&arm.pattern);
                     self.bind_pattern(&arm.pattern);
                     if let Some(guard) = &arm.guard {
                         self.visit_expr(guard);
@@ -810,11 +829,11 @@ pub(crate) fn collection_for_inits(node: &Expr) -> Vec<&ForInit> {
             MapElement::Entry(_) | MapElement::Spread { .. } => {}
         }
     }
-    if let Expr::List { elements, .. } | Expr::Set { elements, .. } = node {
+    if let Expr::List { elements, .. } | Expr::Set { elements, .. } = node.unparenthesized() {
         for element in elements {
             collection_element(element, &mut out);
         }
-    } else if let Expr::Map { elements, .. } = node {
+    } else if let Expr::Map { elements, .. } = node.unparenthesized() {
         for element in elements {
             map_element(element, &mut out);
         }
@@ -827,6 +846,111 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::*;
+
+    #[test]
+    fn legacy_case_expression_reads_parameters() {
+        // Source-semantics compatibility: parameter references need not be
+        // legal constants to exercise lexical usage in both case AST forms.
+        for version in ["2.19", "3.13"] {
+            let source = format!(
+                "// @dart = {version}\nvoid f(int value, Object input) {{ switch (input) {{ case const [value]: break; }} }}"
+            );
+            let (program, errors) = parse(&source);
+            assert!(errors.is_empty(), "{errors:?}");
+            let TopLevelDecl::Function(function) = &program.declarations[0] else {
+                panic!()
+            };
+            let used = used_parameters(function.params().unwrap(), function.body.as_ref().unwrap());
+            assert!(
+                used.contains(&function.params().unwrap().params[0].name.span.start),
+                "source: {source}, used: {used:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn const_pattern_parameter_reads_respect_local_shadowing() {
+        for (body, expected) in [
+            ("switch (input) { case value: break; }", true),
+            ("return switch (input) { value => 1, _ => 0 };", true),
+            ("const value = 1; if (input case value) {}", false),
+        ] {
+            // Parameter constants need not be valid Dart to test lexical
+            // resolution independently of constant evaluation.
+            let source = format!("Object? f(int value, Object input) {{ {body} }}");
+            let (program, errors) = parse(&source);
+            assert!(errors.is_empty(), "{errors:?}");
+            let TopLevelDecl::Function(function) = &program.declarations[0] else {
+                panic!()
+            };
+            let params = function.params().unwrap();
+            let used = used_parameters(params, function.body.as_ref().unwrap());
+            assert_eq!(used.contains(&params.params[0].name.span.start), expected);
+        }
+    }
+
+    #[test]
+    fn const_pattern_names_resolve_to_the_nearest_local_at_each_use() {
+        let source = "void f(Object input) { const Box = 1; switch (input) { case Box: break; } { const Box = 2; if (input case [Box]) {} } switch (input) { case Box: break; } }";
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let offsets: Vec<_> = source
+            .match_indices("Box")
+            .map(|(offset, _)| offset)
+            .collect();
+        let declarations = local_declarations(&program);
+        let bound = locally_bound_identifiers(&program);
+        for (usage, declaration) in [(1, 0), (3, 2), (4, 0)] {
+            assert_eq!(
+                declarations.get(&offsets[usage]),
+                Some(&offsets[declaration])
+            );
+            assert!(bound.contains(&offsets[usage]));
+        }
+        assert!(!bound.contains(&offsets[0]));
+        assert!(!bound.contains(&offsets[2]));
+        assert!(local_writes(&program).is_empty());
+    }
+
+    #[test]
+    fn const_pattern_qualified_names_only_read_the_head() {
+        let source = "void f(Object prefix, Object member, Object input) { if (input case prefix.member) {} }";
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            panic!()
+        };
+        let params = function.params().unwrap();
+        let used = used_parameters(params, function.body.as_ref().unwrap());
+        assert!(used.contains(&params.params[0].name.span.start));
+        assert!(!used.contains(&params.params[1].name.span.start));
+        let declarations = local_declarations(&program);
+        assert_eq!(
+            declarations.get(&source.rfind("prefix").unwrap()),
+            Some(&params.params[0].name.span.start)
+        );
+        assert!(!declarations.contains_key(&source.rfind("member").unwrap()));
+    }
+
+    #[test]
+    fn object_and_variable_pattern_types_are_not_value_reads() {
+        for pattern in ["Box()", "Box value", "Box _"] {
+            let source =
+                format!("void f(Object Box, Object input) {{ if (input case {pattern}) {{}} }}");
+            let (program, errors) = parse(&source);
+            assert!(errors.is_empty(), "{errors:?}");
+            let TopLevelDecl::Function(function) = &program.declarations[0] else {
+                panic!()
+            };
+            let params = function.params().unwrap();
+            let used = used_parameters(params, function.body.as_ref().unwrap());
+            assert!(
+                !used.contains(&params.params[0].name.span.start),
+                "{pattern}"
+            );
+            assert!(!local_declarations(&program).contains_key(&source.rfind("Box").unwrap()));
+        }
+    }
 
     #[test]
     fn nested_callback_parameter_shadows_target() {
@@ -874,6 +998,34 @@ mod tests {
                 used.contains(&function.params().unwrap().params[0].name.span.start),
                 "source: {source}, used: {used:?}"
             );
+        }
+    }
+
+    #[test]
+    fn nested_collection_bindings_shadow_parameters_without_escaping() {
+        for literal in [
+            "[if (condition) for (var value in [1]) value]",
+            "<int, int>{if (condition) for (var value in [1]) value: value}",
+            "[if (condition) if (input case int value when value > 0) value]",
+            "<int, int>{if (condition) if (input case int value when value > 0) value: value}",
+        ] {
+            for suffix in ["", "print(value);"] {
+                let source = format!(
+                    "void f(int value, bool condition, Object input) {{ {literal}; {suffix} }}"
+                );
+                let (program, errors) = parse(&source);
+                assert!(errors.is_empty(), "{errors:?}");
+                let TopLevelDecl::Function(function) = &program.declarations[0] else {
+                    panic!()
+                };
+                let params = function.params().unwrap();
+                let used = used_parameters(params, function.body.as_ref().unwrap());
+                assert_eq!(
+                    used.contains(&params.params[0].name.span.start),
+                    !suffix.is_empty(),
+                    "source: {source}, used: {used:?}"
+                );
+            }
         }
     }
 

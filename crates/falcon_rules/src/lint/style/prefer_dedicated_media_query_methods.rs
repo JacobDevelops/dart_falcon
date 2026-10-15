@@ -42,15 +42,15 @@ fn check_media_query_size_field(
 }
 
 fn is_media_query_size(expr: &Expr) -> bool {
-    if let Expr::Field { object, field, .. } = expr
+    if let Expr::Field { object, field, .. } = expr.unparenthesized()
         && field.name == "size"
-        && let Expr::Call { callee, args, .. } = object.as_ref()
+        && let Expr::Call { callee, args, .. } = object.unparenthesized()
         && let Expr::Field {
             object: mq_obj,
             field: method,
             ..
-        } = callee.as_ref()
-        && let Expr::Ident(ident) = mq_obj.as_ref()
+        } = callee.unparenthesized()
+        && let Expr::Ident(ident) = mq_obj.unparenthesized()
     {
         return ident.name == "MediaQuery" && method.name == "of" && args.positional.len() == 1;
     }

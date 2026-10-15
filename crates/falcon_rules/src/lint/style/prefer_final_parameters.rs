@@ -3,14 +3,13 @@
 //! Declaring a parameter `final` documents that the function never rebinds it
 //! and lets the compiler enforce that. Every parameter of a function,
 //! method, setter, operator, constructor, local function, or function literal
-//! is checked, unless it is already `final`, is an initializing formal
-//! (`this.x` / `super.x`, implicitly final), is the wildcard `_`, or is written
+//! is checked, unless it is already `final`, is an initializing formal or an
+//! extension-type representation formal (implicitly final), is the wildcard `_`
+//! (Dart 3.7+; in older libraries `_` is an ordinary name and is checked), or is written
 //! anywhere in the body (including from closures). Function-typed formals
-//! (`void f(int callback())`) are conservatively skipped.
-//!
-//! This preserves the analyzer's legacy-language behavior. The analyzer disables
-//! the deprecated rule when primary constructors are enabled; Falcon currently
-//! does not expose that language-feature gate to lint rules.
+//! (`void f(int callback())`) are checked like any other parameter. Like the
+//! official lint, the rule is off in libraries with primary constructors
+//! enabled (Dart 3.13+).
 //!
 //! ```dart
 //! void greet(String name) => print(name); // flagged
@@ -21,12 +20,12 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Feature, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_function_decl,
-    walk_method_decl, walk_setter_decl, walk_stmt,
+    Visitor, walk_class_member, walk_expr, walk_function_decl, walk_method_decl, walk_setter_decl,
+    walk_stmt,
 };
 
 use crate::lint::lexical_usage::{find_word, local_writes};
@@ -38,13 +37,18 @@ pub struct PreferFinalParameters;
 
 impl Rule for PreferFinalParameters {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mutated = local_writes(program, ctx.source)
+        let version = ctx.language_version();
+        if version.supports(Feature::PrimaryConstructors) {
+            return Vec::new();
+        }
+        let mutated = local_writes(program)
             .into_iter()
             .map(|write| write.declaration)
             .collect();
         let mut collector = Collector {
             ctx,
             mutated,
+            wildcards: version.supports(Feature::WildcardVariables),
             diagnostics: Vec::new(),
         };
         collector.visit_program(program);
@@ -55,12 +59,13 @@ impl Rule for PreferFinalParameters {
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
     mutated: HashSet<usize>,
+    wildcards: bool,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl Collector<'_, '_> {
     fn check_name(&mut self, name: &Identifier, span: Span) {
-        if name.name == "_" || self.mutated.contains(&name.span.start) {
+        if (self.wildcards && name.name == "_") || self.mutated.contains(&name.span.start) {
             return;
         }
         self.diagnostics.push(self.ctx.diagnostic(
@@ -72,7 +77,7 @@ impl Collector<'_, '_> {
 
     fn check(&mut self, params: &FormalParamList) {
         for param in &params.params {
-            if param.is_final || param.initializing.is_some() || param.function_params.is_some() {
+            if param.is_final || param.initializing.is_some() {
                 continue;
             }
             self.check_name(&param.name, param.span);
@@ -116,9 +121,13 @@ impl Visitor for Collector<'_, '_> {
         walk_class_member(self, node);
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.check(&node.params);
-        walk_constructor_decl(self, node);
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+        // Primary constructors in pre-3.13 libraries are extension-type
+        // representation declarations: their parameters declare final fields.
+        // In 3.13+ the lint is disabled for the whole library above.
+        if !node.is_primary {
+            self.check(node.params);
+        }
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {

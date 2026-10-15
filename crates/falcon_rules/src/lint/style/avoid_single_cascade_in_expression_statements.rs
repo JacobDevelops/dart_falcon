@@ -18,7 +18,7 @@ impl Rule for AvoidSingleCascadeInExpressionStatements {
         let mut diags = Vec::new();
         for_each_stmt_in_program(program, |node| {
             if let Stmt::Expr(e) = node
-                && let Expr::Cascade { sections, span, .. } = &e.expr
+                && let Expr::Cascade { sections, span, .. } = e.expr.unparenthesized()
                 && sections.len() == 1
             {
                 diags.push(ctx.diagnostic(

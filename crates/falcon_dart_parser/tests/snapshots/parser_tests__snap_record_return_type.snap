@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1722
 expression: "prog.declarations[0]"
 ---
 Function(
@@ -12,7 +13,7 @@ Function(
                 params: [],
                 span: Span {
                     start: 18,
-                    end: 21,
+                    end: 20,
                 },
             },
         ),
@@ -63,7 +64,7 @@ Function(
                     is_nullable: false,
                     span: Span {
                         start: 0,
-                        end: 14,
+                        end: 13,
                     },
                 },
             ),

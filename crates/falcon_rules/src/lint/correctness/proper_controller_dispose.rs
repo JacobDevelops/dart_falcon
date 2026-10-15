@@ -177,9 +177,9 @@ impl<'a, 'model> Scan<'a, 'model> {
     }
 
     fn field_target<'b>(&self, expression: &'b Expr) -> Option<&'b str> {
-        match expression {
+        match expression.unparenthesized() {
             Expr::Field { object, field, .. }
-                if matches!(object.as_ref(), Expr::This { .. })
+                if matches!(object.unparenthesized(), Expr::This { .. })
                     && self.fields.contains(&field.name) =>
             {
                 Some(&field.name)
@@ -197,9 +197,16 @@ impl<'a, 'model> Scan<'a, 'model> {
     fn for_init(&mut self, init: &ForInit) {
         match init {
             ForInit::VarDecl(declaration) => self.local(declaration),
-            ForInit::ForIn { name, iterable, .. } => {
+            ForInit::ForIn {
+                declares_variable,
+                name,
+                iterable,
+                ..
+            } => {
                 self.visit_expr(iterable);
-                self.scopes.declare(&name.name);
+                if *declares_variable {
+                    self.scopes.declare(&name.name);
+                }
             }
             ForInit::PatternForIn {
                 pattern, iterable, ..
@@ -312,7 +319,7 @@ impl Visitor for Scan<'_, '_> {
                 }
             }
             Expr::Call { callee, .. } if self.in_dispose => {
-                if let Expr::Field { object, field, .. } = callee.as_ref()
+                if let Expr::Field { object, field, .. } = callee.unparenthesized()
                     && field.name == "dispose"
                     && let Some(controller) = self.field_target(object)
                 {
@@ -341,9 +348,9 @@ impl Visitor for Scan<'_, '_> {
 }
 
 fn constructor_identity(callee: &Expr, model: &SemanticModel<'_>) -> Option<DeclarationIdentity> {
-    match callee {
+    match callee.unparenthesized() {
         Expr::Ident(identifier) => model.resolve_name(&identifier.name),
-        Expr::Field { object, field, .. } => match object.as_ref() {
+        Expr::Field { object, field, .. } => match object.unparenthesized() {
             Expr::Ident(identifier) => model
                 .resolve_name(QualifiedName::prefixed(&identifier.name, &field.name))
                 .or_else(|| model.resolve_name(&identifier.name)),
@@ -351,7 +358,7 @@ fn constructor_identity(callee: &Expr, model: &SemanticModel<'_>) -> Option<Decl
                 object: prefix,
                 field: type_name,
                 ..
-            } => match prefix.as_ref() {
+            } => match prefix.unparenthesized() {
                 Expr::Ident(prefix) => {
                     model.resolve_name(QualifiedName::prefixed(&prefix.name, &type_name.name))
                 }
@@ -364,7 +371,7 @@ fn constructor_identity(callee: &Expr, model: &SemanticModel<'_>) -> Option<Decl
 }
 
 fn constructs_controller(expression: &Expr, model: &SemanticModel<'_>) -> bool {
-    let identity = match expression {
+    let identity = match expression.unparenthesized() {
         Expr::New { dart_type, .. } => match model.resolve_type(dart_type) {
             ResolvedType::Interface { identity, .. } => Some(identity),
             _ => None,
@@ -374,13 +381,9 @@ fn constructs_controller(expression: &Expr, model: &SemanticModel<'_>) -> bool {
     };
     matches!(
         identity,
-        Some(DeclarationIdentity::Package {
-            package: "flutter",
-            name: "TextEditingController"
-                | "ScrollController"
-                | "PageController"
-                | "TabController"
-                | "AnimationController"
-        })
+        Some(DeclarationIdentity::Package { package, name })
+            if package.as_str() == "flutter" && matches!(name.as_str(),
+                "TextEditingController" | "ScrollController" | "PageController"
+                | "TabController" | "AnimationController")
     )
 }

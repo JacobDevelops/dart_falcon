@@ -18,7 +18,6 @@
 //! Adopted from the official `always_put_control_body_on_new_line` lint.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::token::Token;
@@ -29,9 +28,10 @@ pub struct AlwaysPutControlBodyOnNewLine;
 
 impl Rule for AlwaysPutControlBodyOnNewLine {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let tokens: Vec<Token> = Lexer::new(ctx.source)
-            .tokenize()
-            .into_iter()
+        let tokens: Vec<Token> = ctx
+            .tokens()
+            .iter()
+            .copied()
             .filter(|token| !token.is_trivia())
             .collect();
         let mut collector = Collector {

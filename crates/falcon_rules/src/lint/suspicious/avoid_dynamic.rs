@@ -113,10 +113,10 @@ impl Visitor for DynamicVisitor<'_, '_> {
 }
 
 fn is_map_name(expr: &Expr) -> bool {
-    match expr {
+    match expr.unparenthesized() {
         Expr::Ident(identifier) => identifier.name == "Map",
         Expr::Field { object, field, .. } => {
-            matches!(object.as_ref(), Expr::Ident(_)) && field.name == "Map"
+            matches!(object.unparenthesized(), Expr::Ident(_)) && field.name == "Map"
         }
         _ => false,
     }

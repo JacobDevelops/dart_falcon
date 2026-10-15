@@ -84,40 +84,49 @@ impl Checker<'_> {
                     self.params(params);
                 }
             }
-            // Legacy `typedef F(x);`; its synthesized function type starts at
-            // the return type, or at the name when the return type is omitted.
+            // Only old-style aliases have a formal parameter list as written.
             TopLevelDecl::TypeAlias(alias) if !is_private(&alias.name.name) => {
                 if let DartType::Function(function) = &alias.aliased
-                    && function.span.start <= alias.name.span.start
+                    && let Some(params) = &alias.legacy_params
                 {
                     if function.return_type.is_none() {
                         self.report(alias.name.span);
                     } else {
-                        for param in &function.params {
-                            if let (DartType::Dynamic { span }, Some(name)) =
-                                (&param.param_type, &param.name)
-                                && span.start == name.span.start
-                                && !name.name.chars().all(|c| c == '_')
-                            {
-                                self.report(name.span);
-                            }
-                        }
+                        self.params(params);
                     }
                 }
             }
             TopLevelDecl::Class(class) => {
+                if let Some(primary) = &class.primary_constructor {
+                    self.primary_constructor(primary, &class.name);
+                }
                 self.members(&class.members, Some(&class.name));
             }
             TopLevelDecl::MixinClass(class) => {
+                if let Some(primary) = &class.primary_constructor {
+                    self.primary_constructor(primary, &class.name);
+                }
                 self.members(&class.members, Some(&class.name));
             }
             TopLevelDecl::Mixin(mixin) => self.members(&mixin.members, Some(&mixin.name)),
             TopLevelDecl::Enum(enumeration) => self.members(&enumeration.members, None),
             TopLevelDecl::Extension(extension) => self.members(&extension.members, None),
             TopLevelDecl::ExtensionType(extension) => {
+                self.primary_constructor(&extension.primary_constructor, &extension.name);
                 self.members(&extension.members, Some(&extension.name));
             }
             _ => {}
+        }
+    }
+
+    fn primary_constructor(&mut self, primary: &PrimaryConstructor, owner: &Identifier) {
+        if !is_private(&owner.name)
+            && primary
+                .constructor_name
+                .as_ref()
+                .is_none_or(|name| !is_private(&name.name))
+        {
+            self.params(&primary.params);
         }
     }
 
@@ -167,7 +176,9 @@ impl Checker<'_> {
                     }
                     self.params(&operator.params);
                 }
-                ClassMember::Method(_) | ClassMember::Error(_) => {}
+                ClassMember::Method(_)
+                | ClassMember::PrimaryConstructorBody(_)
+                | ClassMember::Error(_) => {}
             }
         }
     }
@@ -202,14 +213,20 @@ impl Checker<'_> {
     }
 
     fn params(&mut self, params: &FormalParamList) {
+        // Regular function-typed formals are an annotation boundary. Initializing
+        // formals still expose their nested parameters to the public API check.
         for param in &params.params {
-            if let Some(nested) = &param.function_params {
+            if param.initializing.is_some()
+                && let Some(nested) = &param.function_params
+            {
                 self.params(nested);
-            } else if param.param_type.is_none()
+            }
+            if param.function_params.is_none()
+                && param.param_type.is_none()
                 && param.initializing.is_none()
                 && !param.name.name.chars().all(|c| c == '_')
             {
-                self.report(param.name.span);
+                self.report(param.span);
             }
         }
     }

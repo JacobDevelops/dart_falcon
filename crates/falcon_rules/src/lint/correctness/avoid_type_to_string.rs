@@ -4,25 +4,30 @@
 //! `Type` can differ between debug and release:
 //!
 //! ```dart
-//! final name = value.runtimeType.toString(); // BAD
+//! class TypeName implements Type {}
+//! final name = TypeName().toString(); // BAD: uses `Object.toString`
 //! if (value is Widget) {} // GOOD: compare types, not their names
 //! ```
 //!
-//! Reported for `toString()` calls and `toString` tear-offs passed as
-//! arguments whose receiver (or implicit `this`, inside a class, mixin, or
-//! extension) is provably a subtype of `dart:core` `Type` and still uses
-//! `Object.toString`. `runtimeType` getters are typed as `Type`; a project type
-//! implementing `Type` is only reported when its whole supertype chain resolves
-//! and no project declaration in it overrides `toString`.
-//!
-//! Adopted from the official `avoid_type_to_string` lint.
+//! Adopted from the official `avoid_type_to_string` lint, including its
+//! quirks. A `toString` invocation (cascade sections included) or a `toString`
+//! tear-off passed as an argument is reported when it resolves to
+//! `Object.toString` and its target type is a non-nullable subtype of
+//! `dart:core` `Type`. The target type is the receiver's static type when that
+//! is an interface type; otherwise (no receiver, `dynamic`, a type parameter)
+//! it is the type of the most recent class, mixin, or extension declaration
+//! in the file — the official visitor never resets it, so it carries over into
+//! later functions, enums, and extension types. A tear-off through a simple
+//! identifier prefix (`t.toString`) uses only an interface-typed prefix.
+//! `Type` itself (and so every `runtimeType` read) is never reported, because
+//! `dart:core` `Type` redeclares `toString`.
 
+use falcon_analyze::resolve::TypeKind;
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
-use crate::lint::function_bodies::contains;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]
@@ -33,71 +38,139 @@ impl Rule for AvoidTypeToString {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
         };
-        let extensions = program
+        let stale_this = program
             .declarations
             .iter()
-            .filter_map(|declaration| match declaration {
-                TopLevelDecl::Extension(extension) => Some((extension.span, &extension.on_type)),
-                _ => None,
+            .filter_map(|declaration| {
+                let ty = match declaration {
+                    TopLevelDecl::Class(class) => this_type(&class.name, &state),
+                    TopLevelDecl::MixinClass(class) => this_type(&class.name, &state),
+                    TopLevelDecl::Mixin(mixin) => this_type(&mixin.name, &state),
+                    TopLevelDecl::Extension(extension) => {
+                        Some(state.model.resolve_type(&extension.on_type))
+                            .filter(|ty| matches!(ty, ResolvedType::Interface { .. }))
+                    }
+                    _ => return None,
+                };
+                Some((declaration.span().start, ty))
             })
             .collect();
         let mut collector = Collector {
             diagnostics: Vec::new(),
             ctx,
-            extensions,
+            stale_this,
         };
         visit_program(&mut collector, program, state);
         collector.diagnostics
     }
 }
 
-struct Collector<'a, 'p> {
-    diagnostics: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
-    /// Extension declarations and their `on` types, for implicit `this`.
-    extensions: Vec<(Span, &'p DartType)>,
+fn this_type(name: &Identifier, state: &SemanticState<'_>) -> Option<ResolvedType> {
+    state
+        .model
+        .resolve_name(&*name.name)
+        .map(|identity| ResolvedType::Interface {
+            occurrence: Default::default(),
+            identity,
+            arguments: Vec::new().into(),
+            nullable: false,
+            extension_type: false,
+        })
 }
 
-impl Collector<'_, '_> {
-    /// The type of implicit `this` at `span`.
-    fn this_type(&self, span: &Span, state: &SemanticState<'_>) -> ResolvedType {
-        match &state.enclosing_type {
-            Some(ty @ ResolvedType::Interface { .. }) => ty.clone(),
-            _ => self
-                .extensions
-                .iter()
-                .find(|(extension, _)| contains(extension, span))
-                .map_or(ResolvedType::Unknown, |(_, on_type)| {
-                    state.model.resolve_type_in(on_type, &state.type_parameters)
-                }),
-        }
+/// What the `toString` reference resolves against.
+enum Lookup<'t> {
+    /// A member of this static type.
+    Member(&'t ResolvedType),
+    /// `super.toString`: the concrete member inherited by the enclosing type.
+    Super,
+}
+
+struct Collector<'a> {
+    diagnostics: Vec<Diagnostic>,
+    ctx: &'a AnalyzeContext<'a>,
+    /// The official visitor's `thisType` after each class, mixin, and
+    /// extension declaration (by start offset): `None` for an extension on a
+    /// non-interface type.
+    stale_this: Vec<(usize, Option<ResolvedType>)>,
+}
+
+impl Collector<'_> {
+    fn stale_this(&self, offset: usize) -> Option<&ResolvedType> {
+        let after = self
+            .stale_this
+            .partition_point(|(start, _)| *start <= offset);
+        after
+            .checked_sub(1)
+            .and_then(|index| self.stale_this[index].1.as_ref())
     }
 
-    /// The static type of an explicit receiver; `runtimeType` reads are `Type`.
-    fn receiver_type(&self, receiver: &Expr, state: &SemanticState<'_>) -> ResolvedType {
-        match receiver {
-            Expr::This { span } | Expr::Super { span } => self.this_type(span, state),
-            Expr::Field { field, .. } if field.name == "runtimeType" => {
-                state.model.core_type("Type", false)
-            }
-            Expr::Ident(identifier)
-                if identifier.name == "runtimeType"
-                    && !state.environment.is_bound(&identifier.name) =>
-            {
-                state.model.core_type("Type", false)
-            }
+    fn check(
+        &mut self,
+        name: &Identifier,
+        lookup: Lookup<'_>,
+        target: Option<&ResolvedType>,
+        state: &SemanticState<'_>,
+    ) {
+        if name.name != "toString"
+            || !target.is_some_and(|target| is_type_subtype(target, state))
+            || !resolves_to_object_to_string(lookup, state)
+        {
+            return;
+        }
+        self.diagnostics.push(self.ctx.diagnostic(
+            "avoid-type-to-string",
+            "Using 'toString' on a 'Type' is not safe in production code.",
+            name.span,
+        ));
+    }
+
+    /// `receiver.name`, invoked or (`prefixed_only`) torn off through a
+    /// simple identifier prefix.
+    fn check_receiver(
+        &mut self,
+        receiver: &Expr,
+        name: &Identifier,
+        prefixed_only: bool,
+        state: &SemanticState<'_>,
+    ) {
+        let is_super = matches!(receiver.unparenthesized(), Expr::Super { .. });
+        let receiver_type = match receiver.unparenthesized() {
+            Expr::This { .. } | Expr::Super { .. } => state
+                .enclosing_type
+                .clone()
+                .unwrap_or(ResolvedType::Unknown),
             other => state.infer(other),
+        };
+        if matches!(receiver_type, ResolvedType::Unknown) {
+            return;
         }
+        let target = if matches!(receiver_type, ResolvedType::Interface { .. }) {
+            Some(&receiver_type)
+        } else if prefixed_only {
+            return;
+        } else {
+            self.stale_this(name.span.start)
+        }
+        .cloned();
+        let lookup = if is_super {
+            Lookup::Super
+        } else {
+            Lookup::Member(&receiver_type)
+        };
+        self.check(name, lookup, target.as_ref(), state);
     }
 
-    fn check(&mut self, target: &ResolvedType, name: &Identifier, state: &SemanticState<'_>) {
-        if name.name == "toString" && is_type_using_object_to_string(target, state) {
-            self.diagnostics.push(self.ctx.diagnostic(
-                "avoid-type-to-string",
-                "Using 'toString' on a 'Type' is not safe in production code.",
-                name.span,
-            ));
+    /// An unqualified `toString`, resolved against implicit `this`.
+    fn check_implicit_this(&mut self, name: &Identifier, state: &SemanticState<'_>) {
+        if state.environment.is_bound(&name.name) {
+            return;
         }
+        let Some(enclosing) = state.enclosing_type.as_ref() else {
+            return;
+        };
+        let target = self.stale_this(name.span.start).cloned();
+        self.check(name, Lookup::Member(enclosing), target.as_ref(), state);
     }
 
     fn check_arguments(&mut self, args: &ArgList, state: &SemanticState<'_>) {
@@ -106,69 +179,125 @@ impl Collector<'_, '_> {
             .iter()
             .chain(args.named.iter().map(|argument| &argument.value))
         {
-            match argument {
-                Expr::Field { object, field, .. } => {
-                    let target = self.receiver_type(object, state);
-                    self.check(&target, field, state);
+            match argument.unparenthesized() {
+                Expr::Field {
+                    object,
+                    field,
+                    is_null_safe,
+                    ..
+                } => {
+                    let prefixed =
+                        !is_null_safe && matches!(object.unparenthesized(), Expr::Ident(_));
+                    self.check_receiver(object, field, prefixed, state);
                 }
-                Expr::Ident(identifier) if !state.environment.is_bound(&identifier.name) => {
-                    let target = self.this_type(&identifier.span, state);
-                    self.check(&target, identifier, state);
-                }
+                Expr::Ident(identifier) => self.check_implicit_this(identifier, state),
                 _ => {}
             }
         }
     }
 }
 
-impl SemanticRuleVisitor for Collector<'_, '_> {
+impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         match node {
             Expr::Call { callee, args, .. } => {
-                match callee.as_ref() {
+                self.check_arguments(args, state);
+                match callee.unparenthesized() {
                     Expr::Field { object, field, .. } => {
-                        let target = self.receiver_type(object, state);
-                        self.check(&target, field, state);
+                        self.check_receiver(object, field, false, state);
                     }
-                    Expr::Ident(identifier) if !state.environment.is_bound(&identifier.name) => {
-                        let target = self.this_type(&identifier.span, state);
-                        self.check(&target, identifier, state);
-                    }
+                    Expr::Ident(identifier) => self.check_implicit_this(identifier, state),
                     _ => {}
                 }
-                self.check_arguments(args, state);
             }
             Expr::New { args, .. } => self.check_arguments(args, state),
+            Expr::Cascade {
+                object, sections, ..
+            } => {
+                for section in sections {
+                    for (index, op) in section.ops.iter().enumerate() {
+                        match op {
+                            CascadeOp::Call(name, _, args) => {
+                                self.check_arguments(args, state);
+                                // Later links target the previous link's result.
+                                if index == 0 {
+                                    self.check_receiver(object, name, false, state);
+                                }
+                            }
+                            CascadeOp::Invoke(_, args) => self.check_arguments(args, state),
+                            _ => {}
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
 }
 
-/// Whether `ty` is provably a `Type` whose `toString` is `Object.toString`.
-fn is_type_using_object_to_string(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
-    let ResolvedType::Interface { identity, .. } = ty else {
-        return false;
+/// The analyzer's `isSubtypeOf(target, Type)`: nullable types never are.
+fn is_type_subtype(target: &ResolvedType, state: &SemanticState<'_>) -> bool {
+    matches!(
+        target,
+        ResolvedType::Interface {
+            nullable: false,
+            ..
+        }
+    ) && state.signatures.implements_sdk(target, "dart:core", "Type") == Truth::Yes
+}
+
+/// Whether the `toString` reference's element is `Object.toString`.
+fn resolves_to_object_to_string(lookup: Lookup<'_>, state: &SemanticState<'_>) -> bool {
+    let signatures = &state.signatures;
+    // Every type has `toString`: finding none means `Object`'s is unindexed.
+    let is_object = |fact: Option<Option<&falcon_analyze::MemberFacts>>| match fact {
+        Some(Some(fact)) => fact.declaring_type == DeclarationIdentity::OBJECT,
+        Some(None) => true,
+        None => false,
     };
-    if state.signatures.implements_sdk(ty, "dart:core", "Type") != Truth::Yes {
-        return false;
+    let ty = match lookup {
+        Lookup::Super => {
+            return match &state.enclosing_type {
+                Some(ResolvedType::Interface { identity, .. }) => {
+                    is_object(signatures.inherited_concrete_member(identity, "toString"))
+                }
+                _ => false,
+            };
+        }
+        Lookup::Member(ty) => ty,
+    };
+    match ty {
+        ResolvedType::Dynamic => true,
+        ResolvedType::TypeParameter { bound, .. } => {
+            resolves_to_object_to_string(Lookup::Member(bound), state)
+        }
+        ResolvedType::Interface { identity, .. } => {
+            // `dart:core` `Type` redeclares `toString`.
+            if identity.is_sdk("dart:core", "Type") {
+                return false;
+            }
+            if matches!(
+                signatures.type_kind(identity),
+                Some(TypeKind::Mixin | TypeKind::ExtensionType)
+            ) {
+                // No concrete superclass: the interface member wins.
+                return is_object(signatures.interface_member(identity, identity, "toString"));
+            }
+            let owner_is_object = signatures
+                .resolved_member_owner(ty, "toString", &state.model)
+                .is_some_and(|owner| owner == DeclarationIdentity::OBJECT);
+            // Abstract redeclarations (such as `Type.toString`) leave the
+            // concrete implementation, which is the resolved element, unchanged.
+            owner_is_object
+                && signatures
+                    .inherited_member_facts(identity, "toString")
+                    .is_some_and(|facts| {
+                        facts
+                            .iter()
+                            .filter(|fact| !fact.is_abstract)
+                            .all(|fact| fact.declaring_type == DeclarationIdentity::OBJECT)
+                    })
+        }
+        _ => false,
     }
-    if identity.is_sdk("dart:core", "Type") {
-        return true;
-    }
-    let owner_is_object = state
-        .signatures
-        .resolved_member_owner(ty, "toString", &state.model)
-        .is_some_and(|owner| owner == DeclarationIdentity::OBJECT);
-    // Abstract redeclarations (such as `Type.toString`) leave the concrete
-    // implementation, which is what the official rule looks up, unchanged.
-    owner_is_object
-        && state
-            .signatures
-            .inherited_member_facts(identity, "toString")
-            .is_some_and(|facts| {
-                facts
-                    .iter()
-                    .filter(|fact| !fact.is_abstract)
-                    .all(|fact| fact.declaring_type == DeclarationIdentity::OBJECT)
-            })
 }

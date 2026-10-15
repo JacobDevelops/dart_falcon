@@ -112,6 +112,6 @@ fn body_result(
 }
 
 fn looks_like_unresolved_construction(expression: &Expr) -> bool {
-    matches!(expression, Expr::Call { callee, .. }
+    matches!(expression.unparenthesized(), Expr::Call { callee, .. }
         if falcon_analyze::expression_segments(callee, false).is_some())
 }

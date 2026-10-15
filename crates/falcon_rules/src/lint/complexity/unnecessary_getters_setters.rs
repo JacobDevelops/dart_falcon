@@ -66,9 +66,11 @@ fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<
 }
 
 fn field_name(expr: &Expr) -> Option<&str> {
-    match expr {
+    match expr.unparenthesized() {
         Expr::Ident(id) => Some(id.name.as_str()),
-        Expr::Field { object, field, .. } if matches!(object.as_ref(), Expr::This { .. }) => {
+        Expr::Field { object, field, .. }
+            if matches!(object.unparenthesized(), Expr::This { .. }) =>
+        {
             Some(field.name.as_str())
         }
         _ => None,
@@ -100,8 +102,8 @@ fn setter_assigns_field(setter: &SetterDecl) -> Option<&str> {
         op: AssignOp::Eq,
         value,
         ..
-    } = assign
-        && let Expr::Ident(rhs) = value.as_ref()
+    } = assign.unparenthesized()
+        && let Expr::Ident(rhs) = value.unparenthesized()
         && rhs.name == setter.param.name
     {
         return field_name(target);

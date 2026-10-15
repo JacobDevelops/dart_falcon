@@ -7,16 +7,23 @@
 //! an extension on a nullable type, or when the target's static type is
 //! nullable and every visible extension supplying that member to the type is
 //! on a nullable type. Members the target's own class declares win over
-//! extensions and are not checked.
+//! extensions and are not checked; for SDK classes falcon uses the loaded SDK
+//! sources, or without them its curated `dart:core` table (e.g.
+//! `String.length`, `String.[]`).
 //!
-//! falcon only reasons about extensions declared in the analyzed project, and
-//! stays silent when it cannot tell which extensions apply. Null-aware cascade
-//! sections (`?..`) are not checked.
+//! Every section of a null-aware cascade (`x?..m()..n()`) is null-aware too;
+//! each section's leading member is checked against the cascade target. An
+//! extension on `dynamic` (or `void`) is on a nullable type.
+//!
+//! Imported extensions participate even through prefixed imports, subject to
+//! show/hide combinators and exports. Explicit overrides resolve the extension
+//! by declaration identity, including qualified names. The rule stays silent
+//! when it cannot tell which extensions apply.
 //!
 //! Adopted from the official `unnecessary_null_aware_operator_on_extension_on_nullable`
 //! lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, MemberResult, ResolvedType, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
@@ -59,8 +66,15 @@ fn explicitly_nullable(ty: &ResolvedType) -> bool {
         ResolvedType::Unknown
         | ResolvedType::Dynamic
         | ResolvedType::Void
-        | ResolvedType::Never => false,
+        | ResolvedType::Never
+        | ResolvedType::NonNullTypeParameter { .. } => false,
     }
+}
+
+/// Whether an extension's `on` type is nullable to the type system:
+/// `dynamic` and `void` are, besides written-nullable types.
+fn extended_type_nullable(ty: &ResolvedType) -> bool {
+    explicitly_nullable(ty) || matches!(ty, ResolvedType::Dynamic | ResolvedType::Void)
 }
 
 impl Collector<'_> {
@@ -71,17 +85,13 @@ impl Collector<'_> {
         member: &str,
         state: &SemanticState<'_>,
     ) -> bool {
-        if let Expr::Call { callee, args, .. } = target
-            && let Expr::Ident(name) = callee.as_ref()
+        if let Expr::Call { callee, args, .. } = target.unparenthesized()
             && args.positional.len() == 1
             && args.named.is_empty()
-            && !state.environment.is_bound(&name.name)
-            && state.model.resolve_name(&name.name).is_none()
-            && let Some(on_type) = state
-                .signatures
-                .visible_extension_on_type(&name.name, &state.model)
+            && let Some(identity) = state.named_extension(callee)
+            && let Some(on_type) = state.signatures.extension_on_type(&identity)
         {
-            return explicitly_nullable(on_type);
+            return extended_type_nullable(on_type);
         }
         let receiver = state.infer(target);
         if !explicitly_nullable(&receiver) || matches!(receiver, ResolvedType::Null) {
@@ -105,7 +115,8 @@ impl Collector<'_> {
             || state
                 .signatures
                 .resolved_writable_field(&lookup, getter, &state.model)
-                .is_some();
+                .is_some()
+            || self.core_type_declares(&lookup, getter);
         if declared_by_class {
             return false;
         }
@@ -113,8 +124,26 @@ impl Collector<'_> {
             .signatures
             .applicable_extension_on_types(&non_null, member, &state.model)
             .is_some_and(|on_types| {
-                !on_types.is_empty() && on_types.into_iter().all(explicitly_nullable)
+                !on_types.is_empty() && on_types.into_iter().all(extended_type_nullable)
             })
+    }
+
+    /// Whether the type index records `member` on an SDK receiver: loaded SDK
+    /// sources when present, otherwise the curated `dart:core` table.
+    fn core_type_declares(&self, receiver: &ResolvedType, member: &str) -> bool {
+        let ResolvedType::Interface {
+            identity: identity @ DeclarationIdentity::Sdk { .. },
+            ..
+        } = receiver
+        else {
+            return false;
+        };
+        self.ctx.types.is_some_and(|types| {
+            matches!(
+                types.member_lookup_identity(identity, member),
+                MemberResult::Found(_)
+            )
+        })
     }
 
     fn report(&mut self, from: usize, to: usize, operator: &str) {
@@ -133,6 +162,33 @@ impl Collector<'_> {
             DiagSpan {
                 start,
                 end: start + operator.len(),
+            },
+        ));
+    }
+
+    /// Reports the `?..` or `..` operator opening the cascade section at `start`.
+    fn report_cascade_operator(&mut self, start: usize) {
+        let source = self.ctx.source;
+        let at = |offset: usize, text: &str| {
+            source
+                .get(offset..)
+                .is_some_and(|rest| rest.starts_with(text))
+        };
+        let (start, len) = if at(start, "?..") {
+            (start, 3)
+        } else if start > 0 && at(start - 1, "?..") {
+            (start - 1, 3)
+        } else if at(start, "..") {
+            (start, 2)
+        } else {
+            return;
+        };
+        self.diags.push(self.ctx.diagnostic(
+            "unnecessary-null-aware-operator-on-extension-on-nullable",
+            "Unnecessary use of a null-aware operator to invoke an extension method on a nullable type.",
+            DiagSpan {
+                start,
+                end: start + len,
             },
         ));
     }
@@ -159,6 +215,29 @@ impl SemanticRuleVisitor for Collector<'_> {
                 };
                 if self.extension_on_nullable(object, &member, state) {
                     self.report(object.span().end, field.span.start, "?.");
+                }
+            }
+            Expr::Cascade {
+                object,
+                sections,
+                is_null_aware: true,
+                ..
+            } => {
+                for section in sections {
+                    let member = match section.ops.as_slice() {
+                        [CascadeOp::Field { name, .. }, CascadeOp::Assign(..)] => {
+                            format!("{}=", name.name)
+                        }
+                        [CascadeOp::Field { name, .. }, ..] | [CascadeOp::Call(name, ..), ..] => {
+                            name.name.clone()
+                        }
+                        [CascadeOp::IndexAssign(..), ..] => "[]=".to_string(),
+                        [CascadeOp::Index { .. }, ..] => "[]".to_string(),
+                        _ => continue,
+                    };
+                    if self.extension_on_nullable(object, &member, state) {
+                        self.report_cascade_operator(section.span.start);
+                    }
                 }
             }
             Expr::Index {

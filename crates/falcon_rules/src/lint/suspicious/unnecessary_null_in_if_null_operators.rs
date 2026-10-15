@@ -37,9 +37,10 @@ impl Visitor for Collector<'_> {
             left,
             right,
             span,
+            ..
         } = node
-            && (matches!(left.as_ref(), Expr::NullLit { .. })
-                || matches!(right.as_ref(), Expr::NullLit { .. }))
+            && (matches!(left.unparenthesized(), Expr::NullLit { .. })
+                || matches!(right.unparenthesized(), Expr::NullLit { .. }))
         {
             self.diags.push(self.ctx.diagnostic(
                 "unnecessary-null-in-if-null-operators",

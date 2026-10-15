@@ -14,9 +14,9 @@
 //! }
 //! ```
 //!
-//! Only operators whose single parameter is explicitly declared nullable (or
-//! `dynamic`) are inspected, and an operator body that rebinds the parameter
-//! name is skipped.
+//! Only operators whose single parameter is explicitly declared nullable are
+//! inspected; `dynamic` is excluded, matching the analyzer's nullability suffix
+//! check. An operator body that rebinds the parameter name is skipped.
 //!
 //! Adopted from the official `avoid_null_checks_in_equality_operators` lint.
 
@@ -51,10 +51,7 @@ fn check_operator(op: &OperatorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diagn
     let (Some(body), [param]) = (&op.body, op.params.params.as_slice()) else {
         return;
     };
-    let nullable_param = param
-        .param_type
-        .as_ref()
-        .is_some_and(|ty| ty.is_nullable() || matches!(ty, DartType::Dynamic { .. }));
+    let nullable_param = param.param_type.as_ref().is_some_and(DartType::is_nullable);
     if op.op != "==" || !nullable_param {
         return;
     }
@@ -78,7 +75,7 @@ fn check_operator(op: &OperatorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diagn
 }
 
 fn is_param(expr: &Expr, name: &str) -> bool {
-    matches!(expr, Expr::Ident(identifier) if identifier.name == name)
+    matches!(expr.unparenthesized(), Expr::Ident(identifier) if identifier.name == name)
 }
 
 struct NullChecks<'a> {
@@ -95,8 +92,10 @@ impl Visitor for NullChecks<'_> {
                 right,
                 ..
             } => {
-                (matches!(**left, Expr::NullLit { .. }) && is_param(right, self.name))
-                    || (matches!(**right, Expr::NullLit { .. }) && is_param(left, self.name))
+                (matches!((**left).unparenthesized(), Expr::NullLit { .. })
+                    && is_param(right, self.name))
+                    || (matches!((**right).unparenthesized(), Expr::NullLit { .. })
+                        && is_param(left, self.name))
             }
             Expr::Binary {
                 op: BinaryOp::NullCoalesce,

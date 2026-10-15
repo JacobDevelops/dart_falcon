@@ -29,11 +29,11 @@
 //!
 //! Facts falcon cannot prove are resolved toward reachability, so uncertainty
 //! causes misses rather than false positives: a member whose container has a
-//! supertype declared outside the library may override it and is never a
-//! candidate; a member access on a receiver of unknown type reaches every
-//! same-named member, and its class too when the class is named anywhere
-//! outside its own declaration (a class that is never named cannot be the
-//! static type of a receiver); an identifier counts unless it lexically
+//! supertype with an incomplete indexed hierarchy may override it and is not
+//! a candidate. Known receiver types resolve members and operators before
+//! considering extensions. An unknown receiver reaches same-named members
+//! only in extensions or classes named outside their own declaration (a class
+//! never named cannot be its static type); an identifier counts unless it
 //! resolves to a local. A library with a part that does not resolve to an
 //! analyzed file is not analyzed.
 //!
@@ -49,7 +49,9 @@ use falcon_syntax::visitor::{
     walk_stmt, walk_top_level_decl,
 };
 
-use crate::lint::lexical_usage::{for_in_declares_variable, locally_bound_identifiers};
+use crate::lint::declarations::operator_token_span;
+use crate::lint::lexical_usage::locally_bound_identifiers;
+use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use crate::lint::string_lit::{is_ident_body, is_simple_identifier};
 
 const RULE: &str = "unreachable-from-main";
@@ -76,7 +78,11 @@ impl Rule for UnreachableFromMain {
         let mut deps: Vec<Vec<DeclId>> = vec![Vec::new(); tables.decls.len()];
         for (index, unit) in units.iter().enumerate() {
             let bound = locally_bound_identifiers(unit.program);
+            let mut types = ExpressionTypes::default();
+            let state = SemanticState::new(unit.program, ctx)
+                .map(|state| visit_program(&mut types, unit.program, state));
             let mut walker = RefWalker::new(&tables, index, unit.source, &bound, &mut deps);
+            walker.semantic = state.as_ref().map(|state| (state, &types.0));
             for declaration in &unit.program.declarations {
                 walker.visit_top_level_decl(declaration);
             }
@@ -263,6 +269,8 @@ struct Tables<'a> {
     /// Top-level declarations by name.
     top: HashMap<&'a str, Vec<DeclId>>,
     container_named: HashMap<&'a str, ContainerId>,
+    container_identities: HashMap<falcon_analyze::DeclarationIdentity, ContainerId>,
+    extension_on_types: Vec<(ContainerId, falcon_analyze::ResolvedType)>,
     alias_named: HashMap<&'a str, &'a DartType>,
     /// Top-level variable initializers, for annotations through a constant.
     initializers: HashMap<&'a str, &'a Expr>,
@@ -289,6 +297,8 @@ impl<'a> Tables<'a> {
             containers: Vec::new(),
             top: HashMap::new(),
             container_named: HashMap::new(),
+            container_identities: HashMap::new(),
+            extension_on_types: Vec::new(),
             alias_named: HashMap::new(),
             initializers: HashMap::new(),
             members_named: HashMap::new(),
@@ -305,8 +315,33 @@ impl<'a> Tables<'a> {
                 tables.add_top_level(unit, source.source, declaration);
             }
         }
+        let model = ctx.identities.map(|identities| {
+            falcon_analyze::SemanticModel::new(ctx.file_path, identities, ctx.types)
+        });
+        let semantic = model.as_ref().zip(ctx.signatures);
+        if let Some((model, signatures)) = semantic {
+            tables.container_identities.reserve(tables.containers.len());
+            for (container, declaration) in tables.containers.iter().enumerate() {
+                let label = &tables.decls[declaration.decl].label;
+                if let Some(identity) = model.resolve_name(label) {
+                    tables
+                        .container_identities
+                        .entry(identity)
+                        .or_insert(container);
+                }
+                if declaration.kind == ContainerKind::Extension
+                    && let Some(on_type) = signatures.visible_extension_on_type(label, model)
+                {
+                    tables.extension_on_types.push((container, on_type.clone()));
+                }
+            }
+        }
         for container in 0..tables.containers.len() {
-            tables.add_members(container, units[tables.containers[container].unit].source);
+            tables.add_members(
+                container,
+                units[tables.containers[container].unit].source,
+                semantic,
+            );
         }
         tables.find_entry_points(units, ctx);
         tables.find_named_elsewhere(units);
@@ -497,11 +532,13 @@ impl<'a> Tables<'a> {
                     .extend(x.variants.iter().map(|variant| variant.name.name.clone()));
             }
             TopLevelDecl::ExtensionType(x) => {
-                let field = &x.representation.field_name.name;
-                lexical.declared.insert(field.clone());
-                lexical.instance.insert(field.clone());
+                if let Some(representation) = x.representation() {
+                    let field = &representation.name.name;
+                    lexical.declared.insert(field.clone());
+                    lexical.instance.insert(field.clone());
+                }
                 lexical.constructors.insert(
-                    x.representation
+                    x.primary_constructor
                         .constructor_name
                         .as_ref()
                         .map_or_else(|| "new".to_string(), |name| name.name.clone()),
@@ -524,8 +561,8 @@ impl<'a> Tables<'a> {
                 ClassMember::Method(x) => (x.is_static, Some(x.name.name.clone()), &[]),
                 ClassMember::Getter(x) => (x.is_static, Some(x.name.name.clone()), &[]),
                 ClassMember::Setter(x) => (x.is_static, Some(x.name.name.clone()), &[]),
-                ClassMember::Operator(x) => (false, Some(operator_key(x)), &[]),
-                ClassMember::Error(_) => continue,
+                ClassMember::Operator(x) => (false, Some(x.lookup_name().to_string()), &[]),
+                ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => continue,
             };
             for name in single
                 .into_iter()
@@ -545,7 +582,15 @@ impl<'a> Tables<'a> {
 
     /// Register the candidate members of a public container. Runs after every
     /// container is known, so override detection sees the whole library.
-    fn add_members(&mut self, container: ContainerId, source: &str) {
+    fn add_members(
+        &mut self,
+        container: ContainerId,
+        source: &str,
+        semantic: Option<(
+            &falcon_analyze::SemanticModel<'_>,
+            &falcon_analyze::SignatureIndex,
+        )>,
+    ) {
         let Container {
             public,
             unit,
@@ -567,7 +612,7 @@ impl<'a> Tables<'a> {
                 ClassMember::Getter(x) => (&x.annotations, x.is_static),
                 ClassMember::Setter(x) => (&x.annotations, x.is_static),
                 ClassMember::Operator(x) => (&x.annotations, false),
-                ClassMember::Error(_) => continue,
+                ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => continue,
             };
             let doc_start = doc_start(source, annotated_start(annotations, span.start));
             let visible_for_testing = annotations.iter().any(is_visible_for_testing);
@@ -589,7 +634,9 @@ impl<'a> Tables<'a> {
                 ClassMember::Field(field) => {
                     for declarator in &field.declarators {
                         let name = &declarator.name.name;
-                        if is_public(name) && (is_static || !self.may_override(container, name)) {
+                        if is_public(name)
+                            && (is_static || !self.may_override(container, name, semantic))
+                        {
                             entries.push((
                                 declarator.span.start,
                                 name.clone(),
@@ -601,9 +648,9 @@ impl<'a> Tables<'a> {
                     }
                 }
                 ClassMember::Operator(operator) => {
-                    let key = operator_key(operator);
-                    if !self.may_override(container, &key) {
-                        let name_span = find_operator_span(source, span, &operator.op);
+                    let key = operator.lookup_name().to_string();
+                    if !self.may_override(container, &key, semantic) {
+                        let name_span = operator_token_span(operator, source);
                         entries.push((span.start, key, operator.op.clone(), name_span, span));
                     }
                 }
@@ -613,12 +660,12 @@ impl<'a> Tables<'a> {
                     let key = &name.name;
                     if is_public(key)
                         && !is_test_method(key)
-                        && (is_static || !self.may_override(container, key))
+                        && (is_static || !self.may_override(container, key, semantic))
                     {
                         entries.push((span.start, key.clone(), key.clone(), name.span, span));
                     }
                 }
-                ClassMember::Error(_) => {}
+                ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
             }
             // Widget previews apply to constructors and static methods.
             let preview_exempt = preview
@@ -662,7 +709,15 @@ impl<'a> Tables<'a> {
 
     /// Whether an instance member named `name` of `container` may override a
     /// supertype member. Unknown supertypes answer yes.
-    fn may_override(&self, container: ContainerId, name: &str) -> bool {
+    fn may_override(
+        &self,
+        container: ContainerId,
+        name: &str,
+        semantic: Option<(
+            &falcon_analyze::SemanticModel<'_>,
+            &falcon_analyze::SignatureIndex,
+        )>,
+    ) -> bool {
         if OBJECT_MEMBERS.contains(&name) {
             return true;
         }
@@ -679,6 +734,21 @@ impl<'a> Tables<'a> {
                 continue;
             }
             let Some(parent) = self.library_container(supertype) else {
+                if let Some((model, signatures)) = semantic
+                    && let falcon_analyze::ResolvedType::Interface { identity, .. } =
+                        model.resolve_type(supertype)
+                {
+                    match signatures.supertype_matches(&identity, &|identity| {
+                        !signatures.declared_member_facts(identity, name).is_empty()
+                            || (matches!(identity, falcon_analyze::DeclarationIdentity::Sdk { .. })
+                                && *identity != falcon_analyze::DeclarationIdentity::OBJECT
+                                && signatures.type_kind(identity).is_none())
+                    }) {
+                        falcon_analyze::Truth::Yes => return true,
+                        falcon_analyze::Truth::No => continue,
+                        falcon_analyze::Truth::Unknown => {}
+                    }
+                }
                 return true;
             };
             if !visited.insert(parent) {
@@ -809,7 +879,7 @@ impl<'a> Tables<'a> {
             ),
         };
         let is_entry_point = callee.name == "pragma"
-            && matches!(args.positional.first(), Some(Expr::StringLit(literal))
+            && matches!(args.positional.first().map(Expr::unparenthesized), Some(Expr::StringLit(literal))
                 if literal.interpolations.is_empty() && literal.value == "vm:entry-point");
         is_entry_point.then_some(callee)
     }
@@ -836,11 +906,11 @@ impl<'a> Tables<'a> {
 /// The invoked (possibly prefixed) name and arguments of `name(...)`,
 /// `prefix.name(...)`, or `const name(...)`.
 fn invocation(expr: &Expr) -> Option<(QualifiedName<'_>, &ArgList)> {
-    match expr {
+    match expr.unparenthesized() {
         Expr::Call { callee, args, .. } => {
-            let name = match callee.as_ref() {
+            let name = match callee.unparenthesized() {
                 Expr::Ident(name) => QualifiedName::from(&name.name),
-                Expr::Field { object, field, .. } => match object.as_ref() {
+                Expr::Field { object, field, .. } => match object.unparenthesized() {
                     Expr::Ident(prefix) => QualifiedName::prefixed(&prefix.name, &field.name),
                     _ => return None,
                 },
@@ -884,30 +954,6 @@ fn constructor_key(constructor: &ConstructorDecl) -> String {
         .constructor_name
         .as_ref()
         .map_or_else(|| "new".to_string(), |name| name.name.clone())
-}
-
-/// The lookup key of a user-defined operator; unary minus is `unary-`.
-fn operator_key(operator: &OperatorDecl) -> String {
-    if operator.op == "-" && operator.params.params.is_empty() {
-        "unary-".to_string()
-    } else {
-        operator.op.clone()
-    }
-}
-
-/// The span of the operator token in an operator declaration.
-fn find_operator_span(source: &str, span: Span, op: &str) -> Span {
-    let text = source.get(span.start..span.end).unwrap_or_default();
-    text.find("operator")
-        .and_then(|keyword| {
-            let after = keyword + "operator".len();
-            let offset = text[after..].find(op.chars().next()?)? + after;
-            Some(Span::new(
-                span.start + offset,
-                span.start + offset + op.len(),
-            ))
-        })
-        .unwrap_or(span)
 }
 
 fn annotated_start(annotations: &[Annotation], start: usize) -> usize {
@@ -1008,6 +1054,26 @@ enum Lexical {
     Unknown,
 }
 
+#[derive(Default)]
+struct ExpressionTypes(HashMap<Span, falcon_analyze::ResolvedType>);
+
+impl SemanticRuleVisitor for ExpressionTypes {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        let receiver = match node {
+            Expr::Field { object, .. }
+            | Expr::Index { object, .. }
+            | Expr::Cascade { object, .. } => object.as_ref(),
+            Expr::Binary { left, .. } => left.as_ref(),
+            Expr::Unary { operand, .. } | Expr::PostfixIncDec { operand, .. } => operand.as_ref(),
+            Expr::Assign { target, .. } => target.as_ref(),
+            _ => return,
+        };
+        self.0
+            .entry(*receiver.span())
+            .or_insert_with(|| state.infer(receiver));
+    }
+}
+
 /// Records, for each declaration being walked, the declarations it references.
 struct RefWalker<'t, 'a> {
     tables: &'t Tables<'a>,
@@ -1022,6 +1088,10 @@ struct RefWalker<'t, 'a> {
     type_argument_depth: usize,
     external_depth: usize,
     constant_pattern_depth: usize,
+    semantic: Option<(
+        &'t SemanticState<'a>,
+        &'t HashMap<Span, falcon_analyze::ResolvedType>,
+    )>,
 }
 
 impl<'t, 'a> RefWalker<'t, 'a> {
@@ -1043,6 +1113,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
             type_argument_depth: 0,
             external_depth: 0,
             constant_pattern_depth: 0,
+            semantic: None,
         }
     }
 
@@ -1103,11 +1174,11 @@ impl<'t, 'a> RefWalker<'t, 'a> {
     fn mark_any_member(&mut self, name: &str) {
         let tables = self.tables;
         for &id in tables.members_named.get(name).into_iter().flatten() {
-            self.mark(id);
             if let Some(container) = tables.decls[id].container
                 && (tables.containers[container].kind == ContainerKind::Extension
                     || tables.named_elsewhere[container])
             {
+                self.mark(id);
                 self.mark_container(container);
             }
         }
@@ -1223,13 +1294,13 @@ impl<'t, 'a> RefWalker<'t, 'a> {
     /// The class-like declaration an expression is an instance of, when it is
     /// syntactically evident.
     fn receiver_container(&self, receiver: &Expr) -> Option<ContainerId> {
-        match receiver {
+        match receiver.unparenthesized() {
             Expr::This { .. } => self.container.filter(|&container| {
                 self.tables.containers[container].kind != ContainerKind::Extension
             }),
-            Expr::Call { callee, .. } => match callee.as_ref() {
+            Expr::Call { callee, .. } => match callee.unparenthesized() {
                 Expr::Ident(type_name) => self.named_container(type_name),
-                Expr::Field { object, field, .. } => match object.as_ref() {
+                Expr::Field { object, field, .. } => match object.unparenthesized() {
                     Expr::Ident(type_name) => {
                         self.named_container(type_name).filter(|&container| {
                             self.tables.containers[container]
@@ -1254,16 +1325,69 @@ impl<'t, 'a> RefWalker<'t, 'a> {
 
     /// `receiver.name` where the receiver is not a type name.
     fn instance_member(&mut self, receiver: &Expr, name: &str) {
+        if self.resolved_instance_member(receiver, name) {
+            return;
+        }
         match self.receiver_container(receiver) {
             Some(container) => self.mark_member_of(container, name),
             None => self.mark_any_member(name),
         }
     }
 
+    fn resolved_container(
+        &self,
+        identity: &falcon_analyze::DeclarationIdentity,
+    ) -> Option<ContainerId> {
+        self.tables.container_identities.get(identity).copied()
+    }
+
+    fn resolved_instance_member(&mut self, receiver: &Expr, name: &str) -> bool {
+        let Some((state, types)) = self.semantic else {
+            return false;
+        };
+        let Some(ty) = types.get(receiver.span()) else {
+            return false;
+        };
+        if matches!(
+            ty,
+            falcon_analyze::ResolvedType::Unknown | falcon_analyze::ResolvedType::Dynamic
+        ) {
+            return false;
+        }
+        if let falcon_analyze::ResolvedType::Interface { identity, .. } = ty
+            && let Some(container) = self.resolved_container(identity)
+            && self.mark_in_hierarchy(container, name)
+        {
+            return true;
+        }
+        if let Some(owner) = state
+            .signatures
+            .resolved_member_owner(ty, name, &state.model)
+        {
+            if let Some(container) = self.resolved_container(&owner) {
+                self.mark_members(container, name);
+            }
+            return true;
+        }
+        let Some(on_types) = state
+            .signatures
+            .applicable_extension_on_types(ty, name, &state.model)
+        else {
+            return false;
+        };
+        let tables = self.tables;
+        for (container, on_type) in &tables.extension_on_types {
+            if on_types.contains(&on_type) {
+                self.mark_members(*container, name);
+            }
+        }
+        true
+    }
+
     /// `object.name`: a static member or constructor when `object` names a
     /// library type, an instance member otherwise.
     fn member_access(&mut self, object: &Expr, name: &str) {
-        if let Expr::Ident(type_name) = object
+        if let Expr::Ident(type_name) = object.unparenthesized()
             && let Some(container) = self.named_container(type_name)
         {
             self.mark_static(container, name);
@@ -1585,7 +1709,7 @@ impl Visitor for RefWalker<'_, '_> {
                 self.visit_external_type(operator.return_type.as_ref(), operator.is_external);
             }
             ClassMember::Setter(setter) => self.stack.extend(self.id_at(setter.span.start)),
-            ClassMember::Error(_) => {}
+            ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
         }
         walk_class_member(self, node);
         self.stack.truncate(depth);
@@ -1646,12 +1770,10 @@ impl Visitor for RefWalker<'_, '_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         if let Stmt::For(statement) = node
             && let Some(ForInit::ForIn {
-                keyword,
-                var_type,
+                declares_variable: false,
                 name,
                 ..
             }) = &statement.header.init
-            && !for_in_declares_variable(*keyword, var_type.as_ref(), name, self.source)
         {
             self.reference(&name.name);
         }
@@ -1668,7 +1790,7 @@ impl Visitor for RefWalker<'_, '_> {
                 callee, type_args, ..
             } => {
                 self.visit_type_arguments(type_args);
-                if let Expr::Ident(type_name) = callee.as_ref()
+                if let Expr::Ident(type_name) = callee.unparenthesized()
                     && self.named_container(type_name).is_some()
                 {
                     self.constructor_reference(&type_name.name, "new");
@@ -1694,12 +1816,12 @@ impl Visitor for RefWalker<'_, '_> {
                     }
                 }
             }
-            Expr::Binary { op, .. } => {
+            Expr::Binary { left, op, .. } => {
                 if let Some(operator) = binary_operator(*op) {
-                    self.mark_any_member(operator);
+                    self.instance_member(left, operator);
                 }
             }
-            Expr::Unary { op, .. } => {
+            Expr::Unary { operand, op, .. } => {
                 let operator = match op {
                     UnaryOp::Minus => Some("unary-"),
                     UnaryOp::Tilde => Some("~"),
@@ -1708,22 +1830,25 @@ impl Visitor for RefWalker<'_, '_> {
                     UnaryOp::Bang => None,
                 };
                 if let Some(operator) = operator {
-                    self.mark_any_member(operator);
+                    self.instance_member(operand, operator);
                 }
             }
-            Expr::PostfixIncDec { op, .. } => self.mark_any_member(match op {
-                PostfixIncDec::Increment => "+",
-                PostfixIncDec::Decrement => "-",
-            }),
+            Expr::PostfixIncDec { operand, op, .. } => self.instance_member(
+                operand,
+                match op {
+                    PostfixIncDec::Increment => "+",
+                    PostfixIncDec::Decrement => "-",
+                },
+            ),
             Expr::Assign { target, op, .. } => {
                 if let Some(operator) = assignment_operator(*op) {
-                    self.mark_any_member(operator);
+                    self.instance_member(target, operator);
                 }
-                if matches!(target.as_ref(), Expr::Index { .. }) {
-                    self.mark_any_member("[]=");
+                if let Expr::Index { object, .. } = target.unparenthesized() {
+                    self.instance_member(object, "[]=");
                 }
             }
-            Expr::Index { .. } => self.mark_any_member("[]"),
+            Expr::Index { object, .. } => self.instance_member(object, "[]"),
             Expr::Cascade {
                 object, sections, ..
             } => {
@@ -1734,16 +1859,26 @@ impl Visitor for RefWalker<'_, '_> {
                             self.visit_type_arguments(type_args);
                             self.instance_member(object, &name.name);
                         }
+                        // Like ordinary function-expression invocations, an implicit
+                        // `call` names no element, so it references no member.
+                        CascadeOp::Invoke(type_args, _) => self.visit_type_arguments(type_args),
                         CascadeOp::Index { .. } => self.mark_any_member("[]"),
                         CascadeOp::Assign(target, op, _) => {
-                            // `..name = v` and `..[index] = v` share this shape.
-                            if let Expr::Ident(name) = target.as_ref() {
+                            // A named cascade assignment writes the receiver member.
+                            if let Expr::Ident(name) = target.unparenthesized() {
                                 self.instance_member(object, &name.name);
                             }
-                            self.mark_any_member("[]=");
                             if let Some(operator) = assignment_operator(*op) {
                                 self.mark_any_member(operator);
-                                self.mark_any_member("[]");
+                            }
+                        }
+                        CascadeOp::IndexAssign(_, op, _) => {
+                            self.instance_member(object, "[]=");
+                            if *op != AssignOp::Eq {
+                                self.instance_member(object, "[]");
+                            }
+                            if let Some(operator) = assignment_operator(*op) {
+                                self.mark_any_member(operator);
                             }
                         }
                     }

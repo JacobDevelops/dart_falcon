@@ -19,18 +19,13 @@
 //! class CustomSize implements Size { ... } // flagged
 //! ```
 //!
-//! `implements` clauses of classes, mixins, enums, and extension types are
-//! checked. Only a concrete `==` declared by a class counts: an abstract `==`
-//! or one supplied by a mixin is not reported, nor are `dart:core` classes
-//! (whose `==` is the platform's). The rule stays silent when the implemented
-//! type's member chain cannot be resolved.
+//! Only class declarations are checked. An inherited or abstract `==`,
+//! including one supplied by a mixin, counts when its declaring library is
+//! not `dart:core`. Unresolved external interfaces remain silent.
 //!
 //! Adopted from the official `avoid_implementing_value_types` lint.
 
-use falcon_analyze::resolve::TypeKind;
-use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberKind, Rule, SemanticModel, SignatureIndex,
-};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel, SignatureIndex};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -47,15 +42,10 @@ impl Rule for AvoidImplementingValueTypes {
         for decl in &program.declarations {
             let implements = match decl {
                 TopLevelDecl::Class(class) => &class.implements,
-                TopLevelDecl::ClassTypeAlias(alias) => &alias.implements,
-                TopLevelDecl::MixinClass(class) => &class.implements,
-                TopLevelDecl::Mixin(mixin) => &mixin.implements,
-                TopLevelDecl::Enum(enumeration) => &enumeration.implements,
-                TopLevelDecl::ExtensionType(extension) => &extension.implements,
                 _ => continue,
             };
             for interface in implements {
-                if overrides_equals(interface, signatures, &model, ctx) {
+                if overrides_equals(interface, signatures, &model) {
                     diags.push(ctx.diagnostic(
                         "avoid-implementing-value-types",
                         "Classes that override '==' should not be implemented.",
@@ -68,34 +58,17 @@ impl Rule for AvoidImplementingValueTypes {
     }
 }
 
-/// Whether the nearest `==` of `interface` is a concrete operator declared by a
-/// project class (not a mixin, and not `Object`'s). An abstract nearest
-/// declaration or an unresolved chain stays silent.
+/// Whether the interface's `==` is declared outside `dart:core`.
 fn overrides_equals(
     interface: &DartType,
     signatures: &SignatureIndex,
     model: &SemanticModel<'_>,
-    ctx: &AnalyzeContext,
 ) -> bool {
     let resolved = model.resolve_type(interface);
     let Some(facts) = signatures.resolved_member_facts(&resolved, "==", model) else {
         return false;
     };
-    let concrete = facts
-        .iter()
-        .any(|fact| fact.kind == MemberKind::Operator && !fact.is_static && !fact.is_abstract);
-    let Some(owner) = facts.first().map(|fact| &fact.declaring_type) else {
-        return false;
-    };
-    concrete
-        && match owner {
-            DeclarationIdentity::Project { name, .. } => ctx.types.is_some_and(|types| {
-                matches!(
-                    types.type_kind(name),
-                    Some(TypeKind::Class | TypeKind::MixinClass)
-                )
-            }),
-            DeclarationIdentity::Sdk { .. } => false,
-            DeclarationIdentity::Package { .. } => true,
-        }
+    facts.first().is_some_and(|fact| {
+        !matches!(&fact.declaring_type, DeclarationIdentity::Sdk { library, .. } if *library == "dart:core")
+    })
 }

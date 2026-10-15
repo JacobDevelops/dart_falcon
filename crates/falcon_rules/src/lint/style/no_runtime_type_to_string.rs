@@ -12,10 +12,14 @@
 //!
 //! Reported for `this.runtimeType`, `super.runtimeType`, or an implicit-`this`
 //! `runtimeType` getter that is either interpolated or has `toString()` called
-//! on it. Uses inside asserts, `throw` expressions, catch clauses, mixins,
-//! abstract classes, and extensions on anything other than a non-abstract
-//! class are exempt, as their runtime type is either diagnostic-only or not
-//! known to be a single concrete class.
+//! on it. Uses inside asserts, `throw` expressions, catch clauses, mixins, and
+//! abstract classes are exempt. Extension-target checks are syntactic: an
+//! unqualified named target is checked only if it names a non-abstract class
+//! declared in this file, `Object`, or one of the extension's type parameters.
+//! Non-named targets, including `dynamic`, `void`, function and record types,
+//! are checked. Falcon limitation: other named targets are exempt, including
+//! prefixed targets, external classes and `Never`; this is not a semantic test
+//! of whether the target is concrete.
 //!
 //! Adopted from the official `no_runtimeType_toString` lint.
 
@@ -76,10 +80,13 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn is_runtime_type_access(&self, expr: &Expr) -> bool {
-        match expr {
+        match expr.unparenthesized() {
             Expr::Field { object, field, .. } => {
                 field.name == "runtimeType"
-                    && matches!(object.as_ref(), Expr::This { .. } | Expr::Super { .. })
+                    && matches!(
+                        object.unparenthesized(),
+                        Expr::This { .. } | Expr::Super { .. }
+                    )
             }
             Expr::Ident(identifier) => {
                 identifier.name == "runtimeType" && self.in_type && !self.shadowed
@@ -220,7 +227,7 @@ impl Visitor for Collector<'_> {
             return;
         }
         if let Expr::Call { callee, .. } = node
-            && let Expr::Field { object, field, .. } = callee.as_ref()
+            && let Expr::Field { object, field, .. } = callee.unparenthesized()
             && field.name == "toString"
             && self.is_runtime_type_access(object)
         {

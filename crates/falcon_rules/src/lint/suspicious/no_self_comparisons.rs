@@ -3,10 +3,13 @@
 //! Getter reads, index operations, calls, and user-defined operator receivers are
 //! intentionally excluded: evaluating the same syntax twice need not produce the
 //! same value, and equality/ordering may be overloaded.
+//! A scalar read type does not establish stability: unqualified top-level and
+//! inherited getter names still execute a getter on each evaluation.
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
@@ -41,6 +44,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             left,
             right,
             span,
+            ..
         } = node
         else {
             return;
@@ -81,38 +85,122 @@ fn is_comparison(op: &BinaryOp) -> bool {
 }
 
 fn proven_scalar_value(expression: &Expr, state: &SemanticState<'_>) -> bool {
-    let syntactically_stable = match expression {
-        Expr::Ident(_)
-        | Expr::IntLit { .. }
-        | Expr::DoubleLit { .. }
-        | Expr::BoolLit { .. }
-        | Expr::NullLit { .. } => true,
-        Expr::StringLit(string) => string.interpolations.is_empty(),
-        // `++x`/`--x` mutate, so the two sides are not the same value.
-        Expr::Unary { op, operand, .. } => {
-            !matches!(op, UnaryOp::PlusPlus | UnaryOp::MinusMinus)
-                && matches!(
-                    operand.as_ref(),
-                    Expr::Ident(_) | Expr::IntLit { .. } | Expr::DoubleLit { .. }
-                )
-        }
-        _ => false,
+    let mut proof = ScalarValueProof {
+        state,
+        proven: false,
     };
-    syntactically_stable && scalar_type(&state.infer(expression))
+    proof.visit_expr(expression);
+    proof.proven
+}
+
+/// Only stable scalar leaves and non-mutating unary operations qualify.
+/// Shared traversal supplies the unary operand's proof.
+struct ScalarValueProof<'s, 'a> {
+    state: &'s SemanticState<'a>,
+    proven: bool,
+}
+
+impl Visitor for ScalarValueProof<'_, '_> {
+    fn visit_expr(&mut self, node: &Expr) {
+        let syntactically_stable = match node {
+            Expr::Ident(identifier) => self.state.is_variable_read(&identifier.name),
+            Expr::IntLit { .. }
+            | Expr::DoubleLit { .. }
+            | Expr::BoolLit { .. }
+            | Expr::NullLit { .. } => true,
+            Expr::StringLit(string) => string.interpolations.is_empty(),
+            // `++x`/`--x` mutate, so the two sides are not the same value.
+            Expr::Unary { op, operand, .. }
+                if !matches!(op, UnaryOp::PlusPlus | UnaryOp::MinusMinus)
+                    && matches!(
+                        operand.unparenthesized(),
+                        Expr::Ident(_) | Expr::IntLit { .. } | Expr::DoubleLit { .. }
+                    ) =>
+            {
+                walk_expr(self, node);
+                self.proven
+            }
+            _ => false,
+        };
+        self.proven = syntactically_stable && scalar_type(&self.state.infer(node));
+    }
 }
 
 fn scalar_type(ty: &ResolvedType) -> bool {
-    matches!(
-        ty,
-        ResolvedType::Null
-            | ResolvedType::Interface {
-                identity: DeclarationIdentity::Sdk {
-                    library: "dart:core",
-                    name: "bool" | "int" | "double" | "num" | "String",
-                },
-                ..
-            }
-    )
+    matches!(ty, ResolvedType::Null)
+        || matches!(ty, ResolvedType::Interface {
+            identity: DeclarationIdentity::Sdk { library, name }, ..
+        } if library.as_str() == "dart:core"
+            && matches!(name.as_str(), "bool" | "int" | "double" | "num" | "String"))
 }
 
 use crate::lint::expressions::normalized;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::{IdentityIndex, IdentitySource, SemanticModel, SignatureIndex, TypeIndex};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::Path;
+
+    #[test]
+    fn source_getters_are_not_stable_variable_reads() {
+        let source = r#"
+int nextId = 0;
+int get changing => nextId++;
+bool getterEqual() => changing == changing;
+bool getterUnary() => -changing == -changing;
+bool globalEqual() => nextId == nextId;
+bool parameterEqual(int changing) => changing == changing;
+bool localEqual() { final changing = 1; return changing == changing; }
+bool primitiveEqual() => -1 == -1;
+class Values {
+  int value = 0;
+  int get changing => value++;
+  bool getterEqual() => changing == changing;
+  bool getterUnary() => -changing == -changing;
+  bool fieldEqual() => value == value;
+}
+class Child extends Values {
+  bool inheritedGetterEqual() => changing == changing;
+  bool inheritedFieldEqual() => value == value;
+}
+"#;
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let path = Path::new("self_comparisons.dart");
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path,
+                program: &program,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let types = TypeIndex::from_resolved_files(
+            [(
+                path,
+                falcon_analyze::LibrarySource {
+                    program: &program,
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )],
+            &identities,
+        );
+        let model = SemanticModel::new(path, &identities, Some(&types));
+        let signatures = SignatureIndex::from_program(&program, &model);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(path, source, &config)
+            .with_identities(&identities)
+            .with_types(&types)
+            .with_signatures(&signatures);
+        let diagnostics = NoSelfComparisons.analyze(&program, &ctx);
+        let lines: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| source[..diagnostic.span.start].matches('\n').count() + 1)
+            .collect();
+        assert_eq!(lines, [6, 7, 8, 9, 15, 19], "{diagnostics:?}");
+    }
+}

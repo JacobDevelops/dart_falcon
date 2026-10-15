@@ -66,7 +66,7 @@ impl Visitor for Collector<'_> {
 }
 
 fn extractable_pattern(expr: &Expr) -> Option<&str> {
-    let Expr::StringLit(node) = expr else {
+    let Expr::StringLit(node) = expr.unparenthesized() else {
         return None;
     };
     if !node.interpolations.is_empty() {

@@ -1,12 +1,11 @@
-//! Flags `throw e` inside a `catch (e)` where `e` is exactly the caught
-//! exception.
+//! Flags `throw e` inside a `catch (e)` by matching the exception parameter's name.
 //!
 //! Re-throwing the caught object with `throw e` starts a fresh stack trace from
 //! the catch site, discarding the original point of failure and making the error
 //! far harder to trace. Use `rethrow`, which propagates the same exception with
-//! its trace intact. Reporting is conservative: a throw is flagged only where
-//! `rethrow` would be valid and refer to the same binding, so throws inside a
-//! nested closure or a nested `try`/`catch` are skipped.
+//! its trace intact. Matching is syntactic: the thrown identifier must have the
+//! exception parameter's spelling; binding identity is not resolved. Throws
+//! inside a nested closure or a nested `try`/`catch` are skipped.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
@@ -55,7 +54,7 @@ impl Visitor for Collector<'_> {
 }
 
 fn is_target(expr: &Expr, target: &str) -> bool {
-    matches!(expr, Expr::Ident(id) if id.name == target)
+    matches!(expr.unparenthesized(), Expr::Ident(id) if id.name == target)
 }
 
 /// Walks a single catch body looking for `throw <exception>`. Stops at closures and

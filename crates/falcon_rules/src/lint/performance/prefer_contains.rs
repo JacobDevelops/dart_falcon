@@ -1,10 +1,29 @@
-//! Prefers `contains` to `indexOf` comparisons used only as membership tests.
+//! Prefers `contains` to comparing the result of `indexOf` with a constant.
+//!
+//! Adopted from the official `prefer_contains` lint. The rule looks at a
+//! comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`) of an `Iterable` or `String`
+//! receiver's `indexOf(...)` call (optionally behind `as` casts) with an
+//! integer constant `<= 0` on the other side: an integer literal, a negated
+//! literal or identifier, or an identifier naming an `int` constant. When the
+//! call has exactly two arguments the second (the start index) must be the
+//! constant `0`. Comparisons with `-1` (`==`, `!=`, `<=` and `>` after
+//! normalizing the call to the left) and `0` (`>=`, `<`) are membership tests
+//! that `contains` states directly; comparisons that are always true or false
+//! (`< -1`, `>= -1`, or any comparison with a value below `-1`) are reported
+//! too. A constant on the right is preferred: when the right operand is an
+//! integer constant the left operand is not considered.
 
-use falcon_analyze::{AnalyzeContext, Rule, parse_int};
+use falcon_analyze::constant_value::{LocalConstants, Number};
+use falcon_analyze::{
+    AnalyzeContext, ConstantValue, ResolvedType, Rule, Truth, evaluate_constant_with_local_values,
+    parse_int,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+
+const RULE: &str = "prefer-contains";
 
 #[derive(Default)]
 pub struct PreferContains;
@@ -28,6 +47,13 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
+/// What a comparison of `indexOf` with a constant amounts to.
+enum Finding {
+    UseContains,
+    AlwaysFalse,
+    AlwaysTrue,
+}
+
 impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::Binary {
@@ -35,88 +61,160 @@ impl SemanticRuleVisitor for Collector<'_> {
             left,
             right,
             span,
+            ..
         } = node
         else {
             return;
         };
-        let invocation = index_of_invocation(left)
-            .filter(|_| comparison_matches(op, right, false))
-            .or_else(|| index_of_invocation(right).filter(|_| comparison_matches(op, left, true)));
-        let Some(invocation) = invocation else {
+        if !matches!(
+            op,
+            BinaryOp::EqEq
+                | BinaryOp::NotEq
+                | BinaryOp::Gt
+                | BinaryOp::GtEq
+                | BinaryOp::Lt
+                | BinaryOp::LtEq
+        ) {
             return;
-        };
-        let receiver = state.infer(invocation.receiver);
-        let is_string = receiver.interface("dart:core", "String");
-        let is_list = state
-            .signatures
-            .instantiated_supertype(&receiver, "dart:core", "List", &state.model)
-            .is_some();
-        if invocation.argument_count == 1 && (is_string || is_list) {
-            self.diags.push(self.ctx.diagnostic(
-                "prefer-contains",
-                "Use 'contains' instead of comparing the result of 'indexOf'.",
-                *span,
-            ));
         }
+        let finding = match int_value(right, state) {
+            Some(value) => (value <= 0 && unassigned_index_of(left, state))
+                .then(|| finding(value, *op))
+                .flatten(),
+            None => int_value(left, state).and_then(|value| {
+                (value <= 0 && unassigned_index_of(right, state))
+                    .then(|| finding(value, inverted(*op)))
+                    .flatten()
+            }),
+        };
+        let message = match finding {
+            Some(Finding::UseContains) => {
+                "Use 'contains' instead of comparing the result of 'indexOf'."
+            }
+            Some(Finding::AlwaysFalse) => "This comparison of 'indexOf' is always false.",
+            Some(Finding::AlwaysTrue) => "This comparison of 'indexOf' is always true.",
+            None => return,
+        };
+        self.diags.push(self.ctx.diagnostic(RULE, message, *span));
     }
 }
 
-struct IndexOfInvocation<'a> {
-    receiver: &'a Expr,
-    argument_count: usize,
-}
-
-fn index_of_invocation(expr: &Expr) -> Option<IndexOfInvocation<'_>> {
-    let Expr::Call { callee, args, .. } = expr else {
-        return None;
-    };
-    let Expr::Field {
-        object,
-        field,
-        is_null_safe: false,
-        ..
-    } = callee.as_ref()
-    else {
-        return None;
-    };
-    if field.name != "indexOf" || !args.named.is_empty() || args.positional.is_empty() {
-        return None;
-    }
-    Some(IndexOfInvocation {
-        receiver: object,
-        argument_count: args.positional.len(),
-    })
-}
-
-fn int_value(expr: &Expr) -> Option<i128> {
-    match expr {
-        Expr::IntLit { value, .. } => parse_int(value),
-        Expr::Unary {
-            op: UnaryOp::Minus,
-            operand,
-            ..
-        } => match operand.as_ref() {
-            Expr::IntLit { value, .. } => parse_int(value).and_then(i128::checked_neg),
-            _ => None,
-        },
+/// The comparison `indexOf(...) <op> value` for a `value <= 0`.
+fn finding(value: i128, op: BinaryOp) -> Option<Finding> {
+    use BinaryOp::*;
+    match (value, op) {
+        (-1, EqEq | NotEq | LtEq | Gt) | (0, GtEq | Lt) => Some(Finding::UseContains),
+        (-1, Lt) => Some(Finding::AlwaysFalse),
+        (-1, GtEq) => Some(Finding::AlwaysTrue),
+        (value, EqEq | LtEq | Lt) if value < -1 => Some(Finding::AlwaysFalse),
+        (value, NotEq | GtEq | Gt) if value < -1 => Some(Finding::AlwaysTrue),
         _ => None,
     }
 }
 
-fn comparison_matches(op: &BinaryOp, other: &Expr, swapped: bool) -> bool {
-    let Some(value) = int_value(other) else {
+/// The operator with its operands swapped.
+fn inverted(op: BinaryOp) -> BinaryOp {
+    match op {
+        BinaryOp::LtEq => BinaryOp::GtEq,
+        BinaryOp::Lt => BinaryOp::Gt,
+        BinaryOp::Gt => BinaryOp::Lt,
+        BinaryOp::GtEq => BinaryOp::LtEq,
+        op => op,
+    }
+}
+
+/// Whether `expression`, behind `as` casts, invokes `indexOf` on an explicit
+/// `Iterable` or `String` receiver, with a zero start index when it has two
+/// arguments.
+fn unassigned_index_of(mut expression: &Expr, state: &SemanticState<'_>) -> bool {
+    while let Expr::As { expr, .. } = expression.unparenthesized() {
+        expression = expr;
+    }
+    let Expr::Call { callee, args, .. } = expression.unparenthesized() else {
         return false;
     };
-    matches!(
-        (op, swapped, value),
-        (BinaryOp::EqEq | BinaryOp::NotEq, _, -1)
-            | (BinaryOp::Gt, false, -1)
-            | (BinaryOp::Lt, true, -1)
-            | (BinaryOp::GtEq, false, 0)
-            | (BinaryOp::LtEq, true, 0)
-            | (BinaryOp::Lt, false, 0)
-            | (BinaryOp::Gt, true, 0)
-            | (BinaryOp::LtEq, false, -1)
-            | (BinaryOp::GtEq, true, -1)
-    )
+    let Expr::Field { object, field, .. } = callee.unparenthesized() else {
+        return false;
+    };
+    if field.name != "indexOf" {
+        return false;
+    }
+    let receiver = state.infer(object);
+    if state
+        .signatures
+        .interface_check_sdk(&receiver, "dart:core", "Iterable", &state.model)
+        != Truth::Yes
+        && state
+            .signatures
+            .interface_check_sdk(&receiver, "dart:core", "String", &state.model)
+            != Truth::Yes
+    {
+        return false;
+    }
+    let mut arguments = args
+        .positional
+        .iter()
+        .chain(args.named.iter().map(|argument| &argument.value));
+    match (arguments.next(), arguments.next(), arguments.next()) {
+        (Some(_), Some(start), None) => int_value(start, state) == Some(0),
+        _ => true,
+    }
+}
+
+/// The linter's `getIntValue`: an integer literal or an identifier naming an
+/// integer constant, optionally negated.
+fn int_value(expression: &Expr, state: &SemanticState<'_>) -> Option<i128> {
+    match expression.unparenthesized() {
+        Expr::Unary {
+            op: UnaryOp::Minus,
+            operand,
+            ..
+        } => unsigned_int_value(operand, state)?.checked_neg(),
+        expression => unsigned_int_value(expression, state),
+    }
+}
+
+fn unsigned_int_value(expression: &Expr, state: &SemanticState<'_>) -> Option<i128> {
+    match expression.unparenthesized() {
+        Expr::IntLit { value, .. } => parse_int(value),
+        Expr::Ident(identifier) => {
+            let constants = state.local_constant_values();
+            if (state.environment.is_bound(&identifier.name)
+                && !constants.contains_key(identifier.name.as_str()))
+                || !is_int_constant(expression, &identifier.name, state)
+            {
+                return None;
+            }
+            match evaluate_constant_with_local_values(
+                expression,
+                None,
+                LocalConstants {
+                    values: &constants,
+                    types: &state.local_constant_types(),
+                },
+                &state.model,
+                &state.signatures,
+            )? {
+                ConstantValue::Number(Number::Int(value)) => Some(value),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Whether the identifier `expression` names a constant of static type `int`
+/// (the evaluator folds integral doubles into integers, so `-1.0` must be told
+/// apart here).
+fn is_int_constant(expression: &Expr, name: &str, state: &SemanticState<'_>) -> bool {
+    let declared = state.infer(expression);
+    if declared.interface("dart:core", "int") {
+        return true;
+    }
+    matches!(declared, ResolvedType::Unknown)
+        && state
+            .model
+            .resolve_value(name)
+            .and_then(|identity| state.signatures.constant_initializer(&identity))
+            .is_some_and(|initializer| state.infer(initializer).interface("dart:core", "int"))
 }

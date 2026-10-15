@@ -2,9 +2,11 @@
 //!
 //! For an `int` `x`, `x % 2 == 0` is `x.isEven` and `x % 2 == 1` is `x.isOdd`;
 //! the getters say what is meant. The rule fires on `==` whose left operand is
-//! `<expr> % 2` with static type `int` and whose right operand is the literal `0`
-//! or `1`. Comparisons in a constant context, and in the assert initializers of a
-//! `const` constructor, are exempt because `isEven` is not a constant expression.
+//! `<expr> % 2` with static type `int` and whose right operand is an integer
+//! literal: `0` suggests `isEven`, any other literal `isOdd` (the official rule
+//! does not check the value). Comparisons in a constant context (parameter
+//! default values are not one), and in the assert initializers of a `const`
+//! constructor, are exempt because `isEven` is not a constant expression.
 //!
 //! Adopted from the official `use_is_even_rather_than_modulo` lint.
 
@@ -12,8 +14,9 @@ use falcon_analyze::{AnalyzeContext, Rule, parse_int};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
+use crate::lint::const_eval::ConstContexts;
+use crate::lint::const_eval::ConstructorConstContexts as ConstConstructorAsserts;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
-use crate::lint::style::use_named_constants::ConstContexts;
 
 #[derive(Default)]
 pub struct UseIsEvenRatherThanModulo;
@@ -26,7 +29,8 @@ impl Rule for UseIsEvenRatherThanModulo {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
-            contexts: ConstContexts::new(program),
+            contexts: ConstContexts::of(program),
+            asserts: ConstConstructorAsserts::new(program),
         };
         visit_program(&mut collector, program, state);
         collector.diags
@@ -37,6 +41,7 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
     contexts: ConstContexts,
+    asserts: ConstConstructorAsserts,
 }
 
 fn int_literal(expr: &Expr) -> Option<i128> {
@@ -53,14 +58,10 @@ impl SemanticRuleVisitor for Collector<'_> {
             left,
             right,
             span,
+            ..
         } = node
         else {
             return;
-        };
-        let getter = match int_literal(right) {
-            Some(0) => "isEven",
-            Some(1) => "isOdd",
-            _ => return,
         };
         let Expr::Binary {
             op: BinaryOp::Mod,
@@ -70,10 +71,15 @@ impl SemanticRuleVisitor for Collector<'_> {
         else {
             return;
         };
+        let getter = match int_literal(right) {
+            Some(0) => "isEven",
+            Some(_) => "isOdd",
+            None => return,
+        };
         if int_literal(divisor) != Some(2)
             || !state.infer(left).interface("dart:core", "int")
             || self.contexts.contains(span)
-            || self.contexts.in_const_constructor_assert(span)
+            || self.asserts.in_const_constructor_assert(span)
         {
             return;
         }

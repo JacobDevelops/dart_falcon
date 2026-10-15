@@ -1,18 +1,28 @@
 //! Requires `@override` on members that override an inherited declaration.
+//!
+//! Adopted from the official `annotate_overrides` lint.
+//! An instance method, operator, getter, setter, or field of a class, mixin
+//! class, enum, or mixin
+//! is reported when its inherited interface has a combined member signature
+//! for that name — a getter for fields and getters, a setter for setters.
+//! Conflicting inherited signatures with no most-specific existing candidate
+//! do not count, even when this declaration validly overrides all candidates.
+//! Extension-type members are never checked. Unloaded dependency signatures
+//! remain unknown rather than being inferred from member names.
+//!
+//! Declaring `var`/`final` primary-constructor parameters are also instance
+//! fields and are checked as such.
 
-use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberFacts, MemberKind, Rule, SemanticModel,
-    SignatureIndex,
-};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, MemberKind, Rule, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use super::override_members::override_member_owners;
+use crate::lint::declarations::annotation;
+use crate::lint::declarations::operator_token_span;
+use crate::lint::inherited_members::inheriting_declarations;
 
 #[derive(Default)]
 pub struct AnnotateOverrides;
-
-type Candidate<'a> = (&'a str, &'a Span, &'a [Annotation], MemberKind);
 
 impl Rule for AnnotateOverrides {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
@@ -21,104 +31,104 @@ impl Rule for AnnotateOverrides {
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
-        for (name, members) in override_member_owners(program) {
-            check_members(
-                model.resolve_name(name),
-                members,
-                signatures,
-                ctx,
-                &mut diags,
-            );
-        }
-        diags
-    }
-}
-
-fn has_override(annotations: &[Annotation]) -> bool {
-    annotations.iter().any(|annotation| {
-        annotation
-            .name
-            .last()
-            .is_some_and(|name| name.name == "override")
-    })
-}
-
-fn check_members(
-    owner: Option<DeclarationIdentity>,
-    members: &[ClassMember],
-    signatures: &SignatureIndex,
-    ctx: &AnalyzeContext,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let Some(owner) = owner else {
-        return;
-    };
-    for member in members {
-        let candidates: Vec<Candidate<'_>> = match member {
-            ClassMember::Field(field) if !field.is_static => field
-                .declarators
-                .iter()
-                .map(|declarator| {
-                    (
-                        declarator.name.name.as_str(),
-                        &declarator.name.span,
-                        field.annotations.as_slice(),
-                        MemberKind::field(field),
-                    )
-                })
-                .collect(),
-            ClassMember::Method(method) if !method.is_static => vec![(
-                method.name.name.as_str(),
-                &method.name.span,
-                method.annotations.as_slice(),
-                MemberKind::Method,
-            )],
-            ClassMember::Getter(getter) if !getter.is_static => vec![(
-                getter.name.name.as_str(),
-                &getter.name.span,
-                getter.annotations.as_slice(),
-                MemberKind::Getter,
-            )],
-            ClassMember::Setter(setter) if !setter.is_static => vec![(
-                setter.name.name.as_str(),
-                &setter.name.span,
-                setter.annotations.as_slice(),
-                MemberKind::Setter,
-            )],
-            ClassMember::Operator(operator) => vec![(
-                operator.op.as_str(),
-                &operator.span,
-                operator.annotations.as_slice(),
-                MemberKind::Operator,
-            )],
-            ClassMember::Field(_)
-            | ClassMember::Constructor(_)
-            | ClassMember::Method(_)
-            | ClassMember::Getter(_)
-            | ClassMember::Setter(_)
-            | ClassMember::Error(_) => Vec::new(),
-        };
-        for (name, span, annotations, kind) in candidates {
-            let overrides = signatures
-                .inherited_member_facts(&owner, name)
-                .is_some_and(|facts| facts.iter().any(|fact| compatible(kind, fact)));
-            if !has_override(annotations) && overrides {
+        let mut report = |owner: &DeclarationIdentity, name: &str, kind: MemberKind, span: Span| {
+            let overrides = signatures.has_combined_inherited_member(owner, name, kind, &model);
+            if overrides {
                 diags.push(ctx.diagnostic(
                     "annotate-overrides",
                     "Annotate overridden members with '@override'.",
-                    *span,
+                    span,
                 ));
             }
+        };
+        for declaration in inheriting_declarations(program) {
+            let Some(owner) = model.resolve_name(&*declaration.name.name) else {
+                continue;
+            };
+            for member in declaration.members {
+                match member {
+                    ClassMember::Field(field)
+                        if !field.is_static && !annotation(&field.annotations, "override") =>
+                    {
+                        for declarator in &field.declarators {
+                            report(
+                                &owner,
+                                &declarator.name.name,
+                                MemberKind::field(field),
+                                declarator.name.span,
+                            );
+                        }
+                    }
+                    ClassMember::Method(method)
+                        if !method.is_static && !annotation(&method.annotations, "override") =>
+                    {
+                        report(
+                            &owner,
+                            &method.name.name,
+                            MemberKind::Method,
+                            method.name.span,
+                        );
+                    }
+                    ClassMember::Getter(getter)
+                        if !getter.is_static && !annotation(&getter.annotations, "override") =>
+                    {
+                        report(
+                            &owner,
+                            &getter.name.name,
+                            MemberKind::Getter,
+                            getter.name.span,
+                        );
+                    }
+                    ClassMember::Setter(setter)
+                        if !setter.is_static && !annotation(&setter.annotations, "override") =>
+                    {
+                        report(
+                            &owner,
+                            &setter.name.name,
+                            MemberKind::Setter,
+                            setter.name.span,
+                        );
+                    }
+                    ClassMember::Operator(operator)
+                        if !annotation(&operator.annotations, "override") =>
+                    {
+                        report(
+                            &owner,
+                            operator.lookup_name(),
+                            MemberKind::Operator,
+                            operator_token_span(operator, ctx.source),
+                        );
+                    }
+                    ClassMember::Field(_)
+                    | ClassMember::Method(_)
+                    | ClassMember::Getter(_)
+                    | ClassMember::Setter(_)
+                    | ClassMember::Operator(_)
+                    | ClassMember::Constructor(_)
+                    | ClassMember::PrimaryConstructorBody(_)
+                    | ClassMember::Error(_) => {}
+                }
+            }
+            // Declaring `var`/`final` primary-constructor parameters are fields.
+            for param in (EffectiveMembers {
+                declared: declaration.members,
+                primary: declaration.primary_constructor,
+                representation: false,
+            }
+            .declaring_params()
+            .filter(|param| !annotation(&param.annotations, "override")))
+            {
+                report(
+                    &owner,
+                    &param.name.name,
+                    MemberKind::Field {
+                        writable: param.is_var,
+                        covariant: param.is_covariant,
+                    },
+                    param.name.span,
+                );
+            }
         }
-    }
-}
-
-fn compatible(declared: MemberKind, inherited: &MemberFacts) -> bool {
-    match declared {
-        MemberKind::Method | MemberKind::Operator => inherited.kind == declared,
-        _ => {
-            (declared.has_getter() && inherited.kind.has_getter())
-                || (declared.has_setter() && inherited.kind.has_setter())
-        }
+        diags
     }
 }

@@ -1171,7 +1171,10 @@ fn test_expr_as_cast() {
             let Stmt::Expr(es) = &b.stmts[0] else {
                 panic!("expected expr stmt")
             };
-            assert!(matches!(&es.expr, Expr::As { .. }));
+            let Expr::Paren { expr, .. } = &es.expr else {
+                panic!("expected parenthesized expression")
+            };
+            assert!(matches!(expr.as_ref(), Expr::As { .. }));
         }
         _ => panic!("expected block body"),
     }

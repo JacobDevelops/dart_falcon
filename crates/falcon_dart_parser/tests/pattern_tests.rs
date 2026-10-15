@@ -35,6 +35,54 @@ fn first_case(sw: &SwitchStmt) -> (&Pattern, &Option<Box<Expr>>) {
 }
 
 #[test]
+fn dynamic_type_literal_is_a_constant_pattern() {
+    let (sw, errs) = parse_switch("case dynamic: break;");
+    assert_eq!(errs, 0, "switch: {sw:?}");
+    let (pat, _) = first_case(&sw);
+    assert!(
+        matches!(
+            pat,
+            Pattern::Const(ConstPattern {
+                value: ConstPatternValue::Name(name),
+                ..
+            }) if matches!(name.as_slice(), [identifier] if identifier.name == "dynamic"
+                && identifier.span.end - identifier.span.start == "dynamic".len())
+        ),
+        "expected a dynamic constant pattern, got {pat:?}"
+    );
+}
+
+#[test]
+fn dynamic_typed_patterns_keep_their_bindings() {
+    for (source, wildcard) in [
+        ("case dynamic value: break;", false),
+        ("case dynamic _: break;", true),
+    ] {
+        let (sw, errs) = parse_switch(source);
+        assert_eq!(errs, 0, "switch: {sw:?}");
+        let (pat, _) = first_case(&sw);
+        if wildcard {
+            assert!(
+                matches!(
+                    pat,
+                    Pattern::Wildcard {
+                        type_: Some(DartType::Dynamic { .. }),
+                        ..
+                    }
+                ),
+                "got {pat:?}"
+            );
+        } else {
+            assert!(
+                matches!(pat, Pattern::Variable { type_: Some(DartType::Dynamic { .. }), name, .. }
+                    if name.name == "value"),
+                "got {pat:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn guard_after_dotted_constant_pattern() {
     let (sw, errs) = parse_switch("case State.a when c: break;");
     assert_eq!(errs, 0, "switch: {sw:?}");
@@ -127,7 +175,7 @@ fn const_parenthesized_expression_pattern() {
             ..
         }) => {
             assert!(
-                matches!(expr.as_ref(), Expr::Binary { .. }),
+                matches!(expr.unparenthesized(), Expr::Binary { .. }),
                 "expected a binary expr, got {:?}",
                 expr
             );
@@ -290,6 +338,26 @@ fn object_pattern_multiple_shorthands() {
                     f.pattern
                 );
             }
+        }
+        other => panic!("expected Object pattern, got {other:?}"),
+    }
+}
+
+#[test]
+fn object_pattern_shorthand_infers_name_through_unary_patterns() {
+    let (sw, errs) = parse_switch("case Foo(:final a?, :b!, :var c as int): break;");
+    assert_eq!(errs, 0, "switch: {sw:?}");
+    let (pat, _) = first_case(&sw);
+    match pat {
+        Pattern::Object(op) => {
+            let names: Vec<&str> = op.fields.iter().map(|f| f.name.name.as_str()).collect();
+            assert_eq!(names, ["a", "b", "c"]);
+            assert!(
+                matches!(&op.fields[0].pattern, Some(Pattern::NullCheck { inner, .. })
+                    if matches!(&**inner, Pattern::Variable { name, .. } if name.name == "a")),
+                "got {:?}",
+                op.fields[0].pattern
+            );
         }
         other => panic!("expected Object pattern, got {other:?}"),
     }
@@ -539,7 +607,7 @@ fn const_parenthesised_expr_pattern_still_single() {
             value: ConstPatternValue::Expr(expr),
             ..
         }) => assert!(
-            matches!(expr.as_ref(), Expr::Binary { .. }),
+            matches!(expr.unparenthesized(), Expr::Binary { .. }),
             "expected single binary expr, got {:?}",
             expr
         ),
@@ -622,4 +690,80 @@ fn single_string_pattern_unaffected() {
     let (sw, errs) = parse_switch("case 'foo': break;");
     assert_eq!(errs, 0, "switch: {sw:?}");
     assert_eq!(first_case_string(&sw), "foo");
+}
+
+#[test]
+fn switch_expression_member_access_constant_with_guard() {
+    let (stmts, errs) = parse_body(
+        "final v = switch (s) { \"Lax\".length when ok(s) => 1, 'x'.length => 2, _ => 3 };",
+        "",
+    );
+    assert_eq!(errs, 0, "{stmts:?}");
+    assert!(matches!(&stmts[0], Stmt::LocalVar(_)));
+}
+
+#[test]
+fn switch_case_member_access_constant_with_guard() {
+    let (sw, errs) = parse_switch("case 'Lax'.length when c: break;");
+    assert_eq!(errs, 0);
+    let (_, guard) = first_case(&sw);
+    assert!(guard.is_some());
+}
+
+#[test]
+fn object_pattern_declaration_binds_getter_shorthand() {
+    let (stmts, errs) = parse_body("final AsyncError(:error) = result; use(error);", "");
+    assert_eq!(errs, 0, "stmts: {stmts:?}");
+    assert_eq!(stmts.len(), 2, "must preserve the following statement");
+    let Stmt::PatternDecl(decl) = &stmts[0] else {
+        panic!("expected pattern declaration, got {:?}", stmts[0]);
+    };
+    assert_eq!(decl.keyword, VarKeyword::Final);
+    let Pattern::Object(object) = &decl.pattern else {
+        panic!("expected object pattern, got {:?}", decl.pattern);
+    };
+    let DartType::Named(ty) = &object.type_ else {
+        panic!("expected named type, got {:?}", object.type_);
+    };
+    assert_eq!(ty.segments[0].name, "AsyncError");
+    assert_eq!(object.fields.len(), 1);
+    assert_eq!(object.fields[0].name.name, "error");
+    assert!(
+        matches!(&object.fields[0].pattern, Some(Pattern::Variable { name, .. }) if name.name == "error")
+    );
+    assert!(matches!(&decl.init, Expr::Ident(name) if name.name == "result"));
+    assert!(matches!(&stmts[1], Stmt::Expr(_)));
+}
+
+#[test]
+fn var_qualified_generic_object_pattern_declaration() {
+    let (stmts, errs) = parse_body("var prefix.Box<int>(:value) = result; use(value);", "");
+    assert_eq!(errs, 0, "stmts: {stmts:?}");
+    assert_eq!(stmts.len(), 2, "must preserve the following statement");
+    let Stmt::PatternDecl(decl) = &stmts[0] else {
+        panic!("expected pattern declaration, got {:?}", stmts[0]);
+    };
+    assert_eq!(decl.keyword, VarKeyword::Var);
+    let Pattern::Object(object) = &decl.pattern else {
+        panic!("expected object pattern, got {:?}", decl.pattern);
+    };
+    let DartType::Named(ty) = &object.type_ else {
+        panic!("expected named type, got {:?}", object.type_);
+    };
+    assert_eq!(
+        ty.segments
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>(),
+        ["prefix", "Box"]
+    );
+    assert_eq!(ty.type_args.len(), 1);
+    assert!(matches!(&ty.type_args[0], DartType::Named(arg) if arg.segments[0].name == "int"));
+    assert_eq!(object.fields.len(), 1);
+    assert_eq!(object.fields[0].name.name, "value");
+    assert!(
+        matches!(&object.fields[0].pattern, Some(Pattern::Variable { name, .. }) if name.name == "value")
+    );
+    assert!(matches!(&decl.init, Expr::Ident(name) if name.name == "result"));
+    assert!(matches!(&stmts[1], Stmt::Expr(_)));
 }

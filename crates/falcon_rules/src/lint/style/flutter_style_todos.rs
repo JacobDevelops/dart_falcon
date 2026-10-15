@@ -17,11 +17,12 @@
 use std::sync::LazyLock;
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::Program;
 use falcon_syntax::token::TokenKind;
 use regex::Regex;
+
+use crate::lint::tokens::comment_tokens;
 
 static TODO: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^//+\s*TODO\b").expect("valid TODO regex"));
@@ -35,8 +36,7 @@ pub struct FlutterStyleTodos;
 
 impl Rule for FlutterStyleTodos {
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        Lexer::new(ctx.source)
-            .tokenize()
+        comment_tokens(ctx)
             .into_iter()
             .filter(|token| matches!(token.kind, TokenKind::LineComment | TokenKind::DocComment))
             .filter(|token| {

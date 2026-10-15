@@ -16,7 +16,7 @@ impl Rule for PreferUnderscoreForUnusedCallbackParameters {
         for_each_expr_in_program(program, |node| {
             if let Expr::FuncExpr {
                 params, body, span, ..
-            } = node
+            } = node.unparenthesized()
             {
                 let used = used_parameters(params, body);
                 if params.params.iter().any(|param| {

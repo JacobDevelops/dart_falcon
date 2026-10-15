@@ -57,8 +57,7 @@ impl Collector<'_> {
         let CollectionElement::Expr(Expr::StringLit(string)) = element else {
             return None;
         };
-        (string.is_adjacent && !is_parenthesized(self.ctx.source, string.span))
-            .then_some(string.span)
+        string.is_adjacent.then_some(string.span)
     }
 
     fn check(&mut self, element: &CollectionElement) {
@@ -125,17 +124,6 @@ impl Collector<'_> {
             }
         }
     }
-}
-
-/// Whether `span` is wrapped in parentheses; the parser drops them from the AST.
-fn is_parenthesized(source: &str, span: Span) -> bool {
-    let before = source
-        .get(..span.start)
-        .and_then(|text| text.trim_end().chars().next_back());
-    let after = source
-        .get(span.end..)
-        .and_then(|text| text.trim_start().chars().next());
-    before == Some('(') && after == Some(')')
 }
 
 impl Visitor for Collector<'_> {

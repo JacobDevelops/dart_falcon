@@ -37,9 +37,9 @@ struct Collector<'s> {
 /// The receiver of a direct member access, index, or method call — the part
 /// that `?.` would guard.
 fn access_receiver(expr: &Expr) -> Option<&Expr> {
-    match expr {
+    match expr.unparenthesized() {
         Expr::Field { object, .. } | Expr::Index { object, .. } => Some(object),
-        Expr::Call { callee, .. } => match callee.as_ref() {
+        Expr::Call { callee, .. } => match callee.unparenthesized() {
             Expr::Field { object, .. } | Expr::Index { object, .. } => Some(object),
             _ => None,
         },
@@ -64,7 +64,7 @@ impl Visitor for Collector<'_> {
             } else {
                 (else_expr, then_expr)
             };
-            if matches!(null_branch.as_ref(), Expr::NullLit { .. })
+            if matches!(null_branch.unparenthesized(), Expr::NullLit { .. })
                 && let Some(receiver) = access_receiver(access_branch)
                 && text(receiver, self.source) == text(operand, self.source)
             {

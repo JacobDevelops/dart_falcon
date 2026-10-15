@@ -34,7 +34,7 @@ impl Rule for UseDesignSystemItem {
 
         let mut diags = Vec::new();
         falcon_syntax::visitor::for_each_expr_in_program(program, |expr| {
-            let construction = match expr {
+            let construction = match expr.unparenthesized() {
                 Expr::New { .. } => crate::lint::flutter::widget_construction(expr)
                     .map(|(name, _, span)| (name, span)),
                 Expr::Call { callee, span, .. } => {
@@ -69,10 +69,10 @@ fn parse_config_items<'a>(ctx: &'a AnalyzeContext<'_>) -> Vec<(&'a str, Option<&
 }
 
 fn callee_base_name(mut callee: &Expr) -> Option<&str> {
-    while let Expr::Call { callee: inner, .. } = callee {
+    while let Expr::Call { callee: inner, .. } = callee.unparenthesized() {
         callee = inner;
     }
-    match callee {
+    match callee.unparenthesized() {
         Expr::Ident(id) => Some(id.name.as_str()),
         _ => None,
     }

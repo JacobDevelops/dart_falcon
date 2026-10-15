@@ -195,7 +195,7 @@ fn test_formal_param_optional() {
 
 #[test]
 fn test_formal_param_multiple_kinds() {
-    let src = "void foo(int a, [int b], {int c}) {}";
+    let src = "void foo(int a, {int c}) {}";
     let (prog, errors) = parse(src);
     assert!(errors.is_empty());
 
@@ -203,17 +203,11 @@ fn test_formal_param_multiple_kinds() {
         panic!("expected function")
     };
     let params = &fun.params().unwrap().params;
-    assert_eq!(params.len(), 3);
+    assert_eq!(params.len(), 2);
     assert_eq!(params[0].kind, ParamKind::Positional);
-    assert_eq!(params[1].kind, ParamKind::OptionalPositional);
-    assert_eq!(params[2].kind, ParamKind::Named { required: false });
-    assert_eq!(
-        params
-            .iter()
-            .map(|param| param.name.name.as_str())
-            .collect::<Vec<_>>(),
-        ["a", "b", "c"]
-    );
+    assert_eq!(params[1].kind, ParamKind::Named { required: false });
+    // Optional-positional and named groups cannot both appear.
+    assert!(!parse("void foo(int a, [int b], {int c}) {}").1.is_empty());
 }
 
 #[test]
@@ -682,5 +676,330 @@ fn statement_loops_share_complete_headers() {
         assert_eq!(actual, kind);
         assert_eq!(statement.header.updates.len(), updates);
         assert_eq!(statement.header.condition.is_some(), updates != 0);
+    }
+}
+
+#[test]
+fn grouping_parentheses_and_operator_spans_are_preserved() {
+    let source = "var value = (( /* why */ 1)) == 2;";
+    let (program, errors) = parse(source);
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
+        panic!("expected variable");
+    };
+    let Expr::Binary { left, op_span, .. } = variable.declarators[0].initializer.as_ref().unwrap()
+    else {
+        panic!("expected binary");
+    };
+    assert_eq!(&source[op_span.start..op_span.end], "==");
+    let Expr::Paren { expr, span } = left.as_ref() else {
+        panic!("expected outer parentheses");
+    };
+    assert_eq!(&source[span.start..span.end], "(( /* why */ 1))");
+    assert!(matches!(expr.as_ref(), Expr::Paren { .. }));
+    assert!(matches!(left.unparenthesized(), Expr::IntLit { .. }));
+}
+
+#[test]
+fn cascade_index_assignments_have_distinct_syntax() {
+    let (program, errors) = parse("var value = target..field /* [ */ = 1..[index] = 2;");
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
+        panic!("expected variable");
+    };
+    let Expr::Cascade { sections, .. } = variable.declarators[0].initializer.as_ref().unwrap()
+    else {
+        panic!("expected cascade");
+    };
+    assert!(matches!(sections[0].ops[0], CascadeOp::Assign(..)));
+    assert!(matches!(sections[1].ops[0], CascadeOp::IndexAssign(..)));
+}
+
+#[test]
+fn shared_visitor_observes_each_effective_constructor_once() {
+    use falcon_syntax::visitor::Visitor;
+
+    #[derive(Default)]
+    struct Constructors {
+        primary: usize,
+        ordinary: usize,
+        bodies: usize,
+        defaults: usize,
+    }
+    impl Visitor for Constructors {
+        fn visit_constructor(&mut self, constructor: ConstructorRef<'_>) {
+            if constructor.is_primary {
+                self.primary += 1;
+            } else {
+                self.ordinary += 1;
+            }
+            self.bodies += usize::from(constructor.body.is_some());
+        }
+
+        fn visit_expr(&mut self, expression: &Expr) {
+            if matches!(expression, Expr::IntLit { value, .. } if value == "42") {
+                self.defaults += 1;
+            }
+            falcon_syntax::visitor::walk_expr(self, expression);
+        }
+    }
+
+    let source = "class C([int x = 42]) { this {} C.other() : this(); } \
+        mixin class M() {} \
+        enum E([int x = 42]) { first; } \
+        extension type X(int value) { X.other(this.value); }";
+    let (program, errors) = parse(source);
+    assert!(errors.is_empty(), "{errors:?}");
+    let mut visitor = Constructors::default();
+    visitor.visit_program(&program);
+    assert_eq!(visitor.primary, 4);
+    assert_eq!(visitor.ordinary, 2);
+    assert_eq!(visitor.bodies, 1);
+    assert_eq!(visitor.defaults, 2);
+}
+
+#[test]
+fn expression_spans_end_at_consumed_tokens_not_following_trivia() {
+    for expression in [
+        "(target)",
+        "target.field",
+        "target[0]",
+        "target.method(1)",
+        "target + 1",
+        "target..method()()",
+        "a < b >> c",
+    ] {
+        let source = format!("var value = {expression} /* trailing */ \n;");
+        let (program, errors) = parse(&source);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+        let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
+            panic!("expected variable");
+        };
+        let initializer = variable.declarators[0].initializer.as_ref().unwrap();
+        let start = "var value = ".len();
+        assert_eq!(
+            (initializer.span().start, initializer.span().end),
+            (start, start + expression.len()),
+            "{source}",
+        );
+    }
+}
+
+#[test]
+fn nested_type_spans_end_after_each_consumed_shift_token_delimiter() {
+    for names in [
+        &["List<List<int>>", "List<int>", "int"][..],
+        &[
+            "List<List<List<int>>>",
+            "List<List<int>>",
+            "List<int>",
+            "int",
+        ][..],
+    ] {
+        let source = format!("{} /* trailing */ value;", names[0]);
+        let (program, errors) = parse(&source);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+        let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
+            panic!("expected variable");
+        };
+        let mut ty = variable.var_type.as_ref().unwrap();
+        for expected in names {
+            let DartType::Named(named) = ty else {
+                panic!("expected named type");
+            };
+            assert_eq!(&source[named.span.start..named.span.end], *expected);
+            if let Some(argument) = named.type_args.first() {
+                ty = argument;
+            }
+        }
+    }
+}
+
+#[test]
+fn cascade_chained_invocations_preserve_type_arguments_and_delimiters() {
+    let source = "var value = target..method()()<int>(1)..[0]() /* trailing */ ;";
+    let (program, errors) = parse(source);
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
+        panic!("expected variable");
+    };
+    let Expr::Cascade { sections, .. } = variable.declarators[0].initializer.as_ref().unwrap()
+    else {
+        panic!("expected cascade");
+    };
+    assert_eq!(sections.len(), 2);
+    assert!(matches!(
+        sections[0].ops.as_slice(),
+        [
+            CascadeOp::Call(name, _, _),
+            CascadeOp::Invoke(first_types, _),
+            CascadeOp::Invoke(second_types, _),
+        ] if name.name == "method" && first_types.is_empty() && second_types.len() == 1
+    ));
+    assert!(matches!(
+        sections[1].ops.as_slice(),
+        [CascadeOp::Index { .. }, CascadeOp::Invoke(types, _)] if types.is_empty()
+    ));
+    assert_eq!(
+        &source[sections[0].span.start..sections[0].span.end],
+        "..method()()<int>(1)",
+    );
+    assert_eq!(
+        &source[sections[1].span.start..sections[1].span.end],
+        "..[0]()",
+    );
+    let CascadeOp::Invoke(types, args) = &sections[0].ops[2] else {
+        unreachable!();
+    };
+    assert_eq!(&source[args.span.start..args.span.end], "(1)");
+    assert_eq!(&source[types[0].span().start..types[0].span().end], "int");
+    let CascadeOp::Index { span, .. } = &sections[1].ops[0] else {
+        unreachable!();
+    };
+    assert_eq!(&source[span.start..span.end], "[0]");
+}
+
+#[test]
+fn legacy_typedef_function_span_ends_at_parameter_closure() {
+    for declaration in ["typedef void F(int x);", "typedef F(int x);"] {
+        let source = format!("{declaration} /* trailing trivia */\n\nvoid next() {{}}");
+        let (program, errors) = parse(&source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::TypeAlias(alias) = &program.declarations[0] else {
+            panic!("expected typedef");
+        };
+        let DartType::Function(function) = &alias.aliased else {
+            panic!("expected synthesized function type");
+        };
+        let start = "typedef ".len();
+        let end = declaration.len() - 1;
+        assert_eq!(function.span, Span::new(start, end));
+        assert_eq!(alias.span, Span::new(0, declaration.len()));
+        assert_eq!(alias.legacy_params.as_ref().unwrap().span.end, end);
+    }
+}
+
+#[test]
+fn local_variable_spans_preserve_attached_documentation_and_metadata() {
+    for (documentation, first_documentation) in [
+        ("/// first\n/// second\n", "/// first"),
+        ("/// first\n// ordinary\n", "/// first"),
+        ("/** first */\n/** second */\n", "/** second */"),
+        ("/// first\n// ordinary\n/// second\n", "/// first"),
+        ("", "@deprecated"),
+    ] {
+        let source = format!("void f() {{\n{documentation}@deprecated\nfinal value = 1;\n}}");
+        let (program, errors) = parse(&source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            panic!("expected function");
+        };
+        let Some(FunctionBody::Block(body)) = &function.body else {
+            panic!("expected block body");
+        };
+        let Stmt::LocalVar(declaration) = &body.stmts[0] else {
+            panic!("expected local variable");
+        };
+        assert_eq!(declaration.annotations.len(), 1);
+        assert_eq!(
+            declaration.span,
+            Span::new(
+                source.find(first_documentation).unwrap(),
+                source.find(";\n}").unwrap() + 1,
+            )
+        );
+    }
+}
+
+#[test]
+fn local_variable_keyword_spans_are_consumed_tokens_not_documentation_words() {
+    for (declaration, keyword) in [
+        ("var value = 1;", Some("var")),
+        ("final value = 1;", Some("final")),
+        ("const value = 1;", Some("const")),
+        ("late /* final */ final int value = 1;", Some("final")),
+        ("late var value = 1;", Some("var")),
+        ("late int value = 1;", None),
+        ("int value = 1;", None),
+    ] {
+        let source = format!(
+            "void f() {{\n/// Documentation mentioning var final const.\n@deprecated\n{declaration}\n}}"
+        );
+        let (program, errors) = parse(&source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            panic!("expected function");
+        };
+        let Some(FunctionBody::Block(body)) = &function.body else {
+            panic!("expected block body");
+        };
+        let Stmt::LocalVar(declaration) = &body.stmts[0] else {
+            panic!("expected local variable");
+        };
+        let expected = keyword.map(|keyword| {
+            let start = source.rfind(keyword).unwrap();
+            Span::new(start, start + keyword.len())
+        });
+        assert_eq!(declaration.keyword_span, expected);
+        assert_eq!(declaration.span.start, source.find("///").unwrap());
+    }
+}
+
+#[test]
+fn for_loop_local_variable_keyword_spans_distinguish_keywordless_types() {
+    for (declaration, keyword) in [
+        ("var value = 1", Some("var")),
+        ("final value = 1", Some("final")),
+        ("const value = 1", Some("const")),
+        ("late /* final */ final int value = 1", Some("final")),
+        ("late int value = 1", None),
+        ("int value = 1", None),
+    ] {
+        let source = format!("void f() {{ for ({declaration}; false;) {{}} }}");
+        let (program, errors) = parse(&source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            panic!("expected function");
+        };
+        let Some(FunctionBody::Block(body)) = &function.body else {
+            panic!("expected block body");
+        };
+        let Stmt::For(statement) = &body.stmts[0] else {
+            panic!("expected for statement");
+        };
+        let Some(ForInit::VarDecl(declaration)) = &statement.header.init else {
+            panic!("expected local for initializer");
+        };
+        let expected = keyword.map(|keyword| {
+            let start = source.rfind(keyword).unwrap();
+            Span::new(start, start + keyword.len())
+        });
+        assert_eq!(declaration.keyword_span, expected);
+    }
+}
+
+#[test]
+fn pattern_declaration_keyword_span_is_the_consumed_token() {
+    for (declaration, keyword) in [
+        ("@pragma('final') final (a, b) = (1, 2);", "final"),
+        ("@pragma('var') var [c, d] = [1, 2];", "var"),
+    ] {
+        let source =
+            format!("void f() {{\n/// Documentation mentioning var final.\n{declaration}\n}}");
+        let (program, errors) = parse(&source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            panic!("expected function");
+        };
+        let Some(FunctionBody::Block(body)) = &function.body else {
+            panic!("expected block body");
+        };
+        let Stmt::PatternDecl(parsed) = &body.stmts[0] else {
+            panic!("expected pattern declaration");
+        };
+        let start = source.find(declaration).unwrap()
+            + declaration.find(&format!(") {keyword} ")).unwrap()
+            + 2;
+        assert_eq!(parsed.keyword_span, Span::new(start, start + keyword.len()));
     }
 }

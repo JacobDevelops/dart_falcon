@@ -369,6 +369,28 @@ fn test_null_aware_index_selector_cascade_section() {
 }
 
 #[test]
+fn cascade_index_selector_spans_include_closing_delimiters() {
+    for source in ["a..[0]", "a..?[0]", "a..items[ (0) ].field"] {
+        let expr = parse_ok(source);
+        let Expr::Cascade { sections, .. } = expr else {
+            panic!("expected cascade");
+        };
+        let span = sections[0]
+            .ops
+            .iter()
+            .find_map(|operation| match operation {
+                CascadeOp::Index { span, .. } => Some(*span),
+                _ => None,
+            })
+            .expect("index selector");
+        let prefix_len = "var x = ".len();
+        let start = prefix_len + source.find("?[").or_else(|| source.find('[')).unwrap();
+        let end = prefix_len + source.find(']').unwrap() + 1;
+        assert_eq!((span.start, span.end), (start, end), "{source}");
+    }
+}
+
+#[test]
 fn test_const_type_args_without_collection_records_error() {
     let (_expr, errors) = parse_expr("const <int>");
     assert!(
@@ -552,6 +574,17 @@ fn method_type_args_nested_generic_in_function_type_param() {
 }
 
 #[test]
+fn typed_collections_do_not_enter_generic_function_lookahead() {
+    let Expr::Call { args, .. } = parse_ok("f(<int>[1], () {})") else {
+        panic!("expected call");
+    };
+    assert_eq!(args.positional.len(), 2);
+    assert!(matches!(args.positional[0], Expr::List { .. }));
+    assert!(matches!(args.positional[1], Expr::FuncExpr { .. }));
+    assert!(matches!(parse_ok("<List<int>>[]"), Expr::List { .. }));
+}
+
+#[test]
 fn method_type_args_survive_speculative_typed_decl_rollback() {
     // As a bare expression statement the `>>>` close is first scanned by the
     // speculative typed-declaration path; its rolled-back type parse must restore
@@ -709,7 +742,10 @@ fn paren_expr_initializer_before_block_body_is_not_a_lambda() {
     assert!(matches!(ctor.body, Some(FunctionBody::Block(_))));
     match &ctor.initializers[0] {
         ConstructorInitializer::FieldInit { value, .. } => {
-            assert!(matches!(value, Expr::FuncExpr { .. }), "value: {value:?}");
+            assert!(
+                matches!(value.unparenthesized(), Expr::FuncExpr { .. }),
+                "value: {value:?}"
+            );
         }
         other => panic!("expected field initializer, got {other:?}"),
     }
@@ -816,7 +852,7 @@ fn test_assignment_inside_parens() {
             left,
             ..
         } => assert!(
-            matches!(*left, Expr::Assign { .. }),
+            matches!(left.unparenthesized(), Expr::Assign { .. }),
             "left of ?? should be an assignment, got {left:?}"
         ),
         other => panic!("expected `?? ` binary, got {other:?}"),

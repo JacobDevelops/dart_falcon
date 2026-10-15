@@ -65,6 +65,7 @@ impl Visitor for Collector<'_, '_> {
             ClassMember::Setter(member) => member.body.as_ref(),
             ClassMember::Operator(member) => member.body.as_ref(),
             ClassMember::Constructor(member) => member.body.as_ref(),
+            ClassMember::PrimaryConstructorBody(member) => member.body.as_ref(),
             ClassMember::Field(_) | ClassMember::Error(_) => None,
         };
         self.check(body);

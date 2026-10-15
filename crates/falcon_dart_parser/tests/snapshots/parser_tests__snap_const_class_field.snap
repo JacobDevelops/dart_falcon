@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1786
 expression: "prog.declarations[0]"
 ---
 Class(
@@ -17,6 +18,7 @@ Class(
             },
         },
         type_params: [],
+        primary_constructor: None,
         extends: None,
         with_clause: [],
         implements: [],
@@ -46,7 +48,7 @@ Class(
                                 is_nullable: false,
                                 span: Span {
                                     start: 28,
-                                    end: 32,
+                                    end: 31,
                                 },
                             },
                         ),
@@ -77,7 +79,7 @@ Class(
                     ],
                     span: Span {
                         start: 15,
-                        end: 48,
+                        end: 47,
                     },
                 },
             ),
@@ -106,7 +108,7 @@ Class(
                                 is_nullable: false,
                                 span: Span {
                                     start: 61,
-                                    end: 68,
+                                    end: 67,
                                 },
                             },
                         ),
@@ -144,7 +146,7 @@ Class(
                     ],
                     span: Span {
                         start: 48,
-                        end: 105,
+                        end: 104,
                     },
                 },
             ),

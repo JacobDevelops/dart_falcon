@@ -92,7 +92,7 @@ impl Visitor for Collector<'_, '_> {
         }
         if !self.suppress
             && let Expr::Call { callee, span, .. } = node
-            && let Expr::Field { field, .. } = callee.as_ref()
+            && let Expr::Field { field, .. } = callee.unparenthesized()
             && field.name == "then"
         {
             self.diags.push(self.ctx.diagnostic(

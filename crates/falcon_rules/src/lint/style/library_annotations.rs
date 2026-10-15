@@ -173,11 +173,11 @@ impl Visitor for LibraryTargetFinder {
 }
 
 fn constructed_type(expr: &Expr) -> Option<&str> {
-    match expr {
+    match expr.unparenthesized() {
         Expr::New { dart_type, .. } => type_name(dart_type),
-        Expr::Call { callee, .. } => match callee.as_ref() {
+        Expr::Call { callee, .. } => match callee.unparenthesized() {
             Expr::Ident(name) => Some(&name.name),
-            Expr::Field { object, .. } => match object.as_ref() {
+            Expr::Field { object, .. } => match object.unparenthesized() {
                 Expr::Ident(name) => Some(&name.name),
                 _ => None,
             },
@@ -298,7 +298,7 @@ fn late_trust_pragma(
             .as_ref()
             .and_then(|args| args.positional.first())
             .is_some_and(|arg| {
-                matches!(arg, Expr::StringLit(string) if string.value == "dart2js:late:trust")
+                matches!(arg.unparenthesized(), Expr::StringLit(string) if string.value == "dart2js:late:trust")
             })
 }
 

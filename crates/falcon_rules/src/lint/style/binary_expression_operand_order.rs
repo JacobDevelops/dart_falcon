@@ -7,7 +7,8 @@
 //! operand is a literal, with one exception: a `null` on the left compared
 //! against another literal (as in `null == null`) is left alone.
 //!
-//! Checks comparisons throughout the program, including initializers and collections.
+//! Checks each comparison once throughout the program, including parenthesized
+//! expressions, initializers, and collections.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
@@ -25,11 +26,12 @@ impl Rule for BinaryExpressionOperandOrder {
                 left,
                 right,
                 span,
+                ..
             } = expr
             {
                 let left_is_literal = is_literal_or_const(left);
                 let right_is_literal = is_literal_or_const(right);
-                let left_is_null = matches!(left.as_ref(), Expr::NullLit { .. });
+                let left_is_null = matches!(left.unparenthesized(), Expr::NullLit { .. });
 
                 if should_check_operator(op)
                     && left_is_literal
@@ -49,7 +51,7 @@ impl Rule for BinaryExpressionOperandOrder {
 
 fn is_literal_or_const(expr: &Expr) -> bool {
     matches!(
-        expr,
+        expr.unparenthesized(),
         Expr::IntLit { .. }
             | Expr::DoubleLit { .. }
             | Expr::StringLit(_)

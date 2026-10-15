@@ -49,6 +49,33 @@ fn sole_param_type(param: &str) -> DartType {
 }
 
 #[test]
+fn function_type_parameters_preserve_required_and_optional_shapes() {
+    for (source, expected) in [
+        (
+            "typedef F = void Function(int, [String?]);",
+            vec![(true, false), (false, false)],
+        ),
+        (
+            "typedef F = void Function(int, {required String label, bool? enabled});",
+            vec![(true, false), (true, true), (false, true)],
+        ),
+        (
+            "typedef void F(int value, [String? label]);",
+            vec![(true, false), (false, false)],
+        ),
+    ] {
+        let aliased = typedef_aliased(source);
+        let function = as_function(&aliased);
+        let actual: Vec<_> = function
+            .params
+            .iter()
+            .map(|parameter| (parameter.is_required, parameter.is_named))
+            .collect();
+        assert_eq!(actual, expected, "{source}");
+    }
+}
+
+#[test]
 fn dynamic_function_return_in_typedef() {
     let aliased = typedef_aliased("typedef F = dynamic Function(int);");
     let f = as_function(&aliased);

@@ -4,6 +4,8 @@
 //! emitted diagnostics line up with the `/* expect: <rule-name> */` annotations. This is
 //! the `cargo test` counterpart of the out-of-process `cargo xtask validate-rules` harness:
 //! it needs no pre-built binary, so `cargo test -p falcon_rules` exercises every rule.
+//! Fixtures that need SDK member declarations opt into the shared parsed SDK
+//! below; other fixtures keep their SDK-free, source-local inference context.
 //!
 //! Invariants enforced:
 //!   * every registered rule has real positive and negative corpus coverage;
@@ -13,6 +15,8 @@
 //!   * clean files (zero annotations) produce zero diagnostics;
 //!   * source and corpus fixtures contain no explicit stub/placeholder markers.
 
+#[path = "support/inference.rs"]
+mod inference;
 mod support;
 
 use std::collections::{HashMap, HashSet};
@@ -20,7 +24,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{
-    AnalyzeContext, IdentityIndex, IdentitySource, ProjectFile, Rule, SignatureIndex, TypeIndex,
+    AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, ProjectFile, Rule,
+    SignatureIndex, TypeIndex,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
@@ -87,34 +92,54 @@ fn run_rule(
     source: &str,
     config: &FalconConfig,
 ) -> Vec<(String, usize)> {
-    let (program, errors) = parse(source);
-    let resolver_dependent = rule_requires_resolution(rule_name);
-    let types = resolver_dependent.then(|| TypeIndex::from_program(&program));
-    let identity_sources = [IdentitySource {
-        path: file,
-        program: &program,
-        has_parse_errors: !errors.is_empty(),
-    }];
-    let identities =
-        resolver_dependent.then(|| IdentityIndex::from_project_files(&identity_sources, &[]));
-    let signatures = identities
-        .as_ref()
-        .zip(types.as_ref())
-        .map(|(identities, types)| {
-            let model = falcon_analyze::SemanticModel::new(file, identities, Some(types));
-            SignatureIndex::from_program(&program, &model)
+    let diagnostics = if inference::requires_sdk(file) {
+        inference::analyze(rule, file, source, config)
+    } else {
+        let (program, errors) = parse(source);
+        let resolver_dependent = rule_requires_resolution(rule_name);
+        let identity_sources = [IdentitySource {
+            path: file,
+            program: &program,
+            has_parse_errors: !errors.is_empty(),
+        }];
+        let identities = resolver_dependent
+            .then(|| IdentityIndex::build(&identity_sources, &[source], &[], None));
+        let types = identities.as_ref().map(|identities| {
+            TypeIndex::from_resolved_files(
+                [(
+                    file,
+                    LibrarySource {
+                        program: &program,
+                        has_parse_errors: !errors.is_empty(),
+                        has_unresolved_parts: false,
+                    },
+                )],
+                identities,
+            )
         });
-    let mut ctx = AnalyzeContext::new(file, source, config);
-    if let Some(types) = types.as_ref() {
-        ctx = ctx.with_types(types);
-    }
-    if let Some(identities) = identities.as_ref() {
-        ctx = ctx.with_identities(identities);
-    }
-    if let Some(signatures) = signatures.as_ref() {
-        ctx = ctx.with_signatures(signatures);
-    }
-    rule.analyze(&program, &ctx)
+        let signatures = identities
+            .as_ref()
+            .zip(types.as_ref())
+            .map(|(identities, types)| {
+                let model = falcon_analyze::SemanticModel::new(file, identities, Some(types));
+                SignatureIndex::from_program(&program, &model)
+            });
+        let environment =
+            falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator([file], |_| None);
+        let mut ctx =
+            AnalyzeContext::new(file, source, config).with_environment(Some(&environment));
+        if let Some(types) = types.as_ref() {
+            ctx = ctx.with_types(types);
+        }
+        if let Some(identities) = identities.as_ref() {
+            ctx = ctx.with_identities(identities);
+        }
+        if let Some(signatures) = signatures.as_ref() {
+            ctx = ctx.with_signatures(signatures);
+        }
+        rule.analyze(&program, &ctx)
+    };
+    diagnostics
         .into_iter()
         .map(|d| {
             (
@@ -551,6 +576,26 @@ fn corpus_matches_expectations() {
 }
 
 #[test]
+fn nullable_extension_getter_is_not_an_instance_member() {
+    use falcon_rules::lint::style::unnecessary_null_aware_operator_on_extension_on_nullable::UnnecessaryNullAwareOperatorOnExtensionOnNullable;
+
+    let source = "class Target {}\n\
+                  extension NullableValues on Target? { int get value => 1; }\n\
+                  void read(Target? target) { target?.value; }\n";
+    let (_, errors) = parse(source);
+    assert!(errors.is_empty(), "parse errors: {errors:?}");
+    let rule_name = "unnecessary-null-aware-operator-on-extension-on-nullable";
+    let diagnostics = run_rule(
+        rule_name,
+        &UnnecessaryNullAwareOperatorOnExtensionOnNullable,
+        Path::new("/project/lib/main.dart"),
+        source,
+        &FalconConfig::default(),
+    );
+    assert_eq!(diagnostics, vec![(rule_name.to_owned(), 3)]);
+}
+
+#[test]
 fn use_design_system_item_fires_only_when_configured() {
     let src = r#"
 import 'package:flutter/material.dart';
@@ -564,15 +609,7 @@ Widget build(BuildContext context) {
 
     // Without configuration the rule is a no-op.
     let default_cfg = FalconConfig::default();
-    let ctx = AnalyzeContext {
-        file_path: Path::new("t.dart"),
-        source: src,
-        config: &default_cfg,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &default_cfg);
     assert!(
         rule.analyze(&program, &ctx).is_empty(),
         "rule must be a no-op without configuration"
@@ -596,15 +633,7 @@ Widget build(BuildContext context) {
         }
     }))
     .expect("valid config");
-    let ctx = AnalyzeContext {
-        file_path: Path::new("t.dart"),
-        source: src,
-        config: &configured,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &configured);
     let diags = rule.analyze(&program, &ctx);
     assert_eq!(
         diags.len(),
@@ -621,15 +650,7 @@ Widget build(BuildContext context) {
     // Static calls are not constructions.
     let static_src = "Widget f(BuildContext c) => Container.of(c);";
     let (static_program, _e) = parse(static_src);
-    let ctx = AnalyzeContext {
-        file_path: Path::new("t.dart"),
-        source: static_src,
-        config: &configured,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), static_src, &configured);
     assert!(
         rule.analyze(&static_program, &ctx).is_empty(),
         "static access `Container.of(...)` must not be flagged"
@@ -659,15 +680,7 @@ class Bar {
     // Default config → built-in pyramid order (fields → constructors → methods).
     // `Foo.run` (a method before a field/constructor) is flagged; `Bar` is fine.
     let default_cfg = FalconConfig::default();
-    let ctx = AnalyzeContext {
-        file_path: Path::new("t.dart"),
-        source: src,
-        config: &default_cfg,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &default_cfg);
     let default_diags = rule.analyze(&program, &ctx);
     assert!(
         !default_diags.is_empty(),
@@ -697,15 +710,7 @@ class Bar {
         }
     }))
     .expect("valid config");
-    let ctx = AnalyzeContext {
-        file_path: Path::new("t.dart"),
-        source: src,
-        config: &configured,
-        types: None,
-        identities: None,
-        signatures: None,
-        library: None,
-    };
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &configured);
     let diags = rule.analyze(&program, &ctx);
     assert_eq!(
         diags.len(),
@@ -859,6 +864,20 @@ fn resolver_dependent_per_file_project_corpus() {
         }
 
         let paths = support::files(&dir, usize::MAX, Some("dart"));
+        let source_paths = paths.clone();
+        let sdk_project = paths
+            .iter()
+            .any(|path| inference::requires_sdk(path))
+            .then(|| inference::sdk_fixture::stage_project(&dir));
+        let paths: Vec<PathBuf> = paths
+            .into_iter()
+            .map(|path| {
+                sdk_project.as_ref().map_or_else(
+                    || path.clone(),
+                    |project| inference::sdk_fixture::staged_file(project.path(), &dir, &path),
+                )
+            })
+            .collect();
         let sources: Vec<String> = paths
             .iter()
             .map(|p| fs::read_to_string(p).unwrap())
@@ -877,14 +896,6 @@ fn resolver_dependent_per_file_project_corpus() {
             .zip(programs.iter().copied())
             .collect();
         let grouping = group_libraries(&path_prog);
-        let type_index =
-            TypeIndex::from_library_files(parsed.iter().enumerate().map(|(i, (p, err))| {
-                LibrarySource {
-                    program: p,
-                    has_parse_errors: *err,
-                    has_unresolved_parts: grouping.is_unresolved(i),
-                }
-            }));
         let identity_sources: Vec<_> = paths
             .iter()
             .zip(&parsed)
@@ -894,17 +905,61 @@ fn resolver_dependent_per_file_project_corpus() {
                 has_parse_errors: *has_parse_errors,
             })
             .collect();
-        let identities = IdentityIndex::from_project_files(&identity_sources, &[]);
-        let signatures = SignatureIndex::from_project_files(&path_prog, &identities, &type_index);
-
         let source_refs: Vec<&str> = sources.iter().map(String::as_str).collect();
+        let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+            paths.iter().map(PathBuf::as_path),
+            |config| {
+                let root = config?.flutter_root.as_ref()?;
+                falcon_analyze::environment::DartSdk::load(&root.join("bin/cache/dart-sdk"))
+            },
+        );
+        let external_inputs: Vec<_> = paths
+            .iter()
+            .zip(&programs)
+            .zip(&source_refs)
+            .map(|((path, program), source)| (path.as_path(), *program, *source))
+            .collect();
+        let externals =
+            falcon_analyze::ExternalLibraries::load(&environment, &external_inputs, |path| {
+                paths.iter().any(|local| local == path)
+            });
+        let identities = IdentityIndex::build(
+            &identity_sources,
+            &source_refs,
+            &[],
+            Some(falcon_analyze::ExternalSources {
+                libraries: &externals,
+                environment: &environment,
+            }),
+        );
+        let mut type_index = TypeIndex::from_resolved_files(
+            parsed
+                .iter()
+                .enumerate()
+                .map(|(i, (program, has_parse_errors))| {
+                    (
+                        paths[i].as_path(),
+                        LibrarySource {
+                            program,
+                            has_parse_errors: *has_parse_errors,
+                            has_unresolved_parts: grouping.is_unresolved(i),
+                        },
+                    )
+                }),
+            &identities,
+        );
+        type_index.add_external(&externals, &identities);
+        let signatures =
+            SignatureIndex::build(&path_prog, Some(&externals), &identities, &type_index);
+
         for (i, path) in paths.iter().enumerate() {
             let unit = library_unit(&grouping, &programs, &source_refs, i);
             let ctx = AnalyzeContext::new(path, &sources[i], &config)
                 .with_types(&type_index)
                 .with_identities(&identities)
                 .with_signatures(&signatures)
-                .with_library(&unit);
+                .with_library(&unit)
+                .with_environment(Some(&environment));
             let mut diag_lines: Vec<usize> = rule
                 .analyze(programs[i], &ctx)
                 .into_iter()
@@ -924,7 +979,7 @@ fn resolver_dependent_per_file_project_corpus() {
                 } else {
                     failures.push(format!(
                         "MISS  {}:{} — `{}`",
-                        path.display(),
+                        source_paths[i].display(),
                         line,
                         rule_name
                     ));
@@ -933,7 +988,7 @@ fn resolver_dependent_per_file_project_corpus() {
             for line in diag_lines {
                 failures.push(format!(
                     "EXTRA {}:{} — `{}`",
-                    path.display(),
+                    source_paths[i].display(),
                     line,
                     rule_name
                 ));

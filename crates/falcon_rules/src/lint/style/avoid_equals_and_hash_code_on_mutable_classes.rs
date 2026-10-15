@@ -17,15 +17,17 @@
 //! }
 //! ```
 //!
-//! The annotation may sit on the class itself or on any supertype. When a
-//! supertype cannot be resolved the rule stays silent.
+//! The annotation may sit on the class itself or on any supertype (superclass,
+//! mixin, or interface). Unresolved supertypes leave immutability unknown.
 //!
 //! Adopted from the official `avoid_equals_and_hash_code_on_mutable_classes`
 //! lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, Truth};
+use falcon_analyze::{AnalyzeContext, Rule, SemanticModel, Truth, has_immutable_annotation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+
+use crate::lint::declarations::first_token_after_annotations;
 
 #[derive(Default)]
 pub struct AvoidEqualsAndHashCodeOnMutableClasses;
@@ -53,11 +55,17 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
                 ),
                 _ => continue,
             };
-            let immutable = match ctx.types {
-                Some(types) => types.is_immutable_type(name),
-                None if has_immutable_annotation(annotations, program) => Truth::Yes,
-                None if !has_supertypes => Truth::No,
-                None => Truth::Unknown,
+            let immutable = match (ctx.identities, ctx.signatures) {
+                (Some(identities), Some(signatures)) => {
+                    SemanticModel::new(ctx.file_path, identities, ctx.types)
+                        .resolve_name(&**name)
+                        .map_or(Truth::Unknown, |identity| {
+                            signatures.has_immutable_supertype(&identity, false)
+                        })
+                }
+                _ if has_immutable_annotation(annotations, program) => Truth::Yes,
+                _ if !has_supertypes => Truth::No,
+                _ => Truth::Unknown,
             };
             if immutable != Truth::No {
                 continue;
@@ -73,7 +81,7 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
                     }
                     _ => continue,
                 };
-                let start = first_token_after(annotations, span, ctx.source);
+                let start = first_token_after_annotations(annotations, span, ctx.source);
                 diags.push(ctx.diagnostic(
                     "avoid-equals-and-hash-code-on-mutable-classes",
                     format!(
@@ -85,47 +93,4 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
         }
         diags
     }
-}
-
-/// The class's own package:meta `@immutable` annotation.
-fn has_immutable_annotation(annotations: &[Annotation], program: &Program) -> bool {
-    annotations.iter().any(|annotation| {
-        let prefix = match annotation.name.as_slice() {
-            [name] if name.name == "immutable" => None,
-            [prefix, name] if name.name == "immutable" => Some(prefix.name.as_str()),
-            _ => return false,
-        };
-        program.imports.iter().any(|import| {
-            matches!(
-                import.uri.value.as_str(),
-                "package:meta/meta.dart"
-                    | "package:flutter/foundation.dart"
-                    | "package:flutter/widgets.dart"
-                    | "package:flutter/material.dart"
-            ) && import.as_name.as_ref().map(|name| name.name.as_str()) == prefix
-        })
-    })
-}
-
-/// Offset of the first source token after a member's annotations, skipping
-/// whitespace and comments.
-fn first_token_after(annotations: &[Annotation], span: Span, source: &str) -> usize {
-    let mut offset = annotations
-        .iter()
-        .map(|annotation| annotation.span.end)
-        .fold(span.start, usize::max);
-    let bytes = source.as_bytes();
-    while offset < span.end {
-        let rest = &source[offset..];
-        if bytes[offset].is_ascii_whitespace() {
-            offset += 1;
-        } else if rest.starts_with("//") {
-            offset += rest.find('\n').unwrap_or(rest.len());
-        } else if rest.starts_with("/*") {
-            offset += rest.find("*/").map_or(rest.len(), |end| end + 2);
-        } else {
-            break;
-        }
-    }
-    offset.min(span.end)
 }

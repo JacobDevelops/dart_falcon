@@ -46,7 +46,10 @@ impl Collector<'_> {
             return;
         }
         for d in declarators {
-            if matches!(&d.initializer, Some(Expr::NullLit { .. })) {
+            if matches!(
+                d.initializer.as_ref().map(Expr::unparenthesized),
+                Some(Expr::NullLit { .. })
+            ) {
                 self.diags.push(self.ctx.diagnostic(
                     "avoid-init-to-null",
                     "Don't explicitly initialize variables to null.",

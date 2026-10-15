@@ -53,7 +53,7 @@ impl Visitor for Collector<'_> {
                 op: UnaryOp::Bang,
                 operand: next,
                 ..
-            } = current
+            } = current.unparenthesized()
             {
                 current = next.as_ref();
             }
@@ -67,7 +67,7 @@ impl Visitor for Collector<'_> {
 /// True for a `!`-prefixed expression — the inner half of a `!!` double negation.
 fn is_bang_unary(expr: &Expr) -> bool {
     matches!(
-        expr,
+        expr.unparenthesized(),
         Expr::Unary {
             op: UnaryOp::Bang,
             ..

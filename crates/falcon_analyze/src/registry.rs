@@ -92,6 +92,16 @@ impl RuleRegistry {
         }
         // Append after filtering so malformed suppressions cannot suppress themselves.
         diagnostics.extend(suppressions.into_diagnostics());
+        diagnostics.sort_by(|left, right| {
+            left.rule
+                .cmp(right.rule)
+                .then(left.span.start.cmp(&right.span.start))
+                .then(left.span.end.cmp(&right.span.end))
+                .then(left.message.cmp(&right.message))
+        });
+        diagnostics.dedup_by(|left, right| {
+            left.rule == right.rule && left.span == right.span && left.message == right.message
+        });
         diagnostics
     }
 }

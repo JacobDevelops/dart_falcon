@@ -130,6 +130,56 @@ impl<'src> Parser<'src> {
         }
     }
 
+    /// The front end's `looksLikeExpressionAfterAwaitOrYield` for an `await`
+    /// at the cursor outside an async body: `await f();`, `await f.x`,
+    /// `(await f)`, `await f + 1`, `await null` parse as (misplaced) await
+    /// expressions; anything else leaves `await` an identifier. The
+    /// unary-context-only `await f;` / `await f,` forms are not modeled: at
+    /// statement level they declare variables of a type named `await`.
+    fn await_operand_ahead(&self) -> bool {
+        let next = self.peek(1).kind;
+        if next == TokenKind::Null {
+            return true;
+        }
+        if !next.is_identifier_like() {
+            return false;
+        }
+        let binary = |kind: TokenKind| {
+            (kind.is_user_definable_operator() && kind != TokenKind::Tilde)
+                || matches!(
+                    kind,
+                    TokenKind::BangEq
+                        | TokenKind::AmpAmp
+                        | TokenKind::PipePipe
+                        | TokenKind::QmarkQmark
+                )
+        };
+        let after = self.peek(2).kind;
+        if after == TokenKind::LParen {
+            let Some(close) = self.matching_close(self.pos + 2, Brackets::Mixed, |_| false, None)
+            else {
+                return false;
+            };
+            let kind = self.kind_at(close + 1);
+            return binary(kind)
+                || matches!(
+                    kind,
+                    TokenKind::Semicolon
+                        | TokenKind::Dot
+                        | TokenKind::Comma
+                        | TokenKind::DotDot
+                        | TokenKind::Qmark
+                        | TokenKind::QmarkDot
+                        | TokenKind::RParen
+                );
+        }
+        binary(after)
+            || matches!(
+                after,
+                TokenKind::Dot | TokenKind::RParen | TokenKind::RBracket
+            )
+    }
+
     pub(super) fn parse_expr(&mut self) -> Expr {
         self.parse_assign()
     }
@@ -220,10 +270,12 @@ impl<'src> Parser<'src> {
         let start = self.cur().offset;
         let mut lhs = next(self);
         while let Some(op) = operator(self.cur().kind) {
+            let op_span = self.cur_span();
             self.advance();
             let rhs = next(self);
             lhs = Expr::Binary {
                 op,
+                op_span,
                 left: Box::new(lhs),
                 right: Box::new(rhs),
                 span: self.span_from(start),
@@ -261,10 +313,12 @@ impl<'src> Parser<'src> {
             TokenKind::BangEq => BinaryOp::NotEq,
             _ => return lhs,
         };
+        let op_span = self.cur_span();
         self.advance();
         let rhs = self.parse_relational();
         Expr::Binary {
             op,
+            op_span,
             left: Box::new(lhs),
             right: Box::new(rhs),
             span: self.span_from(start),
@@ -405,10 +459,12 @@ impl<'src> Parser<'src> {
             TokenKind::GtEq => BinaryOp::GtEq,
             _ => return lhs,
         };
+        let op_span = self.cur_span();
         self.advance();
         let r = self.parse_cast();
         Expr::Binary {
             op,
+            op_span,
             left: Box::new(lhs),
             right: Box::new(r),
             span: self.span_from(start),
@@ -520,7 +576,10 @@ impl<'src> Parser<'src> {
                     };
                 }
                 match p.cur().kind {
-                    TokenKind::Await if p.ctx.body.is_async() => {
+                    // Outside async bodies `await` is an identifier, except where
+                    // it plainly leads an operand (`await foo();`): the front end
+                    // parses that as a misplaced await expression, and so do we.
+                    TokenKind::Await if p.ctx.body.is_async() || p.await_operand_ahead() => {
                         p.advance();
                         let operand = p.parse_unary();
                         Expr::Await {
@@ -701,18 +760,25 @@ impl<'src> Parser<'src> {
         let mut ops = Vec::new();
         // First selector after `..`: bare identifier or `[index]`, no leading dot.
         let first = if self.at(TokenKind::LBracket) || self.at(TokenKind::QmarkLBracket) {
+            let selector_start = self.cur().offset;
             let index_null_aware = section_null_aware || self.at(TokenKind::QmarkLBracket);
             self.advance();
             let idx = self.parse_expr();
             self.expect(TokenKind::RBracket);
+            let selector_span = self.span_from(selector_start);
             if let Some(assign_op) = self.try_parse_assign_op() {
                 let rhs = self.parse_expr_without_cascade();
-                ops.push(CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs)));
+                ops.push(CascadeOp::IndexAssign(
+                    Box::new(idx),
+                    assign_op,
+                    Box::new(rhs),
+                ));
                 return ops; // assignment terminates the section
             }
             CascadeOp::Index {
                 index: Box::new(idx),
                 is_null_aware: index_null_aware,
+                span: selector_span,
             }
         } else if self.cur().kind.is_identifier_like() {
             let name = self.expect_ident();
@@ -764,19 +830,42 @@ impl<'src> Parser<'src> {
                     }
                 }
                 TokenKind::LBracket | TokenKind::QmarkLBracket => {
+                    let selector_start = self.cur().offset;
                     let is_null_safe = self.at(TokenKind::QmarkLBracket);
                     self.advance();
                     let idx = self.parse_expr();
                     self.expect(TokenKind::RBracket);
+                    let selector_span = self.span_from(selector_start);
                     if let Some(assign_op) = self.try_parse_assign_op() {
                         let rhs = self.parse_expr_without_cascade();
-                        ops.push(CascadeOp::Assign(Box::new(idx), assign_op, Box::new(rhs)));
+                        ops.push(CascadeOp::IndexAssign(
+                            Box::new(idx),
+                            assign_op,
+                            Box::new(rhs),
+                        ));
                         break;
                     }
                     ops.push(CascadeOp::Index {
                         index: Box::new(idx),
                         is_null_aware: is_null_safe,
+                        span: selector_span,
                     });
+                }
+                TokenKind::LParen => {
+                    let args = self.parse_arg_list();
+                    ops.push(CascadeOp::Invoke(Vec::new(), args));
+                }
+                TokenKind::Lt if self.is_generic_invocation() => {
+                    let invocation = self.speculate(|parser| {
+                        let type_args = parser.parse_type_args();
+                        parser
+                            .at(TokenKind::LParen)
+                            .then(|| (type_args, parser.parse_arg_list()))
+                    });
+                    let Some((type_args, args)) = invocation else {
+                        break;
+                    };
+                    ops.push(CascadeOp::Invoke(type_args, args));
                 }
                 _ => break,
             }
@@ -891,11 +980,19 @@ impl<'src> Parser<'src> {
                             p.parse_paren_or_record(false, start)
                         }
                     }
-                    TokenKind::Lt if p.looks_like_generic_function_expr() => {
-                        let type_params = p.parse_type_params();
-                        p.parse_function_expr_with_type_params(type_params, start)
-                    }
-                    TokenKind::Lt => p.parse_typed_collection(false, start),
+                    TokenKind::Lt => p
+                        .speculate(|p| {
+                            let errors = p.errors.len();
+                            let type_params = p.parse_type_params();
+                            if p.errors.len() != errors
+                                || !p.at(TokenKind::LParen)
+                                || !p.looks_like_function_expr()
+                            {
+                                return None;
+                            }
+                            Some(p.parse_function_expr_with_type_params(type_params, start))
+                        })
+                        .unwrap_or_else(|| p.parse_typed_collection(false, start)),
                     TokenKind::LBracket => p.parse_list_literal(false, None, start),
                     TokenKind::LBrace => p.parse_map_or_set_literal(false, Vec::new(), start),
                     // Dot shorthand (Dart 3.9): `.name` / `.new` in a context position.
@@ -963,9 +1060,12 @@ impl<'src> Parser<'src> {
             } else {
                 (None, self.parse_expr())
             };
-        if self.eat(TokenKind::RParen).is_some() {
+        if let Some(close) = self.eat(TokenKind::RParen) {
             if first_name.is_none() {
-                return first_value;
+                return Expr::Paren {
+                    expr: Box::new(first_value),
+                    span: Span::new(start, close.offset + close.len),
+                };
             }
             let fields = vec![RecordField {
                 name: first_name,
@@ -1039,40 +1139,6 @@ impl<'src> Parser<'src> {
                 TokenKind::Arrow | TokenKind::Async | TokenKind::Sync | TokenKind::LBrace
             )
         })
-    }
-
-    /// True when a `<` at the cursor opens the type-parameter list of a generic
-    /// function expression: a balanced `<...>` closed immediately before a `(`
-    /// whose matching `)` is followed by `=>`, `{`, `async`, or `sync`.
-    fn looks_like_generic_function_expr(&self) -> bool {
-        use TokenKind::*;
-        let Some(close) = self.matching_angle_close(
-            self.pos,
-            |kind| {
-                kind.is_identifier_like()
-                    || matches!(
-                        kind,
-                        Dot | Comma
-                            | Qmark
-                            | Extends
-                            | Void
-                            | LParen
-                            | RParen
-                            | LBracket
-                            | RBracket
-                            | LBrace
-                            | RBrace
-                    )
-            },
-            Some(513),
-        ) else {
-            return false;
-        };
-        let paren = close + 1;
-        self.kind_at(paren) == LParen
-            && self
-                .matching_close(paren, Brackets::ParenOnly, |_| false, None)
-                .is_some_and(|i| matches!(self.kind_at(i + 1), Arrow | LBrace | Async | Sync))
     }
 
     fn parse_function_expr_with_type_params(
@@ -1436,6 +1502,7 @@ impl<'src> Parser<'src> {
             self.expect(TokenKind::RParen);
             return ForHeader {
                 init: Some(ForInit::PatternForIn {
+                    annotations: Vec::new(),
                     keyword: VarKeyword::Var,
                     pattern,
                     iterable,

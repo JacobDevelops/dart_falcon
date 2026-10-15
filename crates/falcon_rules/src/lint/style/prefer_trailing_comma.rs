@@ -7,9 +7,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{
-    Visitor, walk_annotation, walk_constructor_decl, walk_enum_decl, walk_expr,
-};
+use falcon_syntax::visitor::{Visitor, walk_annotation, walk_enum_decl, walk_expr};
 
 #[derive(Default)]
 pub struct PreferTrailingComma;
@@ -138,8 +136,8 @@ impl Visitor for Collector<'_, '_> {
         walk_annotation(self, node);
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        for initializer in &node.initializers {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+        for initializer in node.initializers {
             match initializer {
                 ConstructorInitializer::SuperCall { args, .. }
                 | ConstructorInitializer::ThisCall { args, .. } => self.check_args(args),
@@ -147,7 +145,6 @@ impl Visitor for Collector<'_, '_> {
                 | ConstructorInitializer::Assert { .. } => {}
             }
         }
-        walk_constructor_decl(self, node);
     }
 
     fn visit_enum_decl(&mut self, node: &EnumDecl) {
@@ -165,7 +162,7 @@ impl Visitor for Collector<'_, '_> {
             Expr::Cascade { sections, .. } => {
                 for section in sections {
                     for op in &section.ops {
-                        if let CascadeOp::Call(_, _, args) = op {
+                        if let CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) = op {
                             self.check_args(args);
                         }
                     }

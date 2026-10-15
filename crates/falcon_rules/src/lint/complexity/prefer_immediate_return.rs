@@ -30,7 +30,7 @@ fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext
         {
             let var_name = &local.declarators[0].name.name;
             if let Stmt::Return(ret) = &stmts[i + 1]
-                && let Some(Expr::Ident(ident)) = &ret.value
+                && let Some(Expr::Ident(ident)) = ret.value.as_ref().map(Expr::unparenthesized)
                 && &ident.name == var_name
             {
                 diags.push(ctx.diagnostic(

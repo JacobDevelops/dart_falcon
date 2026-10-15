@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1681
 expression: "prog.declarations[0]"
 ---
 Class(
@@ -17,6 +18,7 @@ Class(
             },
         },
         type_params: [],
+        primary_constructor: None,
         extends: Some(
             Named(
                 NamedType {
@@ -33,7 +35,7 @@ Class(
                     is_nullable: false,
                     span: Span {
                         start: 18,
-                        end: 25,
+                        end: 24,
                     },
                 },
             ),
@@ -54,7 +56,7 @@ Class(
                     is_nullable: false,
                     span: Span {
                         start: 30,
-                        end: 37,
+                        end: 36,
                     },
                 },
             ),
@@ -75,7 +77,7 @@ Class(
                     is_nullable: false,
                     span: Span {
                         start: 48,
-                        end: 52,
+                        end: 51,
                     },
                 },
             ),
@@ -106,7 +108,7 @@ Class(
                                 is_nullable: false,
                                 span: Span {
                                     start: 60,
-                                    end: 67,
+                                    end: 66,
                                 },
                             },
                         ),
@@ -129,7 +131,7 @@ Class(
                     ],
                     span: Span {
                         start: 54,
-                        end: 73,
+                        end: 72,
                     },
                 },
             ),
@@ -154,6 +156,7 @@ Class(
                                 kind: Positional,
                                 is_covariant: false,
                                 is_final: false,
+                                is_var: false,
                                 initializing: Some(
                                     This,
                                 ),
@@ -184,7 +187,7 @@ Class(
                     body: None,
                     span: Span {
                         start: 73,
-                        end: 89,
+                        end: 88,
                     },
                 },
             ),

@@ -4,14 +4,18 @@
 
 pub mod complexity;
 pub(crate) mod const_eval;
+pub(crate) mod core_imports;
 pub mod correctness;
 pub(crate) mod declarations;
+pub(crate) mod doc_comments;
 pub(crate) mod expressions;
 pub(crate) mod flutter;
 pub(crate) mod function_bodies;
+pub(crate) mod inherited_members;
 pub(crate) mod lexical_usage;
 pub(crate) mod naming;
 pub(crate) mod options;
+pub(crate) mod package_layout;
 pub mod performance;
 pub(crate) mod resource_leaks;
 pub(crate) mod semantic_scope;
@@ -19,3 +23,4 @@ pub(crate) mod semantic_type_operations;
 pub(crate) mod string_lit;
 pub mod style;
 pub mod suspicious;
+pub(crate) mod tokens;

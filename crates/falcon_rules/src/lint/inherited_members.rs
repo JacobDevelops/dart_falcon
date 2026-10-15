@@ -1,0 +1,105 @@
+//! The analyzer's `InterfaceElement.getInheritedConcreteMember` over falcon's
+//! signature index, shared by rules that compare a declaration with the
+//! member it overrides in the superclass chain.
+
+use falcon_analyze::{
+    DeclarationIdentity, MemberFacts, ResolvedType, SemanticModel, SignatureIndex,
+};
+use falcon_syntax::ast::{
+    ClassMember, DartType, Identifier, PrimaryConstructor, Program, TopLevelDecl,
+};
+
+/// Where a declaration's inherited concrete members come from.
+pub(crate) enum InheritanceSource<'a> {
+    /// Classes, enums, and mixin classes: the superclass chain and mixin
+    /// applications.
+    Superclasses,
+    /// Mixins: the interfaces of their `on` types (`Object` without one).
+    SuperclassConstraints(&'a [DartType]),
+}
+
+/// A declaration whose instance members can override inherited ones.
+pub(crate) struct InheritingDeclaration<'a> {
+    pub name: &'a Identifier,
+    pub members: &'a [ClassMember],
+    /// The header's primary constructor, whose declaring parameters are
+    /// instance fields alongside `members`.
+    pub primary_constructor: Option<&'a PrimaryConstructor>,
+    pub source: InheritanceSource<'a>,
+}
+
+/// Every class, mixin class, enum, and mixin of `program`. Extension types
+/// inherit no concrete members and are omitted.
+pub(crate) fn inheriting_declarations(
+    program: &Program,
+) -> impl Iterator<Item = InheritingDeclaration<'_>> {
+    program.declarations.iter().filter_map(|declaration| {
+        let (name, members, primary_constructor, source) = match declaration {
+            TopLevelDecl::Class(node) => (
+                &node.name,
+                &node.members,
+                node.primary_constructor.as_ref(),
+                InheritanceSource::Superclasses,
+            ),
+            TopLevelDecl::MixinClass(node) => (
+                &node.name,
+                &node.members,
+                node.primary_constructor.as_ref(),
+                InheritanceSource::Superclasses,
+            ),
+            TopLevelDecl::Enum(node) => (
+                &node.name,
+                &node.members,
+                node.primary_constructor.as_ref(),
+                InheritanceSource::Superclasses,
+            ),
+            TopLevelDecl::Mixin(node) => (
+                &node.name,
+                &node.members,
+                None,
+                InheritanceSource::SuperclassConstraints(&node.on_clause),
+            ),
+            TopLevelDecl::ExtensionType(_)
+            | TopLevelDecl::ClassTypeAlias(_)
+            | TopLevelDecl::Extension(_)
+            | TopLevelDecl::Function(_)
+            | TopLevelDecl::Variable(_)
+            | TopLevelDecl::TypeAlias(_)
+            | TopLevelDecl::Error(_) => return None,
+        };
+        Some(InheritingDeclaration {
+            name,
+            members,
+            primary_constructor,
+            source,
+        })
+    })
+}
+
+/// The non-setter member named `name` that `owner` inherits as its concrete
+/// super implementation: the first concrete one in the superclass chain, or
+/// for a mixin the member of its superclass constraints' interfaces. `None`
+/// when there is none or the inheritance chain is unknown.
+pub(crate) fn inherited_concrete_member<'a>(
+    model: &SemanticModel<'_>,
+    signatures: &'a SignatureIndex,
+    owner: &DeclarationIdentity,
+    name: &str,
+    source: &InheritanceSource<'_>,
+) -> Option<&'a MemberFacts> {
+    let interface_member = |ty: &ResolvedType| {
+        let ResolvedType::Interface { identity, .. } = ty else {
+            return None;
+        };
+        signatures.interface_member(owner, identity, name)?
+    };
+    match source {
+        InheritanceSource::Superclasses => signatures.inherited_concrete_member(owner, name)?,
+        InheritanceSource::SuperclassConstraints([]) => {
+            interface_member(&model.core_type("Object", false))
+        }
+        InheritanceSource::SuperclassConstraints(constraints) => constraints
+            .iter()
+            .find_map(|constraint| interface_member(&model.resolve_type(constraint))),
+    }
+}

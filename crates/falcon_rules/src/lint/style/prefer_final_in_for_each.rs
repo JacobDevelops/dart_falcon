@@ -21,7 +21,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, for_each_declared_body, walk_expr, walk_stmt};
 
-use crate::lint::lexical_usage::{collection_for_inits, for_in_declares_variable, local_writes};
+use crate::lint::lexical_usage::{collection_for_inits, local_writes};
 
 const RULE: &str = "prefer-final-in-for-each";
 
@@ -30,7 +30,7 @@ pub struct PreferFinalInForEach;
 
 impl Rule for PreferFinalInForEach {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mutated = local_writes(program, ctx.source)
+        let mutated = local_writes(program)
             .into_iter()
             .map(|write| write.declaration)
             .collect();
@@ -73,18 +73,10 @@ impl Collector<'_, '_> {
         match init {
             ForInit::ForIn {
                 keyword: VarKeyword::Var,
-                var_type,
+                declares_variable: true,
                 name,
                 ..
-            } if name.name != "_"
-                && for_in_declares_variable(
-                    VarKeyword::Var,
-                    var_type.as_ref(),
-                    name,
-                    self.ctx.source,
-                )
-                && !self.mutated.contains(&name.span.start) =>
-            {
+            } if !self.mutated.contains(&name.span.start) => {
                 self.diagnostics.push(self.ctx.diagnostic(
                     RULE,
                     format!("The variable '{}' should be final.", name.name),

@@ -16,27 +16,29 @@
 //! ```
 //!
 //! All `package:` directives form one section; the analyzer does not separate
-//! the current package from third-party packages. Imports inside `@docImport`
-//! doc comments are not checked.
+//! the current package from third-party packages. `@docImport`s of the library
+//! documentation comment form their own sections, checked like imports.
 //!
 //! Adopted from the official `directives_ordering` lint.
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, library_doc_imports};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+
+use super::conditional_uri_does_not_exist::uri_value;
 
 #[derive(Default)]
 pub struct DirectivesOrdering;
 
 const RULE: &str = "directives-ordering";
 
-/// A namespace directive (import or export) in source order.
-#[derive(Clone, Copy)]
-struct Namespace<'a> {
-    uri: &'a str,
+/// A namespace directive (import, export, or `@docImport`) in source order.
+struct Namespace {
+    /// The URI with escapes resolved, as the analyzer's `stringValue`.
+    uri: String,
     span: Span,
 }
 
@@ -46,7 +48,7 @@ impl Rule for DirectivesOrdering {
             .imports
             .iter()
             .map(|import| Namespace {
-                uri: &import.uri.value,
+                uri: uri_value(&import.uri),
                 span: import.span,
             })
             .collect();
@@ -54,10 +56,21 @@ impl Rule for DirectivesOrdering {
             .exports
             .iter()
             .map(|export| Namespace {
-                uri: &export.uri.value,
+                uri: uri_value(&export.uri),
                 span: export.span,
             })
             .collect();
+        let doc_imports: Vec<Namespace> = library_doc_imports(program, ctx.source)
+            .map(|import| Namespace {
+                uri: uri_value(&import.literal),
+                span: import.span,
+            })
+            .collect();
+        let groups = [
+            (&imports, "imports"),
+            (&exports, "exports"),
+            (&doc_imports, "@docImports"),
+        ];
 
         let mut linted = HashSet::new();
         let mut diags = Vec::new();
@@ -68,11 +81,11 @@ impl Rule for DirectivesOrdering {
         };
 
         // 'dart:' directives go first.
-        for (directives, kind) in [(&imports, "imports"), (&exports, "exports")] {
+        for (directives, kind) in groups {
             for directive in directives
                 .iter()
-                .skip_while(|d| is_dart(d.uri))
-                .filter(|d| is_dart(d.uri))
+                .skip_while(|d| is_dart(d))
+                .filter(|d| is_dart(d))
             {
                 report(
                     directive.span,
@@ -82,12 +95,12 @@ impl Rule for DirectivesOrdering {
         }
 
         // 'package:' directives go before relative ones.
-        for (directives, kind) in [(&imports, "imports"), (&exports, "exports")] {
+        for (directives, kind) in groups {
             for directive in directives
                 .iter()
-                .filter(|d| !is_dart(d.uri))
-                .skip_while(|d| is_absolute(d.uri))
-                .filter(|d| is_package(d.uri))
+                .filter(|d| !is_dart(d))
+                .skip_while(|d| is_absolute(d))
+                .filter(|d| is_package(d))
             {
                 report(
                     directive.span,
@@ -143,14 +156,14 @@ impl Rule for DirectivesOrdering {
         }
 
         // Each section is sorted alphabetically.
-        type Section = fn(&str) -> bool;
-        let sections: [Section; 3] = [is_dart, |uri| !is_absolute(uri), is_package];
+        type Section = fn(&Namespace) -> bool;
+        let sections: [Section; 3] = [is_dart, |d| !is_absolute(d), is_package];
         for in_section in sections {
-            for directives in [&imports, &exports] {
+            for (directives, _) in groups {
                 let section: Vec<&Namespace> =
-                    directives.iter().filter(|d| in_section(d.uri)).collect();
+                    directives.iter().filter(|d| in_section(d)).collect();
                 for pair in section.windows(2) {
-                    if compare_directives(pair[0].uri, pair[1].uri) == Ordering::Greater {
+                    if compare_directives(&pair[0].uri, &pair[1].uri) == Ordering::Greater {
                         report(
                             pair[1].span,
                             "Sort directive sections alphabetically.".to_string(),
@@ -172,16 +185,16 @@ enum DirectiveKind {
     Other,
 }
 
-fn is_dart(uri: &str) -> bool {
-    uri.starts_with("dart:")
+fn is_dart(directive: &Namespace) -> bool {
+    directive.uri.starts_with("dart:")
 }
 
-fn is_package(uri: &str) -> bool {
-    uri.starts_with("package:")
+fn is_package(directive: &Namespace) -> bool {
+    directive.uri.starts_with("package:")
 }
 
-fn is_absolute(uri: &str) -> bool {
-    uri.contains(':')
+fn is_absolute(directive: &Namespace) -> bool {
+    directive.uri.contains(':')
 }
 
 /// Dart's `String.compareTo`: lexicographic over UTF-16 code units.
@@ -189,10 +202,11 @@ fn dart_compare(a: &str, b: &str) -> Ordering {
     a.encode_utf16().cmp(b.encode_utf16())
 }
 
-/// The analyzer's `compareDirectives`: two package URIs, or two absolute
-/// paths, compare their first path segment before the remainder.
+/// The analyzer's `compareDirectives`: two package URIs, or URIs where either
+/// is an absolute path, compare their first path segment before the remainder.
 fn compare_directives(a: &str, b: &str) -> Ordering {
-    if (!is_package(a) || !is_package(b)) && (!a.starts_with('/') || !b.starts_with('/')) {
+    let both_package = a.starts_with("package:") && b.starts_with("package:");
+    if !both_package && !a.starts_with('/') && !b.starts_with('/') {
         return dart_compare(a, b);
     }
     let (Some(index_a), Some(index_b)) = (a.find('/'), b.find('/')) else {
@@ -200,4 +214,71 @@ fn compare_directives(a: &str, b: &str) -> Ordering {
     };
     dart_compare(&a[..index_a], &b[..index_b])
         .then_with(|| dart_compare(&a[index_a + 1..], &b[index_b + 1..]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compare_directives, uri_value};
+    use falcon_analyze::library_doc_imports;
+
+    #[test]
+    fn doc_imports_use_literal_segments_and_import_spans() {
+        let source = "/// @docImport r'dart:' '\\x63ollection';\n/// @docImport r'dart:' '\\x61sync';\nlibrary;\n";
+        let (program, errors) = falcon_dart_parser::parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let imports: Vec<_> = library_doc_imports(&program, source).collect();
+        assert_eq!(imports.len(), 2);
+        assert_eq!(uri_value(&imports[0].literal), "dart:collection");
+        assert_eq!(uri_value(&imports[1].literal), "dart:async");
+        assert_eq!(
+            &source[imports[1].span.start..imports[1].span.end],
+            "Import r'dart:' '\\x61sync';"
+        );
+    }
+
+    #[test]
+    fn doc_import_spans_preserve_tabs_crlf_and_block_offsets() {
+        let source = "\t/**\r\n\t * @docImport r'dart:collection';\r\n\t * @docImport 'dart:async';\r\n\t */\r\nlibrary;\r\n";
+        let (program, _) = falcon_dart_parser::parse(source);
+        let imports: Vec<_> = library_doc_imports(&program, source).collect();
+        assert_eq!(imports.len(), 2);
+        assert_eq!(
+            &source[imports[0].span.start..imports[0].span.end],
+            "Import r'dart:collection';"
+        );
+        assert_eq!(
+            &source[imports[1].span.start..imports[1].span.end],
+            "Import 'dart:async';"
+        );
+    }
+
+    #[test]
+    fn doc_import_keyword_requires_a_space_and_maps_extra_whitespace() {
+        let source = "/// @docImport\t'dart:io';\n/// @docImport   'dart:async';\nlibrary;\n";
+        let (program, _) = falcon_dart_parser::parse(source);
+        let imports: Vec<_> = library_doc_imports(&program, source).collect();
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].span.start, source.rfind("Import").unwrap() + 2);
+        assert_eq!(imports[0].span.end - imports[0].span.start, 20);
+    }
+
+    #[test]
+    fn doc_import_span_excludes_trailing_comment_trivia() {
+        let source = "/// @docImport 'dart:async'; /* trailing trivia */\r\nlibrary;\r\n";
+        let (program, errors) = falcon_dart_parser::parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let imports: Vec<_> = library_doc_imports(&program, source).collect();
+        assert_eq!(imports.len(), 1);
+        assert_eq!(
+            &source[imports[0].span.start..imports[0].span.end],
+            "Import 'dart:async';"
+        );
+    }
+
+    #[test]
+    fn package_comparison_uses_package_name_then_path() {
+        assert!(compare_directives("package:http_parser/a.dart", "package:http/b.dart").is_gt());
+        assert!(compare_directives("package:http/a.dart", "package:http/b.dart").is_lt());
+        assert!(compare_directives("\u{10000}", "\u{e000}").is_lt());
+    }
 }

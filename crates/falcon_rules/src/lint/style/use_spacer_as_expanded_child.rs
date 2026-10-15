@@ -67,6 +67,6 @@ fn is_empty_spacer_widget(expr: &Expr) -> bool {
 }
 
 fn is_unqualified_construction(expr: &Expr) -> bool {
-    !matches!(expr, Expr::New { dart_type: DartType::Named(named), .. }
+    !matches!(expr.unparenthesized(), Expr::New { dart_type: DartType::Named(named), .. }
         if named.segments.len() != 1)
 }

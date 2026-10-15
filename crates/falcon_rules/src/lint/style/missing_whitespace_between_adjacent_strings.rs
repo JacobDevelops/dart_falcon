@@ -65,11 +65,11 @@ impl Seam {
 
 /// Whether a call passes its positional arguments as a regular expression.
 fn is_pattern_call(node: &Expr) -> Option<&ArgList> {
-    match node {
-        Expr::Call { callee, args, .. } => match callee.as_ref() {
+    match node.unparenthesized() {
+        Expr::Call { callee, args, .. } => match callee.unparenthesized() {
             Expr::Ident(name) if matches!(name.name.as_str(), "RegExp" | "matches") => Some(args),
             Expr::Field { object, field, .. }
-                if field.name == "RegExp" && matches!(object.as_ref(), Expr::Ident(_)) =>
+                if field.name == "RegExp" && matches!(object.unparenthesized(), Expr::Ident(_)) =>
             {
                 Some(args)
             }
@@ -99,12 +99,17 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::Paren { .. }) {
+            falcon_syntax::visitor::walk_expr(self, node);
+            return;
+        }
         if let Some(args) = is_pattern_call(node) {
-            self.exempt
-                .extend(args.positional.iter().filter_map(|arg| match arg {
+            self.exempt.extend(args.positional.iter().filter_map(
+                |arg| match arg.unparenthesized() {
                     Expr::StringLit(string) if string.is_adjacent => Some(string.span),
                     _ => None,
-                }));
+                },
+            ));
         }
         walk_expr(self, node);
     }

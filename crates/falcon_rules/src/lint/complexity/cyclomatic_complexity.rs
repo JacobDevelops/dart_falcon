@@ -92,6 +92,7 @@ impl Visitor for DecisionPoints {
                 .flat_map(|case| &case.cases)
                 .map(|kind| match kind {
                     SwitchCaseKind::Pattern(_, guard) => 1 + usize::from(guard.is_some()),
+                    SwitchCaseKind::Expr(_) => 1,
                     SwitchCaseKind::Default => 0,
                 })
                 .sum(),

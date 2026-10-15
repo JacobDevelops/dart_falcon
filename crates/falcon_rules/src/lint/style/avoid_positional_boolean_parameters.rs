@@ -1,21 +1,25 @@
-//! Flags signatures that take more than one positional `bool` parameter.
+//! Flags a positional `bool` parameter in a public signature.
 //!
-//! At a call site like `setFlags(true, false)` the literals say nothing about
-//! what they mean, and swapping them goes unnoticed. Once a public function,
-//! method, constructor, or `Function(...)` type takes two or more positional
-//! `bool` parameters, the second one is reported; make them named instead:
+//! At a call site like `setVisible(true)` the literal says nothing about what
+//! it means. The first positional `bool` parameter (required or optional) of a
+//! public function, method, constructor, or `Function(...)` type is
+//! reported; make it named instead:
 //!
 //! ```dart
-//! void configure(bool verbose, bool dryRun) {}     // `bool dryRun` flagged
-//! void configure({bool verbose = false, bool dryRun = false}) {}
-//! void toggle(bool on) {}                          // fine: only one
+//! void configure(int level, bool verbose) {}   // `bool verbose` flagged
+//! void configure(int level, {bool verbose = false}) {}
 //! ```
 //!
-//! Private declarations, getters, setters, and operators are skipped, as are
-//! members whose signature is fixed by an inherited member they override (and
-//! function types written in such a signature). Field and super parameters
-//! (`this.flag`, `super.flag`) take their declared type. When falcon cannot
-//! resolve whether a member overrides something, it stays silent.
+//! Private functions, methods, and constructors (by their own name), getters,
+//! method setters, and operators are skipped, as are methods whose signature
+//! is fixed by an inherited member they override. Top-level setters are
+//! checked like functions. `Function(...)` types are checked wherever they are
+//! written, including in overriding signatures and private declarations;
+//! legacy `typedef void F(bool b);` aliases and function-typed parameters
+//! (`void f(bool b)` as a parameter) are not function types and are skipped.
+//! Field and super parameters (`this.flag`, `super.flag`) take their declared
+//! type. When falcon cannot resolve whether a method overrides something, it
+//! stays silent.
 //!
 //! Adopted from the official `avoid_positional_boolean_parameters` lint.
 
@@ -46,7 +50,6 @@ impl Rule for AvoidPositionalBooleanParameters {
             model: &state.model,
             signatures: &state.signatures,
             container: None,
-            fixed_signatures: Vec::new(),
             diags: Vec::new(),
         };
         for declaration in &program.declarations {
@@ -72,8 +75,6 @@ struct Collector<'a, 'ctx, 'p> {
     model: &'a SemanticModel<'a>,
     signatures: &'a SignatureIndex,
     container: Option<Container<'p>>,
-    /// Source ranges of member signatures fixed by an overridden member.
-    fixed_signatures: Vec<(usize, usize)>,
     diags: Vec<Diagnostic>,
 }
 
@@ -81,12 +82,9 @@ fn is_core_bool(ty: &ResolvedType) -> bool {
     matches!(
         ty,
         ResolvedType::Interface {
-            identity: DeclarationIdentity::Sdk {
-                library: "dart:core",
-                name: "bool"
-            },
+            identity,
             ..
-        }
+        } if identity.is_sdk("dart:core", "bool")
     )
 }
 
@@ -97,10 +95,6 @@ fn has_override(annotations: &[Annotation]) -> bool {
             .last()
             .is_some_and(|name| name.name == "override")
     })
-}
-
-fn signature_range(start: usize, body: Option<&FunctionBody>, end: usize) -> (usize, usize) {
-    (start, body.map_or(end, |body| body.span().start))
 }
 
 impl<'p> Collector<'_, '_, 'p> {
@@ -124,13 +118,12 @@ impl<'p> Collector<'_, '_, 'p> {
             .is_none_or(|facts| !facts.is_empty())
     }
 
-    fn in_fixed_signature(&self, span: &Span) -> bool {
-        self.fixed_signatures
-            .iter()
-            .any(|(start, end)| *start <= span.start && span.end <= *end)
-    }
-
-    fn is_bool_param(&self, param: &FormalParam, super_constructor: Option<&str>) -> bool {
+    fn is_bool_param(
+        &self,
+        param: &FormalParam,
+        params: &FormalParamList,
+        super_constructor: Option<&str>,
+    ) -> bool {
         if param.function_params.is_some() {
             return false;
         }
@@ -153,6 +146,7 @@ impl<'p> Collector<'_, '_, 'p> {
                 let superclass = self.model.resolve_type(superclass);
                 resolved_super_param_type(
                     param,
+                    params,
                     &superclass,
                     constructor,
                     self.signatures,
@@ -181,13 +175,12 @@ impl<'p> Collector<'_, '_, 'p> {
     }
 
     fn check_params(&mut self, params: &FormalParamList, super_constructor: Option<&str>) {
-        let second = params
+        if let Some(first) = params
             .positional()
-            .filter(|param| self.is_bool_param(param, super_constructor))
-            .nth(1);
-        if let Some(second) = second {
+            .find(|param| self.is_bool_param(param, params, super_constructor))
+        {
             self.diags
-                .push(self.ctx.diagnostic(RULE, MESSAGE, second.span));
+                .push(self.ctx.diagnostic(RULE, MESSAGE, first.span));
         }
     }
 
@@ -227,7 +220,7 @@ impl<'p> Collector<'_, '_, 'p> {
 impl Visitor for Collector<'_, '_, '_> {
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         if !node.name.name.starts_with('_')
-            && let FunctionKind::Function(params) = &node.kind
+            && let Some(params) = node.params()
         {
             self.check_params(params, None);
         }
@@ -256,44 +249,18 @@ impl Visitor for Collector<'_, '_, '_> {
                 }
             }
             ClassMember::Method(method) => {
-                if self.is_fixed(&method.name.name, &method.annotations) {
-                    self.fixed_signatures.push(signature_range(
-                        method.span.start,
-                        method.body.as_ref(),
-                        method.span.end,
-                    ));
-                } else if !method.name.name.starts_with('_') {
+                if !method.name.name.starts_with('_')
+                    && !self.is_fixed(&method.name.name, &method.annotations)
+                {
                     self.check_params(&method.params, None);
                 }
             }
-            ClassMember::Getter(getter) => {
-                if self.is_fixed(&getter.name.name, &getter.annotations) {
-                    self.fixed_signatures.push(signature_range(
-                        getter.span.start,
-                        getter.body.as_ref(),
-                        getter.span.end,
-                    ));
-                }
-            }
-            ClassMember::Setter(setter) => {
-                if self.is_fixed(&setter.name.name, &setter.annotations) {
-                    self.fixed_signatures.push(signature_range(
-                        setter.span.start,
-                        setter.body.as_ref(),
-                        setter.span.end,
-                    ));
-                }
-            }
-            ClassMember::Operator(operator) => {
-                if self.is_fixed(&operator.op, &operator.annotations) {
-                    self.fixed_signatures.push(signature_range(
-                        operator.span.start,
-                        operator.body.as_ref(),
-                        operator.span.end,
-                    ));
-                }
-            }
-            ClassMember::Field(_) | ClassMember::Error(_) => {}
+            ClassMember::Getter(_)
+            | ClassMember::Setter(_)
+            | ClassMember::Operator(_)
+            | ClassMember::Field(_)
+            | ClassMember::PrimaryConstructorBody(_)
+            | ClassMember::Error(_) => {}
         }
         walk_class_member(self, node);
     }
@@ -308,22 +275,16 @@ impl Visitor for Collector<'_, '_, '_> {
     }
 
     fn visit_dart_type(&mut self, node: &DartType) {
-        if let DartType::Function(function) = node
-            && !self.in_fixed_signature(&function.span)
-        {
-            let second = function
-                .params
-                .iter()
-                .filter(|param| {
-                    !param.is_named && is_core_bool(&self.model.resolve_type(&param.param_type))
-                })
-                .nth(1);
-            if let Some(second) = second {
-                let start = second.param_type.span().start;
-                let end = second
+        if let DartType::Function(function) = node {
+            let first = function.params.iter().find(|param| {
+                !param.is_named && is_core_bool(&self.model.resolve_type(&param.param_type))
+            });
+            if let Some(first) = first {
+                let start = first.param_type.span().start;
+                let end = first
                     .name
                     .as_ref()
-                    .map_or(second.param_type.span().end, |name| name.span.end);
+                    .map_or(first.param_type.span().end, |name| name.span.end);
                 self.diags
                     .push(self.ctx.diagnostic(RULE, MESSAGE, DiagSpan { start, end }));
             }

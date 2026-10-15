@@ -1,4 +1,5 @@
 use falcon_syntax::ast::*;
+use falcon_syntax::language_version::Feature;
 use falcon_syntax::token::TokenKind;
 
 use super::Parser;
@@ -48,25 +49,18 @@ impl<'src> Parser<'src> {
             // `String? Function(...)`.
             let is_nullable = self.eat_type_qmark();
 
-            // Could be `Function(...)` / `Function<T>(...)` after a (possibly
-            // nullable) return type.
-            if self.at_function_type_start() {
-                let ret = DartType::Named(NamedType {
-                    segments,
-                    type_args,
-                    is_nullable,
-                    span: self.span_from(start),
-                });
-                return self.parse_function_type(Some(ret), start);
-            }
-
-            let span = self.span_from(start);
-            return DartType::Named(NamedType {
+            let named = DartType::Named(NamedType {
                 segments,
                 type_args,
                 is_nullable,
-                span,
+                span: self.span_from(start),
             });
+            // Could be `Function(...)` / `Function<T>(...)` after a (possibly
+            // nullable) return type.
+            if self.at_function_type_start() {
+                return self.parse_function_type(Some(named), start);
+            }
+            return named;
         }
 
         // Fallback: produce dynamic
@@ -89,12 +83,16 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_function_type(&mut self, return_type: Option<DartType>, start: usize) -> DartType {
+        let keyword = self.pos;
         self.advance(); // Function keyword
         let type_params = self.parse_type_params();
         self.expect(TokenKind::LParen);
         let params = self.parse_function_type_params();
         self.expect(TokenKind::RParen);
         let is_nullable = self.eat_type_qmark();
+        // Set after the parameters, so the outermost function type — which
+        // completes last, including a curried suffix — has the final say.
+        self.last_function_keyword = Some(keyword);
         let span = self.span_from(start);
         let fn_type = DartType::Function(Box::new(FunctionType {
             return_type: return_type.map(Box::new),
@@ -136,7 +134,8 @@ impl<'src> Parser<'src> {
                     continue;
                 }
             }
-            let is_required = self.eat(TokenKind::Required).is_some();
+            let explicit_required = self.eat(TokenKind::Required).is_some();
+            let is_required = explicit_required || (!in_named && !in_optional);
             let _ = self
                 .eat(TokenKind::Final)
                 .or_else(|| self.eat(TokenKind::Covariant));
@@ -252,8 +251,6 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::LParen);
 
         let mut params = Vec::new();
-
-        let leading_optional = self.at_any(&[TokenKind::LBracket, TokenKind::LBrace]);
         while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
             if self.at_any(&[TokenKind::LBracket, TokenKind::LBrace]) {
                 let named = self.advance().kind == TokenKind::LBrace;
@@ -274,10 +271,9 @@ impl<'src> Parser<'src> {
                     }
                 }
                 self.eat(close);
-                if leading_optional || named {
-                    break;
-                }
-                self.eat(TokenKind::Comma);
+                // An optional/named group is the last in the list: `(a, [b], {c})`
+                // is a syntax error.
+                break;
             } else {
                 params.push(self.parse_formal_param(ParamKind::Positional));
                 if self.eat(TokenKind::Comma).is_none() {
@@ -305,47 +301,45 @@ impl<'src> Parser<'src> {
         }
         let is_covariant = self.eat(TokenKind::Covariant).is_some();
         let is_final = self.eat(TokenKind::Final).is_some();
-        // `var` marks an untyped mutable parameter; consume it so the following
-        // identifier is read as the name rather than a type.
-        let is_var = self.eat(TokenKind::Var).is_some();
+        // `var` marks a mutable parameter (declaring in a primary constructor);
+        // like `final`, it may be followed by a type (`C(var int x)`).
+        let is_var = !is_final && self.eat(TokenKind::Var).is_some();
 
         // A `this.field` / `super.field` formal may be preceded by a type
         // (`C(int this.x)`, `C(int super.x)`), so parse an optional leading type
         // before deciding.
         let mut initializing = None;
-        let (param_type, name) = if is_var {
-            // `var name` — untyped, the next token is the parameter name.
-            (None, self.expect_ident())
-        } else {
-            let leading = self.try_parse_type_followed_by(|kind| {
-                kind.is_identifier_like() || matches!(kind, TokenKind::This | TokenKind::Super)
-            });
-
-            if self.at(TokenKind::This) && self.peek(1).kind == TokenKind::Dot {
-                initializing = Some(InitializingFormal::This);
-                self.advance(); // this
-                self.advance(); // .
-                (leading, self.expect_ident())
-            } else if self.at(TokenKind::Super) && self.peek(1).kind == TokenKind::Dot {
-                initializing = Some(InitializingFormal::Super);
-                self.advance(); // super
-                self.advance(); // .
-                (leading, self.expect_ident())
-            } else {
-                (leading, self.expect_ident())
-            }
-        };
-
-        // A named initializing/super formal with a private name
-        // (`{required this._x}`, `{super._y}`) needs the off-by-default
-        // `private-named-parameters` feature; the pinned front end rejects it as a
-        // syntactic error rather than accepting the looser grammar.
-        if matches!(kind, ParamKind::Named { .. })
-            && initializing.is_some()
-            && name.name.starts_with('_')
+        let leading = self.try_parse_type_followed_by(|kind| {
+            kind.is_identifier_like() || matches!(kind, TokenKind::This | TokenKind::Super)
+        });
+        let (param_type, name) = if self.at(TokenKind::This) && self.peek(1).kind == TokenKind::Dot
         {
-            self.error(
-                "This requires the 'private-named-parameters' language feature to be enabled",
+            initializing = Some(InitializingFormal::This);
+            self.advance(); // this
+            self.advance(); // .
+            (leading, self.expect_ident())
+        } else if self.at(TokenKind::Super) && self.peek(1).kind == TokenKind::Dot {
+            initializing = Some(InitializingFormal::Super);
+            self.advance(); // super
+            self.advance(); // .
+            (leading, self.expect_ident())
+        } else if let Some(function_named) = leading
+            .is_none()
+            .then(|| self.function_named_formal())
+            .flatten()
+        {
+            function_named
+        } else {
+            (leading, self.expect_ident())
+        };
+        if matches!(kind, ParamKind::Named { .. })
+            && initializing == Some(InitializingFormal::This)
+            && name.name.starts_with('_')
+            && !self.version.supports(Feature::PrivateNamedParameters)
+        {
+            self.error_at(
+                name.span.start,
+                "This requires the 'private-named-parameters' language feature",
             );
         }
 
@@ -376,6 +370,7 @@ impl<'src> Parser<'src> {
             kind,
             is_covariant,
             is_final,
+            is_var,
             initializing,
             param_type,
             name,
@@ -384,5 +379,43 @@ impl<'src> Parser<'src> {
             function_params,
             span: self.span_from(start),
         }
+    }
+
+    /// An old-style function-typed formal whose *name* is the built-in
+    /// identifier `Function`: `void map(void Function({int? e}))`. The input
+    /// reads as an unnamed function type, so when a full type parse ends in a
+    /// `Function(...)` suffix that no parameter name follows, re-read that
+    /// suffix as the parameter's name and parameter list, keeping the cursor
+    /// before `Function`. Returns the return type and the `Function` name.
+    fn function_named_formal(&mut self) -> Option<(Option<DartType>, Identifier)> {
+        if !self.is_type_start() {
+            return None;
+        }
+        self.speculate(|parser| {
+            parser.last_function_keyword = None;
+            let ty = parser.parse_type();
+            let keyword = parser.last_function_keyword?;
+            let ends_param = matches!(
+                parser.cur().kind,
+                TokenKind::Comma
+                    | TokenKind::RParen
+                    | TokenKind::RBracket
+                    | TokenKind::RBrace
+                    | TokenKind::Eq
+                    | TokenKind::Colon
+            );
+            let DartType::Function(function) = ty else {
+                return None;
+            };
+            if !ends_param {
+                return None;
+            }
+            parser.rewind_to(keyword);
+            let name_tok = parser.advance(); // Function
+            Some((
+                function.return_type.map(|ret| *ret),
+                parser.tok_ident(&name_tok),
+            ))
+        })
     }
 }

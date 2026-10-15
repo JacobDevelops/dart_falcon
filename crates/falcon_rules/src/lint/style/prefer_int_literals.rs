@@ -14,8 +14,9 @@
 //! keeps its meaning: the initializer of a variable, field, or top-level
 //! declared `double`; an element of a `<double>[...]` list; a value returned
 //! from a function, method, getter, or operator declared to return `double`;
-//! and an argument whose parameter resolves to `double`. Parenthesized
-//! literals and values outside the 64-bit integer range are left alone.
+//! and an argument whose parameter resolves to `double`, including `super`
+//! and `this` constructor initializers with instantiated superclass parameters.
+//! Parenthesized literals and values outside the 64-bit integer range are left alone.
 //!
 //! Adopted from the official `prefer_int_literals` lint.
 
@@ -60,7 +61,7 @@ impl Rule for PreferIntLiterals {
 
 /// The span of the double literal in `expr` (`1.0` or `-1.0`) when it holds a
 /// whole number an int literal can spell.
-fn replaceable_literal(source: &str, expr: &Expr) -> Option<Span> {
+fn replaceable_literal(expr: &Expr) -> Option<Span> {
     let (value, span) = match expr {
         Expr::DoubleLit { value, span } => (value, *span),
         Expr::Unary {
@@ -68,7 +69,7 @@ fn replaceable_literal(source: &str, expr: &Expr) -> Option<Span> {
             operand,
             ..
         } => match operand.as_ref() {
-            Expr::DoubleLit { value, span } if !is_parenthesized(source, *span) => (value, *span),
+            Expr::DoubleLit { value, span } => (value, *span),
             _ => return None,
         },
         _ => return None,
@@ -77,29 +78,6 @@ fn replaceable_literal(source: &str, expr: &Expr) -> Option<Span> {
     // Mirrors `value == value.truncate()` on a 64-bit int.
     let whole = value.is_finite() && value.trunc() == value && value.abs() <= i64::MAX as f64;
     whole.then_some(span)
-}
-
-fn previous_char(source: &str, offset: usize) -> Option<char> {
-    source.get(..offset)?.trim_end().chars().next_back()
-}
-
-fn next_char(source: &str, offset: usize) -> Option<char> {
-    source.get(offset..)?.trim_start().chars().next()
-}
-
-/// Whether `span` is wrapped in parentheses; the parser drops them from the AST.
-fn is_parenthesized(source: &str, span: Span) -> bool {
-    previous_char(source, span.start) == Some('(') && next_char(source, span.end) == Some(')')
-}
-
-/// Like [`is_parenthesized`] for a call argument, whose own `(` may be the
-/// argument list's: only an extra `(` after `(`, `,`, or `name:` counts.
-fn is_parenthesized_argument(source: &str, span: Span) -> bool {
-    if !is_parenthesized(source, span) {
-        return false;
-    }
-    let open = source[..span.start].trim_end().len() - 1;
-    matches!(previous_char(source, open), Some('(' | ',' | ':'))
 }
 
 fn is_double(ty: &ResolvedType) -> bool {
@@ -122,10 +100,7 @@ impl DeclaredContexts<'_, '_> {
     }
 
     fn check(&mut self, expr: &Expr) {
-        if is_parenthesized(self.ctx.source, *expr.span()) {
-            return;
-        }
-        if let Some(span) = replaceable_literal(self.ctx.source, expr) {
+        if let Some(span) = replaceable_literal(expr) {
             self.diagnostics
                 .push(self.ctx.diagnostic(RULE, MESSAGE, span));
         }
@@ -259,10 +234,10 @@ struct ArgumentContexts<'a> {
 
 impl ArgumentContexts<'_> {
     fn check(&mut self, parameter: &ResolvedType, argument: &Expr) {
-        if !is_double(parameter) || is_parenthesized_argument(self.ctx.source, *argument.span()) {
+        if !is_double(parameter) {
             return;
         }
-        if let Some(span) = replaceable_literal(self.ctx.source, argument) {
+        if let Some(span) = replaceable_literal(argument) {
             self.diagnostics
                 .push(self.ctx.diagnostic(RULE, MESSAGE, span));
         }
@@ -286,61 +261,13 @@ impl ArgumentContexts<'_> {
 }
 
 impl SemanticRuleVisitor for ArgumentContexts<'_> {
-    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-        match node {
-            Expr::Call {
-                callee,
-                type_args,
-                args,
-                ..
-            } => {
-                if let Some(signature) = state.call_signature(callee, type_args) {
-                    self.check_arguments(args, &signature.positional, &signature.named);
-                }
-            }
-            Expr::New {
-                dart_type,
-                constructor_name,
-                args,
-                ..
-            } => {
-                let ResolvedType::Interface {
-                    identity,
-                    arguments,
-                    ..
-                } = state
-                    .model
-                    .resolve_type_in(dart_type, &state.type_parameters)
-                else {
-                    return;
-                };
-                let Some(signature) = state.signatures.constructor(
-                    &identity,
-                    constructor_name
-                        .as_ref()
-                        .map_or("new", |name| name.name.as_str()),
-                ) else {
-                    return;
-                };
-                let substitutions: HashMap<_, _> = signature
-                    .owner_parameters
-                    .iter()
-                    .cloned()
-                    .zip(arguments)
-                    .collect();
-                let positional: Vec<ResolvedType> = signature
-                    .positional
-                    .iter()
-                    .map(|ty| state.model.substitute(ty, &substitutions))
-                    .collect();
-                let named: HashMap<String, ResolvedType> = signature
-                    .named
-                    .iter()
-                    .map(|(name, ty)| (name.clone(), state.model.substitute(ty, &substitutions)))
-                    .collect();
-                self.check_arguments(args, &positional, &named);
-            }
-            _ => {}
-        }
+    fn visit_call_arguments(
+        &mut self,
+        args: &ArgList,
+        positional: &[ResolvedType],
+        named: &HashMap<String, ResolvedType>,
+        _state: &SemanticState<'_>,
+    ) {
+        self.check_arguments(args, positional, named);
     }
 }

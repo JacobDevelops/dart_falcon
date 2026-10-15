@@ -1,7 +1,26 @@
-use falcon_config::FalconConfig;
-use falcon_diagnostics::{Diagnostic, Severity, Span};
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
-use crate::resolve::{IdentityIndex, LibraryUnit, SignatureIndex, TypeIndex};
+use falcon_config::FalconConfig;
+use falcon_dart_parser::lexer::Lexer;
+use falcon_diagnostics::{Diagnostic, Severity, Span};
+use falcon_syntax::Token;
+use falcon_syntax::ast::{FunctionKind, Program, TopLevelDecl};
+
+use crate::environment::{AnalysisEnvironment, LanguageVersion};
+use crate::resolve::flow_writes::FlowWrites;
+use crate::resolve::{
+    IdentityIndex, LibraryUnit, ResolvedType, SemanticModel, SignatureIndex, TypeIndex,
+    TypeParameterScope,
+};
+
+/// Lazily computed facts shared by all rules analyzing one file.
+#[derive(Default)]
+pub struct AnalysisCache {
+    flow_writes: OnceLock<FlowWrites>,
+    globals: OnceLock<HashMap<String, ResolvedType>>,
+    tokens: OnceLock<Vec<Token>>,
+}
 
 /// Per-file analysis context passed to every rule.
 ///
@@ -21,6 +40,16 @@ pub struct AnalyzeContext<'a> {
     /// This file's library context — its part/owner siblings and the flag for an
     /// unresolved part. `None` when resolution is off or the file stands alone.
     pub library: Option<&'a LibraryUnit<'a>>,
+    /// Package configurations, language versions and the SDK of the run.
+    /// `None` means no package configuration or SDK is known.
+    pub environment: Option<&'a AnalysisEnvironment>,
+    /// The file's package `languageVersion`, cached by
+    /// [`Self::with_environment`]; `None` when no package configuration
+    /// covers the file. [`Self::language_version`] prefers the file's
+    /// `// @dart` override, then this, then the analyzer's default.
+    pub package_language_version: Option<LanguageVersion>,
+    /// Per-file facts; create a fresh cache when constructing a context for another file.
+    pub cache: AnalysisCache,
 }
 
 impl<'a> AnalyzeContext<'a> {
@@ -34,7 +63,81 @@ impl<'a> AnalyzeContext<'a> {
             identities: None,
             signatures: None,
             library: None,
+            environment: None,
+            package_language_version: None,
+            cache: AnalysisCache::default(),
         }
+    }
+
+    /// Lexical writes collected once for this file's parsed program.
+    pub fn flow_writes(&self, program: &Program) -> &FlowWrites {
+        self.cache
+            .flow_writes
+            .get_or_init(|| FlowWrites::program(program))
+    }
+
+    /// Top-level variable and setter types shared by semantic rule visitors.
+    pub fn globals(&self, program: &Program) -> &HashMap<String, ResolvedType> {
+        self.cache.globals.get_or_init(|| {
+            let mut globals = HashMap::new();
+            let Some(identities) = self.identities else {
+                return globals;
+            };
+            let model = SemanticModel::new(self.file_path, identities, self.types);
+            for declaration in &program.declarations {
+                match declaration {
+                    TopLevelDecl::Variable(variable) => {
+                        let declared = variable.var_type.as_ref().map(|ty| model.resolve_type(ty));
+                        for declarator in &variable.declarators {
+                            globals.insert(
+                                declarator.name.name.clone(),
+                                declared.clone().unwrap_or(ResolvedType::Unknown),
+                            );
+                        }
+                    }
+                    TopLevelDecl::Function(function) => {
+                        if let FunctionKind::Setter(parameters) = &function.kind
+                            && let Some(parameter) = parameters.params.first()
+                        {
+                            globals.insert(
+                                function.name.name.clone(),
+                                model.resolve_formal_parameter_in(
+                                    parameter,
+                                    &TypeParameterScope::default(),
+                                ),
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            globals
+        })
+    }
+
+    /// Source tokens, including trivia, lexed once per file.
+    pub fn tokens(&self) -> &[Token] {
+        self.cache
+            .tokens
+            .get_or_init(|| Lexer::new(self.source).tokenize())
+    }
+
+    /// The language version the file is analyzed at, as the analyzer
+    /// determines it: a leading `// @dart = X.Y` comment, else the package's
+    /// `languageVersion`, else [`LanguageVersion::CURRENT`].
+    pub fn language_version(&self) -> LanguageVersion {
+        LanguageVersion::file_override(self.source)
+            .or(self.package_language_version)
+            .unwrap_or(LanguageVersion::CURRENT)
+    }
+
+    /// Attach the run's analysis environment and cache the file's package
+    /// language version from it.
+    pub fn with_environment(mut self, environment: Option<&'a AnalysisEnvironment>) -> Self {
+        self.environment = environment;
+        self.package_language_version = environment
+            .and_then(|environment| environment.package_language_version(self.file_path));
+        self
     }
 
     pub fn diagnostic(

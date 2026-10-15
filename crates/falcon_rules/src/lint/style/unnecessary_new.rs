@@ -22,7 +22,7 @@ impl Rule for UnnecessaryNew {
                 is_const: false,
                 span,
                 ..
-            } = node
+            } = node.unparenthesized()
             {
                 diags.push(ctx.diagnostic(
                     "unnecessary-new",

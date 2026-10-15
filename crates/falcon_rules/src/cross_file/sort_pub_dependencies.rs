@@ -7,9 +7,9 @@
 //! the official rule, each section reports at most one name (the first break in
 //! the order) so that fixing it and re-running converges. Names compare by
 //! UTF-16 code units, exactly as Dart's `String.compareTo`, so `Zebra` sorts
-//! before `apple`. Malformed YAML and non-mapping sections are skipped. This is
-//! a cross-file rule because it reads the package manifest rather than Dart
-//! source.
+//! before `apple`. Malformed YAML (including duplicate keys) and non-mapping
+//! sections are skipped. This is a cross-file rule because it reads the package
+//! manifest rather than Dart source.
 
 use std::cmp::Ordering;
 use std::path::Path;
@@ -17,7 +17,7 @@ use std::path::Path;
 use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
-use marked_yaml::parse_yaml;
+use marked_yaml::{LoaderOptions, parse_yaml_with_options};
 
 use super::{character_to_byte, project_pubspecs, scalar_source_span};
 
@@ -45,7 +45,9 @@ fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
     let Ok(source) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(root) = parse_yaml(0, &source) else {
+    // Reject invalid mappings during the same location-preserving parse.
+    let options = LoaderOptions::default().error_on_duplicate_keys(true);
+    let Ok(root) = parse_yaml_with_options(0, &source, options) else {
         return Vec::new();
     };
     let Some(root) = root.as_mapping() else {
@@ -105,5 +107,17 @@ mod tests {
         assert_eq!(dart_compare("Zebra", "apple"), Ordering::Less);
         assert_eq!(dart_compare("flutter", "flutter_test"), Ordering::Less);
         assert_eq!(dart_compare("a_b", "ab"), Ordering::Less);
+    }
+
+    #[test]
+    fn skips_duplicate_keys_even_outside_dependency_sections() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pubspec.yaml");
+        std::fs::write(
+            &path,
+            "name: example\nmetadata:\n  key: first\n  key: second\ndependencies:\n  zebra: any\n  apple: any\n",
+        )
+        .unwrap();
+        assert!(check_pubspec(&path).is_empty());
     }
 }

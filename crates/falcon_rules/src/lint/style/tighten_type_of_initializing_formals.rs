@@ -10,7 +10,11 @@
 //! is `dynamic`, which counts as nullable), or the super constructor's parameter
 //! type for an untyped `super.x`. A trailing `?` or `dynamic` proves
 //! nullability even when the named type itself is unresolved; otherwise
-//! unresolved types are never reported.
+//! unresolved types are never reported. The analyzer treats an undefined type
+//! (a compile error) as nullable and reports it, but Falcon cannot tell an
+//! undefined type from one declared in a library it does not load.
+//! Parenthesized conditions or operands are not the analyzer's direct binary
+//! identifier/null test. Repeated asserts on one formal produce one diagnostic.
 //!
 //! ```dart
 //! class A {
@@ -22,14 +26,15 @@
 //!
 //! Adopted from the official `tighten_type_of_initializing_formals` lint.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_class_decl, walk_constructor_decl, walk_enum_decl};
+use falcon_syntax::visitor::{Visitor, walk_class_decl, walk_enum_decl, walk_top_level_decl};
 
+use crate::lint::expressions::is_parenthesized;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use crate::lint::semantic_type_operations::nullability;
 
@@ -41,7 +46,10 @@ impl Rule for TightenTypeOfInitializingFormals {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
         };
-        let mut asserts = NonNullAsserts::default();
+        let mut asserts = NonNullAsserts {
+            formals: HashMap::new(),
+            fields: Vec::new(),
+        };
         asserts.visit_program(program);
         if asserts.formals.is_empty() {
             return Vec::new();
@@ -49,6 +57,7 @@ impl Rule for TightenTypeOfInitializingFormals {
         let mut collector = Collector {
             ctx,
             formals: asserts.formals,
+            reported: HashSet::new(),
             diagnostics: Vec::new(),
         };
         visit_program(&mut collector, program, state);
@@ -59,7 +68,6 @@ impl Rule for TightenTypeOfInitializingFormals {
 /// Assert-initializer conditions (keyed by span) that null-check an
 /// initializing formal, mapped to that formal's span and whether the formal's
 /// type is syntactically proven nullable.
-#[derive(Default)]
 struct NonNullAsserts {
     formals: HashMap<(usize, usize), (Span, bool)>,
     /// Field declarations of the enclosing class or enum.
@@ -114,6 +122,28 @@ impl NonNullAsserts {
 }
 
 impl Visitor for NonNullAsserts {
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        if let TopLevelDecl::ExtensionType(extension) = node {
+            self.push_fields(&extension.members);
+            if let Some(representation) = extension.representation() {
+                let shape =
+                    if representation.param_type.as_ref().is_some_and(|ty| {
+                        ty.is_nullable() || matches!(ty, DartType::Dynamic { .. })
+                    }) {
+                        FieldShape::Nullable
+                    } else {
+                        FieldShape::Other
+                    };
+                if let Some(fields) = self.fields.last_mut() {
+                    fields.insert(representation.name.name.clone(), shape);
+                }
+            }
+            walk_top_level_decl(self, node);
+            self.fields.pop();
+        } else {
+            walk_top_level_decl(self, node);
+        }
+    }
     fn visit_class_decl(&mut self, node: &ClassDecl) {
         self.push_fields(&node.members);
         walk_class_decl(self, node);
@@ -126,11 +156,14 @@ impl Visitor for NonNullAsserts {
         self.fields.pop();
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        for initializer in &node.initializers {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+        for initializer in node.initializers {
             let ConstructorInitializer::Assert { condition, .. } = initializer else {
                 continue;
             };
+            if is_parenthesized(condition) {
+                continue;
+            }
             let Some(name) = null_checked_identifier(condition) else {
                 continue;
             };
@@ -147,11 +180,10 @@ impl Visitor for NonNullAsserts {
                 );
             }
         }
-        walk_constructor_decl(self, node);
     }
 }
 
-/// The identifier `x` of an `x != null` or `null != x` condition.
+/// Only bare identifier/null operands match the official rule.
 fn null_checked_identifier(condition: &Expr) -> Option<&Identifier> {
     let Expr::Binary {
         op: BinaryOp::NotEq,
@@ -162,6 +194,9 @@ fn null_checked_identifier(condition: &Expr) -> Option<&Identifier> {
     else {
         return None;
     };
+    if is_parenthesized(left) || is_parenthesized(right) {
+        return None;
+    }
     match (left.as_ref(), right.as_ref()) {
         (Expr::Ident(identifier), Expr::NullLit { .. })
         | (Expr::NullLit { .. }, Expr::Ident(identifier)) => Some(identifier),
@@ -172,6 +207,8 @@ fn null_checked_identifier(condition: &Expr) -> Option<&Identifier> {
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     formals: HashMap<(usize, usize), (Span, bool)>,
+    /// Each initializing formal is reported once even with duplicate asserts.
+    reported: HashSet<(usize, usize)>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -189,7 +226,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         let nullable = syntactically_nullable
             || matches!(ty, ResolvedType::Dynamic)
             || nullability(&ty, &state.signatures, self.ctx.types) == Truth::Yes;
-        if nullable {
+        if nullable && self.reported.insert((param.start, param.end)) {
             self.diagnostics.push(self.ctx.diagnostic(
                 "tighten-type-of-initializing-formals",
                 "Use a type annotation rather than 'assert' to enforce non-nullability.",

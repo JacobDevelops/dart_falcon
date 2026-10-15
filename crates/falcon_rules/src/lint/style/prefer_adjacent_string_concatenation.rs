@@ -24,9 +24,10 @@ impl Rule for PreferAdjacentStringConcatenation {
                 left,
                 right,
                 span,
-            } = node
-                && matches!(left.as_ref(), Expr::StringLit(_))
-                && matches!(right.as_ref(), Expr::StringLit(_))
+                ..
+            } = node.unparenthesized()
+                && matches!(left.unparenthesized(), Expr::StringLit(_))
+                && matches!(right.unparenthesized(), Expr::StringLit(_))
             {
                 diags.push(ctx.diagnostic(
                     "prefer-adjacent-string-concatenation",

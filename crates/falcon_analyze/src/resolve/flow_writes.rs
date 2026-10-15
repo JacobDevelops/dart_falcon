@@ -1,0 +1,634 @@
+//! Variables each loop and `try` region writes, collected once per program
+//! with lexical resolution; flow analysis forgets their promotions where
+//! control may re-enter the region (a loop's back edge, a `catch`).
+use std::collections::{HashMap, HashSet};
+
+use falcon_syntax::ast::*;
+use falcon_syntax::visitor::{
+    Visitor, walk_class_member, walk_collection_element, walk_expr, walk_function_decl,
+    walk_map_element, walk_pattern, walk_stmt,
+};
+
+#[derive(Default)]
+pub struct FlowWrites {
+    /// Direct writes of bindings enclosing each loop, switch, or try/catch region.
+    pub region_writes: HashMap<usize, HashSet<String>>,
+    /// Enclosing bindings written by closures declared inside each region;
+    /// captures by earlier closures are already marked in the environment.
+    pub captured_region_writes: HashMap<usize, HashSet<String>>,
+    /// Enclosing bindings written anywhere in each nested callable's executable.
+    pub anywhere_writes: HashMap<usize, HashSet<String>>,
+    /// Enclosing bindings each nested callable sees that some closure writes,
+    /// wherever in the executable that closure is declared.
+    pub anywhere_captured: HashMap<usize, HashSet<String>>,
+    /// Enclosing bindings each nested callable itself writes, directly or in
+    /// deeper closures: the captures its declaration actually performs.
+    pub callable_captured_writes: HashMap<usize, HashSet<String>>,
+    scopes: Vec<HashMap<String, usize>>,
+    callable_scopes: Vec<usize>,
+    callable_ids: Vec<Option<usize>>,
+    callable_captures: HashMap<usize, HashSet<usize>>,
+    regions: Vec<(usize, usize, usize)>,
+    callable_bindings: HashMap<usize, HashMap<String, usize>>,
+    captured_bindings: HashSet<usize>,
+    written_bindings: HashSet<usize>,
+    assigning_pattern: bool,
+}
+
+impl FlowWrites {
+    pub fn program(program: &Program) -> Self {
+        let mut visitor = Self {
+            scopes: vec![HashMap::new()],
+            ..Self::default()
+        };
+        visitor.visit_program(program);
+        visitor.anywhere_writes =
+            callable_names(&visitor.callable_bindings, &visitor.written_bindings);
+        visitor.anywhere_captured =
+            callable_names(&visitor.callable_bindings, &visitor.captured_bindings);
+        visitor.callable_captured_writes = visitor
+            .callable_bindings
+            .iter()
+            .filter_map(|(callable, bindings)| {
+                let names = names_of(bindings, visitor.callable_captures.get(callable)?);
+                (!names.is_empty()).then_some((*callable, names))
+            })
+            .collect();
+        // Cached flow facts outlive traversal; binding snapshots and capture
+        // bookkeeping must not remain attached to each file's result.
+        Self {
+            region_writes: visitor.region_writes,
+            captured_region_writes: visitor.captured_region_writes,
+            anywhere_writes: visitor.anywhere_writes,
+            anywhere_captured: visitor.anywhere_captured,
+            callable_captured_writes: visitor.callable_captured_writes,
+            ..Self::default()
+        }
+    }
+
+    fn bindings(&self) -> HashMap<String, usize> {
+        self.scopes
+            .iter()
+            .flat_map(|scope| scope.iter().map(|(name, id)| (name.clone(), *id)))
+            .collect()
+    }
+
+    fn bind(&mut self, identifier: &Identifier) {
+        self.scopes
+            .last_mut()
+            .expect("lexical scope")
+            .insert(identifier.name.clone(), identifier.span.start);
+    }
+
+    fn record(&mut self, identifier: &Identifier) {
+        let name = &identifier.name;
+        let binding = self
+            .scopes
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(scope, bindings)| bindings.get(name).map(|id| (scope, *id)));
+        if let Some((scope, id)) = binding {
+            self.written_bindings.insert(id);
+            if self
+                .callable_scopes
+                .last()
+                .is_some_and(|entry| scope < *entry)
+            {
+                self.captured_bindings.insert(id);
+            }
+            for (&entry, &callable) in self.callable_scopes.iter().zip(&self.callable_ids) {
+                if let Some(callable) = callable.filter(|_| scope < entry) {
+                    self.callable_captures
+                        .entry(callable)
+                        .or_default()
+                        .insert(id);
+                }
+            }
+            // Resolve captures while lexical scopes are still available instead
+            // of copying every visible binding when a region begins.
+            for &(region, entry, depth) in &self.regions {
+                if scope < entry
+                    && self
+                        .callable_scopes
+                        .get(depth)
+                        .is_some_and(|callable| scope < *callable)
+                {
+                    let names = self.captured_region_writes.entry(region).or_default();
+                    if !names.contains(name) {
+                        names.insert(name.clone());
+                    }
+                }
+            }
+        }
+        for &(region, scope, depth) in &self.regions {
+            if depth == self.callable_scopes.len()
+                && binding.is_none_or(|(binding, _)| binding < scope)
+            {
+                self.region_writes
+                    .entry(region)
+                    .or_default()
+                    .insert(name.clone());
+            }
+        }
+    }
+
+    fn pattern_variable(&mut self, identifier: &Identifier) {
+        if self.assigning_pattern {
+            self.record(identifier);
+        } else {
+            self.bind(identifier);
+        }
+    }
+
+    fn scoped(&mut self, visit: impl FnOnce(&mut Self)) {
+        self.scopes.push(HashMap::new());
+        visit(self);
+        self.scopes.pop();
+    }
+
+    /// Visits a callable body; `id` keys nested callables' facts.
+    fn callable(&mut self, id: Option<usize>, visit: impl FnOnce(&mut Self)) {
+        self.callable_scopes.push(self.scopes.len());
+        self.callable_ids.push(id);
+        self.scoped(visit);
+        self.callable_ids.pop();
+        self.callable_scopes.pop();
+    }
+
+    fn region(&mut self, id: usize, visit: impl FnOnce(&mut Self)) {
+        self.regions
+            .push((id, self.scopes.len(), self.callable_scopes.len()));
+        visit(self);
+        self.regions.pop();
+    }
+    fn conditional(&mut self, condition: &IfCondition, then: impl FnOnce(&mut Self)) {
+        match condition {
+            IfCondition::Expr(value) => {
+                self.visit_expr(value);
+                self.scoped(then);
+            }
+            IfCondition::Case(value, pattern, guard) => {
+                self.visit_expr(value);
+                self.scoped(|visitor| {
+                    visitor.visit_pattern(pattern);
+                    if let Some(guard) = guard {
+                        visitor.visit_expr(guard);
+                    }
+                    then(visitor);
+                });
+            }
+        }
+    }
+
+    fn loop_header(&mut self, header: &ForHeader) {
+        if let Some(ForInit::ForIn {
+            declares_variable: false,
+            name,
+            ..
+        }) = &header.init
+        {
+            self.record(name);
+        }
+        if let Some(condition) = &header.condition {
+            self.visit_expr(condition);
+        }
+        for update in &header.updates {
+            self.visit_expr(update);
+        }
+    }
+
+    fn loop_init(&mut self, header: &ForHeader) {
+        if let Some(init) = &header.init {
+            match init {
+                ForInit::VarDecl(declaration) => self.visit_local_var(declaration),
+                ForInit::ForIn {
+                    declares_variable,
+                    name,
+                    iterable,
+                    ..
+                } => {
+                    self.visit_expr(iterable);
+                    if *declares_variable {
+                        self.bind(name);
+                    }
+                }
+                ForInit::PatternForIn {
+                    pattern, iterable, ..
+                } => {
+                    self.visit_expr(iterable);
+                    self.visit_pattern(pattern);
+                }
+                ForInit::Exprs(expressions) => {
+                    for expression in expressions {
+                        self.visit_expr(expression);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Names in `bindings` whose binding is in `selected`.
+fn names_of(bindings: &HashMap<String, usize>, selected: &HashSet<usize>) -> HashSet<String> {
+    bindings
+        .iter()
+        .filter(|(_, binding)| selected.contains(binding))
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+fn callable_names(
+    callables: &HashMap<usize, HashMap<String, usize>>,
+    selected: &HashSet<usize>,
+) -> HashMap<usize, HashSet<String>> {
+    callables
+        .iter()
+        .filter_map(|(callable, bindings)| {
+            let names = names_of(bindings, selected);
+            (!names.is_empty()).then_some((*callable, names))
+        })
+        .collect()
+}
+
+impl Visitor for FlowWrites {
+    fn visit_local_var(&mut self, declaration: &LocalVarDecl) {
+        for declarator in &declaration.declarators {
+            if let Some(initializer) = &declarator.initializer {
+                self.visit_expr(initializer);
+            }
+            self.bind(&declarator.name);
+        }
+    }
+
+    fn visit_formal_param(&mut self, parameter: &FormalParam) {
+        self.bind(&parameter.name);
+        if let Some(default) = &parameter.default_value {
+            self.visit_expr(default);
+        }
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) {
+        match member {
+            ClassMember::Field(_) | ClassMember::Error(_) => walk_class_member(self, member),
+            _ => self.callable(None, |visitor| walk_class_member(visitor, member)),
+        }
+    }
+
+    fn visit_function_decl(&mut self, declaration: &FunctionDecl) {
+        self.bind(&declaration.name);
+        self.callable(None, |visitor| walk_function_decl(visitor, declaration));
+    }
+
+    fn visit_stmt(&mut self, statement: &Stmt) {
+        match statement {
+            Stmt::Block(_) => self.scoped(|visitor| walk_stmt(visitor, statement)),
+            Stmt::If(statement) => {
+                match &statement.condition {
+                    IfCondition::Expr(condition) => {
+                        self.visit_expr(condition);
+                        self.scoped(|visitor| visitor.visit_stmt(&statement.then_branch));
+                    }
+                    IfCondition::Case(value, pattern, guard) => {
+                        self.visit_expr(value);
+                        self.scoped(|visitor| {
+                            visitor.visit_pattern(pattern);
+                            if let Some(guard) = guard {
+                                visitor.visit_expr(guard);
+                            }
+                            visitor.visit_stmt(&statement.then_branch);
+                        });
+                    }
+                }
+                if let Some(branch) = &statement.else_branch {
+                    self.scoped(|visitor| visitor.visit_stmt(branch));
+                }
+            }
+            Stmt::For(statement) => self.scoped(|visitor| {
+                visitor.loop_init(&statement.header);
+                visitor.region(statement.span.start, |visitor| {
+                    visitor.loop_header(&statement.header);
+                    visitor.scoped(|visitor| visitor.visit_stmt(&statement.body));
+                });
+            }),
+            Stmt::While(statement) => self.region(statement.span.start, |visitor| {
+                visitor.visit_expr(&statement.condition);
+                visitor.scoped(|visitor| visitor.visit_stmt(&statement.body));
+            }),
+            Stmt::DoWhile(statement) => self.region(statement.span.start, |visitor| {
+                visitor.scoped(|visitor| visitor.visit_stmt(&statement.body));
+                visitor.visit_expr(&statement.condition);
+            }),
+            Stmt::TryCatch(statement) => {
+                self.region(statement.span.start, |visitor| {
+                    visitor.scoped(|visitor| {
+                        for statement in &statement.body.stmts {
+                            visitor.visit_stmt(statement);
+                        }
+                    })
+                });
+                for catch in &statement.catches {
+                    self.scoped(|visitor| {
+                        visitor.region(catch.body.span.start, |visitor| {
+                            if let Some(name) = &catch.exception_var {
+                                visitor.bind(name);
+                            }
+                            if let Some(name) = &catch.stack_trace_var {
+                                visitor.bind(name);
+                            }
+                            for statement in &catch.body.stmts {
+                                visitor.visit_stmt(statement);
+                            }
+                        });
+                    });
+                }
+                if let Some(finally) = &statement.finally {
+                    self.scoped(|visitor| {
+                        for statement in &finally.stmts {
+                            visitor.visit_stmt(statement);
+                        }
+                    });
+                }
+            }
+            Stmt::Switch(statement) => self.region(statement.span.start, |visitor| {
+                visitor.visit_expr(&statement.subject);
+                for case in &statement.cases {
+                    visitor.scoped(|visitor| {
+                        for label in &case.cases {
+                            if let SwitchCaseKind::Pattern(pattern, guard) = label {
+                                visitor.visit_pattern(pattern);
+                                if let Some(guard) = guard {
+                                    visitor.visit_expr(guard);
+                                }
+                            }
+                        }
+                        for statement in &case.body {
+                            visitor.visit_stmt(statement);
+                        }
+                    });
+                }
+            }),
+            Stmt::PatternDecl(declaration) => {
+                self.visit_expr(&declaration.init);
+                self.visit_pattern(&declaration.pattern);
+            }
+            Stmt::PatternAssign(assignment) => {
+                self.visit_expr(&assignment.value);
+                self.assigning_pattern = true;
+                self.visit_pattern(&assignment.pattern);
+                self.assigning_pattern = false;
+            }
+            Stmt::LocalFunc(function) => {
+                self.bind(&function.name);
+                self.callable_bindings
+                    .insert(function.span.start, self.bindings());
+                self.callable(Some(function.span.start), |visitor| {
+                    walk_stmt(visitor, statement)
+                });
+            }
+            _ => walk_stmt(self, statement),
+        }
+    }
+
+    fn visit_collection_element(&mut self, element: &CollectionElement) {
+        if let CollectionElement::If {
+            condition,
+            then_elem,
+            else_elem,
+            ..
+        } = element
+        {
+            self.conditional(condition, |visitor| {
+                visitor.visit_collection_element(then_elem)
+            });
+            if let Some(element) = else_elem {
+                self.scoped(|visitor| visitor.visit_collection_element(element));
+            }
+            return;
+        }
+        if let CollectionElement::For {
+            header,
+            element: body,
+            span,
+            ..
+        } = element
+        {
+            self.scoped(|visitor| {
+                visitor.loop_init(header);
+                visitor.region(span.start, |visitor| {
+                    visitor.loop_header(header);
+                    visitor.visit_collection_element(body);
+                });
+            });
+        } else {
+            walk_collection_element(self, element);
+        }
+    }
+
+    fn visit_map_element(&mut self, element: &MapElement) {
+        if let MapElement::If {
+            condition,
+            then_entry,
+            else_entry,
+            ..
+        } = element
+        {
+            self.conditional(condition, |visitor| visitor.visit_map_element(then_entry));
+            if let Some(entry) = else_entry {
+                self.scoped(|visitor| visitor.visit_map_element(entry));
+            }
+            return;
+        }
+        if let MapElement::For {
+            header,
+            entry,
+            span,
+            ..
+        } = element
+        {
+            self.scoped(|visitor| {
+                visitor.loop_init(header);
+                visitor.region(span.start, |visitor| {
+                    visitor.loop_header(header);
+                    visitor.visit_map_element(entry);
+                });
+            });
+        } else {
+            walk_map_element(self, element);
+        }
+    }
+
+    fn visit_expr(&mut self, expression: &Expr) {
+        match expression {
+            Expr::Assign { target, .. } => {
+                if let Expr::Ident(name) = target.unparenthesized() {
+                    self.record(name);
+                }
+                walk_expr(self, expression);
+            }
+            Expr::Unary {
+                op: UnaryOp::PlusPlus | UnaryOp::MinusMinus,
+                operand,
+                ..
+            }
+            | Expr::PostfixIncDec { operand, .. } => {
+                if let Expr::Ident(name) = operand.unparenthesized() {
+                    self.record(name);
+                }
+                walk_expr(self, expression);
+            }
+            Expr::FuncExpr { span, .. } => {
+                self.callable_bindings.insert(span.start, self.bindings());
+                self.callable(Some(span.start), |visitor| walk_expr(visitor, expression));
+            }
+            Expr::Switch { subject, arms, .. } => {
+                self.visit_expr(subject);
+                for arm in arms {
+                    self.scoped(|visitor| {
+                        visitor.visit_pattern(&arm.pattern);
+                        if let Some(guard) = &arm.guard {
+                            visitor.visit_expr(guard);
+                        }
+                        visitor.visit_expr(&arm.body);
+                    });
+                }
+            }
+            _ => walk_expr(self, expression),
+        }
+    }
+
+    fn visit_pattern(&mut self, pattern: &Pattern) {
+        match pattern {
+            Pattern::Variable { name, .. } => self.pattern_variable(name),
+            // `Type(:name)` binds the getter's name.
+            Pattern::Object(object) => {
+                for field in object.fields.iter().filter(|field| field.pattern.is_none()) {
+                    self.pattern_variable(&field.name);
+                }
+            }
+            _ => {}
+        }
+        walk_pattern(self, pattern);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use falcon_dart_parser::parse;
+
+    use super::FlowWrites;
+
+    #[test]
+    fn regions_record_direct_writes_of_enclosing_bindings() {
+        let source = "void f(int? a, int? b, int c) { while (a != null) { a = b; var d = 0; d = 1; \
+            void g() { c = 1; } } for (var i = 0; i < 1; i++) { (b, _) = (null, 0); } \
+            try { c = 2; } catch (e) {} do { c++; } while (c < 3); }";
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let writes = FlowWrites::program(&program);
+        let region = |text: &str| source.find(text).expect(text);
+        assert_eq!(
+            writes.region_writes,
+            HashMap::from([
+                (region("while (a"), HashSet::from(["a".to_owned()])),
+                (
+                    region("for ("),
+                    HashSet::from(["i".to_owned(), "b".to_owned()])
+                ),
+                (region("try"), HashSet::from(["c".to_owned()])),
+                (region("do {"), HashSet::from(["c".to_owned()])),
+            ]),
+        );
+    }
+    #[test]
+    fn region_captures_come_only_from_closures_inside_the_region() {
+        let source = "void f(int? x, List<int?> xs, List<Function> cbs) { \
+            cbs.add(() { print(x); }); \
+            while (true) { void h() { x = null; } } for (x in xs) {} try {} catch (e) {} \
+            cbs.add(() => x = null); for (var x in xs) { x = null; } \
+            var g = () { do { x = null; } while (true); }; }";
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let writes = FlowWrites::program(&program);
+        let at = |text: &str| source.find(text).expect(text);
+        let x = HashSet::from(["x".to_owned()]);
+        assert_eq!(
+            writes.captured_region_writes,
+            HashMap::from([(at("while (true)"), x.clone())]),
+        );
+        for region in ["for (x in", "for (var x", "do {"] {
+            assert_eq!(writes.region_writes[&at(region)], x);
+        }
+        // Every closure sees `x` as captured, including closures declared
+        // before the one that writes it and closures that only read it.
+        assert_eq!(writes.anywhere_captured.len(), 4);
+        assert_eq!(writes.anywhere_captured[&at("() { print")], x);
+        for callable in [at("() => x"), at("() { do")] {
+            assert_eq!(writes.anywhere_captured[&callable], x);
+        }
+        assert!(writes.anywhere_captured.values().all(|names| names == &x));
+        // Only the closures that write `x` capture it.
+        assert_eq!(writes.callable_captured_writes.len(), 3);
+        for callable in [at("() => x"), at("() { do")] {
+            assert_eq!(writes.callable_captured_writes[&callable], x);
+        }
+    }
+
+    #[test]
+    fn captures_resolve_region_entry_bindings_without_scope_snapshots() {
+        let source = "void f(int? x) { while (true) { \
+            { int? x; void inner() { x = null; } } \
+            while (true) { void outer() { x = null; } } } }";
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let writes = FlowWrites::program(&program);
+        let x = HashSet::from(["x".to_owned()]);
+        for (start, _) in source.match_indices("while") {
+            assert_eq!(writes.captured_region_writes[&start], x);
+        }
+        assert_eq!(writes.captured_region_writes.len(), 2);
+        let (shadowed, errors) =
+            parse("void f(int? x) { while (true) { int? x; void inner() { x = null; } } }");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(
+            FlowWrites::program(&shadowed)
+                .captured_region_writes
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn collection_case_bindings_do_not_escape_the_then_element() {
+        let source = "void f(int? x, Object value) { while (true) { \
+            var list = [if (value case int x) x else (x = null), (x = null)]; \
+            var map = {if (value case int x) x: x else 0: (x = null)}; } }";
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let writes = FlowWrites::program(&program);
+        assert_eq!(
+            writes.region_writes[&source.find("while").unwrap()],
+            HashSet::from(["x".to_owned()])
+        );
+    }
+
+    #[test]
+    fn cached_results_drop_traversal_only_bindings() {
+        let source = "void f(int x) { void g() { x = 1; } while (true) { g(); } }";
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let writes = FlowWrites::program(&program);
+        assert!(!writes.anywhere_writes.is_empty());
+        assert!(!writes.anywhere_captured.is_empty());
+        assert!(!writes.callable_captured_writes.is_empty());
+        assert!(writes.scopes.is_empty());
+        assert!(writes.callable_scopes.is_empty());
+        assert!(writes.callable_ids.is_empty());
+        assert!(writes.callable_captures.is_empty());
+        assert!(writes.regions.is_empty());
+        assert!(writes.callable_bindings.is_empty());
+        assert!(writes.captured_bindings.is_empty());
+        assert!(writes.written_bindings.is_empty());
+    }
+}

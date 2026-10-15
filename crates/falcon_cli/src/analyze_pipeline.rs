@@ -1,16 +1,18 @@
 //! Analyze pipeline: config loading, file walking, parallel analysis, and diagnostic output.
 
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::info;
 
-use std::collections::HashMap;
-
 use clap::{Args, ValueEnum};
+use falcon_analyze::environment::{DartSdk, PackageConfig};
 use falcon_analyze::{
-    ProjectFile, analyze_parallel_collecting_resolving, analyze_sequential_collecting_resolving,
+    AnalysisEnvironment, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
+    analyze_sequential_collecting_resolving,
 };
 use falcon_config::{load_config, load_or_default};
-use falcon_diagnostics::Diagnostic;
+use falcon_diagnostics::{Diagnostic, LineIndex};
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, package_identities,
     requires_resolution, run_cross_file,
@@ -89,6 +91,18 @@ pub struct CheckOutput {
 /// Returns an error message if the explicit `--config` file cannot be loaded
 /// or the current directory is inaccessible.
 pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
+    collect_check_with_sdk_locator(options, DartSdk::locate)
+}
+
+/// Collect analysis with an explicit SDK discovery policy.
+///
+/// # Errors
+///
+/// Returns the same configuration and directory errors as [`collect_check`].
+pub fn collect_check_with_sdk_locator(
+    options: &CheckOptions,
+    sdk_locator: fn(Option<&PackageConfig>) -> Option<DartSdk>,
+) -> Result<CheckOutput, String> {
     let mut config = match &options.config_path {
         Some(path) => load_config(path).map_err(|e| e.to_string())?,
         None => {
@@ -143,6 +157,16 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
         resolve,
         "starting check"
     );
+    // Package configurations give every file its language version; resolving
+    // runs also load the SDK and dependency libraries project files import.
+    let environment = AnalysisEnvironment::discover_with_sdk_locator(
+        files.iter().map(|(path, _)| path.as_path()),
+        sdk_locator,
+    );
+    let workspace = Workspace {
+        packages: &packages,
+        environment: Some(&environment),
+    };
     let (mut diagnostics, mut project_files, indexes) = if options.parallel {
         analyze_parallel_collecting_resolving(
             &registry,
@@ -150,7 +174,7 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
             &config,
             collect_programs,
             resolve,
-            &packages,
+            workspace,
         )
     } else {
         analyze_sequential_collecting_resolving(
@@ -159,7 +183,7 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
             &config,
             collect_programs,
             resolve,
-            &packages,
+            workspace,
         )
     };
     if collect_programs {
@@ -185,14 +209,15 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
 
     // Resolve 1-based line/col for every diagnostic from its file's source, so
     // text and JSON output carry navigable positions rather than byte offsets.
-    let sources: HashMap<String, &str> = files
+    let sources: HashMap<Cow<'_, str>, &str> = files
         .iter()
         .chain(manifests.iter())
-        .map(|(path, source)| (path.to_string_lossy().into_owned(), source.as_str()))
+        .map(|(path, source)| (path.to_string_lossy(), source.as_str()))
         .collect();
+    let mut lines: HashMap<&str, LineIndex<'_>> = HashMap::new();
     for d in &mut diagnostics {
-        if let Some(src) = sources.get(&d.file_path) {
-            d.resolve_position(src);
+        if let Some((path, src)) = sources.get_key_value(d.file_path.as_str()) {
+            d.resolve_position_in(lines.entry(path).or_insert_with(|| LineIndex::new(src)));
         }
     }
 
@@ -205,6 +230,8 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
             .then((a.rule != "syntax-error").cmp(&(b.rule != "syntax-error")))
             .then(a.span.start.cmp(&b.span.start))
             .then(a.rule.cmp(b.rule))
+            .then(a.span.end.cmp(&b.span.end))
+            .then(a.message.cmp(&b.message))
     });
 
     // CLI flag takes precedence over the config value.
@@ -227,7 +254,15 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
 /// Run the check pipeline and print diagnostics. Returns 0 if no diagnostics,
 /// `error_exit_code` if any found, 1 on pipeline errors.
 pub fn run_check(options: CheckOptions) -> i32 {
-    let result = match collect_check(&options) {
+    run_check_with_sdk_locator(options, DartSdk::locate)
+}
+
+/// Run the check pipeline with an explicit SDK discovery policy.
+pub fn run_check_with_sdk_locator(
+    options: CheckOptions,
+    sdk_locator: fn(Option<&PackageConfig>) -> Option<DartSdk>,
+) -> i32 {
+    let result = match collect_check_with_sdk_locator(&options, sdk_locator) {
         Ok(output) => output,
         Err(e) => {
             eprintln!("error: {}", e);

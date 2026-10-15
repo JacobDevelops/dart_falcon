@@ -6,10 +6,8 @@
 //! `Window`; and invoking the `Element.html` or `DocumentFragment.html`
 //! constructors all bypass sanitization and are a common XSS vector. A
 //! receiver whose static type is `dynamic` is flagged too, since it may be any
-//! of these — unless it is a variable that could be type-promoted (by an
-//! `is`/`is!` test, an `as` cast, a pattern match, or an assignment) anywhere
-//! in its outermost enclosing declaration, as falcon has no flow analysis.
-//! Receivers whose type cannot be established are left alone.
+//! of these. Receivers use flow-promoted types at the current use site;
+//! receivers whose type cannot be established are left alone.
 //!
 //! ```dart
 //! import 'dart:html';
@@ -21,9 +19,9 @@
 //! }
 //! ```
 //!
-//! Adopted from the official `unsafe_html` lint (removed from the Dart SDK in
-//! 3.7 alongside the deprecation of `dart:html`; this ports its final
-//! behaviour).
+//! UPSTREAM-NOOP: `unsafe_html` is absent from current upstream, having been
+//! removed from the Dart SDK in 3.7 alongside the deprecation of `dart:html`.
+//! Falcon retains its unsafe-HTML implementation.
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, Truth,
@@ -32,7 +30,6 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
-use super::avoid_dynamic_calls::PromotableNames;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 const HTML: &str = "dart:html";
@@ -63,7 +60,6 @@ impl Rule for UnsafeHtml {
         let mut collector = Collector {
             ctx,
             diags: Vec::new(),
-            promotable: PromotableNames::of(program),
         };
         visit_program(&mut collector, program, state);
         collector.diags
@@ -73,7 +69,6 @@ impl Rule for UnsafeHtml {
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
-    promotable: PromotableNames,
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
@@ -86,7 +81,7 @@ impl SemanticRuleVisitor for Collector<'_> {
                         .clone()
                         .map(|receiver| (receiver, &name.name)),
                     Expr::Field { object, field, .. } => {
-                        Some((self.promoted_receiver_type(object, state), &field.name))
+                        Some((receiver_type(object, state), &field.name))
                     }
                     _ => None,
                 };
@@ -101,7 +96,7 @@ impl SemanticRuleVisitor for Collector<'_> {
                         .clone()
                         .map(|receiver| (receiver, &name.name)),
                     Expr::Field { object, field, .. } => {
-                        Some((self.promoted_receiver_type(object, state), &field.name))
+                        Some((receiver_type(object, state), &field.name))
                     }
                     _ => None,
                 };
@@ -114,14 +109,11 @@ impl SemanticRuleVisitor for Collector<'_> {
             Expr::Cascade {
                 object, sections, ..
             } => {
-                let receiver = self.promoted_receiver_type(object, state);
+                let receiver = receiver_type(object, state);
                 for section in sections {
                     match section.ops.as_slice() {
                         [CascadeOp::Assign(target, _, _)] => {
-                            if let Expr::Ident(name) = target.as_ref()
-                                && !self.ctx.source[section.span.start..name.span.start]
-                                    .contains('[')
-                            {
+                            if let Expr::Ident(name) = target.as_ref() {
                                 self.attribute(&receiver, &name.name, section.span, state);
                             }
                         }
@@ -138,20 +130,6 @@ impl SemanticRuleVisitor for Collector<'_> {
 }
 
 impl Collector<'_> {
-    /// The receiver's static type, treating a `dynamic` variable that may be
-    /// promoted at this use as unknown.
-    fn promoted_receiver_type(&self, object: &Expr, state: &SemanticState<'_>) -> ResolvedType {
-        let ty = receiver_type(object, state);
-        match object {
-            Expr::Ident(identifier)
-                if ty == ResolvedType::Dynamic && self.promotable.may_promote(identifier) =>
-            {
-                ResolvedType::Unknown
-            }
-            _ => ty,
-        }
-    }
-
     fn attribute(
         &mut self,
         receiver: &ResolvedType,
@@ -246,10 +224,7 @@ fn receiver_type(object: &Expr, state: &SemanticState<'_>) -> ResolvedType {
     };
     match state.model.resolve_sdk_member(name) {
         Some(identity) if identity.is_sdk(HTML, "window") => {
-            ResolvedType::interface_identity(DeclarationIdentity::Sdk {
-                library: HTML,
-                name: "Window",
-            })
+            ResolvedType::interface_identity(DeclarationIdentity::sdk(HTML, "Window"))
         }
         _ => ty,
     }
@@ -269,10 +244,7 @@ fn extends_html(ty: &ResolvedType, class: &'static str, state: &SemanticState<'_
         identity.is_sdk(HTML, target)
             || state.signatures.is_subtype_of(
                 ty,
-                &DeclarationIdentity::Sdk {
-                    library: HTML,
-                    name: target,
-                },
+                &DeclarationIdentity::sdk(HTML, target),
                 &state.model,
             ) == Truth::Yes
     })

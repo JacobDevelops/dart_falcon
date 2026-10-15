@@ -61,14 +61,16 @@ fn check(
 
 /// The span of a direct self-reference (`x` or `this.x`), if `expr` is one.
 fn self_reference<'a>(expr: &'a Expr, name: &str) -> Option<&'a Span> {
-    match expr {
+    match expr.unparenthesized() {
         Expr::Ident(id) if id.name == name => Some(&id.span),
         Expr::Field {
             object,
             field,
             span,
             ..
-        } if matches!(&**object, Expr::This { .. }) && field.name == name => Some(span),
+        } if matches!(object.unparenthesized(), Expr::This { .. }) && field.name == name => {
+            Some(span)
+        }
         _ => None,
     }
 }

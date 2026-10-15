@@ -14,42 +14,47 @@
 //!
 //! Adopted from the official `sized_box_shrink_expand` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel, parse_int};
+use crate::lint::semantic_scope::{self, SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, parse_int};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+
+use crate::lint::expressions::is_parenthesized;
 
 #[derive(Default)]
 pub struct SizedBoxShrinkExpand;
 
 impl Rule for SizedBoxShrinkExpand {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(identities) = ctx.identities else {
+        let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
         };
         let mut collector = Collector {
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
             sized_box: DeclarationIdentity::flutter("SizedBox"),
             ctx,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
+        semantic_scope::visit_program(&mut collector, program, state);
         collector.diags
     }
 }
 
 struct Collector<'a> {
-    model: SemanticModel<'a>,
     sized_box: DeclarationIdentity,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+impl SemanticRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Some((identity, "new", args)) =
-            crate::lint::flutter::constructor_invocation(node, &self.model)
+            crate::lint::flutter::scoped_constructor_invocation(node, state)
             && identity == self.sized_box
+            && !matches!(node, Expr::Call { callee, .. }
+                if matches!(callee.as_ref(), Expr::Field { field, .. } if field.name == "new"))
+            && !matches!(node, Expr::New { dart_type: DartType::Named(named), constructor_name, .. }
+                if constructor_name.is_some()
+                    || named.segments.last().is_some_and(|name| name.name == "new"))
             && let Some(replacement) = replacement(args)
         {
             self.diags.push(self.ctx.diagnostic(
@@ -57,10 +62,9 @@ impl Visitor for Collector<'_> {
                 format!(
                     "Use 'SizedBox.{replacement}' to avoid needing to specify the 'height' and 'width'."
                 ),
-                *node.span(),
+                crate::lint::flutter::constructor_span(node),
             ));
         }
-        walk_expr(self, node);
     }
 }
 
@@ -82,8 +86,12 @@ fn replacement(args: &ArgList) -> Option<&'static str> {
     }
 }
 
-/// The value of an integer or double literal, or of `double.infinity`.
+/// The value of a bare numeric literal or `double.infinity`; parenthesized
+/// values do not match the official rule.
 fn literal_value(expression: &Expr) -> Option<f64> {
+    if is_parenthesized(expression) {
+        return None;
+    }
     match expression {
         Expr::IntLit { value, .. } => parse_int(value).map(|value| value as f64),
         Expr::DoubleLit { value, .. } => value.replace('_', "").parse().ok(),
@@ -93,7 +101,8 @@ fn literal_value(expression: &Expr) -> Option<f64> {
             is_null_safe: false,
             ..
         } if field.name == "infinity"
-            && matches!(object.as_ref(), Expr::Ident(prefix) if prefix.name == "double") =>
+            && matches!(object.as_ref(), Expr::Ident(prefix) if prefix.name == "double")
+            && !is_parenthesized(object) =>
         {
             Some(f64::INFINITY)
         }

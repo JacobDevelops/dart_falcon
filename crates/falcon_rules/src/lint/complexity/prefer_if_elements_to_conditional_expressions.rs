@@ -38,7 +38,10 @@ impl Collector<'_> {
         let mut pending = vec![element];
         while let Some(element) = pending.pop() {
             match element {
-                CollectionElement::Expr(Expr::Conditional { span, .. }) => {
+                CollectionElement::Expr(expr)
+                    if matches!(expr.unparenthesized(), Expr::Conditional { .. }) =>
+                {
+                    let span = expr.unparenthesized().span();
                     self.diags.push(self.ctx.diagnostic(
                         "prefer-if-elements-to-conditional-expressions",
                         "Use an 'if' element to conditionally add elements.",

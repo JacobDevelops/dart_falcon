@@ -3,8 +3,8 @@
 //! A `Container` whose only arguments are `decoration` and `child` (plus an
 //! optional `key`) builds the same tree as a `DecoratedBox`, which is lighter
 //! and has a `const` constructor. Only invocations that resolve to Flutter's
-//! `Container` are considered, and any positional or other named argument
-//! keeps the `Container`.
+//! `Container` are considered, including declarations indexed while analyzing
+//! Flutter itself. Any positional or other named argument keeps the `Container`.
 //!
 //! ```dart
 //! Container(decoration: BoxDecoration(), child: child);    // BAD
@@ -13,51 +13,48 @@
 //!
 //! Adopted from the official `use_decorated_box` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel};
+use crate::lint::semantic_scope::{self, SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct UseDecoratedBox;
 
 impl Rule for UseDecoratedBox {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(identities) = ctx.identities else {
+        let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
         };
         let mut collector = Collector {
-            model: SemanticModel::new(ctx.file_path, identities, ctx.types),
-            container: DeclarationIdentity::flutter("Container"),
             ctx,
             diags: Vec::new(),
         };
-        collector.visit_program(program);
+        semantic_scope::visit_program(&mut collector, program, state);
         collector.diags
     }
 }
 
 struct Collector<'a> {
-    model: SemanticModel<'a>,
-    container: DeclarationIdentity,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
 
-impl Visitor for Collector<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
+impl SemanticRuleVisitor for Collector<'_> {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Some((identity, "new", args)) =
-            crate::lint::flutter::constructor_invocation(node, &self.model)
-            && identity == self.container
+            crate::lint::flutter::scoped_constructor_invocation(node, state)
+            && self.ctx.identities.is_some_and(|index| {
+                index.is_package_declaration(&identity, "flutter", "Container")
+            })
             && only_decorates_child(args)
         {
             self.diags.push(self.ctx.diagnostic(
                 "use-decorated-box",
                 "Use 'DecoratedBox' rather than a 'Container' with only a 'Decoration'.",
-                *node.span(),
+                crate::lint::flutter::constructor_span(node),
             ));
         }
-        walk_expr(self, node);
     }
 }
 

@@ -4,6 +4,10 @@
 //! initializer, `var` or `final` says the same thing with less noise. The same
 //! applies to `for` loop variables, both `for (int i = 0; ...)` and
 //! `for (String s in strings)` when the iterable's element type matches.
+//! For-in checks require an interface-typed iterable; a type parameter's bound
+//! supplies iteration semantics but is not the iterable's own static type.
+//! Enum `values` lists are source-derived static members, so their indexing,
+//! method calls, and inferred `for-in` bindings participate without SDK sources.
 //! Annotations that change the type (`num n = 1`, `int? x = 0`,
 //! `Object o = ''`) are kept, as are those that drive inference of a generic
 //! call (`int x = parse()` where `parse<T>()` returns `T`).
@@ -13,16 +17,17 @@
 //! var count = items.length; // ok
 //! ```
 //!
-//! falcon reports only when both types are fully known; types with `dynamic`
-//! arguments or omitted type arguments are skipped because their inferred form
-//! may differ from the analyzer's. An untyped collection literal takes its
-//! type arguments from the declaration (`List<int> xs = []` is flagged), but a
-//! generic constructor call without type arguments (`Box<int> b = Box(1)`) is
-//! not, since falcon does not model its context-driven inference.
+//! falcon reports only when both types are fully known; unknown components and
+//! omitted type arguments are skipped. Explicit `dynamic` type arguments are
+//! known types and participate in the exact comparison. The initializer is
+//! inferred with the declared type as its context, as the analyzer does, so `List<int> xs = []`,
+//! `Box<int> b = Box()` and `double d = c ? 0 : 1.5` are flagged, while a
+//! coerced integer literal (`double d = 1`) keeps its annotation.
+//! Diagnostic spans stop at the annotation's last token, excluding trailing trivia.
 //!
 //! Adopted from the official `omit_local_variable_types` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -52,22 +57,26 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-/// Whether `ty` is fully determined: no unknown or `dynamic` component and
-/// every generic type carries all of its type arguments.
+/// Whether `ty` is fully determined: no unknown component and every generic
+/// type carries all of its type arguments.
 fn settled(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
     match ty {
-        ResolvedType::Unknown | ResolvedType::Dynamic => false,
-        ResolvedType::Void
+        ResolvedType::Unknown => false,
+        ResolvedType::Dynamic
+        | ResolvedType::Void
         | ResolvedType::Never
         | ResolvedType::Null
-        | ResolvedType::TypeParameter { .. } => true,
+        | ResolvedType::TypeParameter { .. }
+        | ResolvedType::NonNullTypeParameter { .. } => true,
         ResolvedType::Interface {
             identity,
             arguments,
             ..
         } => {
-            let arity = known_type_arity(identity)
-                .or_else(|| state.signatures.project_type_parameter_count(identity));
+            let arity = state
+                .signatures
+                .type_parameter_count(identity)
+                .or_else(|| known_type_arity(identity));
             arity == Some(arguments.len()) && arguments.iter().all(|arg| settled(arg, state))
         }
         ResolvedType::Function {
@@ -89,61 +98,43 @@ fn settled(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
     }
 }
 
-/// The declared type, when it is a candidate for omission at all.
+/// The declared type, when it is a candidate for omission at all. Raw generic
+/// types denote their instantiation to bounds.
 fn declared_type(ty: &DartType, state: &SemanticState<'_>) -> Option<ResolvedType> {
-    let declared = state.model.resolve_type_in(ty, &state.type_parameters);
-    (!matches!(declared, ResolvedType::Null) && settled(&declared, state)).then_some(declared)
+    let declared = state
+        .signatures
+        .instantiate_to_bounds(&state.model.resolve_type_in(ty, &state.type_parameters));
+    (!matches!(declared, ResolvedType::Null | ResolvedType::Dynamic) && settled(&declared, state))
+        .then_some(declared)
 }
 
-/// `f()` of a generic top-level function returning its own type parameter:
-/// the declared type is what instantiates it.
-fn depends_on_declared_type(initializer: &Expr, state: &SemanticState<'_>) -> bool {
-    let Expr::Call {
-        callee, type_args, ..
-    } = initializer
-    else {
-        return false;
-    };
-    let Expr::Ident(name) = callee.as_ref() else {
-        return false;
-    };
-    type_args.is_empty()
-        && !state.environment.is_bound(&name.name)
-        && state
-            .model
-            .resolve_value(&name.name)
-            .and_then(|identity| state.signatures.function(&identity))
-            .is_some_and(|signature| {
-                matches!(signature.return_type, ResolvedType::TypeParameter { .. })
-            })
-}
-
-/// Whether `initializer`'s static type is exactly `declared`. A collection
-/// literal without type arguments takes them from its context, so
-/// `List<int> xs = []` is a `List<int>`, as the analyzer infers it; an empty
-/// `{}` is a set when the context is a `Set`.
+/// Whether `initializer`'s static type, inferred under the declared type as
+/// its context, is exactly `declared`.
 fn has_static_type(initializer: &Expr, declared: &ResolvedType, state: &SemanticState<'_>) -> bool {
-    let literal = match initializer {
-        Expr::List { type_arg: None, .. } => "List",
-        Expr::Set { type_arg: None, .. } => "Set",
-        Expr::Map {
-            type_args,
-            elements,
-            ..
-        } if type_args.is_empty() => {
-            if elements.is_empty() && declared.interface("dart:core", "Set") {
-                "Set"
-            } else {
-                "Map"
-            }
-        }
-        _ => return state.infer(initializer) == *declared,
+    state
+        .signatures
+        .instantiate_to_bounds(&state.infer_with_context(initializer, Some(declared)))
+        == *declared
+}
+
+/// Whether a promoted type parameter acquired an intersection `T & S` that
+/// no written type spells. Removing `?` alone still leaves the spellable `T`.
+fn promoted_type_parameter(initializer: &Expr, state: &SemanticState<'_>) -> bool {
+    let Expr::Ident(identifier) = initializer.unparenthesized() else {
+        return false;
     };
-    declared.interface("dart:core", literal) && !declared.nullable()
+    let environment = &state.environment;
+    let ResolvedType::TypeParameter { id, .. } = environment.declared_type(&identifier.name) else {
+        return false;
+    };
+    environment.promotion_chain(&identifier.name).iter().any(
+        |promotion| !matches!(promotion, ResolvedType::TypeParameter { id: promoted, .. } if *promoted == id),
+    )
 }
 
 impl Collector<'_> {
     fn report(&mut self, ty: &DartType) {
+        // Parser type spans already end at the last consumed token.
         self.diags.push(self.ctx.diagnostic(
             "omit-local-variable-types",
             "Unnecessary type annotation on a local variable.",
@@ -160,7 +151,12 @@ impl Collector<'_> {
         };
         let all_match = declaration.declarators.iter().all(|declarator| {
             declarator.initializer.as_ref().is_some_and(|initializer| {
-                !depends_on_declared_type(initializer, state)
+                // Only a bare integer literal (`double d = 1`) keeps its type;
+                // an explicit Expr::Paren is not this syntax exclusion.
+                !(matches!(initializer, Expr::IntLit { .. })
+                    && !declared.interface("dart:core", "int"))
+                    && !state.generic_function_returns_type_parameter(initializer)
+                    && !promoted_type_parameter(initializer, state)
                     && has_static_type(initializer, &declared, state)
             })
         });
@@ -173,16 +169,24 @@ impl Collector<'_> {
         let Some(declared) = declared_type(ty, state) else {
             return;
         };
+        let context = ResolvedType::Interface {
+            occurrence: Default::default(),
+            identity: DeclarationIdentity::sdk("dart:core", "Iterable"),
+            arguments: vec![declared.clone()].into(),
+            nullable: false,
+            extension_type: false,
+        };
+        let inferred = state.infer_with_context(iterable, Some(&context));
+        if !matches!(inferred, ResolvedType::Interface { .. }) {
+            return;
+        }
         let element = state
             .signatures
-            .instantiated_supertype(
-                &state.infer(iterable),
-                "dart:core",
-                "Iterable",
-                &state.model,
-            )
-            .and_then(|iterable| iterable.arguments().first().cloned());
-        if element == Some(declared) {
+            .instantiated_supertype(&inferred, "dart:core", "Iterable", &state.model)
+            .and_then(|iterable| iterable.type_argument(0));
+        if element
+            .is_some_and(|element| state.signatures.instantiate_to_bounds(&element) == declared)
+        {
             self.report(ty);
         }
     }
@@ -203,5 +207,44 @@ impl SemanticRuleVisitor for Collector<'_> {
             },
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::Path;
+
+    #[test]
+    fn annotation_spans_exclude_trailing_comments_and_whitespace() {
+        let source = "void f() { List<int> /* named */ a; int Function() /* function */ b; (int, String) /* record */ c; }";
+        let (program, errors) = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let TopLevelDecl::Function(function) = &program.declarations[0] else {
+            panic!("expected function");
+        };
+        let Some(FunctionBody::Block(block)) = &function.body else {
+            panic!("expected block");
+        };
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config);
+        let mut collector = Collector {
+            diags: Vec::new(),
+            ctx: &ctx,
+        };
+        for statement in &block.stmts {
+            let Stmt::LocalVar(declaration) = statement else {
+                panic!("expected local declaration");
+            };
+            collector.report(declaration.var_type.as_ref().unwrap());
+        }
+        let spans: Vec<_> = collector
+            .diags
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(spans, ["List<int>", "int Function()", "(int, String)"]);
     }
 }

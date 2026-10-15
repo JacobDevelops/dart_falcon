@@ -36,7 +36,7 @@ impl Rule for NoEqualArguments {
 /// literals (`TypedLiteral`), and a prefix expression whose operand is a literal
 /// (e.g. `-1`).
 fn is_literal(expr: &Expr) -> bool {
-    match expr {
+    match expr.unparenthesized() {
         Expr::IntLit { .. }
         | Expr::DoubleLit { .. }
         | Expr::StringLit { .. }
@@ -118,7 +118,7 @@ impl Visitor for Collector<'_> {
             // Expr::Call, so the arm above never sees `a..f(x, x)`.
             Expr::Cascade { sections, .. } => {
                 for op in sections.iter().flat_map(|s| &s.ops) {
-                    if let CascadeOp::Call(_, _, args) = op {
+                    if let CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) = op {
                         check_args(args, &mut self.diags, self.ctx);
                     }
                 }

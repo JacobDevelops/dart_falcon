@@ -1,15 +1,16 @@
-//! Flags a redundant `.new` on constructor invocations.
+//! Flags a redundant `.new` on constructor declarations and invocations.
 //!
 //! `X.new(...)` names the default (unnamed) constructor explicitly, which is exactly
 //! equivalent to the shorter `X(...)`, so the `.new` is noise. The rule catches both
 //! the plain call form (`X.new(...)`) and the `new`/`const` form (`const X.new(...)`).
+//! Declarations such as `class X { X.new(); }` are also reported.
 //! A bare `X.new` constructor tear-off that is not invoked is deliberately left alone:
 //! there the `.new` is required to reference the constructor as a value.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_constructor_decl, walk_expr};
+use falcon_syntax::visitor::{Visitor, walk_expr};
 
 #[derive(Default)]
 pub struct UnnecessaryConstructorName;
@@ -32,7 +33,7 @@ struct Collector<'a> {
 
 impl Visitor for Collector<'_> {
     // `class A { A.new(); }` — declaring the default constructor as `.new`.
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
         if let Some(name) = &node.constructor_name
             && name.name == "new"
         {
@@ -42,7 +43,6 @@ impl Visitor for Collector<'_> {
                 name.span,
             ));
         }
-        walk_constructor_decl(self, node);
     }
 
     fn visit_expr(&mut self, node: &Expr) {
@@ -51,7 +51,7 @@ impl Visitor for Collector<'_> {
             // `.new` field access. The bare tear-off `X.new` is a `Field` not wrapped
             // in a `Call`, so it is not reached here.
             Expr::Call { callee, .. } => {
-                if let Expr::Field { field, .. } = callee.as_ref()
+                if let Expr::Field { field, .. } = callee.unparenthesized()
                     && field.name == "new"
                 {
                     self.diags.push(self.ctx.diagnostic(

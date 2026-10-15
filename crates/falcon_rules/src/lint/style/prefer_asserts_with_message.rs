@@ -14,7 +14,7 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_constructor_decl, walk_stmt};
+use falcon_syntax::visitor::{Visitor, walk_stmt};
 
 const RULE: &str = "prefer-asserts-with-message";
 const MESSAGE: &str = "Missing a message in an assert.";
@@ -39,8 +39,8 @@ struct Collector<'a, 'ctx> {
 }
 
 impl Visitor for Collector<'_, '_> {
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        for initializer in &node.initializers {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+        for initializer in node.initializers {
             if let ConstructorInitializer::Assert {
                 message: None,
                 span,
@@ -50,7 +50,6 @@ impl Visitor for Collector<'_, '_> {
                 self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, *span));
             }
         }
-        walk_constructor_decl(self, node);
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {

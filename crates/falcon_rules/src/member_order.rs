@@ -78,6 +78,7 @@ pub fn member_tokens(member: &ClassMember) -> Vec<&'static str> {
         ClassMember::Getter(_) => vec!["getters", "methods"],
         ClassMember::Setter(_) => vec!["setters", "methods"],
         ClassMember::Operator(_) => vec!["methods"],
+        ClassMember::PrimaryConstructorBody(_) => vec!["constructors"],
         ClassMember::Error(_) => Vec::new(),
     }
 }

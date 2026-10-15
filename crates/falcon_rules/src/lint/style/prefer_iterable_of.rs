@@ -58,7 +58,7 @@ fn is_from_constructor(dart_type: &DartType, constructor_name: &Option<Identifie
 /// `List`            -> `Expr::Ident("List")`
 /// `List<int>`       -> `Expr::GenericInstantiation { target: Ident("List"), type_args: [int], .. }`
 fn base_type_name(expr: &Expr) -> Option<&str> {
-    match expr {
+    match expr.unparenthesized() {
         Expr::Ident(id) => Some(id.name.as_str()),
         Expr::Call { callee, .. } => base_type_name(callee),
         Expr::GenericInstantiation { target, .. } => base_type_name(target),
@@ -68,7 +68,7 @@ fn base_type_name(expr: &Expr) -> Option<&str> {
 
 /// True for `List.from(...)` / `List<int>.from(...)` parsed as `Call(Field(receiver, "from"), args)`.
 fn is_from_static_call(callee: &Expr) -> bool {
-    if let Expr::Field { object, field, .. } = callee
+    if let Expr::Field { object, field, .. } = callee.unparenthesized()
         && field.name == "from"
         && let Some(base) = base_type_name(object)
     {

@@ -149,7 +149,7 @@ struct Written {
 
 impl Written {
     fn record_target(&mut self, target: &Expr) {
-        match target {
+        match target.unparenthesized() {
             Expr::Ident(id) => {
                 self.names.insert(id.name.clone());
             }

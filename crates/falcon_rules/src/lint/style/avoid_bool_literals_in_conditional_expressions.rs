@@ -4,6 +4,9 @@
 //! literal, the expression simplifies to a logical operator: `c ? true : b` is
 //! `c || b`, `c ? false : b` is `!c && b`, `c ? b : true` is `!c || b`, and
 //! `c ? b : false` is `c && b`.
+//! Branches are checked in their own flow state, after condition promotions.
+//! Reports once per conditional: the analyzer deduplicates upstream reports
+//! when both branches are literals at the same diagnostic location.
 //!
 //! ```dart
 //! final ok = ready ? true : retry; // flagged
@@ -13,10 +16,12 @@
 //! Adopted from the official `avoid_bool_literals_in_conditional_expressions`
 //! lint.
 
+use std::collections::HashMap;
+
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
-use falcon_syntax::ast::Expr;
+use falcon_syntax::ast::{Expr, Span};
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
@@ -29,17 +34,35 @@ impl Rule for AvoidBoolLiteralsInConditionalExpressions {
             return Vec::new();
         };
         let mut collector = Collector {
-            diags: Vec::new(),
-            ctx,
+            conditionals: Vec::new(),
+            branches: HashMap::new(),
         };
         visit_program(&mut collector, program, state);
-        collector.diags
+        collector
+            .conditionals
+            .into_iter()
+            .filter(|conditional| conditional.bool_branches == 2)
+            .map(|conditional| conditional.span)
+            .map(|span| {
+                ctx.diagnostic(
+                    "avoid-bool-literals-in-conditional-expressions",
+                    "Conditional expressions with a 'bool' literal can be simplified.",
+                    span,
+                )
+            })
+            .collect()
     }
 }
 
-struct Collector<'a> {
-    diags: Vec<Diagnostic>,
-    ctx: &'a AnalyzeContext<'a>,
+struct Conditional {
+    span: Span,
+    bool_branches: usize,
+}
+
+struct Collector {
+    conditionals: Vec<Conditional>,
+    /// Branches are typed when the shared visitor reaches their promoted scope.
+    branches: HashMap<*const Expr, usize>,
 }
 
 fn non_nullable_bool(expression: &Expr, state: &SemanticState<'_>) -> bool {
@@ -47,8 +70,13 @@ fn non_nullable_bool(expression: &Expr, state: &SemanticState<'_>) -> bool {
     ty.interface("dart:core", "bool") && !ty.nullable()
 }
 
-impl SemanticRuleVisitor for Collector<'_> {
+impl SemanticRuleVisitor for Collector {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        if let Some(index) = self.branches.remove(&std::ptr::from_ref(node))
+            && non_nullable_bool(node, state)
+        {
+            self.conditionals[index].bool_branches += 1;
+        }
         let Expr::Conditional {
             then_expr,
             else_expr,
@@ -58,16 +86,19 @@ impl SemanticRuleVisitor for Collector<'_> {
         else {
             return;
         };
-        let has_literal = [then_expr, else_expr]
-            .into_iter()
-            .any(|branch| matches!(branch.as_ref(), Expr::BoolLit { .. }));
-        if has_literal && non_nullable_bool(then_expr, state) && non_nullable_bool(else_expr, state)
+        if !matches!(then_expr.unparenthesized(), Expr::BoolLit { .. })
+            && !matches!(else_expr.unparenthesized(), Expr::BoolLit { .. })
         {
-            self.diags.push(self.ctx.diagnostic(
-                "avoid-bool-literals-in-conditional-expressions",
-                "Conditional expressions with a 'bool' literal can be simplified.",
-                *span,
-            ));
+            return;
         }
+        let index = self.conditionals.len();
+        self.conditionals.push(Conditional {
+            span: *span,
+            bool_branches: 0,
+        });
+        self.branches
+            .insert(std::ptr::from_ref(then_expr.as_ref()), index);
+        self.branches
+            .insert(std::ptr::from_ref(else_expr.as_ref()), index);
     }
 }

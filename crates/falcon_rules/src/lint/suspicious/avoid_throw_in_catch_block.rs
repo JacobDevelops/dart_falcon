@@ -1,12 +1,12 @@
-//! Flags a `throw` of a new object inside a `catch` block.
+//! Flags `throw` statements inside a `catch` block.
 //!
 //! Throwing a fresh exception from a catch replaces the error in flight along
 //! with its original stack trace, so the root cause is lost and the failure
 //! becomes much harder to diagnose. Prefer `rethrow` to propagate the caught
 //! exception unchanged, or wrap it in an error that keeps the original as a
-//! cause. Only a `throw` statement raising a new value is reported; a `rethrow`
-//! is always exempt. Delayed local functions and closures are separate execution
-//! scopes and are not treated as part of the surrounding catch.
+//! cause. Every `throw` statement is reported, including throws of existing
+//! values; `rethrow` is always exempt. Delayed local functions and closures are
+//! separate execution scopes and are not part of the surrounding catch.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;

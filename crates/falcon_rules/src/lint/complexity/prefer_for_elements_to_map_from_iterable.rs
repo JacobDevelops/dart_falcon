@@ -38,8 +38,8 @@ impl Visitor for Collector<'_> {
             // `Map.fromIterable(...)` — parsed as a call on a `Map.fromIterable`
             // member reference.
             Expr::Call { callee, args, .. } => {
-                if let Expr::Field { object, field, .. } = &**callee
-                    && let Expr::Ident(id) = &**object
+                if let Expr::Field { object, field, .. } = callee.unparenthesized()
+                    && let Expr::Ident(id) = object.unparenthesized()
                     && id.name == "Map"
                     && field.name == "fromIterable"
                     && !args.positional.is_empty()

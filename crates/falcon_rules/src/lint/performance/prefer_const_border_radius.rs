@@ -32,8 +32,8 @@ fn check_border_radius_only_call(
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    if let Expr::Field { object, field, .. } = callee
-        && let Expr::Ident(ident) = object.as_ref()
+    if let Expr::Field { object, field, .. } = callee.unparenthesized()
+        && let Expr::Ident(ident) = object.unparenthesized()
         && ident.name == "BorderRadius"
         && field.name == "only"
         && all_border_radii_equal(args)
@@ -99,9 +99,9 @@ fn all_border_radii_equal(args: &ArgList) -> bool {
 }
 
 fn extract_radius_value(expr: &Expr) -> Option<&str> {
-    if let Expr::Call { callee, args, .. } = expr
-        && let Expr::Field { object, field, .. } = callee.as_ref()
-        && let Expr::Ident(ident) = object.as_ref()
+    if let Expr::Call { callee, args, .. } = expr.unparenthesized()
+        && let Expr::Field { object, field, .. } = callee.unparenthesized()
+        && let Expr::Ident(ident) = object.unparenthesized()
         && ident.name == "Radius"
         && field.name == "circular"
         && args.positional.len() == 1

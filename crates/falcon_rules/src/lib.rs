@@ -12,6 +12,10 @@ pub(crate) mod member_order;
 pub mod meta;
 pub mod schema;
 
+#[cfg(test)]
+#[path = "../tests/support/inference.rs"]
+mod inference;
+
 use std::collections::HashMap;
 use std::path::Path;
 

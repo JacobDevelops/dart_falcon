@@ -12,13 +12,14 @@
 //!
 //! Initializing formals (`final this.x`, `final super.x`) and function-typed
 //! parameters (`final void cb()`) are not reported, and `Function(...)` types
-//! cannot declare `final` parameters at all.
+//! cannot declare `final` parameters at all. From Dart 3.13, where `final`
+//! marks a declaring primary-constructor parameter, the rule is inactive.
 //!
 //! Adopted from the official `avoid_final_parameters` lint.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_syntax::Feature;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::{Token, TokenKind};
 use falcon_syntax::visitor::{Visitor, walk_class_member, walk_formal_param};
@@ -31,9 +32,18 @@ pub struct AvoidFinalParameters;
 
 impl Rule for AvoidFinalParameters {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let tokens: Vec<Token> = Lexer::new(ctx.source)
-            .tokenize()
-            .into_iter()
+        // With primary constructors `final` declares a field, not a final
+        // parameter; the official rule does not run.
+        if ctx
+            .language_version()
+            .supports(Feature::PrimaryConstructors)
+        {
+            return Vec::new();
+        }
+        let tokens: Vec<Token> = ctx
+            .tokens()
+            .iter()
+            .copied()
             .filter(|token| !token.is_trivia())
             .collect();
         let mut collector = Collector {

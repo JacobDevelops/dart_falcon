@@ -83,6 +83,7 @@ impl Visitor for Checker<'_, '_> {
             ClassMember::Method(x) => &x.type_params,
             ClassMember::Field(_)
             | ClassMember::Constructor(_)
+            | ClassMember::PrimaryConstructorBody(_)
             | ClassMember::Getter(_)
             | ClassMember::Setter(_)
             | ClassMember::Operator(_)

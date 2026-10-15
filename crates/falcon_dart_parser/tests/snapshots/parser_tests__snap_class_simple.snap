@@ -17,6 +17,7 @@ Class(
             },
         },
         type_params: [],
+        primary_constructor: None,
         extends: None,
         with_clause: [],
         implements: [],

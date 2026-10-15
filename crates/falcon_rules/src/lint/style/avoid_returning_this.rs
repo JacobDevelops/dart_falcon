@@ -15,9 +15,8 @@
 //! ```
 //!
 //! Only methods whose declared return type is the enclosing class, enum, or
-//! mixin and whose every `return` yields `this` are reported. Methods that
-//! override an inherited member are exempt; when inheritance cannot be resolved
-//! the rule stays silent.
+//! mixin and whose every `return` yields an unparenthesized `this` are reported.
+//! Methods that override an inherited member are exempt.
 //!
 //! Adopted from the official `avoid_returning_this` lint.
 
@@ -36,6 +35,7 @@ impl Rule for AvoidReturningThis {
             return Vec::new();
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let returns_this = |expr: &Expr| matches!(expr, Expr::This { .. });
         let mut diags = Vec::new();
         for decl in &program.declarations {
             let (name, members) = match decl {
@@ -72,31 +72,26 @@ impl Rule for AvoidReturningThis {
                 if !names_type(return_type, name) || has_override(annotations) {
                     continue;
                 }
-                let Some(inherited) = signatures.inherited_member_facts(&owner, &member_name.name)
-                else {
-                    continue;
-                };
-                let overrides = inherited.iter().any(|fact| {
-                    if getter {
-                        fact.kind.has_getter()
-                    } else {
-                        fact.kind == MemberKind::Method
-                    }
-                });
+                let overrides = signatures
+                    .inherited_member_facts(&owner, &member_name.name)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|fact| {
+                        if getter {
+                            fact.kind.has_getter()
+                        } else {
+                            fact.kind == MemberKind::Method
+                        }
+                    });
                 if overrides {
                     continue;
                 }
                 let span = match body {
-                    FunctionBody::Arrow(expr, _) => {
-                        matches!(**expr, Expr::This { .. }).then_some(member_name.span)
-                    }
+                    FunctionBody::Arrow(expr, _) => returns_this(expr).then_some(member_name.span),
                     FunctionBody::Block(_) => {
                         let returned = returned_expressions(body);
-                        (!returned.is_empty()
-                            && returned
-                                .iter()
-                                .all(|expr| matches!(expr, Expr::This { .. })))
-                        .then(|| *returned[0].span())
+                        (!returned.is_empty() && returned.iter().all(|expr| returns_this(expr)))
+                            .then(|| *returned[0].span())
                     }
                     FunctionBody::Native(..) => None,
                 };

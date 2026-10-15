@@ -1,6 +1,9 @@
-//! Await only values proven to be future-like.
+//! Await only values assignable to futures; `FutureOr`, dynamic, bottom types
+//! and extension types are accepted like the analyzer. A type parameter is
+//! assignable only through a bound that is a `Future` subtype, so its bound
+//! gets no `FutureOr` or extension-type exemption.
 
-use falcon_analyze::{AnalyzeContext, Rule, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -34,16 +37,52 @@ impl SemanticRuleVisitor for Collector<'_> {
         let Expr::Await { expr, span } = node else {
             return;
         };
-        if matches!(expr.as_ref(), Expr::NullLit { .. }) {
+        if matches!(expr.unparenthesized(), Expr::NullLit { .. }) {
             return;
         }
-        let ty = state.infer(expr);
-        if state.model.is_future_like(&ty) == Truth::No {
+        let ty = state.infer_invocation(expr);
+        if awaitable(&ty, state) == Truth::No {
             self.diagnostics.push(self.ctx.diagnostic(
                 "await-only-futures",
                 "Await only futures or other future-like values.",
                 *span,
             ));
         }
+    }
+}
+
+fn awaitable(ty: &ResolvedType, state: &SemanticState<'_>) -> Truth {
+    match ty {
+        ResolvedType::TypeParameter { bound, .. }
+        | ResolvedType::NonNullTypeParameter { bound, .. } => future_subtype(bound, state),
+        _ => state.model.is_future_like(ty),
+    }
+}
+
+/// Whether the type parameter bound `bound` is a subtype of `Future`: neither
+/// `FutureOr` nor `dynamic` is.
+fn future_subtype(bound: &ResolvedType, state: &SemanticState<'_>) -> Truth {
+    match bound {
+        ResolvedType::TypeParameter { bound, .. }
+        | ResolvedType::NonNullTypeParameter { bound, .. } => future_subtype(bound, state),
+        ResolvedType::Dynamic => Truth::No,
+        ResolvedType::Interface { identity, .. } if identity.is_sdk("dart:async", "FutureOr") => {
+            Truth::No
+        }
+        ResolvedType::Interface {
+            extension_type: true,
+            ..
+        } => {
+            if state
+                .signatures
+                .instantiated_supertype(bound, "dart:async", "Future", &state.model)
+                .is_some()
+            {
+                Truth::Yes
+            } else {
+                Truth::Unknown
+            }
+        }
+        _ => state.model.is_future_like(bound),
     }
 }

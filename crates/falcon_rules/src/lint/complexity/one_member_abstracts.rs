@@ -64,7 +64,7 @@ fn single_abstract_method(members: &[ClassMember]) -> Option<&str> {
     let mut method = None;
     for member in members {
         let (name, abstract_body) = match member {
-            ClassMember::Constructor(_) => continue,
+            ClassMember::Constructor(_) | ClassMember::PrimaryConstructorBody(_) => continue,
             ClassMember::Method(m) => (m.name.name.as_str(), m.body.is_none() && !m.is_external),
             ClassMember::Operator(o) => (o.op.as_str(), o.body.is_none() && !o.is_external),
             ClassMember::Field(_)

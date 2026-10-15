@@ -93,9 +93,15 @@ impl Visitor for Collector<'_> {
                 .flat_map(|case| &case.cases)
                 .filter_map(|case| match case {
                     SwitchCaseKind::Pattern(pattern, _) => Some(pattern.as_ref()),
-                    SwitchCaseKind::Default => None,
+                    SwitchCaseKind::Expr(_) | SwitchCaseKind::Default => None,
                 });
             self.check_patterns(patterns);
+            self.check_expressions(switch.cases.iter().flat_map(|case| &case.cases).filter_map(
+                |case| match case {
+                    SwitchCaseKind::Expr(expression) => Some(expression.as_ref()),
+                    _ => None,
+                },
+            ));
         }
         walk_stmt(self, node);
     }
@@ -109,6 +115,35 @@ impl Visitor for Collector<'_> {
 }
 
 impl Collector<'_> {
+    fn check_expressions<'a>(&mut self, expressions: impl Iterator<Item = &'a Expr>) {
+        let mut expressions = expressions.peekable();
+        if expressions.peek().is_none() {
+            return;
+        }
+        let fields = self
+            .fields
+            .iter()
+            .map(|(name, value)| (name.as_str(), value))
+            .collect::<HashMap<_, _>>();
+        let mut seen = HashSet::new();
+        for expression in expressions {
+            if let Some(value) = evaluate_constant(
+                expression,
+                self.owner.as_ref(),
+                &fields,
+                self.model,
+                self.signatures,
+            ) && !seen.insert(value)
+            {
+                self.diags.push(self.ctx.diagnostic(
+                    "no-duplicate-case-values",
+                    "Duplicate case value in switch statement.",
+                    *expression.span(),
+                ));
+            }
+        }
+    }
+
     fn check_patterns<'a>(&mut self, patterns: impl Iterator<Item = &'a Pattern>) {
         let field_refs = self
             .fields
@@ -149,14 +184,15 @@ fn pattern_constants(
             .map(|value| vec![(value, literal.span)])
             .unwrap_or_default(),
         Pattern::Const(constant) => {
-            let expression = match &constant.value {
-                ConstPatternValue::Expr(expression) => Some((**expression).clone()),
-                ConstPatternValue::Name(name) => name_expression(name, &constant.span),
+            let evaluate =
+                |expression: &Expr| evaluate_constant(expression, owner, fields, model, signatures);
+            let value = match &constant.value {
+                ConstPatternValue::Expr(expression) => evaluate(expression),
+                ConstPatternValue::Name(name) => name_expression(name, &constant.span)
+                    .as_ref()
+                    .and_then(evaluate),
             };
-            expression
-                .and_then(|expression| {
-                    evaluate_constant(&expression, owner, fields, model, signatures)
-                })
+            value
                 .map(|value| vec![(value, constant.span)])
                 .unwrap_or_default()
         }

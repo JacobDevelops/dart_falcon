@@ -7,9 +7,11 @@
 //! `debug`-prefixed variant (`debugFoo` for `foo`), appears as an identifier in
 //! either method. Widget-valued properties (and `List`/`Set` of widgets) are
 //! exempt because they are described as children, and so are static members,
-//! private members, and overrides. The rule applies to classes that resolve
-//! to a subtype of Flutter's `Diagnosticable` (every `Widget` and `State`);
-//! properties whose type cannot be resolved are left alone.
+//! private members, and overrides (a field or getter does not override an
+//! inherited setter). Like the analyzer, the rule applies to classes with a
+//! supertype named `Diagnosticable` declared in an unnamed library, including
+//! dependency libraries. Properties whose types cannot be resolved stay silent.
+//! Declaring primary constructor parameters are checked like instance fields.
 //!
 //! ```dart
 //! class Tile extends StatelessWidget {
@@ -27,20 +29,12 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex, Truth,
+    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, SemanticModel,
+    SignatureIndex, Truth, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
-
-/// Flutter base types whose subtypes are `Diagnosticable`.
-const DIAGNOSTICABLE: &[&str] = &[
-    "Diagnosticable",
-    "DiagnosticableTree",
-    "DiagnosticableTreeMixin",
-    "Widget",
-    "State",
-];
 
 /// Public instance fields and getters that `Object`, `Widget`, and `State`
 /// declare; a subclass member with one of these names overrides it.
@@ -90,17 +84,39 @@ impl Checker<'_> {
         let Some(identity) = self.model.resolve_name(&class.name.name) else {
             return;
         };
-        let class_type = ResolvedType::interface_identity(identity.clone());
-        if !DIAGNOSTICABLE.iter().any(|base| {
-            self.signatures.is_subtype_of(
-                &class_type,
-                &DeclarationIdentity::flutter(base),
-                self.model,
-            ) == Truth::Yes
-        }) {
+        let diagnosticable = |supertype: &DeclarationIdentity| {
+            supertype.name() == "Diagnosticable"
+                && self.ctx.identities.is_some_and(|identities| {
+                    identities.identity_is_in_unnamed_library(supertype) == Some(true)
+                })
+        };
+        if self
+            .signatures
+            .supertype_matches(&identity, &diagnosticable)
+            != Truth::Yes
+        {
             return;
         }
+        let mut parameters = TypeParameterScope::default();
+        parameters.push(&class.type_params, self.model);
         let mut properties: Vec<&Identifier> = Vec::new();
+        for parameter in (EffectiveMembers {
+            declared: &class.members,
+            primary: class.primary_constructor.as_ref(),
+            representation: false,
+        }
+        .declaring_params())
+        {
+            if self.should_describe(
+                &identity,
+                &parameter.name.name,
+                &parameter.annotations,
+                parameter.param_type.as_ref(),
+                &parameters,
+            ) {
+                properties.push(&parameter.name);
+            }
+        }
         for member in &class.members {
             match member {
                 ClassMember::Field(field) if !field.is_static => {
@@ -110,6 +126,7 @@ impl Checker<'_> {
                             &declarator.name.name,
                             &field.annotations,
                             field.field_type.as_ref(),
+                            &parameters,
                         ) {
                             properties.push(&declarator.name);
                         }
@@ -122,6 +139,7 @@ impl Checker<'_> {
                             &getter.name.name,
                             &getter.annotations,
                             getter.return_type.as_ref(),
+                            &parameters,
                         ) =>
                 {
                     properties.push(&getter.name);
@@ -162,6 +180,7 @@ impl Checker<'_> {
         name: &str,
         annotations: &[Annotation],
         ty: Option<&DartType>,
+        parameters: &TypeParameterScope,
     ) -> bool {
         if name.starts_with('_') || self.overrides(owner, name, annotations) {
             return false;
@@ -169,7 +188,7 @@ impl Checker<'_> {
         let Some(ty) = ty else {
             return false;
         };
-        self.is_widget_property(&self.model.resolve_type(ty)) == Some(false)
+        self.is_widget_property(&self.model.resolve_type_in(ty, parameters)) == Some(false)
     }
 
     fn overrides(
@@ -185,7 +204,9 @@ impl Checker<'_> {
                     .last()
                     .is_some_and(|segment| segment.name == "override")
         }) || match self.signatures.inherited_member_facts(owner, name) {
-            Some(facts) => !facts.is_empty(),
+            // A field or getter overrides an inherited member of its name
+            // unless that member is only a setter.
+            Some(facts) => facts.iter().any(|fact| fact.kind != MemberKind::Setter),
             None => INHERITED_PROPERTIES.contains(&name),
         }
     }
@@ -212,18 +233,30 @@ impl Checker<'_> {
                     || identity.is_sdk("dart:core", "Set")
                     || identity.is_sdk("dart:collection", "LinkedHashSet");
                 match identity {
-                    _ if collection => match arguments.as_slice() {
+                    _ if collection => match arguments.as_ref() {
                         [element] => self.is_widget_property(element),
                         _ => Some(false),
                     },
                     DeclarationIdentity::Sdk { .. } | DeclarationIdentity::Package { .. } => {
                         Some(false)
                     }
-                    DeclarationIdentity::Project { name, .. } => self
-                        .ctx
-                        .types
-                        .is_some_and(|types| types.is_subtype(name, "Widget") == Truth::No)
-                        .then_some(false),
+                    DeclarationIdentity::Project { .. } => {
+                        let widget = |supertype: &DeclarationIdentity| match supertype {
+                            DeclarationIdentity::Project { name, .. } => name == "Widget",
+                            other => other.is_package("flutter", "Widget"),
+                        };
+                        match self.signatures.supertype_matches(identity, &widget) {
+                            Truth::Yes => Some(true),
+                            Truth::No => Some(false),
+                            Truth::Unknown => self
+                                .ctx
+                                .types
+                                .is_some_and(|types| {
+                                    types.supertype_matches_identity(identity, widget) == Truth::No
+                                })
+                                .then_some(false),
+                        }
+                    }
                 }
             }
             ResolvedType::Dynamic
@@ -231,6 +264,7 @@ impl Checker<'_> {
             | ResolvedType::Never
             | ResolvedType::Null
             | ResolvedType::TypeParameter { .. }
+            | ResolvedType::NonNullTypeParameter { .. }
             | ResolvedType::Function { .. }
             | ResolvedType::Record { .. } => Some(false),
         }

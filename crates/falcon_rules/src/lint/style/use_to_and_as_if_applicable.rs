@@ -12,10 +12,11 @@
 //! }
 //! ```
 //!
-//! Only non-getter methods with no parameters, a non-`void` return type, and a
-//! body consisting of a single constructor call whose only argument is `this`
-//! are checked. Methods that override an inherited method are exempt; when
-//! inheritance cannot be resolved the rule stays silent.
+//! Non-getter methods and operators with no parameters, a non-`void` return
+//! type, and a body consisting of one constructor call taking only `this` are
+//! checked. Methods overriding inherited methods are exempt. Constructor calls
+//! cannot be resolved when Dart's newer `new(...)` declaration syntax failed
+//! to parse.
 //!
 //! Adopted from the official `use_to_and_as_if_applicable` lint.
 
@@ -55,29 +56,43 @@ impl Rule for UseToAndAsIfApplicable {
                 None => None,
             };
             for member in members {
-                let ClassMember::Method(method) = member else {
+                let (name, params, return_type, body, span) = match member {
+                    ClassMember::Method(method) => (
+                        method.name.name.as_str(),
+                        &method.params,
+                        &method.return_type,
+                        &method.body,
+                        method.name.span,
+                    ),
+                    ClassMember::Operator(operator) => (
+                        operator.op.as_str(),
+                        &operator.params,
+                        &operator.return_type,
+                        &operator.body,
+                        operator.span,
+                    ),
+                    _ => continue,
+                };
+                let Some(body) = body else {
                     continue;
                 };
-                let Some(body) = &method.body else {
-                    continue;
-                };
-                if !method.params.params.is_empty()
-                    || matches!(method.return_type, Some(DartType::Void { .. }))
-                    || begins_with_as_or_to(&method.name.name)
+                if !params.params.is_empty()
+                    || matches!(return_type, Some(DartType::Void { .. }))
+                    || begins_with_as_or_to(name)
                     || !wraps_this(body, &model, signatures)
                 {
                     continue;
                 }
                 let inherited = owner.as_ref().map_or(Some(false), |owner| {
                     signatures
-                        .inherited_member_facts(owner, &method.name.name)
+                        .inherited_member_facts(owner, name)
                         .map(|facts| facts.iter().any(|fact| fact.kind == MemberKind::Method))
                 });
-                if inherited == Some(false) {
+                if inherited != Some(true) {
                     diags.push(ctx.diagnostic(
                         "use-to-and-as-if-applicable",
                         "Start the name of the method with 'to' or 'as'.",
-                        method.name.span,
+                        span,
                     ));
                 }
             }
@@ -112,7 +127,7 @@ fn wraps_this(
         },
         FunctionBody::Native(..) => return false,
     };
-    let (args, is_creation) = match expr {
+    let (args, is_creation) = match expr.unparenthesized() {
         Expr::New { args, .. } => (args, true),
         Expr::Call { callee, args, .. } => (
             args,
@@ -121,7 +136,7 @@ fn wraps_this(
             // name a known constructor.
             resolve_call_constructor(callee, model, false).is_some_and(
                 |(identity, constructor)| {
-                    matches!(&**callee, Expr::Ident(_))
+                    matches!(callee.unparenthesized(), Expr::Ident(_))
                         || signatures.constructor(&identity, constructor).is_some()
                 },
             ),
@@ -130,5 +145,5 @@ fn wraps_this(
     };
     is_creation
         && args.named.is_empty()
-        && matches!(args.positional.as_slice(), [Expr::This { .. }])
+        && matches!(args.positional.as_slice(), [argument] if matches!(argument.unparenthesized(), Expr::This { .. }))
 }

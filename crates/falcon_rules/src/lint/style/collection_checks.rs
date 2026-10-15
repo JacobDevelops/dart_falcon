@@ -19,32 +19,22 @@ pub(super) fn lacks_collection_member(
         || targets.iter().any(|name| {
             state.signatures.is_subtype_of(
                 &ty,
-                &DeclarationIdentity::Sdk {
-                    library: "dart:core",
-                    name,
-                },
+                &DeclarationIdentity::sdk("dart:core", name),
                 &state.model,
             ) == Truth::Yes
         })
     {
         return false;
     }
-    let (
-        Some(types),
-        ResolvedType::Interface {
-            identity: identity @ DeclarationIdentity::Project { .. },
-            ..
-        },
-    ) = (ctx.types, ty)
-    else {
+    let (Some(types), ResolvedType::Interface { identity, .. }) = (ctx.types, ty) else {
         return false;
     };
-    let name = identity.name();
     // The identity index proves positive facts; TypeIndex still supplies negative proofs.
-    types.member_lookup(name, member) == MemberResult::Absent
-        && targets
-            .iter()
-            .all(|target| types.is_subtype(name, target) == Truth::No)
+    types.member_lookup_identity(&identity, member) == MemberResult::Absent
+        && targets.iter().all(|target| {
+            types.is_subtype_identity(&identity, &DeclarationIdentity::sdk("dart:core", target))
+                == Truth::No
+        })
 }
 
 #[derive(Clone, Copy)]
@@ -107,12 +97,12 @@ impl Emptiness {
                 field,
                 is_null_safe: false,
                 ..
-            } = length
+            } = length.unparenthesized()
             else {
                 return None;
             };
             if field.name == "length"
-                && matches!(literal, Expr::IntLit { value: text, .. }
+                && matches!(literal.unparenthesized(), Expr::IntLit { value: text, .. }
                     if text.replace('_', "").parse::<i64>().ok() == Some(value))
             {
                 Some(object.as_ref())
@@ -140,6 +130,7 @@ pub(super) fn analyze_emptiness(
                 left,
                 right,
                 span,
+                ..
             } = node
             else {
                 return;

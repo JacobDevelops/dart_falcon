@@ -53,7 +53,11 @@ impl SemanticRuleVisitor for Collector<'_> {
                 continue;
             };
             let ty = state.model.resolve_type_in(caught, &state.type_parameters);
-            if state.signatures.implements_sdk(&ty, "dart:core", "Error") != Truth::Yes {
+            if state
+                .signatures
+                .interface_check_sdk(&ty, "dart:core", "Error", &state.model)
+                != Truth::Yes
+            {
                 continue;
             }
             let message = if matches!(&ty, ResolvedType::Interface { identity, .. } if identity.is_sdk("dart:core", "Error"))

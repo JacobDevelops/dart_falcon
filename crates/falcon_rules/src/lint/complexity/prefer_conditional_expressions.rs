@@ -46,8 +46,8 @@ fn is_return(stmt: &Stmt) -> bool {
 /// The simple-identifier target of a single assignment statement, if any.
 fn assign_target_name(stmt: &Stmt) -> Option<&str> {
     if let Stmt::Expr(e) = unwrap_single(stmt)
-        && let Expr::Assign { target, .. } = &e.expr
-        && let Expr::Ident(id) = target.as_ref()
+        && let Expr::Assign { target, .. } = e.expr.unparenthesized()
+        && let Expr::Ident(id) = target.unparenthesized()
     {
         return Some(&id.name);
     }

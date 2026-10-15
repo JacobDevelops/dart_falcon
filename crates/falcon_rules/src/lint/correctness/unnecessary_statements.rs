@@ -10,13 +10,16 @@
 //! flow. A parenthesized expression is always reported, as are binary
 //! operations, index reads, literals, and `is` tests.
 //!
-//! Identifiers and property reads are reported only when they provably denote a
-//! variable, a field (whose getter is implicit), a method or function tear-off,
-//! or a type; an explicitly declared getter is allowed because getters with side
-//! effects were the main source of false positives. Names falcon cannot resolve
-//! are left alone. The same checks apply to the initializer and updaters of a
-//! `for (;;)` loop, and a cascade section that is a bare method tear-off
-//! (`..clear`) is reported too.
+//! Identifiers and resolved property reads are reported unless they denote an
+//! explicitly declared getter, which may have side effects. Dynamic reads and
+//! unresolved identifiers are reported too. Applicable extension getters are
+//! allowed, while property reads of unavailable external members are
+//! conservatively left alone. The same checks apply to the initializer and
+//! updaters of a `for (;;)` loop with an expression initializer. A cascade
+//! section that reads a method or function-valued member (`..clear`) is reported.
+//! Constructor and generic function tear-offs are references without an effect.
+//! Reading a function's synthetic `call` member is also a tear-off, including
+//! null-aware reads and cascade sections; invoking it still has an effect.
 //!
 //! ```dart
 //! void f(List<int> list, int a, int b) {
@@ -99,7 +102,6 @@ struct Declarations {
     top_level: HashMap<String, Effect>,
     types: HashMap<String, HashMap<String, Member>>,
 }
-
 impl Declarations {
     fn new(program: &Program) -> Self {
         let mut top_level = HashMap::new();
@@ -146,14 +148,38 @@ impl Declarations {
                     TopLevelDecl::Extension(_) | TopLevelDecl::Error(_) => continue,
                 };
             top_level.insert(name.name.clone(), Effect::None);
-            types.insert(name.name.clone(), type_members(members, values));
+            let primary = match declaration {
+                TopLevelDecl::Class(class) => Some(class.element_members()),
+                TopLevelDecl::MixinClass(class) => Some(class.element_members()),
+                TopLevelDecl::Enum(enumeration) => Some(enumeration.element_members()),
+                TopLevelDecl::ExtensionType(extension) => Some(extension.element_members()),
+                _ => None,
+            };
+            let additional_fields = primary.map_or(0, |primary| primary.declaring_params().count());
+            let mut members = type_members(members, values, additional_fields);
+            if let Some(primary) = primary {
+                for param in primary.declaring_params() {
+                    members.insert(
+                        param.name.name.clone(),
+                        Member {
+                            effect: Effect::None,
+                            is_static: false,
+                        },
+                    );
+                }
+            }
+            types.insert(name.name.clone(), members);
         }
         Self { top_level, types }
     }
 }
 
-fn type_members(members: &[ClassMember], values: &[EnumVariant]) -> HashMap<String, Member> {
-    let mut map = HashMap::with_capacity(members.len() + values.len());
+fn type_members(
+    members: &[ClassMember],
+    values: &[EnumVariant],
+    additional_fields: usize,
+) -> HashMap<String, Member> {
+    let mut map = HashMap::with_capacity(members.len() + values.len() + additional_fields);
     for value in values {
         map.insert(
             value.name.name.clone(),
@@ -179,7 +205,12 @@ fn type_members(members: &[ClassMember], values: &[EnumVariant]) -> HashMap<Stri
             }
             ClassMember::Method(method) => (&method.name, Effect::None, method.is_static),
             ClassMember::Getter(getter) => (&getter.name, Effect::Getter, getter.is_static),
-            ClassMember::Constructor(_)
+            // Named constructors tear off a function without invoking it.
+            ClassMember::Constructor(constructor) => match &constructor.constructor_name {
+                Some(name) => (name, Effect::None, true),
+                None => continue,
+            },
+            ClassMember::PrimaryConstructorBody(_)
             | ClassMember::Setter(_)
             | ClassMember::Operator(_)
             | ClassMember::Error(_) => continue,
@@ -206,7 +237,9 @@ impl SemanticRuleVisitor for Collector<'_> {
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         match node {
             Stmt::Expr(statement) => self.check(&statement.expr, state),
-            Stmt::For(statement) => {
+            Stmt::For(statement)
+                if matches!(statement.header.init, None | Some(ForInit::Exprs(_))) =>
+            {
                 if let Some(ForInit::Exprs(initializers)) = &statement.header.init {
                     for initializer in initializers {
                         self.check(initializer, state);
@@ -232,16 +265,29 @@ impl SemanticRuleVisitor for Collector<'_> {
             let [CascadeOp::Field { name, .. }] = section.ops.as_slice() else {
                 continue;
             };
-            let facts = state
+            let facts =
+                state
+                    .signatures
+                    .resolved_interface_member_facts(&target, &name.name, &state.model);
+            let is_method = (name.name == "call"
+                && matches!(target, ResolvedType::Function { .. }))
+                || facts.is_some_and(|facts| {
+                    facts
+                        .iter()
+                        .all(|fact| matches!(fact.kind, MemberKind::Method))
+                })
+                || (facts.is_none()
+                    && self.index_member(&target, &name.name) == Some(MemberKind::Method));
+            let is_function_value = state
                 .signatures
-                .resolved_member_facts(&target, &name.name, &state.model);
-            let is_method = facts.is_some_and(|facts| {
-                facts
-                    .iter()
-                    .all(|fact| matches!(fact.kind, MemberKind::Method))
-            }) || (facts.is_none()
-                && self.index_member(&target, &name.name) == Some(MemberKind::Method));
-            if is_method {
+                .resolved_field(&target, &name.name, &state.model)
+                .or_else(|| {
+                    state
+                        .signatures
+                        .resolved_extension_getter(&target, &name.name, &state.model)
+                })
+                .is_some_and(|(ty, _)| matches!(ty, ResolvedType::Function { .. }));
+            if is_method || is_function_value {
                 self.report(section.span);
             }
         }
@@ -259,10 +305,6 @@ impl Collector<'_> {
     fn check(&mut self, root: &Expr, state: &SemanticState<'_>) {
         let mut pending = vec![root];
         while let Some(expression) = pending.pop() {
-            if let Some(parens) = self.parenthesized(expression) {
-                self.report(parens);
-                continue;
-            }
             let report = match expression {
                 Expr::As { .. }
                 | Expr::Assign { .. }
@@ -274,7 +316,6 @@ impl Collector<'_> {
                 | Expr::NullAssert { .. }
                 | Expr::Throw { .. }
                 | Expr::DotShorthand { .. }
-                | Expr::GenericInstantiation { .. }
                 | Expr::Error { .. } => false,
                 Expr::Binary {
                     op: BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce,
@@ -295,18 +336,20 @@ impl Collector<'_> {
                 }
                 Expr::Unary { op, .. } => !matches!(op, UnaryOp::PlusPlus | UnaryOp::MinusMinus),
                 Expr::Ident(identifier) => {
-                    self.identifier(&identifier.name, state) == Some(Effect::None)
+                    self.identifier(&identifier.name, state) != Some(Effect::Getter)
                 }
                 Expr::Field { object, field, .. } => {
                     self.property(object, &field.name, state) == Some(Effect::None)
                 }
                 Expr::Binary { .. }
+                | Expr::Paren { .. }
                 | Expr::IntLit { .. }
                 | Expr::DoubleLit { .. }
                 | Expr::StringLit(_)
                 | Expr::BoolLit { .. }
                 | Expr::NullLit { .. }
                 | Expr::SymbolLit { .. }
+                | Expr::GenericInstantiation { .. }
                 | Expr::This { .. }
                 | Expr::Super { .. }
                 | Expr::Is { .. }
@@ -322,21 +365,6 @@ impl Collector<'_> {
                 self.report(*expression.span());
             }
         }
-    }
-
-    /// The span of the parentheses wrapping `expression`; the parser drops them
-    /// from the AST, but the analyzer reports a parenthesized statement.
-    fn parenthesized(&self, expression: &Expr) -> Option<Span> {
-        let span = expression.span();
-        let source = self.ctx.source;
-        let open = source.get(..span.start)?.trim_end();
-        let close = source.get(span.end..)?.trim_start();
-        if !open.ends_with('(') || !close.starts_with(')') {
-            return None;
-        }
-        let start = open.len() - 1;
-        let end = source.len() - close.len() + 1;
-        Some(Span::new(start, end))
     }
 
     /// What an unqualified name denotes, following Dart's lexical lookup:
@@ -362,25 +390,53 @@ impl Collector<'_> {
 
     /// What `object.name` denotes.
     fn property(&self, object: &Expr, name: &str, state: &SemanticState<'_>) -> Option<Effect> {
+        // `C<T>.named` is a constructor reference, not a getter.
+        if let Expr::GenericInstantiation { target, .. } = object
+            && let Expr::Ident(identifier) = target.as_ref()
+            && !state.environment.is_bound(&identifier.name)
+            && (self.declarations.types.contains_key(&identifier.name)
+                || state.model.resolve_name(&identifier.name).is_some())
+        {
+            return Some(Effect::None);
+        }
         if let Expr::Ident(identifier) = object
             && !state.environment.is_bound(&identifier.name)
         {
-            // Only a type declared here is a provable static receiver; anything
-            // else unbound may be an import prefix, an imported type, or an
-            // inherited member.
+            // A resolved type or import prefix can denote a static member.
             if self.declarations.top_level.get(&identifier.name) == Some(&Effect::None)
                 && let Some(members) = self.declarations.types.get(&identifier.name)
             {
+                if name == "new" {
+                    return Some(Effect::None);
+                }
                 return members
                     .get(name)
                     .filter(|member| member.is_static)
                     .map(|member| member.effect);
             }
-            // A top-level variable (or function) of this file is a value.
+            if let Some(identity) = state.model.resolve_name(&identifier.name)
+                && (name == "new" || state.signatures.constructor(&identity, name).is_some())
+            {
+                return Some(Effect::None);
+            }
+            if let Some(identity) = state.model.resolve_name(&identifier.name) {
+                let receiver = ResolvedType::interface_identity(identity);
+                if let Some(facts) =
+                    state
+                        .signatures
+                        .resolved_member_facts(&receiver, name, &state.model)
+                {
+                    return facts
+                        .iter()
+                        .filter(|fact| fact.is_static)
+                        .filter_map(|fact| Effect::of_kind(fact.kind))
+                        .fold(None, |effect, next| Some(Effect::merge(effect, next)));
+                }
+            }
             let is_value = self.declarations.top_level.get(&identifier.name) == Some(&Effect::None)
                 && !self.declarations.types.contains_key(&identifier.name);
-            if !is_value {
-                return None;
+            if !is_value && state.model.resolve_name(&identifier.name).is_none() {
+                return Some(Effect::None);
             }
         }
         let receiver = state.infer(object);
@@ -394,9 +450,15 @@ impl Collector<'_> {
         name: &str,
         state: &SemanticState<'_>,
     ) -> Option<Effect> {
-        if let Some(facts) = state
-            .signatures
-            .resolved_member_facts(receiver, name, &state.model)
+        // Function types have a synthetic `call` method, not a getter or an
+        // interface declaration that member lookup can discover.
+        if name == "call" && matches!(receiver, ResolvedType::Function { .. }) {
+            return Some(Effect::None);
+        }
+        if let Some(facts) =
+            state
+                .signatures
+                .resolved_interface_member_facts(receiver, name, &state.model)
         {
             let mut effect = None;
             for fact in facts {
@@ -409,7 +471,28 @@ impl Collector<'_> {
             }
             return effect;
         }
-        self.index_member(receiver, name).and_then(Effect::of_kind)
+        if matches!(receiver, ResolvedType::Dynamic) {
+            return Some(Effect::None);
+        }
+        let effect = self.index_member(receiver, name).and_then(Effect::of_kind);
+        if effect.is_some() {
+            return effect;
+        }
+        // An applicable extension getter may have side effects.
+        if state
+            .signatures
+            .has_possible_extension_getter(receiver, name, &state.model)
+        {
+            return Some(Effect::Getter);
+        }
+        match receiver {
+            ResolvedType::Interface { identity, .. }
+                if state.signatures.declaration(identity).is_some() =>
+            {
+                Some(Effect::None)
+            }
+            _ => None,
+        }
     }
 
     /// The member kind recorded by the type index for an interface receiver.
@@ -417,7 +500,7 @@ impl Collector<'_> {
         let ResolvedType::Interface { identity, .. } = receiver else {
             return None;
         };
-        match self.ctx.types?.member_lookup(identity.name(), name) {
+        match self.ctx.types?.member_lookup_identity(identity, name) {
             MemberResult::Found(kind) => Some(kind),
             MemberResult::Absent | MemberResult::Unknown => None,
         }

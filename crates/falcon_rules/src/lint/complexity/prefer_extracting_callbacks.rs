@@ -111,7 +111,7 @@ impl CallbackCollector<'_, '_> {
     fn check_callback(&mut self, expression: &Expr) {
         let Expr::FuncExpr {
             params, body, span, ..
-        } = expression
+        } = expression.unparenthesized()
         else {
             return;
         };

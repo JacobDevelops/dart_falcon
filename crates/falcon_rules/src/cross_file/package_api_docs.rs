@@ -1,14 +1,17 @@
 //! Documents public declarations in a package's exported API.
 //!
-//! Adopted from the historic official `package_api_docs` lint, removed in Dart
-//! 3.7 after becoming a no-op. Libraries under lib outside lib/src are entry
-//! points; local exports are followed transitively with show/hide combinators,
-//! including library parts. External and conditional exports are not resolved.
-//! Members marked @override are exempt, without guessing unannotated overrides.
+//! UPSTREAM-NOOP: `package_api_docs` is absent from current upstream, having
+//! been removed in Dart 3.7. Falcon retains its API-documentation implementation.
+//!
+//! Libraries under `lib` outside `lib/src` are entry points; local exports are
+//! followed transitively with show/hide combinators, including library parts.
+//! External and conditional exports are not resolved. Members marked
+//! `@override` are exempt, without guessing unannotated overrides.
 
 use super::{ResolvedRef, lib_dir_package, resolve_directive_uri};
-use crate::lint::style::public_member_api_docs::{annotation, api_declarations, documented};
-use falcon_analyze::{CrossFileRule, ProjectFile, canonical_or_lexical};
+use crate::lint::declarations::annotation;
+use crate::lint::style::public_member_api_docs::{api_declarations, documented};
+use falcon_analyze::{CrossFileRule, ProjectFile, SemanticModel, canonical_or_lexical};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::ast::ImportCombinator;
@@ -22,7 +25,7 @@ impl CrossFileRule for PackageApiDocs {
         &self,
         files: &[ProjectFile],
         _config: &FalconConfig,
-        _indexes: Option<&falcon_analyze::SemanticIndexes>,
+        indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
         let paths: HashMap<_, _> = files
             .iter()
@@ -31,7 +34,12 @@ impl CrossFileRule for PackageApiDocs {
             .collect();
         let declarations: Vec<_> = files
             .iter()
-            .map(|f| api_declarations(&f.program, &f.source))
+            .map(|file| {
+                let model = indexes.map(|indexes| {
+                    SemanticModel::new(&file.path, &indexes.identities, Some(&indexes.types))
+                });
+                api_declarations(&file.program, &file.source, model.as_ref())
+            })
             .collect();
         let packages: Vec<_> = files.iter().map(|f| lib_dir_package(&f.path)).collect();
         let mut visible: Vec<BTreeSet<(usize, &str)>> = declarations
@@ -110,7 +118,7 @@ impl CrossFileRule for PackageApiDocs {
             for d in &declarations[i] {
                 if d.name.starts_with('_')
                     || annotation(d.annotations, "override")
-                    || documented(&tokens, d.start)
+                    || d.documented(&tokens)
                     || !public.contains(&(i, d.owner.unwrap_or(d.name)))
                 {
                     continue;
@@ -124,11 +132,13 @@ impl CrossFileRule for PackageApiDocs {
                 ));
             }
             for declaration in &file.program.declarations {
-                if let falcon_syntax::ast::TopLevelDecl::ExtensionType(node) = declaration {
-                    let field = &node.representation.field_name;
+                if let falcon_syntax::ast::TopLevelDecl::ExtensionType(node) = declaration
+                    && let Some(representation) = node.representation()
+                {
+                    let field = &representation.name;
                     if !field.name.starts_with('_')
                         && public.contains(&(i, node.name.name.as_str()))
-                        && !documented(&tokens, node.representation.field_type.span().start)
+                        && !documented(&tokens, representation.span.start)
                     {
                         diagnostics.push(Diagnostic::new(
                             "package-api-docs",

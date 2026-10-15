@@ -1,7 +1,6 @@
 //! Style lint rules.
 
 mod collection_checks;
-mod override_members;
 
 pub mod always_declare_return_types;
 pub mod always_put_control_body_on_new_line;

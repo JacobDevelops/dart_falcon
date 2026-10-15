@@ -34,7 +34,7 @@ impl Rule for UnnecessaryConst {
 /// An explicit `const` keyword produces one of these nodes with `is_const == true`
 /// (implicit/inferred constants leave the flag false), so their span marks the keyword.
 fn const_marker_span(expr: &Expr) -> Option<&Span> {
-    match expr {
+    match expr.unparenthesized() {
         Expr::New { is_const: true, .. }
         | Expr::List { is_const: true, .. }
         | Expr::Map { is_const: true, .. }
@@ -84,6 +84,10 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_expr(&mut self, node: &Expr) {
+        if matches!(node, Expr::Paren { .. }) {
+            falcon_syntax::visitor::walk_expr(self, node);
+            return;
+        }
         if let Some(span) = const_marker_span(node) {
             if self.const_depth > 0 {
                 self.diags.push(self.ctx.diagnostic(

@@ -1,27 +1,57 @@
 //! Reports uses of deprecated declarations from their own package.
 //!
-//! Canonical project identities and lexical scopes prove references; unknown
-//! receivers and ambiguous imports remain silent. Deprecated declarations form
-//! a usage frontier, so their bodies and metadata are exempt. Deprecation
-//! messages are trimmed and punctuated like the analyzer's messages.
-//! Package membership is checked only for proven deprecations and cached per source file.
+//! Canonical project identities and lexical scopes prove code and documentation
+//! references; unknown receivers and ambiguous imports remain silent. Deprecated
+//! declarations and libraries form a usage frontier, so their bodies, documentation,
+//! and metadata are exempt, including part files of deprecated libraries. Library
+//! directive messages use canonical package URIs, and local functions stay within
+//! their lexical block, switch case, or unbraced statement body. Deprecation messages
+//! are trimmed and punctuated like the analyzer's messages. Membership is cached per source.
+//! Cascade diagnostics consume shared semantic traversal callbacks, including
+//! receiver inference and indexed-assignment classification.
+//! Extension owners honor inferred arguments and bounds; `super` owners follow
+//! concrete mixin constraints before interface contracts. Optional parameter
+//! deprecations are checked even when the enclosing member is not deprecated.
+//! Explicit construction resolves dotted constructor selectors separately from
+//! import prefixes; generic class qualifiers retain their constructor metadata.
+//! Constructor aliases resolve to the underlying declaration before constructor
+//! and deprecated-parameter metadata is inspected. Compound assignments and
+//! increments inspect both accessors, while simple assignments inspect only setters.
+//! Local metadata follows binding declaration identities, including loop variables;
+//! local function metadata also applies to references before its lexical declaration.
+//! Enum constants do not name deprecated constructors; implicit extension operators
+//! use the same applicable-extension lookup as ordinary members.
+//! Member and parameter selectors borrow names and keep declaration kind, access,
+//! and static dispatch distinct; retained metadata owns names only during indexing.
+//! Grouped references are visited, but grouped callees do not expose declaration
+//! parameter metadata as direct invocations do.
+//! Null-shortened receiver chains recover reached declaration types until parentheses,
+//! preserving declared nullable members and applicable nullable extensions.
 //!
 //! Adopted from the official `deprecated_member_use_from_same_package` lint.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, DeclarationIdentity, QualifiedName, ResolvedType, Rule,
-    SemanticModel, SignatureIndex, TypeParameterScope, evaluate_constant,
+    AnalyzeContext, ConstantValue, DeclarationIdentity, MemberSelector,
+    MemberSelectorKind as SelectorKind, QualifiedName, ResolvedType, Rule, SemanticModel,
+    SignatureIndex, SourceSelector, TypeParameterScope, evaluate_constant, resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_annotation, walk_class_member, walk_constructor_decl, walk_dart_type, walk_expr,
-    walk_formal_param, walk_function_decl, walk_method_decl, walk_stmt, walk_top_level_decl,
+    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr, walk_formal_param,
+    walk_function_decl, walk_method_decl, walk_stmt, walk_top_level_decl,
 };
+use falcon_syntax::{Token, TokenKind};
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use crate::lint::doc_comments::{
+    DocElement, DocLookup, DocResolver, DocScopes, doc_blocks, references,
+};
+use crate::lint::semantic_scope::{
+    CascadeAssignment, SemanticRuleVisitor, SemanticState, visit_program,
+};
 
 const ID: &str = "deprecated-member-use-from-same-package";
 
@@ -36,9 +66,27 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
         let Some(state) = SemanticState::new(program, ctx) else {
             return Vec::new();
         };
+        if ctx
+            .identities
+            .and_then(|identities| {
+                let (source, annotations) = identities.library_source_annotations(ctx.file_path)?;
+                deprecation(
+                    annotations,
+                    SemanticModel::new(source, identities, ctx.types),
+                    ctx.signatures,
+                )
+            })
+            .is_some()
+            || program.library_directive.as_ref().is_some_and(|library| {
+                deprecation(&library.annotations, state.model, ctx.signatures).is_some()
+            })
+        {
+            return Vec::new();
+        }
         let mut frontier = Frontier {
             model: state.model,
             signatures: ctx.signatures,
+            identities: ctx.identities,
             owner: None,
             superclass: None,
             declaration: None,
@@ -48,8 +96,12 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
             metadata: Vec::new(),
             writes: HashSet::new(),
             reads: HashSet::new(),
+            increments: HashSet::new(),
             parameters: TypeParameterScope::default(),
-            types: Vec::new(),
+            types: StoredTargets::default(),
+            extension_owners: Vec::new(),
+            blocks: Vec::new(),
+            locals: Vec::new(),
         };
         frontier.visit_program(program);
         let declarations = frontier.excluded.len();
@@ -60,18 +112,135 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
                 frontier.excluded.push(metadata);
             }
         }
+        let tokens = ctx.tokens();
         let mut uses = Uses {
             ctx,
-            package_root: package.lib_root,
+            tokens,
+            package_root: package.lib_root.clone(),
             same_package: HashMap::new(),
             excluded: frontier.excluded,
             writes: frontier.writes,
             reads: frontier.reads,
+            increments: frontier.increments,
             diagnostics: Vec::new(),
             reported: HashSet::new(),
+            locals: frontier.locals,
+            extension_owners: frontier.extension_owners,
+            cascade_targets: HashSet::new(),
         };
-        for target in &frontier.types {
-            uses.report(target);
+        for target in &frontier.types.0 {
+            uses.report(&target.borrow());
+        }
+        for (uri, combinators, directive_span) in program
+            .imports
+            .iter()
+            .map(|node| (&node.uri, &node.combinators, node.span))
+            .chain(
+                program
+                    .exports
+                    .iter()
+                    .map(|node| (&node.uri, &node.combinators, node.span)),
+            )
+        {
+            let Some(crate::cross_file::ResolvedRef::Path(path)) =
+                crate::cross_file::resolve_directive_uri(ctx.file_path, &uri.value, Some(&package))
+            else {
+                continue;
+            };
+            let Some(identities) = ctx.identities else {
+                continue;
+            };
+            let Some(file) = identities.file(&path) else {
+                continue;
+            };
+            let library = identities.library(file);
+            if let Some((source, annotations)) = identities.library_source_annotations(&path)
+                && let Some(message) = deprecation(
+                    annotations,
+                    SemanticModel::new(source, identities, ctx.types),
+                    ctx.signatures,
+                )
+            {
+                let name = identities
+                    .library_uri(library)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| file_uri(source));
+                uses.emit_message(source, &name, directive_span, &message);
+            }
+            for combinator in combinators {
+                if let ImportCombinator::Show(names, _) = combinator {
+                    for name in names {
+                        if let Some(owner) = identities.exported_any(library, &name.name) {
+                            uses.report(&Target {
+                                owner,
+                                selector: MemberSelector::DECLARATION.into(),
+                                name: name.name.as_str().into(),
+                                span: name.span,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        let sdk_loaded = ctx
+            .identities
+            .is_some_and(|identities| identities.has_sdk_sources());
+        let scopes = DocScopes::new(program, &state.model, ctx.source);
+        let resolver = DocResolver::new(
+            program,
+            &state.model,
+            &state.signatures,
+            &scopes,
+            sdk_loaded,
+        );
+        for block in doc_blocks(tokens, ctx.source) {
+            let Some(scope) = scopes.scope_for(&block) else {
+                continue;
+            };
+            if uses
+                .excluded
+                .iter()
+                .any(|span| span.start <= scope.span.start && scope.span.start < span.end)
+            {
+                continue;
+            }
+            let (links, _) = references(ctx.source, &block);
+            for link in links {
+                let Some(parsed) = link.parse() else {
+                    continue;
+                };
+                let lookups = resolver.resolve(&parsed, scope);
+                for (name, lookup) in parsed.names.iter().zip(lookups) {
+                    let span = Span::new(name.offset, name.offset + name.text.len());
+                    let target = match lookup {
+                        DocLookup::Found(DocElement::Declaration {
+                            identity: Some(owner),
+                            ..
+                        }) => Target {
+                            name: name.text.into(),
+                            owner,
+                            selector: MemberSelector::DECLARATION.into(),
+                            span,
+                        },
+                        DocLookup::Found(DocElement::Member { owner, selector }) => {
+                            if selector.member.kind == SelectorKind::Constructor {
+                                constructor_target(owner, selector.member.name, span)
+                            } else {
+                                Target {
+                                    owner,
+                                    selector,
+                                    name: name.text.into(),
+                                    span,
+                                }
+                            }
+                        }
+                        _ => continue,
+                    };
+                    // The documented declaration was checked against the
+                    // deprecated frontier above.
+                    uses.emit(&target);
+                }
+            }
         }
         visit_program(&mut uses, program, state);
         uses.diagnostics
@@ -106,7 +275,7 @@ fn deprecation(
             // Dynamic/unevaluated metadata cannot prove a deprecated constant.
             let expression = annotation.args.as_ref()?.positional.first()?;
             let value;
-            let message = if let Expr::StringLit(message) = expression {
+            let message = if let Expr::StringLit(message) = expression.unparenthesized() {
                 message.value.as_str()
             } else {
                 let Some(ConstantValue::String(message)) = signatures.and_then(|signatures| {
@@ -133,6 +302,7 @@ fn deprecation(
 struct Frontier<'a> {
     model: SemanticModel<'a>,
     signatures: Option<&'a SignatureIndex>,
+    identities: Option<&'a falcon_analyze::IdentityIndex>,
     owner: Option<DeclarationIdentity>,
     superclass: Option<DeclarationIdentity>,
     declaration: Option<Span>,
@@ -140,13 +310,34 @@ struct Frontier<'a> {
     in_metadata: bool,
     excluded: Vec<Span>,
     metadata: Vec<(Span, Span)>,
-    writes: HashSet<usize>,
-    reads: HashSet<usize>,
+    writes: HashSet<Span>,
+    reads: HashSet<Span>,
+    increments: HashSet<Span>,
     parameters: TypeParameterScope,
-    types: Vec<Target>,
+    types: StoredTargets,
+    extension_owners: Vec<ExtensionOwner>,
+    blocks: Vec<Span>,
+    locals: Vec<LocalDeprecation>,
+}
+
+impl Frontier<'_> {
+    fn arguments(&mut self, target: &Target, args: &ArgList) {
+        self.types
+            .extend(parameter_targets(target, args, self.identities));
+    }
 }
 
 impl Visitor for Frontier<'_> {
+    fn visit_block(&mut self, node: &Block) {
+        self.blocks.push(node.span);
+        falcon_syntax::visitor::walk_block(self, node);
+        self.blocks.pop();
+    }
+    fn visit_switch_case(&mut self, node: &SwitchCase) {
+        self.blocks.push(node.span);
+        falcon_syntax::visitor::walk_switch_case(self, node);
+        self.blocks.pop();
+    }
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         let previous = self.declaration.replace(*node.span());
         let previous_scope = std::mem::replace(
@@ -173,38 +364,51 @@ impl Visitor for Frontier<'_> {
                 for annotation in &variant.annotations {
                     self.metadata.push((variant.span, annotation.span));
                 }
-                if let Some(owner) = self.model.resolve_name(&enumeration.name.name) {
-                    let constructor = variant.constructor_name.as_ref();
-                    let target = constructor_target(
-                        owner,
-                        constructor.map_or("new", |name| name.name.as_str()),
-                        constructor.map_or(variant.name.span, |name| name.span),
-                    );
-                    if let Some(args) = &variant.args {
-                        for argument in &args.named {
-                            self.types.push(Target {
-                                owner: target.owner.clone(),
-                                selector: format!(
-                                    "param:{}:{}",
-                                    target.selector, argument.name.name
-                                ),
-                                name: argument.name.name.clone(),
-                                span: argument.name.span,
-                            });
-                        }
-                    }
-                    self.types.push(target);
-                }
             }
         }
-        let (owner, superclass, members, class_name) = match node {
+        let (owner, superclass) = match node {
             TopLevelDecl::Class(n) => (
                 self.model.resolve_name(&n.name.name),
                 n.extends.as_ref().filter(|_| n.with_clause.is_empty()),
-                Some(n.members.as_slice()),
-                Some(&n.name),
             ),
-            _ => (None, None, None, None),
+            TopLevelDecl::Mixin(n) => (self.model.resolve_name(&n.name.name), None),
+            TopLevelDecl::MixinClass(n) => (self.model.resolve_name(&n.name.name), None),
+            TopLevelDecl::Enum(n) => (self.model.resolve_name(&n.name.name), None),
+            TopLevelDecl::Extension(n) => {
+                let owner = n
+                    .name
+                    .as_ref()
+                    .and_then(|name| self.model.resolve_extension(&name.name));
+                let mut members = Vec::new();
+                for member in &n.members {
+                    match member {
+                        ClassMember::Field(field) => members.extend(
+                            field
+                                .declarators
+                                .iter()
+                                .map(|variable| (variable.name.name.clone(), field.is_static)),
+                        ),
+                        ClassMember::Method(method) => {
+                            members.push((method.name.name.clone(), method.is_static))
+                        }
+                        ClassMember::Getter(getter) => {
+                            members.push((getter.name.name.clone(), getter.is_static))
+                        }
+                        ClassMember::Setter(setter) => {
+                            members.push((setter.name.name.clone(), setter.is_static))
+                        }
+                        _ => {}
+                    }
+                }
+                self.extension_owners.push(ExtensionOwner {
+                    span: n.span,
+                    identity: owner.clone(),
+                    members,
+                });
+                (owner, None)
+            }
+            TopLevelDecl::ExtensionType(n) => (self.model.resolve_name(&n.name.name), None),
+            _ => (None, None),
         };
         let superclass =
             superclass.and_then(
@@ -215,18 +419,6 @@ impl Visitor for Frontier<'_> {
             );
         let old_owner = std::mem::replace(&mut self.owner, owner);
         let old_superclass = std::mem::replace(&mut self.superclass, superclass);
-        if let (Some(members), Some(class_name), Some(superclass)) =
-            (members, class_name, &self.superclass)
-            && !members
-                .iter()
-                .any(|member| matches!(member, ClassMember::Constructor(_)))
-        {
-            self.types.push(constructor_target(
-                superclass.clone(),
-                "new",
-                class_name.span,
-            ));
-        }
         walk_top_level_decl(self, node);
         self.declaration = previous;
         self.parameters.pop();
@@ -244,9 +436,21 @@ impl Visitor for Frontier<'_> {
         walk_method_decl(self, node);
         self.parameters.pop();
     }
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
         let mut explicit = false;
-        for initializer in &node.initializers {
+        for initializer in node.initializers {
+            if let ConstructorInitializer::FieldInit { field, .. } = initializer
+                && let Some(owner) = &self.owner
+            {
+                self.types.push(Target {
+                    owner: owner.clone(),
+                    selector: MemberSelector::new(SelectorKind::Field, false, &field.name).into(),
+                    name: field.name.as_str().into(),
+                    span: field.span,
+                });
+            }
+        }
+        for initializer in node.initializers {
             let (owner, name, args, span) = match initializer {
                 ConstructorInitializer::SuperCall {
                     call_name,
@@ -267,14 +471,7 @@ impl Visitor for Frontier<'_> {
                     name.map_or("new", |n| n.name.as_str()),
                     name.map_or(span, |n| n.span),
                 );
-                for argument in &args.named {
-                    self.types.push(Target {
-                        owner: target.owner.clone(),
-                        selector: format!("param:{}:{}", target.selector, argument.name.name),
-                        name: argument.name.name.clone(),
-                        span: argument.name.span,
-                    });
-                }
+                self.arguments(&target, args);
                 self.types.push(target);
             }
         }
@@ -285,7 +482,7 @@ impl Visitor for Frontier<'_> {
             self.types.push(constructor_target(
                 superclass.clone(),
                 "new",
-                node.name.span,
+                node.name_span,
             ));
         }
         if let Some(redirect) = &node.redirect
@@ -321,7 +518,6 @@ impl Visitor for Frontier<'_> {
                 constructor.span,
             ));
         }
-        walk_constructor_decl(self, node);
     }
     fn visit_dart_type(&mut self, node: &DartType) {
         if let DartType::Function(function) = node {
@@ -331,19 +527,12 @@ impl Visitor for Frontier<'_> {
             return;
         }
         if let DartType::Named(named) = node
-            && let ResolvedType::Interface { identity, .. } =
-                self.model.resolve_type_in(node, &self.parameters)
             && let Some(name) = named.segments.last()
-        {
-            let identity = QualifiedName::from_identifiers(&named.segments)
+            && !(named.segments.len() == 1 && self.parameters.contains(&name.name))
+            && let Some(identity) = QualifiedName::from_identifiers(&named.segments)
                 .and_then(|name| self.model.resolve_name(name))
-                .unwrap_or(identity);
-            self.types.push(Target {
-                name: identity.name().to_owned(),
-                owner: identity,
-                selector: String::new(),
-                span: name.span,
-            });
+        {
+            self.types.push_declaration(identity, name.span);
         }
         walk_dart_type(self, node);
     }
@@ -387,28 +576,18 @@ impl Visitor for Frontier<'_> {
                 .or_else(|| self.model.resolve_value(name))
             && let Some(identifier) = node.name.last()
         {
-            self.types.push(Target {
-                owner: owner.clone(),
-                selector: String::new(),
-                name: owner.name().to_owned(),
-                span: identifier.span,
-            });
-            if let Some(args) = &node.args {
+            self.types.push_declaration(owner.clone(), identifier.span);
+            if node.args.is_some() {
                 let constructor = node.constructor_name.as_ref();
                 let target = constructor_target(
                     owner,
                     constructor.map_or("new", |n| n.name.as_str()),
                     constructor.map_or(identifier.span, |n| n.span),
                 );
-                for argument in &args.named {
-                    self.types.push(Target {
-                        owner: target.owner.clone(),
-                        selector: format!("param:{}:{}", target.selector, argument.name.name),
-                        name: argument.name.name.clone(),
-                        span: argument.name.span,
-                    });
+                // `@A()` names the class; only `@A.named()` names a constructor.
+                if constructor.is_some() {
+                    self.types.push(target);
                 }
-                self.types.push(target);
             }
         }
         let previous = std::mem::replace(&mut self.in_metadata, self.metadata_scope);
@@ -417,8 +596,115 @@ impl Visitor for Frontier<'_> {
     }
     fn visit_stmt(&mut self, node: &Stmt) {
         let previous = std::mem::replace(&mut self.metadata_scope, false);
+        let declaration = self.declaration;
+        if let Stmt::PatternDecl(pattern) = node {
+            self.declaration = Some(pattern.span);
+        }
+        if let Stmt::LocalFunc(function) = node {
+            self.declaration = Some(function.span);
+            if let Some(scope) =
+                self.blocks.iter().rev().find(|scope| {
+                    scope.start <= function.span.start && function.span.end <= scope.end
+                })
+            {
+                let message = deprecation(&function.annotations, self.model, self.signatures);
+                let mut parameters = Vec::new();
+                for (position, parameter) in function.params.positional().enumerate() {
+                    if parameter.kind == ParamKind::OptionalPositional
+                        && let Some(message) =
+                            deprecation(&parameter.annotations, self.model, self.signatures)
+                    {
+                        parameters.push(LocalParameter {
+                            position: Some(position),
+                            name: parameter.name.name.clone(),
+                            message,
+                        });
+                    }
+                }
+                for parameter in function.params.named() {
+                    if parameter.kind == (ParamKind::Named { required: false })
+                        && let Some(message) =
+                            deprecation(&parameter.annotations, self.model, self.signatures)
+                    {
+                        parameters.push(LocalParameter {
+                            position: None,
+                            name: parameter.name.name.clone(),
+                            message,
+                        });
+                    }
+                }
+                self.locals.push(LocalDeprecation {
+                    name: function.name.name.clone(),
+                    scope: *scope,
+                    binding: function.name.span,
+                    function: true,
+                    message,
+                    parameters,
+                });
+            }
+        }
+        let scopes = self.blocks.len();
+        match node {
+            Stmt::If(statement) => {
+                self.blocks.push(*statement.then_branch.span());
+                if let Some(branch) = &statement.else_branch {
+                    self.blocks.push(*branch.span());
+                }
+            }
+            Stmt::For(statement) => self.blocks.push(*statement.body.span()),
+            Stmt::While(statement) => self.blocks.push(*statement.body.span()),
+            Stmt::DoWhile(statement) => self.blocks.push(*statement.body.span()),
+            _ => {}
+        }
         walk_stmt(self, node);
+        self.blocks.truncate(scopes);
+        self.declaration = declaration;
         self.metadata_scope = previous;
+    }
+    fn visit_local_var(&mut self, node: &LocalVarDecl) {
+        let previous = self.declaration.replace(node.span);
+        if let Some(scope) = self.blocks.last()
+            && let Some(message) = deprecation(&node.annotations, self.model, self.signatures)
+        {
+            for variable in &node.declarators {
+                self.locals.push(LocalDeprecation {
+                    name: variable.name.name.clone(),
+                    scope: *scope,
+                    binding: variable.name.span,
+                    function: false,
+                    message: Some(message.clone()),
+                    parameters: Vec::new(),
+                });
+            }
+        }
+        falcon_syntax::visitor::walk_local_var(self, node);
+        self.declaration = previous;
+    }
+    fn visit_for_header(&mut self, node: &ForHeader) {
+        let previous = self.declaration;
+        if let Some(ForInit::ForIn {
+            annotations,
+            name,
+            declares_variable: true,
+            ..
+        }) = &node.init
+        {
+            self.declaration = Some(name.span);
+            if let Some(scope) = self.blocks.last()
+                && let Some(message) = deprecation(annotations, self.model, self.signatures)
+            {
+                self.locals.push(LocalDeprecation {
+                    name: name.name.clone(),
+                    scope: *scope,
+                    binding: name.span,
+                    function: false,
+                    message: Some(message),
+                    parameters: Vec::new(),
+                });
+            }
+        }
+        falcon_syntax::visitor::walk_for_header(self, node);
+        self.declaration = previous;
     }
     fn visit_expr(&mut self, node: &Expr) {
         if self.in_metadata
@@ -431,16 +717,16 @@ impl Visitor for Frontier<'_> {
         {
             self.types.push(Target {
                 owner,
-                selector: String::new(),
-                name: identifier.name.clone(),
+                selector: MemberSelector::DECLARATION.into(),
+                name: identifier.name.as_str().into(),
                 span: identifier.span,
             });
         }
         match node {
             Expr::Assign { target, op, .. } => {
-                self.writes.insert(target.span().start);
+                self.writes.insert(*target.span());
                 if *op != AssignOp::Eq {
-                    self.reads.insert(target.span().start);
+                    self.reads.insert(*target.span());
                 }
             }
             Expr::Unary {
@@ -449,8 +735,9 @@ impl Visitor for Frontier<'_> {
                 ..
             }
             | Expr::PostfixIncDec { operand, .. } => {
-                self.writes.insert(operand.span().start);
-                self.reads.insert(operand.span().start);
+                self.writes.insert(*operand.span());
+                self.reads.insert(*operand.span());
+                self.increments.insert(*operand.span());
             }
             _ => {}
         }
@@ -460,36 +747,229 @@ impl Visitor for Frontier<'_> {
 
 struct Uses<'a> {
     ctx: &'a AnalyzeContext<'a>,
+    tokens: &'a [Token],
     package_root: std::path::PathBuf,
     same_package: HashMap<std::path::PathBuf, bool>,
     excluded: Vec<Span>,
-    writes: HashSet<usize>,
-    reads: HashSet<usize>,
+    writes: HashSet<Span>,
+    reads: HashSet<Span>,
+    increments: HashSet<Span>,
     diagnostics: Vec<Diagnostic>,
-    reported: HashSet<(usize, usize)>,
+    reported: HashSet<(usize, usize, String)>,
+    locals: Vec<LocalDeprecation>,
+    extension_owners: Vec<ExtensionOwner>,
+    cascade_targets: HashSet<Span>,
 }
 
-struct Target {
+struct ExtensionOwner {
+    span: Span,
+    identity: Option<DeclarationIdentity>,
+    members: Vec<(String, bool)>,
+}
+
+struct Target<'a> {
     owner: DeclarationIdentity,
-    selector: String,
-    name: String,
+    selector: SourceSelector<'a>,
+    name: Cow<'a, str>,
     span: Span,
 }
 
-fn constructor_target(owner: DeclarationIdentity, name: &str, span: Span) -> Target {
+#[derive(Default)]
+struct StoredTargets(Vec<StoredTarget>);
+
+struct StoredTarget {
+    owner: DeclarationIdentity,
+    kind: SelectorKind,
+    is_static: bool,
+    member: String,
+    parameter: Option<String>,
+    name: Option<String>,
+    span: Span,
+}
+
+impl StoredTargets {
+    fn push_declaration(&mut self, owner: DeclarationIdentity, span: Span) {
+        self.0.push(StoredTarget {
+            owner,
+            kind: SelectorKind::Declaration,
+            is_static: false,
+            member: String::new(),
+            parameter: None,
+            name: None,
+            span,
+        });
+    }
+
+    fn push(&mut self, target: Target<'_>) {
+        let default_name = target.selector.parameter.unwrap_or_else(|| {
+            if target.selector.member.name.is_empty() {
+                target.owner.name()
+            } else {
+                target.selector.member.name
+            }
+        });
+        let name = (target.name.as_ref() != default_name).then(|| target.name.into_owned());
+        self.0.push(StoredTarget {
+            owner: target.owner,
+            kind: target.selector.member.kind,
+            is_static: target.selector.member.is_static,
+            member: target.selector.member.name.to_owned(),
+            parameter: target.selector.parameter.map(str::to_owned),
+            name,
+            span: target.span,
+        });
+    }
+
+    fn extend<'a>(&mut self, targets: impl Iterator<Item = Target<'a>>) {
+        for target in targets {
+            self.push(target);
+        }
+    }
+}
+
+impl StoredTarget {
+    fn borrow(&self) -> Target<'_> {
+        Target {
+            owner: self.owner.clone(),
+            selector: SourceSelector {
+                member: MemberSelector::new(self.kind, self.is_static, &self.member),
+                parameter: self.parameter.as_deref(),
+            },
+            name: self
+                .name
+                .as_deref()
+                .unwrap_or_else(|| {
+                    self.parameter.as_deref().unwrap_or_else(|| {
+                        if self.member.is_empty() {
+                            self.owner.name()
+                        } else {
+                            &self.member
+                        }
+                    })
+                })
+                .into(),
+            span: self.span,
+        }
+    }
+}
+
+struct LocalDeprecation {
+    name: String,
+    scope: Span,
+    binding: Span,
+    function: bool,
+    message: Option<String>,
+    parameters: Vec<LocalParameter>,
+}
+
+struct LocalParameter {
+    position: Option<usize>,
+    name: String,
+    message: String,
+}
+
+fn constructor_target<'a>(owner: DeclarationIdentity, name: &'a str, span: Span) -> Target<'a> {
     Target {
-        name: if name == "new" {
-            owner.name().to_owned()
-        } else {
-            format!("{}.{name}", owner.name())
-        },
+        name: "".into(),
         owner,
-        selector: format!("new:{name}"),
+        selector: MemberSelector::new(SelectorKind::Constructor, false, name).into(),
         span,
     }
 }
 
-impl Uses<'_> {
+fn parameter_targets<'a>(
+    target: &'a Target<'a>,
+    args: &'a ArgList,
+    identities: Option<&'a falcon_analyze::IdentityIndex>,
+) -> impl Iterator<Item = Target<'a>> + 'a {
+    let positional = args
+        .positional
+        .iter()
+        .enumerate()
+        .filter_map(move |(position, argument)| {
+            let name = identities?.deprecated_positional_parameter(
+                &target.owner,
+                target.selector.member,
+                position,
+            )?;
+            Some(Target {
+                owner: target.owner.clone(),
+                selector: SourceSelector {
+                    member: target.selector.member,
+                    parameter: Some(name),
+                },
+                name: name.into(),
+                span: *argument.span(),
+            })
+        });
+    positional.chain(args.named.iter().map(move |argument| Target {
+        owner: target.owner.clone(),
+        selector: SourceSelector {
+            member: target.selector.member,
+            parameter: Some(&argument.name.name),
+        },
+        name: argument.name.name.as_str().into(),
+        span: argument.name.span,
+    }))
+}
+
+fn file_uri(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy();
+    let mut uri = String::with_capacity(7 + path.len());
+    uri.push_str("file://");
+    falcon_analyze::environment::percent_encode(&path, &mut uri);
+    uri
+}
+
+fn push_deprecation(
+    ctx: &AnalyzeContext<'_>,
+    excluded: &[Span],
+    reported: &mut HashSet<(usize, usize, String)>,
+    diagnostics: &mut Vec<Diagnostic>,
+    name: &str,
+    span: Span,
+    detail: &str,
+) {
+    if excluded
+        .iter()
+        .any(|excluded| excluded.start <= span.start && span.end <= excluded.end)
+    {
+        return;
+    }
+    let base = format!("'{name}' is deprecated and shouldn't be used.");
+    let message = if detail.is_empty() {
+        base
+    } else {
+        format!("{base} {detail}")
+    };
+    if reported.insert((span.start, span.end, message.clone())) {
+        diagnostics.push(ctx.diagnostic(ID, message, span));
+    }
+}
+
+impl<'ctx> Uses<'ctx> {
+    fn local(&self, name: &str, span: Span, state: &SemanticState<'_>) -> Option<usize> {
+        self.locals
+            .iter()
+            .enumerate()
+            .filter(|(_, local)| {
+                local.name == name
+                    && local.scope.start <= span.start
+                    && span.end <= local.scope.end
+                    && (state.environment.binding_declaration(name) == Some(local.binding)
+                        || (local.function
+                            && span.start < local.binding.start
+                            && state
+                                .environment
+                                .binding_declaration(name)
+                                .is_none_or(|binding| {
+                                    binding.start < local.scope.start
+                                        || local.scope.end < binding.end
+                                })))
+            })
+            .min_by_key(|(_, local)| local.scope.end - local.scope.start)
+            .map(|(index, _)| index)
+    }
     fn report(&mut self, target: &Target) {
         if self
             .excluded
@@ -498,25 +978,41 @@ impl Uses<'_> {
         {
             return;
         }
+        self.emit(target);
+    }
+
+    /// Reports a deprecated target in this package outside deprecated declarations.
+    fn emit(&mut self, target: &Target) {
         let Some(identities) = self.ctx.identities else {
             return;
         };
         let Some((path, annotations)) = identities
-            .source_annotations(&target.owner, &target.selector)
+            .source_annotations(&target.owner, target.selector)
             .or_else(|| {
-                if target.selector.is_empty() || target.selector == "set:" {
-                    identities.source_annotations(&target.owner, "variable")
+                let member = target.selector.member;
+                if target.selector.parameter.is_none()
+                    && member.name.is_empty()
+                    && matches!(member.kind, SelectorKind::Declaration | SelectorKind::Write)
+                {
+                    identities.source_annotations(
+                        &target.owner,
+                        MemberSelector::new(SelectorKind::Variable, false, "").into(),
+                    )
                 } else {
                     None
                 }
             })
             .or_else(|| {
-                let (prefix, name) = target
-                    .selector
-                    .strip_prefix("static:")
-                    .map_or(("", target.selector.as_str()), |name| ("static:", name));
-                let name = name.strip_prefix("set:").unwrap_or(name);
-                identities.source_annotations(&target.owner, &format!("{prefix}field:{name}"))
+                let member = target.selector.member;
+                if target.selector.parameter.is_some()
+                    || !matches!(member.kind, SelectorKind::Read | SelectorKind::Write)
+                {
+                    return None;
+                }
+                identities.source_annotations(
+                    &target.owner,
+                    MemberSelector::new(SelectorKind::Field, member.is_static, member.name).into(),
+                )
             })
         else {
             return;
@@ -525,6 +1021,33 @@ impl Uses<'_> {
         let Some(message) = deprecation(annotations, model, self.ctx.signatures) else {
             return;
         };
+        let name = if target.selector.parameter.is_none()
+            && target.selector.member.kind == SelectorKind::Constructor
+            && target.name.is_empty()
+        {
+            if target.selector.member.name == "new" {
+                target.owner.name().into()
+            } else {
+                Cow::Owned(format!(
+                    "{}.{}",
+                    target.owner.name(),
+                    target.selector.member.name
+                ))
+            }
+        } else {
+            Cow::Borrowed(target.name.as_ref())
+        };
+        self.emit_message(path, &name, target.span, &message);
+    }
+
+    fn emit_message(&mut self, path: &std::path::Path, name: &str, span: Span, message: &str) {
+        if self
+            .excluded
+            .iter()
+            .any(|excluded| excluded.start <= span.start && span.end <= excluded.end)
+        {
+            return;
+        }
         let same_package = if let Some(&same_package) = self.same_package.get(path) {
             same_package
         } else {
@@ -536,155 +1059,366 @@ impl Uses<'_> {
         if !same_package {
             return;
         }
-        if !self.reported.insert((target.span.start, target.span.end)) {
-            return;
-        }
-        let base = format!("'{}' is deprecated and shouldn't be used.", target.name);
-        self.diagnostics.push(self.ctx.diagnostic(
-            ID,
-            if message.is_empty() {
-                base
-            } else {
-                format!("{base} {message}")
-            },
-            target.span,
-        ));
+        push_deprecation(
+            self.ctx,
+            &self.excluded,
+            &mut self.reported,
+            &mut self.diagnostics,
+            name,
+            span,
+            message,
+        );
     }
 
-    fn member(
+    fn member<'node>(
         &self,
         receiver: &ResolvedType,
-        name: &str,
+        name: &'node str,
         span: Span,
         state: &SemanticState<'_>,
         write: bool,
-    ) -> Option<Target> {
+    ) -> Option<Target<'node>>
+    where
+        'ctx: 'node,
+    {
+        if name == "call"
+            && (matches!(receiver, ResolvedType::Function { .. })
+                || matches!(receiver, ResolvedType::Interface { identity, .. }
+                    if identity.is_sdk("dart:core", "Function")))
+        {
+            return None;
+        }
         let owner = if write {
-            let ResolvedType::Interface { identity, .. } = receiver else {
-                return None;
-            };
-            // A directly declared setter/field is proven by its source metadata.
-            let identities = self.ctx.identities?;
-            if identities
-                .source_annotations(identity, &format!("set:{name}"))
-                .is_some()
-                || identities
-                    .source_annotations(identity, &format!("field:{name}"))
-                    .is_some()
-            {
-                identity.clone()
-            } else {
-                return None;
-            }
+            state
+                .signatures
+                .resolved_writable_member_owner(receiver, name, &state.model)
         } else {
             state
                 .signatures
-                .resolved_member_owner(receiver, name, &state.model)?
-        };
-        let selector = if write {
-            format!("set:{name}")
-        } else {
-            name.to_owned()
-        };
+                .resolved_readable_member_owner(receiver, name, &state.model)
+        }
+        .or_else(|| {
+            state
+                .signatures
+                .resolved_extension_access_owner(receiver, name, write, &state.model)
+        })?;
+        let selector = MemberSelector::new(
+            if write {
+                SelectorKind::Write
+            } else {
+                SelectorKind::Read
+            },
+            false,
+            name,
+        )
+        .into();
         Some(Target {
             owner,
             selector,
-            name: name.to_owned(),
+            name: name.into(),
+            span,
+        })
+    }
+    fn cascade_index_span(&self, start: usize, index: &Expr) -> Span {
+        let after = self
+            .tokens
+            .partition_point(|token| token.offset < index.span().end);
+        let end = self.tokens[after..]
+            .iter()
+            .find(|token| token.kind == TokenKind::RBracket)
+            .map_or(index.span().end, |token| token.offset + token.len);
+        Span { start, end }
+    }
+
+    fn extension(&self, name: QualifiedName<'_>) -> Option<DeclarationIdentity> {
+        SemanticModel::new(self.ctx.file_path, self.ctx.identities?, self.ctx.types)
+            .resolve_extension(name)
+    }
+
+    fn extension_member<'node>(
+        &self,
+        owner: &DeclarationIdentity,
+        name: &'node str,
+        span: Span,
+        write: bool,
+    ) -> Option<Target<'node>>
+    where
+        'ctx: 'node,
+    {
+        let selector = self
+            .ctx
+            .identities?
+            .static_member_selector(owner, name, write)?;
+        Some(Target {
+            owner: owner.clone(),
+            selector: selector.into(),
+            name: name.into(),
             span,
         })
     }
 
-    fn target(
+    fn extension_reference(
         &self,
-        node: &Expr,
+        object: &Expr,
+        state: &SemanticState<'_>,
+    ) -> Option<DeclarationIdentity> {
+        let mut callee = object;
+        while let Expr::GenericInstantiation { target, .. } = callee {
+            callee = target;
+        }
+        // A value or type in the current namespace shadows imported extensions.
+        match callee {
+            Expr::Ident(name)
+                if !state.environment.is_bound(&name.name)
+                    && state.model.resolve_value(&name.name).is_none()
+                    && state.model.resolve_name(&name.name).is_none() =>
+            {
+                self.extension(name.name.as_str().into())
+            }
+            Expr::Field { object, field, .. } => {
+                let Expr::Ident(prefix) = object.unparenthesized() else {
+                    return None;
+                };
+                if state.environment.is_bound(&prefix.name) {
+                    return None;
+                }
+                let name = QualifiedName::prefixed(&prefix.name, &field.name);
+                if state.model.resolve_value(name).is_some()
+                    || state.model.resolve_name(name).is_some()
+                {
+                    return None;
+                }
+                self.extension(name)
+            }
+            _ => None,
+        }
+    }
+
+    fn extension_override(
+        &self,
+        object: &Expr,
+        state: &SemanticState<'_>,
+    ) -> Option<DeclarationIdentity> {
+        let Expr::Call { callee, .. } = object.unparenthesized() else {
+            return None;
+        };
+        self.extension_reference(callee, state)
+    }
+
+    fn target<'node>(
+        &self,
+        node: &'node Expr,
         state: &SemanticState<'_>,
         access: Option<bool>,
-    ) -> Option<Target> {
+    ) -> Option<Target<'node>>
+    where
+        'ctx: 'node,
+    {
         let mut node = node;
-        while let Expr::GenericInstantiation { target, .. } = node {
+        while let Expr::GenericInstantiation { target, .. } = node.unparenthesized() {
             node = target;
         }
-        let write = access.unwrap_or_else(|| self.writes.contains(&node.span().start));
-        match node {
-            Expr::Ident(id) if !state.environment.is_bound(&id.name) => {
-                if let Some(receiver) = &state.enclosing_type {
-                    return self.member(receiver, &id.name, id.span, state, write);
-                }
-                Some(Target {
-                    owner: state
-                        .model
-                        .resolve_value(&id.name)
-                        .or_else(|| state.model.resolve_name(&id.name))?,
-                    selector: if write {
-                        "set:".to_owned()
+        let write = access.unwrap_or_else(|| self.writes.contains(node.span()));
+        match node.unparenthesized() {
+            Expr::Ident(id)
+                if !state.environment.is_bound(&id.name)
+                    || state.environment.is_bound_in_root_scope(&id.name) =>
+            {
+                let extension = self.extension_owners.iter().find(|owner| {
+                    owner.span.start <= id.span.start && id.span.end <= owner.span.end
+                });
+                if let Some(owner) = extension
+                    && let Some((_, is_static)) =
+                        owner.members.iter().find(|(name, _)| name == &id.name)
+                {
+                    let owner = owner.identity.clone()?;
+                    let selector = if *is_static {
+                        self.ctx
+                            .identities?
+                            .static_member_selector(&owner, &id.name, write)?
+                            .into()
                     } else {
-                        String::new()
-                    },
-                    name: id.name.clone(),
+                        MemberSelector::new(
+                            if write {
+                                SelectorKind::Write
+                            } else {
+                                SelectorKind::Read
+                            },
+                            false,
+                            &id.name,
+                        )
+                        .into()
+                    };
+                    return Some(Target {
+                        owner,
+                        selector,
+                        name: id.name.as_str().into(),
+                        span: id.span,
+                    });
+                }
+                if let Some(receiver) = &state.enclosing_type
+                    && let Some(target) = self.member(receiver, &id.name, id.span, state, write)
+                {
+                    return Some(target);
+                }
+                if extension.is_none()
+                    && let Some(ResolvedType::Interface { identity, .. }) = &state.enclosing_type
+                    && state
+                        .signatures
+                        .declared_member_facts(identity, &id.name)
+                        .iter()
+                        .any(|fact| fact.is_static)
+                {
+                    return Some(Target {
+                        owner: identity.clone(),
+                        selector: self
+                            .ctx
+                            .identities?
+                            .static_member_selector(identity, &id.name, write)?
+                            .into(),
+                        name: id.name.as_str().into(),
+                        span: id.span,
+                    });
+                }
+                let value = state.model.resolve_value(&id.name);
+                let owner = value
+                    .clone()
+                    .or_else(|| state.model.resolve_name(&id.name))
+                    .or_else(|| self.extension(id.name.as_str().into()))?;
+                Some(Target {
+                    owner,
+                    selector: MemberSelector::new(
+                        if write && value.is_some() {
+                            SelectorKind::Write
+                        } else {
+                            SelectorKind::Declaration
+                        },
+                        false,
+                        "",
+                    )
+                    .into(),
+                    name: id.name.as_str().into(),
                     span: id.span,
                 })
             }
-            Expr::Field { object, field, .. } => {
-                if let Expr::Ident(prefix) = object.as_ref()
+            Expr::Field {
+                object,
+                field,
+                is_null_safe,
+                ..
+            } => {
+                let span = if self.increments.contains(node.span()) {
+                    *node.span()
+                } else {
+                    field.span
+                };
+                if matches!(object.unparenthesized(), Expr::Super { .. }) {
+                    let owner = state.signatures.resolved_super_member_owner(
+                        state.enclosing_type.as_ref()?,
+                        &field.name,
+                        write,
+                        &state.model,
+                    )?;
+                    return Some(Target {
+                        owner,
+                        selector: MemberSelector::new(
+                            if write {
+                                SelectorKind::Write
+                            } else {
+                                SelectorKind::Read
+                            },
+                            false,
+                            &field.name,
+                        )
+                        .into(),
+                        name: field.name.as_str().into(),
+                        span,
+                    });
+                }
+                if let Some(owner) = self.extension_reference(object, state)
+                    && let Some(target) = self.extension_member(&owner, &field.name, span, write)
+                {
+                    return Some(target);
+                }
+                if let Some(owner) = self.extension_override(object, state) {
+                    return Some(Target {
+                        owner,
+                        selector: MemberSelector::new(
+                            if write {
+                                SelectorKind::Write
+                            } else {
+                                SelectorKind::Read
+                            },
+                            false,
+                            &field.name,
+                        )
+                        .into(),
+                        name: field.name.as_str().into(),
+                        span,
+                    });
+                }
+                let mut qualifier = object.as_ref();
+                while let Expr::GenericInstantiation { target, .. } = qualifier.unparenthesized() {
+                    qualifier = target;
+                }
+                if let Expr::Ident(prefix) = qualifier.unparenthesized()
                     && !state.environment.is_bound(&prefix.name)
                 {
                     let qualified = QualifiedName::prefixed(&prefix.name, &field.name);
-                    if let Some(owner) = state
-                        .model
-                        .resolve_value(qualified)
+                    let value = state.model.resolve_value(qualified);
+                    if let Some(owner) = value
+                        .clone()
                         .or_else(|| state.model.resolve_name(qualified))
+                        .or_else(|| self.extension(qualified))
                     {
                         return Some(Target {
                             owner,
-                            selector: if write {
-                                "set:".to_owned()
-                            } else {
-                                String::new()
-                            },
-                            name: field.name.clone(),
-                            span: field.span,
+                            selector: MemberSelector::new(
+                                if write && value.is_some() {
+                                    SelectorKind::Write
+                                } else {
+                                    SelectorKind::Declaration
+                                },
+                                false,
+                                "",
+                            )
+                            .into(),
+                            name: field.name.as_str().into(),
+                            span,
                         });
                     }
                     if let Some(owner) = state.model.resolve_name(&prefix.name) {
+                        let owner = state.model.unaliased(owner);
                         let selector =
                             if state.signatures.constructor(&owner, &field.name).is_some() {
-                                format!("new:{}", field.name)
-                            } else if write {
-                                format!("static:set:{}", field.name)
+                                MemberSelector::new(SelectorKind::Constructor, false, &field.name)
+                                    .into()
                             } else {
-                                format!("static:{}", field.name)
+                                self.ctx
+                                    .identities?
+                                    .static_member_selector(&owner, &field.name, write)?
+                                    .into()
                             };
                         return Some(Target {
                             owner,
                             selector,
-                            name: field.name.clone(),
-                            span: field.span,
+                            name: field.name.as_str().into(),
+                            span,
                         });
                     }
                 }
-                let mut target = self.member(
-                    &state.infer(object),
-                    &field.name,
-                    *node.span(),
-                    state,
-                    write,
-                )?;
-                target.span = field.span;
+                let receiver = state.infer_access_receiver(object, *is_null_safe);
+                let mut target = self.member(&receiver, &field.name, *node.span(), state, write)?;
+                target.span = span;
                 Some(target)
             }
             _ => None,
         }
     }
 
-    fn named_arguments(&mut self, target: &Target, args: &ArgList) {
-        for argument in &args.named {
-            let name = &argument.name;
-            self.report(&Target {
-                owner: target.owner.clone(),
-                selector: format!("param:{}:{}", target.selector, name.name),
-                name: name.name.clone(),
-                span: name.span,
-            });
+    fn arguments(&mut self, target: &Target, args: &ArgList) {
+        for parameter in parameter_targets(target, args, self.ctx.identities) {
+            self.report(&parameter);
         }
     }
 }
@@ -713,11 +1447,182 @@ fn binary_operator(op: BinaryOp) -> Option<&'static str> {
 }
 
 impl SemanticRuleVisitor for Uses<'_> {
+    fn visit_cascade_operation(
+        &mut self,
+        operation: &CascadeOp,
+        receiver: &ResolvedType,
+        section: Span,
+        state: &SemanticState<'_>,
+    ) {
+        match operation {
+            CascadeOp::Field { name, .. } | CascadeOp::Call(name, _, _) => {
+                if let Some(target) = self.member(receiver, &name.name, name.span, state, false) {
+                    self.report(&target);
+                    if let CascadeOp::Call(_, _, arguments) = operation {
+                        self.arguments(&target, arguments);
+                    }
+                }
+            }
+            CascadeOp::Invoke(_, args) => {
+                if !matches!(receiver, ResolvedType::Function { .. })
+                    && let Some(target) = self.member(
+                        receiver,
+                        "call",
+                        Span::new(section.start, args.span.end),
+                        state,
+                        false,
+                    )
+                {
+                    self.report(&target);
+                    // Implicit call invocations report the callable member,
+                    // not its deprecated parameters, unlike explicit `.call`.
+                }
+            }
+            CascadeOp::Index { index, .. } => {
+                if let Some(owner) =
+                    state
+                        .signatures
+                        .resolved_member_owner(receiver, "[]", &state.model)
+                {
+                    self.report(&Target {
+                        owner,
+                        selector: MemberSelector::new(SelectorKind::Operator(1), false, "[]")
+                            .into(),
+                        name: "[]".into(),
+                        span: self.cascade_index_span(section.start, index),
+                    });
+                }
+            }
+            CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => {}
+        }
+    }
+
+    fn visit_cascade_assignment(
+        &mut self,
+        assignment: CascadeAssignment<'_>,
+        receiver: &ResolvedType,
+        section: Span,
+        state: &SemanticState<'_>,
+    ) {
+        let CascadeAssignment {
+            target,
+            operator,
+            indexed,
+            ..
+        } = assignment;
+        if indexed {
+            let span = self.cascade_index_span(section.start, target);
+            for (name, arity) in [("[]=", 2), ("[]", 1)] {
+                if name == "[]" && operator == AssignOp::Eq {
+                    continue;
+                }
+                if let Some(owner) =
+                    state
+                        .signatures
+                        .resolved_member_owner(receiver, name, &state.model)
+                {
+                    self.report(&Target {
+                        owner,
+                        selector: MemberSelector::new(SelectorKind::Operator(arity), false, name)
+                            .into(),
+                        name: name.into(),
+                        span,
+                    });
+                }
+            }
+        } else if let Expr::Ident(name) = target.unparenthesized() {
+            self.cascade_targets.insert(name.span);
+            for write in [true, false] {
+                if !write && operator == AssignOp::Eq {
+                    continue;
+                }
+                if let Some(target) = self.member(receiver, &name.name, name.span, state, write) {
+                    self.report(&target);
+                }
+            }
+        }
+    }
+    fn visit_pattern(
+        &mut self,
+        node: &Pattern,
+        _matched: Option<&ResolvedType>,
+        state: &SemanticState<'_>,
+    ) {
+        if let Pattern::Object(pattern) = node {
+            let receiver = state
+                .model
+                .resolve_type_in(&pattern.type_, &state.type_parameters);
+            for field in &pattern.fields {
+                if let Some(target) =
+                    self.member(&receiver, &field.name.name, field.name.span, state, false)
+                {
+                    self.report(&target);
+                }
+            }
+            return;
+        }
+        let Pattern::Const(ConstPattern {
+            value: ConstPatternValue::Name(names),
+            ..
+        }) = node
+        else {
+            return;
+        };
+        let Some((name, qualifier)) = names.split_last() else {
+            return;
+        };
+        let (owner, selector) = if qualifier.is_empty() {
+            let Some(owner) = state.model.resolve_value(&name.name) else {
+                return;
+            };
+            (owner, MemberSelector::DECLARATION)
+        } else {
+            let Some(qualified) = QualifiedName::from_identifiers(qualifier) else {
+                return;
+            };
+            let Some(owner) = state.model.resolve_name(qualified) else {
+                return;
+            };
+            (
+                owner,
+                MemberSelector::new(SelectorKind::Read, true, &name.name),
+            )
+        };
+        self.report(&Target {
+            owner,
+            selector: selector.into(),
+            name: name.name.as_str().into(),
+            span: name.span,
+        });
+    }
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        if matches!(node, Expr::Paren { .. }) {
+            // The shared walker visits the inner expression separately.
+            return;
+        }
+        if self.cascade_targets.contains(node.span()) {
+            return;
+        }
+        if let Expr::Ident(identifier) = node
+            && let Some(index) = self.local(&identifier.name, identifier.span, state)
+        {
+            if let Some(message) = &self.locals[index].message {
+                push_deprecation(
+                    self.ctx,
+                    &self.excluded,
+                    &mut self.reported,
+                    &mut self.diagnostics,
+                    &identifier.name,
+                    identifier.span,
+                    message,
+                );
+            }
+            return;
+        }
         if let Some(target) = self.target(node, state, None) {
             self.report(&target);
         }
-        if self.reads.contains(&node.span().start)
+        if self.reads.contains(node.span())
             && let Some(target) = self.target(node, state, Some(false))
         {
             self.report(&target);
@@ -735,24 +1640,10 @@ impl SemanticRuleVisitor for Uses<'_> {
                     binary_operator(*op).map(|name| (left.as_ref(), name, 1))
                 }
             }
-            Expr::Assign { op, target, .. } => {
-                let binary = match op {
-                    AssignOp::PlusEq => BinaryOp::Add,
-                    AssignOp::MinusEq => BinaryOp::Sub,
-                    AssignOp::MulEq => BinaryOp::Mul,
-                    AssignOp::DivEq => BinaryOp::Div,
-                    AssignOp::IntDivEq => BinaryOp::IntDiv,
-                    AssignOp::ModEq => BinaryOp::Mod,
-                    AssignOp::AndEq => BinaryOp::BitAnd,
-                    AssignOp::OrEq => BinaryOp::BitOr,
-                    AssignOp::XorEq => BinaryOp::BitXor,
-                    AssignOp::ShlEq => BinaryOp::Shl,
-                    AssignOp::ShrEq => BinaryOp::Shr,
-                    AssignOp::UShrEq => BinaryOp::UShr,
-                    AssignOp::Eq | AssignOp::NullCoalesceEq => BinaryOp::NullCoalesce,
-                };
-                binary_operator(binary).map(|name| (target.as_ref(), name, 1))
-            }
+            Expr::Assign { op, target, .. } => op
+                .binary()
+                .and_then(binary_operator)
+                .map(|name| (target.as_ref(), name, 1)),
             Expr::Unary { op, operand, .. } => match op {
                 UnaryOp::Minus => Some((operand.as_ref(), "-", 0)),
                 UnaryOp::Tilde => Some((operand.as_ref(), "~", 0)),
@@ -771,12 +1662,12 @@ impl SemanticRuleVisitor for Uses<'_> {
             )),
             Expr::Index { object, .. } => Some((
                 object.as_ref(),
-                if self.writes.contains(&node.span().start) {
+                if self.writes.contains(node.span()) {
                     "[]="
                 } else {
                     "[]"
                 },
-                if self.writes.contains(&node.span().start) {
+                if self.writes.contains(node.span()) {
                     2
                 } else {
                     1
@@ -785,37 +1676,105 @@ impl SemanticRuleVisitor for Uses<'_> {
             _ => None,
         };
         let index_read = if let Expr::Index { object, .. } = node
-            && self.reads.contains(&node.span().start)
-            && self.writes.contains(&node.span().start)
+            && self.reads.contains(node.span())
+            && self.writes.contains(node.span())
         {
             Some((object.as_ref(), "[]", 1))
         } else {
             None
         };
         for (receiver, name, arity) in [operator, index_read].into_iter().flatten() {
-            if let Some(owner) =
-                state
-                    .signatures
-                    .resolved_member_owner(&state.infer(receiver), name, &state.model)
+            let lookup = if name == "-" && arity == 0 {
+                "unary-"
+            } else {
+                name
+            };
+            let receiver = match node {
+                Expr::Index { is_null_safe, .. } => {
+                    state.infer_access_receiver(receiver, *is_null_safe)
+                }
+                Expr::Assign { .. }
+                | Expr::PostfixIncDec { .. }
+                | Expr::Unary {
+                    op: UnaryOp::PlusPlus | UnaryOp::MinusMinus,
+                    ..
+                } => state.infer_access_receiver(receiver, false),
+                _ => state.infer(receiver),
+            };
+            if let Some(owner) = state
+                .signatures
+                .resolved_member_owner(&receiver, lookup, &state.model)
+                .or_else(|| {
+                    state
+                        .signatures
+                        .resolved_extension_owner(&receiver, lookup, &state.model)
+                })
             {
                 self.report(&Target {
                     owner,
-                    selector: format!("op:{arity}:{name}"),
-                    name: name.to_owned(),
+                    selector: MemberSelector::new(SelectorKind::Operator(arity), false, name)
+                        .into(),
+                    name: lookup.into(),
                     span: *node.span(),
                 });
             }
         }
         match node {
             Expr::Call { callee, args, .. } => {
-                if let Some(mut target) = self.target(callee, state, None) {
-                    if target.selector.is_empty()
-                        && state.signatures.constructor(&target.owner, "new").is_some()
-                    {
-                        target.selector = "new:new".to_owned();
-                        self.report(&target);
+                if let Expr::Ident(identifier) = callee.as_ref()
+                    && let Some(index) = self.local(&identifier.name, identifier.span, state)
+                {
+                    for parameter in &self.locals[index].parameters {
+                        let span = match parameter.position {
+                            Some(position) => args
+                                .positional
+                                .get(position)
+                                .map(|argument| *argument.span()),
+                            None => args
+                                .named
+                                .iter()
+                                .find(|argument| argument.name.name == parameter.name)
+                                .map(|argument| argument.name.span),
+                        };
+                        if let Some(span) = span {
+                            push_deprecation(
+                                self.ctx,
+                                &self.excluded,
+                                &mut self.reported,
+                                &mut self.diagnostics,
+                                &parameter.name,
+                                span,
+                                &parameter.message,
+                            );
+                        }
                     }
-                    self.named_arguments(&target, args);
+                    return;
+                }
+                let mut target_callee = callee.as_ref();
+                while let Expr::GenericInstantiation { target, .. } = target_callee {
+                    target_callee = target;
+                }
+                if !matches!(target_callee, Expr::Paren { .. })
+                    && let Some(mut target) = self.target(callee, state, None)
+                {
+                    if target.selector.member == MemberSelector::DECLARATION {
+                        let owner = state.model.unaliased(target.owner.clone());
+                        if state.signatures.constructor(&owner, "new").is_some() {
+                            target.owner = owner;
+                            target.selector =
+                                MemberSelector::new(SelectorKind::Constructor, false, "new").into();
+                            self.report(&target);
+                        }
+                    }
+                    self.arguments(&target, args);
+                }
+                let receiver = state.infer(callee);
+                if !matches!(receiver, ResolvedType::Function { .. })
+                    && let Some(mut target) =
+                        self.member(&receiver, "call", *node.span(), state, false)
+                {
+                    target.name = "call".into();
+                    self.report(&target);
                 }
             }
             Expr::New {
@@ -824,28 +1783,21 @@ impl SemanticRuleVisitor for Uses<'_> {
                 args,
                 ..
             } => {
-                if let ResolvedType::Interface { identity, .. } = state
-                    .model
-                    .resolve_type_in(dart_type, &state.type_parameters)
+                if let Some((identity, name)) =
+                    resolve_new_constructor(dart_type, constructor_name.as_ref(), &state.model)
                 {
-                    let name = constructor_name
-                        .as_ref()
-                        .map_or("new", |id| id.name.as_str());
-                    let span = constructor_name
-                        .as_ref()
-                        .map_or(*dart_type.span(), |id| id.span);
-                    let target = Target {
-                        name: if name == "new" {
-                            identity.name().to_owned()
-                        } else {
-                            format!("{}.{name}", identity.name())
+                    let span = constructor_name.as_ref().map_or_else(
+                        || match dart_type {
+                            DartType::Named(named) if name != "new" => {
+                                named.segments.last().map_or(named.span, |id| id.span)
+                            }
+                            _ => *dart_type.span(),
                         },
-                        owner: identity,
-                        selector: format!("new:{name}"),
-                        span,
-                    };
+                        |id| id.span,
+                    );
+                    let target = constructor_target(state.model.unaliased(identity), name, span);
                     self.report(&target);
-                    self.named_arguments(&target, args);
+                    self.arguments(&target, args);
                 }
             }
             _ => {}
@@ -872,7 +1824,17 @@ mod tests {
             }],
             &[],
         );
-        let types = TypeIndex::from_program(&program);
+        let types = TypeIndex::from_resolved_files(
+            [(
+                path,
+                falcon_analyze::LibrarySource {
+                    program: &program,
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )],
+            &identities,
+        );
         let model = SemanticModel::new(path, &identities, Some(&types));
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
@@ -883,11 +1845,156 @@ mod tests {
         DeprecatedMemberUseFromSamePackage.analyze(&program, &ctx)
     }
 
+    #[test]
+    fn cascade_callable_invocations_distinguish_implicit_parameter_uses() {
+        let source = r"
+class Callable {
+  @Deprecated('callable')
+  void call({@Deprecated('named') int value = 0}) {}
+}
+class Holder {
+  Callable callable() => Callable();
+  Callable operator [](int index) => Callable();
+}
+void use(Holder holder) {
+  holder..callable()(value: 1);
+  holder..[0](value: 2);
+  holder.callable().call(value: 3);
+}
+";
+        let mut diagnostics = analyze(source, fixture_path());
+        diagnostics.sort_unstable_by_key(|diagnostic| diagnostic.span.start);
+        let actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(
+            actual,
+            ["..callable()(value: 1)", "..[0](value: 2)", "call", "value"]
+        );
+    }
+
     fn fixture_path() -> &'static Path {
         Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/corpus/deprecated-member-use-from-same-package/bad.dart"
         ))
+    }
+
+    #[test]
+    fn typed_selectors_keep_access_static_and_parameter_metadata_distinct() {
+        let source = r"
+class C {
+  @Deprecated('read') int get readOnly => 0;
+  set readOnly(int value) {}
+  int get writeOnly => 0;
+  @Deprecated('write') set writeOnly(int value) {}
+  @Deprecated('field') int field = 0;
+  @Deprecated('static read') static int get shared => 0;
+  static set shared(int value) {}
+  static int get writeShared => 0;
+  @Deprecated('static write') static set writeShared(int value) {}
+  static void method([@Deprecated('parameter') int? value]) {}
+}
+void use(C c) {
+  c.readOnly;
+  c.readOnly = 1;
+  c.writeOnly;
+  c.writeOnly = 1;
+  c.field;
+  c.field = 1;
+  C.shared;
+  C.shared = 1;
+  C.writeShared;
+  C.writeShared = 1;
+  C.method(1);
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        let mut messages: Vec<_> = diagnostics.iter().map(|d| d.message.as_str()).collect();
+        messages.sort_unstable();
+        let mut expected = [
+            "'readOnly' is deprecated and shouldn't be used. read.",
+            "'writeOnly' is deprecated and shouldn't be used. write.",
+            "'field' is deprecated and shouldn't be used. field.",
+            "'field' is deprecated and shouldn't be used. field.",
+            "'shared' is deprecated and shouldn't be used. static read.",
+            "'writeShared' is deprecated and shouldn't be used. static write.",
+            "'value' is deprecated and shouldn't be used. parameter.",
+        ];
+        expected.sort_unstable();
+        assert_eq!(messages, expected);
+    }
+
+    #[test]
+    fn typed_extension_selectors_preserve_write_and_static_dispatch() {
+        let source = r"
+class C {}
+extension E on C {
+  @Deprecated('extension read') int get value => 0;
+  @Deprecated('extension write') set value(int next) {}
+  @Deprecated('extension static') static void helper() {}
+}
+void use(C c) {
+  c.value;
+  c.value = 1;
+  E(c).value;
+  E(c).value = 1;
+  E.helper();
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        let mut messages: Vec<_> = diagnostics.iter().map(|d| d.message.as_str()).collect();
+        messages.sort_unstable();
+        let mut expected = [
+            "'value' is deprecated and shouldn't be used. extension read.",
+            "'value' is deprecated and shouldn't be used. extension read.",
+            "'value' is deprecated and shouldn't be used. extension write.",
+            "'value' is deprecated and shouldn't be used. extension write.",
+            "'helper' is deprecated and shouldn't be used. extension static.",
+        ];
+        expected.sort_unstable();
+        assert_eq!(messages, expected);
+    }
+
+    #[test]
+    fn implicit_this_write_does_not_fall_through_to_deprecated_top_level() {
+        let source = r"
+@Deprecated('top-level') int x = 0;
+class C {
+  int x = 0;
+  void writeMember() { x = 1; }
+}
+void writeTopLevel() { x = 1; }
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "'x' is deprecated and shouldn't be used. top-level."
+        );
+        let start = source.rfind("x = 1").unwrap();
+        assert_eq!(
+            (diagnostics[0].span.start, diagnostics[0].span.end),
+            (start, start + 1)
+        );
+    }
+
+    #[test]
+    fn documented_operator_uses_operator_selector() {
+        let source = r"
+class C {
+  @Deprecated('operator') C operator +(C other) => this;
+}
+/// See [C.+].
+void documentedOperator() {}
+void positiveControl(C c) { c + c; }
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic.message == "'+' is deprecated and shouldn't be used. operator."
+        }));
     }
 
     #[test]
@@ -919,6 +2026,327 @@ mod tests {
     }
 
     #[test]
+    fn parenthesized_calls_do_not_reference_positional_parameter_metadata() {
+        let source = r"
+void f<T>(int a, [@deprecated int? b]) {}
+void use() {
+  f<int>(1, 2);
+  (f)(1, 2);
+  (f<int>)(1, 2);
+  ((f<int>))(1, 2);
+  (f)<int>(1, 2);
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    }
+
+    #[test]
+    fn grouped_references_are_visited_without_invocation_parameter_metadata() {
+        let source = r"
+@deprecated void old<T>([@deprecated int? argument]) {}
+class Value {
+  @deprecated int get oldField => 0;
+}
+void use(Value value) {
+  (old<int>)(1);
+  ((value.oldField));
+  @deprecated var oldLocal = 0;
+  ((oldLocal));
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 3, "{diagnostics:?}");
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.starts_with("'argument'")),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn enum_constants_do_not_reference_deprecated_constructors_or_parameters() {
+        let source = r"
+mixin M {}
+enum Mixed with M {
+  a(1), b.x(), c.named(oldParameter: null);
+  @deprecated const Mixed(int i);
+  @deprecated const Mixed.x();
+  const Mixed.named({@deprecated Object? oldParameter});
+}
+enum Plain {
+  a(1), b.x(), c.named(oldParameter: null);
+  @deprecated const Plain(int i);
+  @deprecated const Plain.x();
+  const Plain.named({@deprecated Object? oldParameter});
+}
+";
+        assert!(analyze(source, fixture_path()).is_empty());
+    }
+
+    #[test]
+    fn direct_constructor_calls_retain_deprecated_constructor_and_parameter_metadata() {
+        let source = r"
+class Plain {
+  @deprecated Plain.old();
+  Plain.current({@deprecated Object? oldParameter});
+}
+void use() {
+  Plain.old();
+  Plain.current(oldParameter: null);
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+    }
+
+    #[test]
+    fn local_deprecation_tracks_binding_identity_and_metadata_frontiers() {
+        let source = r"
+void use() {
+  @deprecated void oldFunction() {}
+  oldFunction();
+  @deprecated int Function() oldCallback = () => 1;
+  oldCallback();
+  @deprecated var oldValue = 1;
+  print(oldValue);
+  { var oldValue = 2; print(oldValue); }
+  @Deprecated('x') final (a, b) = (1, 2);
+  print(a);
+  for (@deprecated var oldElement in [1]) { print(oldElement); }
+  { void oldFunction() {} oldFunction(); }
+  oldFunction();
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 5, "{diagnostics:?}");
+    }
+
+    #[test]
+    fn implicit_extension_unary_operator_uses_declaration_metadata() {
+        let source = r"
+class Value {}
+extension Operations on Value {
+  @deprecated Value operator -() => this;
+}
+void use(Value value) { -value; }
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(
+            diagnostics[0].message,
+            "'unary-' is deprecated and shouldn't be used."
+        );
+    }
+
+    #[test]
+    fn nullable_extensions_preserve_receiver_nullability_except_null_safe_access() {
+        let source = r"
+class Value {}
+extension Nullable on Value? {
+  @deprecated void nullable() {}
+  @deprecated void shared() {}
+}
+extension NonNullable on Value {
+  void shared() {}
+  @deprecated void strict() {}
+}
+void use(Value? value) {
+  value.nullable();
+  value?.nullable();
+  value.shared();
+  value?.shared();
+  value?.strict();
+  value..shared();
+  value?..shared();
+  value?..strict();
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 6, "{diagnostics:?}");
+    }
+
+    #[test]
+    fn null_safe_index_reads_and_writes_resolve_deprecated_operators() {
+        for declaration in [
+            r"class Collection {
+  @deprecated Value operator [](Key key) => Value();
+  @deprecated void operator []=(Key key, Value value) {}
+}",
+            r"class Collection {}
+extension Operations on Collection {
+  @deprecated Value operator [](Key key) => Value();
+  @deprecated void operator []=(Key key, Value value) {}
+}",
+        ] {
+            let source = format!(
+                r"
+class Key {{}}
+class Value {{}}
+{declaration}
+void use(Collection? collection, Key key, Value value) {{
+  collection?[key];
+  collection?[key] = value;
+}}
+"
+            );
+            let diagnostics = analyze(&source, fixture_path());
+            assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.message.starts_with("'[]'")),
+                "{diagnostics:?}"
+            );
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.message.starts_with("'[]='")),
+                "{diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn null_shortened_member_receivers_preserve_declared_nullable_types_and_grouping() {
+        let source = r"
+class Value {}
+class Key {}
+class Container {
+  Value get value => Value();
+  Value? get maybe => null;
+  Value make() => Value();
+  Value? makeMaybe() => null;
+  Value operator [](Key key) => Value();
+}
+extension NonNullable on Value {
+  @deprecated void old() {}
+}
+extension Nullable on Value? {
+  void old() {}
+}
+void use(Container? container, Key key) {
+  container?.value.old();
+  container?.maybe.old();
+  container?.make().old();
+  container?.makeMaybe().old();
+  (container?.value).old();
+  (container?.make()).old();
+  container?.maybe?.old();
+  container?[key].old();
+  (container?[key]).old();
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 4, "{diagnostics:?}");
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.message.starts_with("'old'")),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn null_shortened_compound_targets_preserve_declared_nullable_operator_receivers() {
+        let source = r"
+class Key {}
+class Counter {
+  @deprecated Counter operator +(int other) => this;
+}
+extension NullableCounter on Counter? {
+  Counter? operator +(int other) => this;
+}
+class Holder {
+  Counter count = Counter();
+  Counter? maybe;
+}
+class Collection {
+  Counter operator [](Key key) => Counter();
+  void operator []=(Key key, Counter value) {}
+}
+class NullableCollection {
+  Counter? operator [](Key key) => null;
+  void operator []=(Key key, Counter? value) {}
+}
+void use(Holder? holder, Collection? collection,
+    NullableCollection? nullableCollection, Key key) {
+  holder?.count += 1;
+  holder?.count++;
+  ++holder?.count;
+  holder?.maybe += 1;
+  holder?.maybe++;
+  collection?[key] += 1;
+  collection?[key]++;
+  nullableCollection?[key] += 1;
+  nullableCollection?[key]++;
+  (holder?.count) + 1;
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 5, "{diagnostics:?}");
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.message.starts_with("'+'")),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn null_shortened_index_receivers_resolve_declared_member_types() {
+        let source = r"
+class Key {}
+class Value {}
+class Collection {
+  @deprecated Value operator [](Key key) => Value();
+  @deprecated void operator []=(Key key, Value value) {}
+}
+class Container {
+  Collection get items => Collection();
+}
+void use(Container? container, Key key, Value value) {
+  container?.items[key];
+  container?.items[key] = value;
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+    }
+
+    #[test]
+    fn local_function_metadata_applies_before_its_declaration() {
+        let source = r"
+void helper() {}
+void forward() {
+  old();
+  @deprecated void old() {}
+}
+void use(int value) {
+  helper();
+  switch (value) {
+    case 0:
+      helper();
+      @deprecated void helper() {}
+      helper();
+      break;
+    case 1:
+      helper();
+      void helper() {}
+      helper();
+      break;
+    default:
+      helper();
+  }
+  helper();
+}
+";
+        let diagnostics = analyze(source, fixture_path());
+        assert_eq!(diagnostics.len(), 3, "{diagnostics:?}");
+    }
+
+    #[test]
     fn requires_an_enclosing_package() {
         assert!(
             analyze(
@@ -934,6 +2362,7 @@ mod tests {
         for source in [
             "class Deprecated { const Deprecated(String message); } @Deprecated('fake') void old() {} void use() { old(); }",
             "@deprecated void old() {} void use(void Function() old) { old(); }",
+            "@deprecated library; @deprecated void old() {} void use() { old(); }",
             "@deprecated void old() { old(); } @deprecated void use() { old(); }",
         ] {
             assert!(analyze(source, fixture_path()).is_empty(), "{source}");

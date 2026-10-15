@@ -38,11 +38,11 @@ impl Visitor for Collector<'_> {
             field,
             is_null_safe: false,
             ..
-        } = &**callee
+        } = callee.unparenthesized()
         && field.name == "forEach"
         && args.positional.len() == 1
         && args.named.is_empty()
-        && let Expr::FuncExpr { params, .. } = &args.positional[0]
+        && let Expr::FuncExpr { params, .. } = args.positional[0].unparenthesized()
         // A single-parameter callback marks an Iterable.forEach; Map.forEach
         // takes two parameters and is intentionally left alone.
         && matches!(params.params.as_slice(), [param] if param.kind == falcon_syntax::ast::ParamKind::Positional)

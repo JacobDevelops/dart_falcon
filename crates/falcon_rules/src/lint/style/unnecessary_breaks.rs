@@ -17,13 +17,12 @@
 //! }
 //! ```
 //!
-//! falcon has no language-version model, so the rule also fires in libraries
-//! whose language version predates Dart 3.0, where the official lint is silent
-//! because those `break`s prevent fall-through.
+//! Like the official lint, the rule is silent in libraries whose language
+//! version predates Dart 3.0, where those `break`s prevent fall-through.
 //!
 //! Adopted from the official `unnecessary_breaks` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Feature, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -34,6 +33,9 @@ pub struct UnnecessaryBreaks;
 
 impl Rule for UnnecessaryBreaks {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        if !ctx.language_version().supports(Feature::Patterns) {
+            return Vec::new();
+        }
         let mut collector = Collector {
             ctx,
             diags: Vec::new(),

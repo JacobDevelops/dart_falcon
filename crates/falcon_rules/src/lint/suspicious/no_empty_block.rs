@@ -11,8 +11,8 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_function_decl,
-    walk_getter_decl, walk_method_decl, walk_setter_decl, walk_stmt,
+    Visitor, walk_class_member, walk_expr, walk_function_decl, walk_getter_decl, walk_method_decl,
+    walk_setter_decl, walk_stmt,
 };
 
 #[derive(Default)]
@@ -48,9 +48,8 @@ impl Visitor for Collector<'_, '_> {
         walk_function_decl(self, node);
     }
 
-    fn visit_constructor_decl(&mut self, node: &ConstructorDecl) {
-        self.check_body(node.body.as_ref());
-        walk_constructor_decl(self, node);
+    fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
+        self.check_body(node.body);
     }
 
     fn visit_method_decl(&mut self, node: &MethodDecl) {
@@ -107,16 +106,13 @@ fn flag_if_empty(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContex
     }
     let end = block.span.end.min(ctx.source.len());
     let src_full = &ctx.source[block.span.start..end];
-    // span_from() includes content up to the next token, so rfind('}') finds
-    // the actual closing brace rather than trusting span.end directly.
-    let Some(close_pos) = src_full.rfind('}') else {
+    let Some(inner) = src_full.strip_suffix('}') else {
         return;
     };
-    let inner = &src_full[..=close_pos];
     if inner.contains("//") || inner.contains("/*") {
         return;
     }
-    let close_byte = block.span.start + close_pos;
+    let close_byte = end - 1;
     diags.push(ctx.diagnostic(
         "no-empty-block",
         "Avoid empty blocks — add a comment explaining the intent or remove the block",
@@ -125,4 +121,25 @@ fn flag_if_empty(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContex
             end: close_byte + 1,
         },
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn exact_block_end_excludes_following_comment_and_preserves_inner_comment() {
+        let source = "void empty() {} /* trailing } */\nvoid intentional() { /* } */ }\n";
+        let (program, errors) = falcon_dart_parser::parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("/project/lib/test.dart"), source, &config);
+        let diagnostics = NoEmptyBlock.analyze(&program, &ctx);
+        let closing_brace = source.find("{}").unwrap() + 1;
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].span.start, closing_brace);
+        assert_eq!(diagnostics[0].span.end, closing_brace + 1);
+    }
 }

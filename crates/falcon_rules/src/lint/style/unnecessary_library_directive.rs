@@ -19,10 +19,9 @@
 //! Adopted from the official `unnecessary_library_directive` lint.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::token::TokenKind;
+use falcon_syntax::token::{Token, TokenKind};
 
 #[derive(Default)]
 pub struct UnnecessaryLibraryDirective;
@@ -35,7 +34,7 @@ impl Rule for UnnecessaryLibraryDirective {
         if !program.part_directives.is_empty() || !lib.annotations.is_empty() {
             return Vec::new();
         }
-        if has_doc_comment(ctx.source, lib.span.start) {
+        if has_doc_comment(ctx.tokens(), lib.span.start) {
             return Vec::new();
         }
         vec![ctx.diagnostic(
@@ -47,8 +46,7 @@ impl Rule for UnnecessaryLibraryDirective {
 }
 
 /// Whether the comments directly preceding `offset` include a doc comment.
-fn has_doc_comment(source: &str, offset: usize) -> bool {
-    let tokens = Lexer::new(source).tokenize();
+fn has_doc_comment(tokens: &[Token], offset: usize) -> bool {
     let before = tokens.partition_point(|token| token.offset < offset);
     tokens[..before]
         .iter()

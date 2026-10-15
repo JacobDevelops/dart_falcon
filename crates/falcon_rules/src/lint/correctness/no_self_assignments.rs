@@ -20,11 +20,11 @@
 //! Adopted from the official `no_self_assignments` lint.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::token::TokenKind;
 use falcon_syntax::visitor::{Visitor, walk_expr};
+
+use crate::lint::expressions::identifier_name;
 
 #[derive(Default)]
 pub struct NoSelfAssignments;
@@ -55,7 +55,6 @@ impl Visitor for Finder<'_, '_> {
         } = node
             && let (Some(left), Some(right)) = (identifier_name(target), identifier_name(value))
             && left == right
-            && !self.parenthesized(target, value)
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "no-self-assignments",
@@ -64,37 +63,5 @@ impl Visitor for Finder<'_, '_> {
             ));
         }
         walk_expr(self, node);
-    }
-}
-
-impl Finder<'_, '_> {
-    /// Parentheses change the analyzer's RHS node kind; comments do not.
-    fn parenthesized(&self, target: &Expr, value: &Expr) -> bool {
-        let Some(between) = self.ctx.source.get(target.span().end..value.span().start) else {
-            return true;
-        };
-        Lexer::new(between)
-            .tokenize()
-            .into_iter()
-            .filter(|token| !token.is_trivia() && token.kind != TokenKind::Eof)
-            .any(|token| token.text(between) != "=")
-    }
-}
-
-/// The analyzer `Identifier` name: `x` for a simple identifier and `a.b` for a
-/// prefixed identifier whose prefix is itself a simple identifier.
-fn identifier_name(expr: &Expr) -> Option<(&str, Option<&str>)> {
-    match expr {
-        Expr::Ident(identifier) => Some((identifier.name.as_str(), None)),
-        Expr::Field {
-            object,
-            field,
-            is_null_safe: false,
-            ..
-        } => match object.as_ref() {
-            Expr::Ident(prefix) => Some((prefix.name.as_str(), Some(field.name.as_str()))),
-            _ => None,
-        },
-        _ => None,
     }
 }

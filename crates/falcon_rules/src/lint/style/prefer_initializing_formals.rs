@@ -62,7 +62,7 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
 
     for init in &ctor.initializers {
         if let ConstructorInitializer::FieldInit { field, value, .. } = init
-            && let Expr::Ident(v) = value
+            && let Expr::Ident(v) = value.unparenthesized()
         {
             copies.push((field, v.name.as_str()));
         }
@@ -75,10 +75,10 @@ fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diag
                     op: AssignOp::Eq,
                     value,
                     ..
-                } = &expr_stmt.expr
-                && let Expr::Field { object, field, .. } = target.as_ref()
-                && matches!(object.as_ref(), Expr::This { .. })
-                && let Expr::Ident(v) = value.as_ref()
+                } = expr_stmt.expr.unparenthesized()
+                && let Expr::Field { object, field, .. } = target.unparenthesized()
+                && matches!(object.unparenthesized(), Expr::This { .. })
+                && let Expr::Ident(v) = value.unparenthesized()
             {
                 copies.push((field, v.name.as_str()));
             }

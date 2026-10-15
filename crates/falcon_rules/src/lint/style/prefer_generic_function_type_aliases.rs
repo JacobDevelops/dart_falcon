@@ -4,9 +4,8 @@
 //! function types and cannot express a function type in every position the
 //! modern syntax can. Rewriting it as `typedef F = int Function(int);` is more
 //! uniform, composes with generics, and reads consistently with other type
-//! aliases. Because the parser only accepts the modern `typedef Name = Type;`
-//! form, detection scans the raw source rather than the AST: a `typedef` whose
-//! declaration reaches an opening `(` before any `=` or `;` is the old,
+//! aliases. Detection scans raw source rather than the AST: a `typedef` whose
+//! declaration reaches an opening `(` before any `=`, `;`, or `{` is the old,
 //! non-generic form. The scan skips comments and string literals so the keyword
 //! appearing in text is not mistaken for a declaration.
 

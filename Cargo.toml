@@ -22,6 +22,9 @@ lsp-types  = "0.97"
 # Parallel execution
 rayon = "1"
 
+# Fast hashing of internal index keys
+rustc-hash = "2"
+
 # CLI
 clap     = { version = "4", features = [ "derive" ] }
 glob     = "0.3"

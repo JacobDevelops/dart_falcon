@@ -78,7 +78,7 @@ impl SemanticRuleVisitor for Usage {
                 }
             }
             Expr::Field { object, field, .. } => {
-                if let Expr::Ident(prefix) = object.as_ref()
+                if let Expr::Ident(prefix) = object.unparenthesized()
                     && !state.environment.is_bound(&prefix.name)
                 {
                     let names = QualifiedName::prefixed(&prefix.name, &field.name);
@@ -150,16 +150,8 @@ impl Visitor for TypeUsage<'_, '_> {
 }
 
 fn framework_identity(identity: &DeclarationIdentity) -> bool {
-    matches!(
-        identity,
-        DeclarationIdentity::Package {
-            package: "flutter",
-            ..
-        } | DeclarationIdentity::Sdk {
-            library: "dart:async",
-            ..
-        }
-    )
+    matches!(identity, DeclarationIdentity::Package { package, .. } if package.as_str() == "flutter")
+        || matches!(identity, DeclarationIdentity::Sdk { library, .. } if library.as_str() == "dart:async")
 }
 
 fn import_targets_framework(import: &ImportDirective) -> bool {

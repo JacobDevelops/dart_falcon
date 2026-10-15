@@ -1,5 +1,6 @@
 ---
 source: crates/falcon_dart_parser/tests/parser_tests.rs
+assertion_line: 1673
 expression: "prog.declarations[0]"
 ---
 Mixin(
@@ -30,7 +31,7 @@ Mixin(
                     is_nullable: false,
                     span: Span {
                         start: 22,
-                        end: 29,
+                        end: 28,
                     },
                 },
             ),
@@ -86,7 +87,7 @@ Mixin(
                                 is_nullable: false,
                                 span: Span {
                                     start: 31,
-                                    end: 52,
+                                    end: 51,
                                 },
                             },
                         ),
@@ -109,7 +110,7 @@ Mixin(
                     body: None,
                     span: Span {
                         start: 31,
-                        end: 62,
+                        end: 61,
                     },
                 },
             ),

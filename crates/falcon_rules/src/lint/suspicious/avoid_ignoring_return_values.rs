@@ -36,19 +36,18 @@ impl SemanticRuleVisitor for Collector<'_> {
         let Expr::Call {
             callee,
             type_args,
+            args,
             span,
             ..
-        } = &statement.expr
+        } = statement.expr.unparenthesized()
         else {
             return;
         };
-        let Some(signature) = state.call_signature(callee, type_args) else {
+        let Some(return_type) = state.call_return_type(callee, type_args, args, None) else {
             return;
         };
-        if matches!(
-            signature.return_type,
-            ResolvedType::Unknown | ResolvedType::Dynamic
-        ) || state.model.void_context(&signature.return_type)
+        if matches!(return_type, ResolvedType::Unknown | ResolvedType::Dynamic)
+            || state.model.void_context(&return_type)
         {
             return;
         }

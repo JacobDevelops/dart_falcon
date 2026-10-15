@@ -21,8 +21,8 @@ impl Rule for PreferInlinedAdds {
         for_each_expr_in_program(program, |node| {
             if let Expr::Cascade {
                 object, sections, ..
-            } = node
-                && matches!(&**object, Expr::List { .. })
+            } = node.unparenthesized()
+                && matches!(object.unparenthesized(), Expr::List { .. })
             {
                 for section in sections {
                     // Stop after one match because operations in a section share its span.

@@ -3,9 +3,13 @@
 //! A `try` statement with a single `catch` clause, no `finally`, and a body
 //! that ends in a call to the test framework's `fail` hand-rolls what
 //! `expect(() => ..., throwsA(...))` states directly, and with worse failure
-//! messages. Only a `fail` that resolves to the one exported by `package:test`,
-//! `package:test_api`, or `package:flutter_test` counts; a local or member
-//! function named `fail` does not.
+//! messages. Like the official rule, only the top-level `fail` declared in
+//! `package:test_api/src/frontend/expect.dart` counts. Current `test_api`
+//! releases no longer declare it there (`package:test`, `test_api`, and
+//! `flutter_test` re-export `package:matcher`'s `fail`), so only code using
+//! such an old `test_api` is reported; a local or member function named
+//! `fail` never is. The declaring library is identified through the package
+//! configuration, including when `test_api` is a dependency.
 //!
 //! ```dart
 //! try {
@@ -18,7 +22,7 @@
 //!
 //! Adopted from the official `use_test_throws_matchers` lint.
 
-use falcon_analyze::{AnalyzeContext, QualifiedName, Rule};
+use falcon_analyze::{AnalyzeContext, IdentityIndex, LibraryId, QualifiedName, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -35,6 +39,7 @@ impl Rule for UseTestThrowsMatchers {
         };
         let mut collector = Collector {
             ctx,
+            expect_library: expect_library(ctx),
             diags: Vec::new(),
         };
         visit_program(&mut collector, program, state);
@@ -44,6 +49,8 @@ impl Rule for UseTestThrowsMatchers {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
+    /// `package:test_api/src/frontend/expect.dart`, when it is indexed.
+    expect_library: Option<LibraryId>,
     diags: Vec<Diagnostic>,
 }
 
@@ -56,7 +63,9 @@ impl SemanticRuleVisitor for Collector<'_> {
             return;
         }
         if let Some(Stmt::Expr(last)) = statement.body.stmts.last()
-            && is_test_fail(&last.expr, state)
+            && let Some(library) = self.expect_library
+            && let Some(identities) = self.ctx.identities
+            && is_test_fail(&last.expr, library, identities, state)
         {
             self.diags.push(self.ctx.diagnostic(
                 "use-test-throws-matchers",
@@ -67,12 +76,32 @@ impl SemanticRuleVisitor for Collector<'_> {
     }
 }
 
-/// Whether `expression` invokes `fail` from the test framework.
-fn is_test_fail(expression: &Expr, state: &SemanticState<'_>) -> bool {
-    let Expr::Call { callee, .. } = expression else {
+/// The indexed library of `package:test_api/src/frontend/expect.dart`.
+fn expect_library(ctx: &AnalyzeContext<'_>) -> Option<LibraryId> {
+    let configured = ctx
+        .environment
+        .and_then(|environment| environment.package_config(ctx.file_path))
+        .and_then(|config| config.resolve_package_uri("package:test_api/src/frontend/expect.dart"));
+    let path = configured.or_else(|| {
+        let package = crate::cross_file::enclosing_package(ctx.file_path)?;
+        (package.name == "test_api").then(|| package.lib_root.join("src/frontend/expect.dart"))
+    })?;
+    let identities = ctx.identities?;
+    let file = identities.file(&path)?;
+    Some(identities.library(file))
+}
+
+/// Whether `expression` invokes the top-level `fail` declared in `library`.
+fn is_test_fail(
+    expression: &Expr,
+    library: LibraryId,
+    identities: &IdentityIndex,
+    state: &SemanticState<'_>,
+) -> bool {
+    let Expr::Call { callee, .. } = expression.unparenthesized() else {
         return false;
     };
-    let name = match callee.as_ref() {
+    let name = match callee.unparenthesized() {
         Expr::Ident(name) => {
             let shadowed = state.environment.is_bound(&name.name)
                 || state.enclosing_type.as_ref().is_some_and(|receiver| {
@@ -91,7 +120,7 @@ fn is_test_fail(expression: &Expr, state: &SemanticState<'_>) -> bool {
             field,
             is_null_safe: false,
             ..
-        } => match object.as_ref() {
+        } => match object.unparenthesized() {
             Expr::Ident(prefix) if !state.environment.is_bound(&prefix.name) => {
                 QualifiedName::prefixed(&prefix.name, &field.name)
             }
@@ -99,12 +128,7 @@ fn is_test_fail(expression: &Expr, state: &SemanticState<'_>) -> bool {
         },
         _ => return false,
     };
-    state
-        .model
-        .resolve_imported_member(name)
-        .is_some_and(|identity| {
-            ["test", "test_api", "flutter_test"]
-                .iter()
-                .any(|package| identity.is_package(package, "fail"))
-        })
+    state.model.resolve_value(name).is_some_and(|identity| {
+        identity.name() == "fail" && identities.declaration_library(&identity) == Some(library)
+    })
 }
