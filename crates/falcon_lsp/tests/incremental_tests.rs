@@ -21,7 +21,7 @@ fn state_with_config(json: &str) -> (LspState, TempDir) {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("falcon.json");
     fs::write(&path, json).unwrap();
-    (LspState::new(Some(path)), dir)
+    (LspState::new_with_sdk_locator(Some(path), |_| None), dir)
 }
 
 fn counts(state: &LspState, uri: &str) -> (u64, u64) {
@@ -422,6 +422,291 @@ fn affected_documents_share_one_invalidated_semantic_snapshot() {
         state.semantic_snapshot_build_count(),
         5,
         "watched config/package changes invalidate semantic package identities"
+    );
+}
+
+#[test]
+fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
+    let config = r#"{
+        "linter": { "rules": {
+            "recommended": false,
+            "suspicious": { "avoid-ignoring-return-values": "warn" }
+        } },
+        "cross-file": { "enabled": false }
+    }"#;
+    let dir = TempDir::new().unwrap();
+    let flutter = dir.path().join("flutter");
+    let sdk = flutter.join("bin/cache/dart-sdk/lib");
+    let dependency = dir.path().join("cache/dep");
+    let app = dir.path().join("app");
+    fs::create_dir_all(sdk.join("core")).unwrap();
+    fs::create_dir_all(dependency.join("lib")).unwrap();
+    fs::create_dir_all(app.join(".dart_tool")).unwrap();
+    fs::create_dir_all(app.join("lib")).unwrap();
+    fs::write(
+        sdk.join("libraries.json"),
+        r#"{"vm": {"libraries": {"core": {"uri": "core/core.dart"}}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        sdk.join("core/core.dart"),
+        "library dart.core;\nclass Object {}\nabstract final class int {}\n",
+    )
+    .unwrap();
+    fs::write(
+        dependency.join("lib/dep.dart"),
+        "library dep;\npart 'generated.dart';\n",
+    )
+    .unwrap();
+    fs::write(
+        app.join(".dart_tool/package_config.json"),
+        format!(
+            r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
+                {{"name": "dep", "rootUri": "file://{}", "packageUri": "lib/", "languageVersion": "3.4"}},
+                {{"name": "app", "rootUri": "../", "packageUri": "lib/", "languageVersion": "3.9"}}
+            ]}}"#,
+            flutter.display(),
+            dependency.display()
+        ),
+    )
+    .unwrap();
+    let config_path = app.join("falcon.json");
+    fs::write(&config_path, config).unwrap();
+    let mut state = LspState::new_with_sdk_locator(Some(config_path), |config| {
+        falcon_analyze::environment::DartSdk::load(
+            &config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"),
+        )
+    });
+    let path = app.join("lib/main.dart");
+    let source = "import 'package:dep/dep.dart';\nvoid check() { calculate(); }\n";
+    fs::write(&path, source).unwrap();
+    let uri = format!("file://{}", path.display());
+    state.open(&uri, source.to_string(), Some(1));
+    let builds = state.semantic_snapshot_build_count();
+    let resets = state.external_reset_count();
+    assert_eq!(builds, 1);
+    assert_eq!(state.external_index_build_count(), 1);
+    assert!(
+        state.document(&uri).unwrap().last_diagnostics.is_empty(),
+        "the missing generated declaration has no known return value"
+    );
+
+    state.analyze(&uri);
+    assert_eq!(state.semantic_snapshot_build_count(), builds);
+    assert_eq!(state.external_reset_count(), resets);
+
+    state.change(&uri, format!("{source}\n"), Some(2));
+    state.analyze(&uri);
+    assert_eq!(
+        state.external_index_build_count(),
+        1,
+        "text edits reuse external identity/type/signature indexes"
+    );
+    let builds = state.semantic_snapshot_build_count();
+
+    fs::write(
+        dependency.join("lib/generated.dart"),
+        "part of dep;\nint calculate() => 1;\n",
+    )
+    .unwrap();
+    state.watched_files_changed(&[dependency.join("lib/generated.dart")]);
+    let diagnostics = state.analyze(&uri);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values"),
+        "a watched creation event exposes the generated dependency part"
+    );
+    assert_eq!(state.semantic_snapshot_build_count(), builds + 1);
+    assert_eq!(state.external_reset_count(), resets + 1);
+    assert_eq!(
+        state.external_index_build_count(),
+        2,
+        "newly materialized parts rebuild external facts"
+    );
+
+    state.analyze(&uri);
+    assert_eq!(state.semantic_snapshot_build_count(), builds + 1);
+    assert_eq!(state.external_reset_count(), resets + 1);
+
+    // A refreshed project overlay must not retain the previous declaration.
+    let shadowed = format!("{source}\nvoid calculate() {{}}\n");
+    state.change(&uri, shadowed, Some(3));
+    assert!(
+        !state
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+    assert_eq!(state.external_index_build_count(), 2);
+    state.change(&uri, source.to_string(), Some(4));
+    assert!(
+        state
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+    assert_eq!(state.external_index_build_count(), 2);
+    let other_uri = format!("file://{}", app.join("lib/other.dart").display());
+    state.open(&other_uri, "class Other {}\n".to_string(), Some(1));
+    assert!(
+        state
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+    assert_eq!(
+        state.external_index_build_count(),
+        2,
+        "external IDs survive changes to project file count"
+    );
+    state.close(&other_uri);
+
+    // Native events invalidate same-mtime, same-size rewrites without polling.
+    let generated = dependency.join("lib/generated.dart");
+    let before = fs::metadata(&generated).unwrap();
+    let modified = before.modified().unwrap();
+    let replacement_source = format!(
+        "{:<width$}",
+        "part of dep;\nvoid calculate() {}\n",
+        width = before.len() as usize
+    );
+    assert_eq!(replacement_source.len() as u64, before.len());
+    fs::write(&generated, replacement_source).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&generated)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    state.watched_files_changed(std::slice::from_ref(&generated));
+    assert!(
+        !state
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+    assert_eq!(state.external_index_build_count(), 3);
+
+    // New imports extend the external graph and invalidate its indexed layer.
+    fs::write(dependency.join("lib/extra.dart"), "int extra() => 1;\n").unwrap();
+    let imported = "import 'package:dep/extra.dart';\nvoid check() { extra(); }\n";
+    state.change(&uri, imported.to_string(), Some(5));
+    assert!(
+        state
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+    assert_eq!(state.external_index_build_count(), 4);
+
+    // Package declarations remain available without an SDK, matching the CLI.
+    let mut sdkless = LspState::new_with_sdk_locator(Some(app.join("falcon.json")), |_| None);
+    sdkless.open(&uri, imported.to_string(), Some(1));
+    assert!(
+        sdkless
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+    assert_eq!(sdkless.external_index_build_count(), 1);
+
+    // Remapping an existing URI must replace identities, shapes and signatures.
+    let replacement = dir.path().join("replacement_dependency");
+    fs::create_dir_all(replacement.join("lib")).unwrap();
+    fs::write(replacement.join("lib/extra.dart"), "void extra() {}\n").unwrap();
+    let package_config = app.join(".dart_tool/package_config.json");
+    let config_text = fs::read_to_string(&package_config).unwrap();
+    let config_modified = fs::metadata(&package_config).unwrap().modified().unwrap();
+    fs::write(
+        &package_config,
+        config_text.replace(
+            &format!("file://{}", dependency.display()),
+            &format!("file://{}", replacement.display()),
+        ),
+    )
+    .unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&package_config)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(config_modified))
+        .unwrap();
+    state.watched_files_changed(std::slice::from_ref(&package_config));
+    assert!(
+        !state
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+    assert_eq!(state.external_index_build_count(), 5);
+    state.change(&uri, format!("{imported}\n"), Some(6));
+    state.analyze(&uri);
+    assert_eq!(state.external_index_build_count(), 5);
+
+    // External back-edges cannot freeze project declarations in a cached base.
+    let api_path = app.join("lib/api.dart");
+    let api_uri = format!("file://{}", api_path.display());
+    fs::write(&api_path, "int calculate() => 1;\n").unwrap();
+    fs::write(
+        replacement.join("lib/extra.dart"),
+        "export '../../app/lib/api.dart';\n",
+    )
+    .unwrap();
+    state.watched_files_changed(&[replacement.join("lib/extra.dart")]);
+    state.change(
+        &uri,
+        "import 'package:dep/extra.dart';\nvoid check() { calculate(); }\n".to_string(),
+        Some(7),
+    );
+    assert!(
+        state
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+    state.open(&api_uri, "void calculate() {}\n".to_string(), Some(1));
+    assert!(
+        !state
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+    state.change(&api_uri, "int calculate() => 1;\n".to_string(), Some(2));
+    assert!(
+        state
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+
+    // Documentation-only backedges also forbid immutable external bases.
+    fs::write(
+        replacement.join("lib/extra.dart"),
+        "/// @docImport '../../app/lib/api.dart';\nlibrary dep;\nint extra() => 1;\n",
+    )
+    .unwrap();
+    state.watched_files_changed(&[replacement.join("lib/extra.dart")]);
+    state.change(&uri, imported.to_string(), Some(8));
+    assert!(
+        state
+            .analyze(&uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
+    let combined_builds = state.external_index_build_count();
+    state.change(&api_uri, "void calculate() {}\n".to_string(), Some(3));
+    state.analyze(&uri);
+    assert!(
+        state.external_index_build_count() > combined_builds,
+        "a documentation import of an editable file must rebuild the combined indexes"
+    );
+    let unchanged = state.external_index_build_count();
+    state.analyze(&uri);
+    assert_eq!(
+        state.external_index_build_count(),
+        unchanged,
+        "an unchanged combined snapshot still reuses its facts"
     );
 }
 
