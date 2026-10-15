@@ -33,7 +33,8 @@ impl Feature {
             Self::Patterns => (3, 0),
             Self::PrivateFieldPromotion => (3, 2),
             Self::WildcardVariables | Self::TallStyle => (3, 7),
-            Self::PrimaryConstructors | Self::PrivateNamedParameters => (3, 13),
+            Self::PrivateNamedParameters => (3, 12),
+            Self::PrimaryConstructors => (3, 13),
         };
         LanguageVersion::new(major, minor)
     }

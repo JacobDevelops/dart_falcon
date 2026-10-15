@@ -111,7 +111,6 @@ fn primary_constructor_syntax_requires_313() {
         "class C { new(); }",
         "class C(int x) { this : assert(x > 0); }",
         "class C;",
-        "class C { final int _x; C({required this._x}); }",
     ] {
         let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 12)));
         assert!(
@@ -156,14 +155,26 @@ fn private_named_formal_feature_gate_reports_the_field_name() {
         "class A { final int _x; A({this._x = 1}); }",
         "// café\nclass A { final int _x; A({required this._x /* field */}); }",
     ] {
-        let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 9)));
+        let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 11)));
         assert_eq!(errors.len(), 1, "{source}: {errors:?}");
         assert_eq!(
             errors[0].message,
             "This requires the 'private-named-parameters' language feature"
         );
         assert_eq!(errors[0].offset, source.rfind("_x").unwrap(), "{source}");
-        let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 13)));
-        assert!(errors.is_empty(), "{source}: {errors:?}");
+        for version in [LanguageVersion::new(3, 12), LanguageVersion::new(3, 13)] {
+            let (_, errors) = parse_for_package(source, Some(version));
+            assert!(errors.is_empty(), "{source}: {errors:?}");
+        }
     }
+}
+
+#[test]
+fn private_named_formals_follow_file_language_version() {
+    let source = "// @dart=3.12\nclass Example { const Example._({required this._value}); final int _value; }";
+    let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 11)));
+    assert!(errors.is_empty(), "{errors:?}");
+    let source = "class Example { const Example({required this.value}); final int value; }";
+    let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 11)));
+    assert!(errors.is_empty(), "{errors:?}");
 }

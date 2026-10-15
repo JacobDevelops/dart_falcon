@@ -76,6 +76,56 @@ fn function_type_parameters_preserve_required_and_optional_shapes() {
 }
 
 #[test]
+fn nullable_function_parameters_in_every_type_position() {
+    for parameters in [
+        "Map<String, dynamic> data, {String? tablePrefix}",
+        "Map<String, dynamic> data, [String? tablePrefix]",
+        "void Function({String? label}) callback, {String? tablePrefix}",
+    ] {
+        let ty = format!("Future Function({parameters})");
+        for source in [
+            format!("typedef F = {ty};"),
+            format!("class C {{ {ty}? field; }}"),
+            format!("List<{ty}> f() => [];"),
+            format!("{ty} f({ty} callback) => callback;"),
+            format!("bool f(Object value) => value is {ty};"),
+            format!("bool f(Object value) => value is {ty} ? true : false;"),
+            format!("Object f(Object value) => value as {ty};"),
+            format!(
+                "bool f(Object value) => switch (value) {{ {ty} callback => true, _ => false }};"
+            ),
+        ] {
+            let (_, errors) = parse(&source);
+            assert!(errors.is_empty(), "{source}: {errors:?}");
+        }
+    }
+}
+
+#[test]
+fn is_function_type_restores_conditional_question_mark() {
+    let (program, errors) =
+        parse("bool f(Object value) => value is void Function({String? label}) ? true : false;");
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Function(function) = &program.declarations[0] else {
+        panic!("expected function");
+    };
+    let Some(FunctionBody::Arrow(expr, _)) = &function.body else {
+        panic!("expected expression body");
+    };
+    let Expr::Conditional { condition, .. } = expr.as_ref() else {
+        panic!("expected conditional, got {expr:?}");
+    };
+    let Expr::Is { dart_type, .. } = condition.as_ref() else {
+        panic!("expected type test");
+    };
+    let function_type = as_function(dart_type);
+    assert!(!function_type.is_nullable);
+    assert!(
+        matches!(&function_type.params[0].param_type, DartType::Named(named) if named.is_nullable)
+    );
+}
+
+#[test]
 fn dynamic_function_return_in_typedef() {
     let aliased = typedef_aliased("typedef F = dynamic Function(int);");
     let f = as_function(&aliased);

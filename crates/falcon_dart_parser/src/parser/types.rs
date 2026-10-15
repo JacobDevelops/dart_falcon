@@ -87,7 +87,10 @@ impl<'src> Parser<'src> {
         self.advance(); // Function keyword
         let type_params = self.parse_type_params();
         self.expect(TokenKind::LParen);
-        let params = self.parse_function_type_params();
+        let params = self.with_ctx(
+            |ctx| ctx.suppress_conditional_qmark = false,
+            Self::parse_function_type_params,
+        );
         self.expect(TokenKind::RParen);
         let is_nullable = self.eat_type_qmark();
         // Set after the parameters, so the outermost function type — which
