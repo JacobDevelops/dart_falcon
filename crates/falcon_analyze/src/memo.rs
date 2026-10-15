@@ -7,10 +7,10 @@
 //! key neither allocates nor runs SipHash. Returning an owned answer may clone it.
 
 use std::borrow::Borrow;
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::sync::{PoisonError, RwLock};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 
 /// A query key: a copyable scope plus an optional qualifier and a name.
 pub(crate) struct NameKey<S> {
@@ -70,16 +70,21 @@ impl<'a, S: 'a> Borrow<dyn NameKeyParts<S> + 'a> for NameKey<S> {
     }
 }
 
+const SHARDS: usize = 32;
+
+#[repr(align(128))]
+struct MemoShard<S, V>(RwLock<FxHashMap<NameKey<S>, V>>);
+
 /// Memoized answers of one pure query keyed by `(scope, qualifier, name)`.
 /// Clones start empty: a memo is derived data of the index owning it.
 pub(crate) struct NameMemo<S, V> {
-    answers: RwLock<FxHashMap<NameKey<S>, V>>,
+    answers: [MemoShard<S, V>; SHARDS],
 }
 
 impl<S, V> Default for NameMemo<S, V> {
     fn default() -> Self {
         Self {
-            answers: RwLock::new(FxHashMap::default()),
+            answers: std::array::from_fn(|_| MemoShard(RwLock::new(FxHashMap::default()))),
         }
     }
 }
@@ -97,9 +102,15 @@ impl<S, V> std::fmt::Debug for NameMemo<S, V> {
 }
 
 impl<S: Copy + Hash + Eq, V: Clone> NameMemo<S, V> {
+    fn shard(&self, scope: S, qualifier: Option<&str>, name: &str) -> &MemoShard<S, V> {
+        let hash = FxBuildHasher.hash_one((scope, qualifier, name));
+        &self.answers[(hash >> 32) as usize % SHARDS]
+    }
+
     /// The memoized answer for the key, if any.
     pub(crate) fn get(&self, scope: S, qualifier: Option<&str>, name: &str) -> Option<V> {
-        self.answers
+        self.shard(scope, qualifier, name)
+            .0
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .get(&(scope, qualifier, name) as &dyn NameKeyParts<S>)
@@ -119,7 +130,8 @@ impl<S: Copy + Hash + Eq, V: Clone> NameMemo<S, V> {
             return answer;
         }
         let answer = compute();
-        self.answers
+        self.shard(scope, qualifier, name)
+            .0
             .write()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(
@@ -136,9 +148,9 @@ impl<S: Copy + Hash + Eq, V: Clone> NameMemo<S, V> {
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.answers
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .len()
+            .iter()
+            .map(|shard| shard.0.read().unwrap_or_else(PoisonError::into_inner).len())
+            .sum()
     }
 }
 
@@ -181,5 +193,25 @@ mod tests {
             8
         );
         assert_eq!(memo.len(), 2);
+    }
+
+    #[test]
+    fn concurrent_queries_preserve_answers_across_scopes() {
+        let memo: NameMemo<usize, usize> = NameMemo::default();
+        std::thread::scope(|threads| {
+            for _ in 0..8 {
+                let memo = &memo;
+                threads.spawn(move || {
+                    for scope in 0..1024 {
+                        assert_eq!(
+                            memo.get_or_compute(scope, Some("p"), "Name", || scope + 1),
+                            scope + 1
+                        );
+                        assert_eq!(memo.get(scope, Some("p"), "Name"), Some(scope + 1));
+                    }
+                });
+            }
+        });
+        assert_eq!(memo.len(), 1024);
     }
 }

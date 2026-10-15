@@ -860,7 +860,8 @@ impl IdentityIndex {
 
     /// The indexed file at `path`, normalizing its spelling.
     pub fn file(&self, path: &Path) -> Option<FileId> {
-        self.file_canonical(&canonical_or_lexical(path))
+        self.file_canonical(path)
+            .or_else(|| self.file_canonical(&canonical_or_lexical(path)))
     }
 
     fn file_canonical(&self, path: &Path) -> Option<FileId> {
@@ -2773,6 +2774,22 @@ mod tests {
             name: name.to_string(),
             lib_root: PathBuf::from(lib_root),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_lookup_normalizes_symlinks_on_a_direct_lookup_miss() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.dart");
+        let alias = directory.path().join("alias.dart");
+        std::fs::write(&path, "class Main {}").unwrap();
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        let path = path.canonicalize().unwrap();
+        let index = index(&[(path.to_str().unwrap(), "class Main {}")], &[]);
+        let canonical = index.file(&path);
+        assert!(canonical.is_some());
+        assert_eq!(index.file(&alias), canonical);
+        assert_eq!(index.file(&directory.path().join("missing.dart")), None);
     }
 
     #[test]
