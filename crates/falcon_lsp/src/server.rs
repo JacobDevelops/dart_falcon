@@ -89,6 +89,7 @@ struct FileWatching {
     relative: bool,
     workspace_roots: Vec<PathBuf>,
     dependency_roots: Vec<PathBuf>,
+    dependency_files: Vec<PathBuf>,
     registration: Option<String>,
     generation: u64,
     pending: HashMap<RequestId, &'static str>,
@@ -121,6 +122,7 @@ impl FileWatching {
             relative,
             workspace_roots,
             dependency_roots: Vec::new(),
+            dependency_files: Vec::new(),
             registration: None,
             generation: 0,
             pending: HashMap::new(),
@@ -155,7 +157,28 @@ impl FileWatching {
         };
         roots.sort_unstable();
         roots.dedup();
-        if self.registration.is_some() && roots == self.dependency_roots {
+        let mut files: Vec<PathBuf> = if self.relative {
+            state
+                .watched_dependency_files()
+                .iter()
+                .filter(|file| {
+                    !self
+                        .workspace_roots
+                        .iter()
+                        .any(|workspace| file.starts_with(workspace))
+                        && !roots.iter().any(|root| file.starts_with(root))
+                })
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        files.sort_unstable();
+        files.dedup();
+        if self.registration.is_some()
+            && roots == self.dependency_roots
+            && files == self.dependency_files
+        {
             return Ok(());
         }
         self.generation += 1;
@@ -174,7 +197,7 @@ impl FileWatching {
                 .insert(request.id.clone(), UnregisterCapability::METHOD);
             connection.sender.send(request.into())?;
         }
-        let mut watchers = Vec::with_capacity(6 + roots.len() * 2);
+        let mut watchers = Vec::with_capacity(6 + roots.len() * 2 + files.len());
         watchers.extend(
             [
                 "**/falcon.json",
@@ -198,6 +221,23 @@ impl FileWatching {
                 watchers.push(relative_watcher(parent, "*".to_string())?);
             }
         }
+        for file in &files {
+            if let (Some(parent), Some(name)) = (file.parent(), file.file_name()) {
+                let name = name.to_string_lossy();
+                let mut pattern = String::with_capacity(name.len() * 3);
+                for character in name.chars() {
+                    match character {
+                        '*' | '?' | '[' | ']' | '{' | '}' => {
+                            pattern.push('[');
+                            pattern.push(character);
+                            pattern.push(']');
+                        }
+                        _ => pattern.push(character),
+                    }
+                }
+                watchers.push(relative_watcher(parent, pattern)?);
+            }
+        }
         let id = format!("falcon-watched-files-{}", self.generation);
         let request = Request::new(
             format!("falcon-watch-register-{}", self.generation).into(),
@@ -217,6 +257,7 @@ impl FileWatching {
         connection.sender.send(request.into())?;
         self.registration = Some(id);
         self.dependency_roots = roots;
+        self.dependency_files = files;
         Ok(())
     }
 
@@ -968,6 +1009,151 @@ mod file_watching_tests {
                 client.drain().is_empty(),
                 "unchanged roots must not reregister"
             );
+            client.finish();
+        }
+    }
+
+    #[test]
+    fn missing_local_import_gets_exact_watch_and_refreshes_when_created() {
+        let client = Client::start(true, true);
+        client.drain();
+        let local = client.directory.path().join("local");
+        std::fs::create_dir(&local).unwrap();
+        let file = local.join("api[one].dart");
+        let source = "import '../local/api[one].dart'; void f() { C x = make(); x; }";
+        std::fs::write(client.workspace.join("main.dart"), source).unwrap();
+        client.notify(
+            "textDocument/didOpen",
+            json!({"textDocument": {
+                "uri": file_uri(&client.workspace.join("main.dart")).unwrap(),
+                "languageId": "dart", "version": 1, "text": source
+            }}),
+        );
+        let opened = client.drain();
+        assert!(!has_rule(
+            &publications(&opened)[0],
+            "omit-local-variable-types"
+        ));
+        let registered = registrations(&opened);
+        assert_eq!(registered.len(), 1);
+        assert!(registered[0].watchers.iter().any(|watcher| {
+            watcher.glob_pattern
+                == GlobPattern::Relative(RelativePattern {
+                    base_uri: OneOf::Right(file_uri(&local).unwrap()),
+                    pattern: "api[[]one[]].dart".to_string(),
+                })
+        }));
+        let pattern = registered[0]
+            .watchers
+            .iter()
+            .find_map(|watcher| match &watcher.glob_pattern {
+                GlobPattern::Relative(relative)
+                    if relative.base_uri == OneOf::Right(file_uri(&local).unwrap()) =>
+                {
+                    Some(relative.pattern.clone())
+                }
+                _ => None,
+            })
+            .unwrap();
+        let matcher = falcon_config::PathFilter::from(vec![pattern]);
+        assert!(matcher.admits("api[one].dart"));
+        assert!(!matcher.admits("apio.dart"));
+        assert!(!matcher.admits("api[other].dart"));
+        std::fs::write(&file, "class C {} C make() => C();").unwrap();
+        client.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": file_uri(&file).unwrap(), "type": 1}]}),
+        );
+        let refreshed = client.drain();
+        assert_eq!(publications(&refreshed).len(), 1);
+        assert!(has_rule(
+            &publications(&refreshed)[0],
+            "omit-local-variable-types"
+        ));
+        assert!(registrations(&refreshed).is_empty());
+        client.finish();
+    }
+
+    #[test]
+    fn loaded_local_libraries_and_companions_are_watched_and_invalidated() {
+        for (library_source, source, changed_file) in [
+            (
+                "class C {} C make() => C();",
+                "import '../local [files]/api.dart'; void f() { C x = make(); x; }",
+                "api.dart",
+            ),
+            (
+                "part 'impl.dart';",
+                "import '../local [files]/api.dart'; void f() { C x = make(); x; }",
+                "impl.dart",
+            ),
+            (
+                "",
+                "part '../local [files]/impl.dart'; void f() { C x = make(); x; }",
+                "impl.dart",
+            ),
+        ] {
+            let client = Client::start(true, true);
+            client.drain();
+            let local = client.directory.path().join("local [files]");
+            std::fs::create_dir_all(&local).unwrap();
+            std::fs::write(local.join("api.dart"), library_source).unwrap();
+            let part_of = if library_source.is_empty() {
+                "../workspace/main.dart"
+            } else {
+                "api.dart"
+            };
+            std::fs::write(
+                local.join("impl.dart"),
+                format!("part of '{part_of}'; class C {{}} C make() => C();"),
+            )
+            .unwrap();
+            std::fs::write(client.workspace.join("main.dart"), source).unwrap();
+            client.notify(
+                "textDocument/didOpen",
+                json!({"textDocument": {
+                    "uri": file_uri(&client.workspace.join("main.dart")).unwrap(),
+                    "languageId": "dart", "version": 1, "text": source
+                }}),
+            );
+            let opened = client.drain();
+            assert!(has_rule(
+                &publications(&opened)[0],
+                "omit-local-variable-types"
+            ));
+            let registered = registrations(&opened);
+            assert_eq!(registered.len(), 1);
+            assert!(registered[0].watchers.iter().any(|watcher| {
+                watcher.glob_pattern
+                    == GlobPattern::Relative(RelativePattern {
+                        base_uri: OneOf::Right(file_uri(&local).unwrap()),
+                        pattern: changed_file.to_string(),
+                    })
+            }));
+            assert!(!registered[0].watchers.iter().any(|watcher| {
+                matches!(&watcher.glob_pattern, GlobPattern::Relative(relative)
+                    if relative.pattern == "**/*"
+                        && [local.as_path(), client.directory.path()]
+                            .iter()
+                            .any(|base| relative.base_uri == OneOf::Right(file_uri(base).unwrap())))
+            }));
+            let changed = local.join(changed_file);
+            let declarations = "class C {} class D {} D make() => D();";
+            let replacement = if changed_file == "impl.dart" {
+                format!("part of '{part_of}'; {declarations}")
+            } else {
+                declarations.to_string()
+            };
+            std::fs::write(&changed, replacement).unwrap();
+            client.notify(
+                "workspace/didChangeWatchedFiles",
+                json!({"changes": [{"uri": file_uri(&changed).unwrap(), "type": 2}]}),
+            );
+            let refreshed = client.drain();
+            assert!(registrations(&refreshed).is_empty());
+            let published = publications(&refreshed);
+            assert_eq!(published.len(), 1);
+            assert!(!has_rule(&published[0], "omit-local-variable-types"));
             client.finish();
         }
     }

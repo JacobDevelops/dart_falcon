@@ -12,10 +12,10 @@ use std::sync::Arc;
 use lsp_types::Uri;
 
 use falcon_analyze::{
-    AnalysisEnvironment, AnalyzeContext, CrossFileRuleRegistry, ExternalLibraries, ExternalSources,
-    IdentityIndex, IdentitySource, LibraryGrouping, LibrarySource, PackageIdentity, ProjectFile,
-    RuleRegistry, SemanticIndexes, SignatureIndex, TypeIndex, canonical_or_lexical,
-    group_libraries, import_path, library_unit, syntax_error_diagnostics,
+    AnalysisEnvironment, AnalyzeContext, CrossFileRuleRegistry, ExternalLibraries, ExternalOrigin,
+    ExternalSources, IdentityIndex, IdentitySource, LibraryGrouping, LibrarySource,
+    PackageIdentity, ProjectFile, RuleRegistry, SemanticIndexes, SignatureIndex, TypeIndex,
+    canonical_or_lexical, group_libraries, import_path, library_unit, syntax_error_diagnostics,
 };
 use falcon_config::{FalconConfig, load_config, load_or_default};
 use falcon_dart_parser::{parse, parse_for_package};
@@ -127,6 +127,8 @@ pub struct LspState {
     external_reset_count: u64,
     external_indexes: Option<ExternalIndexCache>,
     external_topology: Option<ExternalTopology>,
+    watched_local_paths: Vec<PathBuf>,
+    watched_local_sources: Vec<PathBuf>,
     watched_dependency_generation: u64,
     external_index_build_count: u64,
 }
@@ -169,18 +171,36 @@ impl LspState {
             external_reset_count: 0,
             external_indexes: None,
             external_topology: None,
+            watched_local_paths: Vec::new(),
+            watched_local_sources: Vec::new(),
             watched_dependency_generation: 0,
             external_index_build_count: 0,
         }
     }
 
-    /// Mutable package roots for native LSP file watching. Versioned hosted
-    /// packages and SDK sources are intentionally absent.
+    /// Mutable package roots for native LSP watching. Versioned hosted packages
+    /// and SDK sources are intentionally absent.
     pub fn watched_dependency_roots(&self) -> Vec<PathBuf> {
         self.environment
             .watched_dependency_roots()
             .map(Path::to_path_buf)
             .collect()
+    }
+
+    /// Loaded local files use exact relative patterns, never recursive parent watches.
+    pub fn watched_dependency_files(&self) -> &[PathBuf] {
+        &self.watched_local_paths
+    }
+
+    fn loaded_project_paths(&self) -> impl Iterator<Item = &Path> {
+        self.external_libraries
+            .libraries()
+            .iter()
+            .filter(|library| library.origin == ExternalOrigin::Project)
+            .flat_map(|library| &library.files)
+            .map(|file| file.path.as_path())
+            .chain(self.external_libraries.project_companions())
+            .chain(self.external_libraries.attempted_project_paths())
     }
 
     /// Changes only when discovery or invalidation can alter dependency watches.
@@ -195,6 +215,7 @@ impl LspState {
         if paths.is_empty() {
             return Vec::new();
         }
+        let paths: Vec<_> = paths.iter().map(|path| watched_path(path)).collect();
         let rules_changed = paths.iter().any(|path| {
             matches!(
                 path.file_name().and_then(|name| name.to_str()),
@@ -208,18 +229,20 @@ impl LspState {
             .as_ref()
             .is_some_and(|key| paths.iter().any(|path| key.affected_by(path)));
         let dependency_changed = paths.iter().any(|path| {
-            self.environment
-                .watched_dependency_roots()
-                .any(|root| path.starts_with(root))
-                && !self
-                    .documents
-                    .values()
-                    .any(|document| document.path == *path)
-                && !self
-                    .semantic_snapshot
-                    .as_ref()
-                    .is_some_and(|snapshot| snapshot.by_path.contains_key(path))
-                && !self.watched_project_source(path)
+            !self
+                .documents
+                .values()
+                .any(|document| document.path == *path)
+                && (self.watched_local_paths.binary_search(path).is_ok()
+                    || (self
+                        .environment
+                        .watched_dependency_roots()
+                        .any(|root| path.starts_with(root))
+                        && !self
+                            .semantic_snapshot
+                            .as_ref()
+                            .is_some_and(|snapshot| snapshot.by_path.contains_key(path))
+                        && !self.watched_project_source(path)))
         });
         let project_changed = paths.iter().any(|path| {
             path.starts_with(&self.workspace_root)
@@ -823,6 +846,28 @@ impl LspState {
                     .flat_map(|library| &library.files)
                     .map(|file| file.path.as_path()))
         });
+        let mut local_sources: Vec<_> = self.loaded_project_paths().collect();
+        local_sources.sort_unstable();
+        local_sources.dedup();
+        if !self
+            .watched_local_sources
+            .iter()
+            .map(PathBuf::as_path)
+            .eq(local_sources.iter().copied())
+        {
+            let mut paths: Vec<_> = local_sources
+                .iter()
+                .map(|path| watched_path(path))
+                .collect();
+            paths.sort_unstable();
+            paths.dedup();
+            let sources = local_sources.into_iter().map(Path::to_path_buf).collect();
+            self.watched_local_sources = sources;
+            if self.watched_local_paths != paths {
+                self.watched_local_paths = paths;
+                self.watched_dependency_generation += 1;
+            }
+        }
         // URI resolution can canonicalize paths. Retain these immutable graph
         // edges rather than repeating filesystem work for every text edit.
         let new_targets = (!topology_matches).then(|| {
@@ -1162,10 +1207,11 @@ fn resolve_dependency(
 /// The directory the cross-file pass walks: the config file's parent, else the
 /// current directory (`.` if even that is unavailable).
 fn workspace_root_for(config_path: Option<&Path>) -> PathBuf {
-    config_path
+    let root = config_path
         .and_then(Path::parent)
         .map(Path::to_path_buf)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    canonical_or_lexical(&root)
 }
 
 fn load_from(path: Option<&Path>) -> FalconConfig {
@@ -1190,6 +1236,20 @@ fn load_from(path: Option<&Path>) -> FalconConfig {
     // falcon.json files keep resolving.
     falcon_rules::meta::canonicalize_config(&mut config);
     config
+}
+
+fn watched_path(path: &Path) -> PathBuf {
+    for ancestor in path.ancestors() {
+        if let Ok(resolved) = std::fs::canonicalize(ancestor) {
+            let suffix = path.strip_prefix(ancestor).expect("path ancestor");
+            return if suffix.as_os_str().is_empty() {
+                resolved
+            } else {
+                resolved.join(suffix)
+            };
+        }
+    }
+    canonical_or_lexical(path)
 }
 
 fn document_path(uri: &str) -> (PathBuf, bool) {
@@ -1903,6 +1963,19 @@ mod environment_regressions {
     }
 
     #[test]
+    fn watched_file_normalization_preserves_filesystem_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("api.dart");
+        std::fs::write(&file, "class C {}").unwrap();
+        let expected = std::fs::canonicalize(&file).unwrap();
+        let normalized = watched_path(&file);
+        assert_eq!(normalized.as_os_str(), expected.as_os_str());
+        assert!(normalized.is_file());
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(watched_path(&file).as_os_str(), expected.as_os_str());
+    }
+
+    #[test]
     fn configuration_events_invalidate_even_after_discovery_recaptures_new_bytes() {
         let (dir, mut state, uri, _dependency) = dependency_fixture(false);
         let app = dir.path().join("app");
@@ -2045,6 +2118,195 @@ mod environment_regressions {
             .flat_map(|file| &file.facts.declarations).any(|declaration| {
                 matches!(declaration, falcon_syntax::ast::TopLevelDecl::Class(class) if class.name.name == name)
             })
+    }
+
+    #[test]
+    fn watched_workspace_part_refreshes_project_without_resetting_external_facts() {
+        let (dir, mut state, uri, _) = dependency_fixture(false);
+        let generated = dir.path().join("app/generated.dart");
+        std::fs::write(&generated, "part of 'main.dart'; class Before {}").unwrap();
+        state.change(
+            &uri,
+            "import 'package:dep/api.dart'; part 'generated.dart'; void main() {}".into(),
+            Some(2),
+        );
+        state.ensure_semantic_snapshot();
+        let cache = state.external_indexes.as_ref().unwrap();
+        let identities = Arc::clone(&cache.identities);
+        let types = Arc::clone(&cache.types);
+        let signatures = Arc::clone(&cache.signatures);
+        let resets = state.external_reset_count;
+        std::fs::write(&generated, "part of 'main.dart'; class After {}").unwrap();
+        let published = state.watched_files_changed(std::slice::from_ref(&generated));
+        assert_eq!(published.len(), 1);
+        assert_eq!(state.external_reset_count, resets);
+        let cache = state.external_indexes.as_ref().unwrap();
+        assert!(Arc::ptr_eq(&identities, &cache.identities));
+        assert!(Arc::ptr_eq(&types, &cache.types));
+        assert!(Arc::ptr_eq(&signatures, &cache.signatures));
+        let snapshot = state.semantic_snapshot.as_ref().unwrap();
+        assert!(
+            snapshot.files[snapshot.by_path[&generated]]
+                .source
+                .contains("class After")
+        );
+    }
+
+    #[test]
+    fn part_uri_typing_updates_watches_without_rebuilding_external_indexes() {
+        let (_dir, mut state, uri, _) = dependency_fixture(false);
+        let cache = state.external_indexes.as_ref().unwrap();
+        let identities = Arc::clone(&cache.identities);
+        let types = Arc::clone(&cache.types);
+        let signatures = Arc::clone(&cache.signatures);
+        let builds = state.external_index_build_count;
+        for (version, part) in [(2, "../missing-one.dart"), (3, "../missing-two.dart")] {
+            let generation = state.watched_dependency_generation();
+            state.change(
+                &uri,
+                format!("import 'package:dep/api.dart'; part '{part}'; void main() {{}}"),
+                Some(version),
+            );
+            state.ensure_semantic_snapshot();
+            let cache = state.external_indexes.as_ref().unwrap();
+            assert!(Arc::ptr_eq(&identities, &cache.identities));
+            assert!(Arc::ptr_eq(&types, &cache.types));
+            assert!(Arc::ptr_eq(&signatures, &cache.signatures));
+            assert_eq!(state.external_index_build_count, builds);
+            assert!(state.watched_dependency_generation() > generation);
+            assert!(
+                state
+                    .watched_dependency_files()
+                    .iter()
+                    .any(|path| { path.file_name() == Path::new(part).file_name() })
+            );
+        }
+        assert!(
+            state
+                .watched_dependency_files()
+                .windows(2)
+                .all(|paths| paths[0] < paths[1])
+        );
+        let generation = state.watched_dependency_generation();
+        state.change(
+            &uri,
+            "import 'package:dep/api.dart'; part '../missing-two.dart'; void main() { }".into(),
+            Some(4),
+        );
+        state.ensure_semantic_snapshot();
+        assert_eq!(state.watched_dependency_generation(), generation);
+        assert_eq!(state.external_index_build_count, builds);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watched_workspace_alias_event_refreshes_unopened_project_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("workspace");
+        let alias = dir.path().join("workspace-alias");
+        std::fs::create_dir(&root).unwrap();
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let peer = root.join("peer.dart");
+        std::fs::write(&peer, "class Before {}").unwrap();
+        let mut state = state(&alias);
+        assert_eq!(state.workspace_root, canonical_or_lexical(&root));
+        let uri = format!("file://{}", alias.join("main.dart").display());
+        state.open(&uri, "void main() {}".into(), Some(1));
+        state.ensure_semantic_snapshot();
+        let resets = state.external_reset_count;
+        std::fs::write(&peer, "class After {}").unwrap();
+        let published = state.watched_files_changed(&[alias.join("peer.dart")]);
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0, uri);
+        assert_eq!(state.external_reset_count, resets);
+        let snapshot = state.semantic_snapshot.as_ref().unwrap();
+        let peer = canonical_or_lexical(&peer);
+        assert!(
+            snapshot.files[snapshot.by_path[&peer]]
+                .source
+                .contains("class After")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watched_local_alias_changes_and_deletions_invalidate_loaded_facts() {
+        let (dir, mut state, uri, _) = dependency_fixture(false);
+        let local = dir.path().join("local");
+        let alias = dir.path().join("alias");
+        std::fs::create_dir(&local).unwrap();
+        std::os::unix::fs::symlink(&local, &alias).unwrap();
+        let file = local.join("api.dart");
+        std::fs::write(&file, "class Before {}").unwrap();
+        state.change(
+            &uri,
+            "import '../alias/api.dart'; void main() {}".into(),
+            Some(2),
+        );
+        state.ensure_semantic_snapshot();
+        assert!(has_external_class(&state, "Before"));
+        let resets = state.external_reset_count;
+        std::fs::write(&file, "class After {}").unwrap();
+        state.watched_files_changed(&[alias.join("api.dart")]);
+        assert_eq!(state.external_reset_count, resets + 1);
+        assert!(has_external_class(&state, "After"));
+        assert!(!has_external_class(&state, "Before"));
+        std::fs::remove_file(&file).unwrap();
+        state.watched_files_changed(&[alias.join("api.dart")]);
+        assert_eq!(state.external_reset_count, resets + 2);
+        assert!(!has_external_class(&state, "After"));
+        std::fs::write(&file, "class Recreated {}").unwrap();
+        state.watched_files_changed(&[alias.join("api.dart")]);
+        assert_eq!(state.external_reset_count, resets + 3);
+        assert!(has_external_class(&state, "Recreated"));
+    }
+
+    #[test]
+    fn watched_companion_absent_from_external_topology_invalidates_external_facts() {
+        let (dir, mut state, uri, _) = dependency_fixture(false);
+        let companion = dir.path().join("companion.dart");
+        std::fs::write(&companion, "part of 'app/main.dart'; class Before {}").unwrap();
+        state.change(
+            &uri,
+            "import 'package:dep/api.dart'; part '../companion.dart'; void main() {}".into(),
+            Some(2),
+        );
+        state.ensure_semantic_snapshot();
+        assert!(state.loaded_project_paths().any(|path| path == companion));
+        assert!(
+            !state
+                .external_topology
+                .as_ref()
+                .unwrap()
+                .paths
+                .contains(&companion)
+        );
+        assert!(
+            state
+                .semantic_snapshot
+                .as_ref()
+                .unwrap()
+                .by_path
+                .contains_key(&companion)
+        );
+        let cache = state.external_indexes.as_ref().unwrap();
+        let identities = Arc::clone(&cache.identities);
+        let types = Arc::clone(&cache.types);
+        let signatures = Arc::clone(&cache.signatures);
+        let resets = state.external_reset_count;
+        std::fs::write(&companion, "part of 'app/main.dart'; class After {}").unwrap();
+        let published = state.watched_files_changed(std::slice::from_ref(&companion));
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0, uri);
+        assert_eq!(state.external_reset_count, resets + 1);
+        let cache = state.external_indexes.as_ref().unwrap();
+        assert!(!Arc::ptr_eq(&identities, &cache.identities));
+        assert!(!Arc::ptr_eq(&types, &cache.types));
+        assert!(!Arc::ptr_eq(&signatures, &cache.signatures));
+        let snapshot = state.semantic_snapshot.as_ref().unwrap();
+        let file = &snapshot.files[snapshot.by_path[&companion]];
+        assert!(file.source.contains("class After"));
+        assert!(!file.source.contains("class Before"));
     }
 
     #[test]
