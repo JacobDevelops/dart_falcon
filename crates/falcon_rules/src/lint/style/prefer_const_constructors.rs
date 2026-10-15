@@ -9,9 +9,9 @@
 //! the constructor cannot be resolved to a declaration known to be `const`,
 //! when an argument cannot be proven constant, for `Object()` (often used to create
 //! unique identity tokens), for constructors of deferred-imported classes, and
-//! for a generic class invoked without type arguments whose context type,
-//! viewed as that class, has a type parameter as a type argument, or cannot be
-//! resolved (making it `const` would change the inferred type arguments).
+//! for a generic class invoked without type arguments whose approximate context
+//! contains type parameters, or whose context cannot be resolved. As in the
+//! analyzer, assignments use their result type rather than their target type.
 //!
 //! ```dart
 //! class A {
@@ -23,6 +23,8 @@
 //! ```
 //!
 //! Adopted from the official `prefer_const_constructors` lint.
+
+use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
 use falcon_diagnostics::Diagnostic;
@@ -44,6 +46,7 @@ impl Rule for PreferConstConstructors {
         let mut collector = Collector {
             contexts: ConstContexts::of(program),
             deferred_prefixes: deferred_prefixes(program),
+            assignment_values: HashSet::new(),
             ctx,
             diags: Vec::new(),
         };
@@ -55,6 +58,7 @@ impl Rule for PreferConstConstructors {
 struct Collector<'a> {
     contexts: ConstContexts,
     deferred_prefixes: Vec<&'a str>,
+    assignment_values: HashSet<Span>,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
 }
@@ -72,6 +76,23 @@ struct Invocation<'a> {
 
 impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        if let Expr::Assign {
+            op: AssignOp::Eq,
+            value,
+            ..
+        } = node
+        {
+            let mut value = value.as_ref();
+            loop {
+                match value {
+                    Expr::Paren { expr, .. } => value = expr,
+                    // The upstream approximation also climbs cascade targets.
+                    Expr::Cascade { object, .. } => value = object,
+                    _ => break,
+                }
+            }
+            self.assignment_values.insert(*value.span());
+        }
         if matches!(node, Expr::Paren { .. }) {
             return;
         }
@@ -81,7 +102,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         if self.contexts.contains(node.span())
             || invocation.identity == DeclarationIdentity::OBJECT
             || self.is_literal(&invocation, state)
-            || self.inference_depends_on_context(&invocation, state)
+            || self.inference_depends_on_context(node, &invocation, state)
         {
             return;
         }
@@ -120,12 +141,12 @@ impl Collector<'_> {
             })
     }
 
-    /// A generic class invoked without type arguments whose context type,
-    /// viewed as that class, has a type parameter as a type argument: upward
-    /// inference may substitute it, and `const` would change the inferred
-    /// type arguments. An unresolved context might be such a type.
+    /// Match the analyzer's approximate context: an assignment contributes its
+    /// result type (the inferred RHS), while a return contributes its declared
+    /// return type. A supertype return context must not be inferred backwards.
     fn inference_depends_on_context(
         &self,
+        node: &Expr,
         invocation: &Invocation<'_>,
         state: &SemanticState<'_>,
     ) -> bool {
@@ -142,8 +163,14 @@ impl Collector<'_> {
         if state.expected_unknown() {
             return true;
         }
-        state
-            .expected()
+        let assignment_type;
+        let context = if self.assignment_values.contains(node.span()) {
+            assignment_type = state.infer_with_context(node, state.expected());
+            Some(&assignment_type)
+        } else {
+            state.expected()
+        };
+        context
             .and_then(|context| {
                 state
                     .signatures
