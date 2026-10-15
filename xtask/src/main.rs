@@ -6,6 +6,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "../../crates/falcon_rules/tests/support/corpus.rs"]
+mod corpus;
+use corpus::{Expectation, cross_file_project_roots, parse_expectations};
+
 #[derive(Parser)]
 #[command(name = "cargo xtask")]
 struct Cli {
@@ -235,52 +239,6 @@ fn workspace_root() -> PathBuf {
     std::env::current_dir().unwrap()
 }
 
-#[derive(Debug, Clone)]
-struct Expectation {
-    rule: String,
-    line: usize,
-    expected_msg: Option<String>,
-}
-
-/// Parse `/* expect: rule-name */` or `/* expect: rule-name, msg: "text" */` annotations.
-/// The annotation appears on the same line as the expected violation.
-fn parse_expectations(source: &str) -> Vec<Expectation> {
-    let mut exps = Vec::new();
-    for (line_idx, line) in source.lines().enumerate() {
-        let line_num = line_idx + 1;
-        let mut search = line;
-        while let Some(start) = search.find("/* expect:") {
-            let after = &search[start + 10..];
-            if let Some(end) = after.find("*/") {
-                let annotation = after[..end].trim();
-                // annotation: "rule-name" or "rule-name, msg: \"text\""
-                let mut parts = annotation.splitn(2, ',');
-                let rule = parts.next().unwrap_or("").trim().to_string();
-                let msg_part = parts.next().map(|s| s.trim());
-                let expected_msg = msg_part.and_then(|s| {
-                    if let Some(rest) = s.strip_prefix("msg:") {
-                        let trimmed = rest.trim().trim_matches('"');
-                        Some(trimmed.to_string())
-                    } else {
-                        None
-                    }
-                });
-                if !rule.is_empty() {
-                    exps.push(Expectation {
-                        rule,
-                        line: line_num,
-                        expected_msg,
-                    });
-                }
-                search = &after[end + 2..];
-            } else {
-                break;
-            }
-        }
-    }
-    exps
-}
-
 #[derive(Debug, serde::Deserialize)]
 struct DiagnosticJson {
     rule: String,
@@ -355,18 +313,23 @@ impl FalconRunner {
             .env("RUST_LOG", "error")
             .output()
             .map_err(|e| format!("Failed to run falcon binary '{}': {}", self.binary, e))?;
+        if !matches!(output.status.code(), Some(0 | 1)) {
+            return Err(format!(
+                "falcon exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let trimmed = stdout.trim();
-        if trimmed.is_empty() || trimmed == "[]" {
-            return Ok(Vec::new());
-        }
         let mut diagnostics =
             serde_json::from_str::<Vec<DiagnosticJson>>(trimmed).map_err(|e| {
                 format!(
-                    "JSON parse error: {}\nOutput was: {}",
+                    "JSON parse error: {}\nOutput was: {}\nStderr: {}",
                     e,
-                    &trimmed[..trimmed.len().min(200)]
+                    &trimmed[..trimmed.len().min(200)],
+                    String::from_utf8_lossy(&output.stderr)
                 )
             })?;
         if let Some((project, directory)) = &staged {
@@ -381,6 +344,16 @@ impl FalconRunner {
             }
         }
         Ok(diagnostics)
+    }
+
+    fn run_or_exit(&self, file: &Path, config: Option<&Path>) -> Vec<DiagnosticJson> {
+        self.run(file, config).unwrap_or_else(|error| {
+            eprintln!(
+                "error: falcon invocation failed for {}: {error}",
+                file.display()
+            );
+            std::process::exit(1);
+        })
     }
 }
 
@@ -422,14 +395,14 @@ fn validate_file(
     threshold: f64,
     rule_filter: Option<&str>,
     config: Option<&Path>,
-) -> FileResult {
+) -> Result<FileResult, String> {
     let all_exps = parse_expectations(source);
     let exps: Vec<Expectation> = all_exps
         .into_iter()
         .filter(|e| rule_filter.map(|r| e.rule == r).unwrap_or(true))
         .collect();
 
-    let raw_diags = falcon.run(file, config).unwrap_or_default();
+    let raw_diags = falcon.run(file, config)?;
     let diags: Vec<(usize, &DiagnosticJson)> = raw_diags
         .iter()
         .enumerate()
@@ -479,12 +452,12 @@ fn validate_file(
         })
         .collect();
 
-    FileResult {
+    Ok(FileResult {
         expected: exps.len(),
         matched,
         missed,
         false_positives,
-    }
+    })
 }
 
 fn recursive_files(root: &Path) -> Vec<PathBuf> {
@@ -499,26 +472,6 @@ fn recursive_files(root: &Path) -> Vec<PathBuf> {
         .collect();
     files.sort_unstable();
     files
-}
-
-fn cross_file_project_roots(cross_file_dir: &Path) -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = fs::read_dir(cross_file_dir)
-        .unwrap_or_else(|_| panic!("cannot read {}", cross_file_dir.display()))
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_dir()
-                && path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("bad") || name.starts_with("good"))
-        })
-        .collect();
-    roots.sort();
-    if roots.is_empty() {
-        roots.push(cross_file_dir.to_path_buf());
-    }
-    roots
 }
 
 /// Validate each independent package under `corpus/<rule>/cross-file/` in its
@@ -705,15 +658,28 @@ fn validate_rules(options: ValidateRules) {
                 }
             };
 
-            let result = validate_file(
+            total_files += 1;
+            let result = match validate_file(
                 dart_file,
                 &source,
                 &falcon,
                 threshold,
                 Some(&rule_name),
                 rule_config.as_deref(),
-            );
-            total_files += 1;
+            ) {
+                Ok(result) => result,
+                Err(error) => {
+                    let msg = format!(
+                        "ERROR {} — falcon invocation failed: {error}",
+                        dart_file.display()
+                    );
+                    if !json_output {
+                        eprintln!("{msg}");
+                    }
+                    all_failures.push(msg);
+                    continue;
+                }
+            };
             total_expected += result.expected;
             total_matched += result.matched;
 
@@ -1552,7 +1518,7 @@ fn docgen() {
             had_fixture = true;
             for d in cross_file_project_roots(&cross_file_dir)
                 .into_iter()
-                .flat_map(|project| falcon.run(&project, config.as_deref()).unwrap_or_default())
+                .flat_map(|project| falcon.run_or_exit(&project, config.as_deref()))
                 .filter(|d| d.rule == meta.name)
             {
                 let relative = Path::new(&d.file_path)
@@ -1574,8 +1540,7 @@ fn docgen() {
             had_fixture = true;
             let source = fs::read_to_string(&bad_path).unwrap_or_default();
             for d in falcon
-                .run(&bad_path, config.as_deref())
-                .unwrap_or_default()
+                .run_or_exit(&bad_path, config.as_deref())
                 .into_iter()
                 .filter(|d| d.rule == meta.name)
             {
@@ -1688,6 +1653,64 @@ fn docgen() {
 mod tests {
     use super::{Cli, Task, strip_provenance};
     use clap::Parser;
+
+    #[test]
+    fn clean_fixture_does_not_hide_a_missing_binary() {
+        let directory = tempfile::tempdir().unwrap();
+        let runner = super::FalconRunner {
+            binary: directory
+                .path()
+                .join("missing-falcon")
+                .to_string_lossy()
+                .into_owned(),
+            fallback_sdk: None,
+        };
+        let error = super::validate_file(
+            &directory.path().join("clean.dart"),
+            "void main() {}",
+            &runner,
+            1.0,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(error.contains("Failed to run falcon binary"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runner_distinguishes_diagnostic_exit_codes_from_process_failures() {
+        use std::os::unix::fs::PermissionsExt;
+        for (status, stdout, expected_error) in [
+            (2, "[]", Some("exit status: 2")),
+            (1, "", Some("JSON parse error")),
+            (1, "[]", None),
+            (0, "[]", None),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let binary = directory.path().join("falcon");
+            std::fs::write(
+                &binary,
+                format!(
+                    "#!/bin/sh\nprintf '{stdout}'\nprintf 'fixture failure' >&2\nexit {status}\n"
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let runner = super::FalconRunner {
+                binary: binary.to_string_lossy().into_owned(),
+                fallback_sdk: None,
+            };
+            let result = runner.run(&directory.path().join("clean.dart"), None);
+            if let Some(expected) = expected_error {
+                let error = result.unwrap_err();
+                assert!(error.contains("fixture failure"), "{error}");
+                assert!(error.contains(expected), "{error}");
+            } else {
+                assert!(result.unwrap().is_empty());
+            }
+        }
+    }
 
     #[test]
     fn fixture_sdk_is_always_used_for_the_bundled_corpus() {

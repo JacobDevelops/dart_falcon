@@ -15,9 +15,12 @@
 //!   * clean files (zero annotations) produce zero diagnostics;
 //!   * source and corpus fixtures contain no explicit stub/placeholder markers.
 
+#[path = "support/corpus.rs"]
+mod corpus;
 #[path = "support/inference.rs"]
 mod inference;
 mod support;
+use corpus::{Expectation, cross_file_project_roots, parse_expectations};
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -47,41 +50,6 @@ fn corpus_dir() -> PathBuf {
 fn byte_offset_to_line(source: &str, offset: usize) -> usize {
     let clamped = offset.min(source.len());
     source[..clamped].bytes().filter(|&b| b == b'\n').count() + 1
-}
-
-#[derive(Debug)]
-struct Expectation {
-    rule: String,
-    line: usize,
-}
-
-/// Parse `/* expect: rule-name */` (and `, msg: "..."`) annotations. Only the rule id and
-/// line are used for matching here; messages are documented in fixtures but not asserted.
-fn parse_expectations(source: &str) -> Vec<Expectation> {
-    let mut exps = Vec::new();
-    for (line_idx, line) in source.lines().enumerate() {
-        let line_num = line_idx + 1;
-        let mut search = line;
-        while let Some(start) = search.find("/* expect:") {
-            let after = &search[start + "/* expect:".len()..];
-            let Some(end) = after.find("*/") else { break };
-            let annotation = after[..end].trim();
-            let rule = annotation
-                .split(',')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if !rule.is_empty() {
-                exps.push(Expectation {
-                    rule,
-                    line: line_num,
-                });
-            }
-            search = &after[end + 2..];
-        }
-    }
-    exps
 }
 
 /// Run a single rule over `source`; return (rule-id, line) per diagnostic.
@@ -163,26 +131,6 @@ fn corpus_config(rule_dir: &Path) -> FalconConfig {
     }
 }
 
-fn cross_file_project_dirs(dir: &Path) -> Vec<PathBuf> {
-    let mut projects: Vec<PathBuf> = fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_dir()
-                && path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("bad") || name.starts_with("good"))
-        })
-        .collect();
-    projects.sort();
-    if projects.is_empty() {
-        projects.push(dir.to_path_buf());
-    }
-    projects
-}
-
 fn has_rule_expectation(source: &str, rule_name: &str) -> bool {
     parse_expectations(source)
         .iter()
@@ -254,7 +202,7 @@ fn registered_rules_have_real_corpus_coverage() {
                 failures.push(format!("MISSING `{rule_name}` cross-file project fixture"));
                 continue;
             }
-            let projects = cross_file_project_dirs(&project_dir);
+            let projects = cross_file_project_roots(&project_dir);
             let mut has_positive_project = false;
             let mut has_clean_project = false;
             for project in projects {
@@ -743,7 +691,7 @@ fn cross_file_corpus_matches_expectations() {
             rule_name
         );
 
-        for project in cross_file_project_dirs(&dir) {
+        for project in cross_file_project_roots(&dir) {
             let fixture_sources: Vec<(PathBuf, String)> =
                 support::files(&project, usize::MAX, None)
                     .into_iter()

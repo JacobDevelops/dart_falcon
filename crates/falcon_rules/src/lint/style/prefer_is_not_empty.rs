@@ -36,63 +36,19 @@ impl Rule for PreferIsNotEmpty {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_analyze::{IdentityIndex, IdentitySource, SemanticModel, SignatureIndex, TypeIndex};
-    use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
-    use std::path::PathBuf;
-
-    /// Diagnostic count with no type index (baseline fire-on-unknown behavior).
-    fn count_no_types(source: &str) -> usize {
-        let program = parse(source).0;
-        let config = FalconConfig::default();
-        let path = PathBuf::from("t.dart");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                program: &program,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let model = SemanticModel::new(&path, &identities, None);
-        let signatures = SignatureIndex::from_program(&program, &model);
-        let ctx = AnalyzeContext::new(&path, source, &config)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
-        PreferIsNotEmpty.analyze(&program, &ctx).len()
+    mod support {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/rule_context.rs"
+        ));
     }
 
-    /// Diagnostic count with the production identity-keyed index attached.
+    fn count_no_types(source: &str) -> usize {
+        support::count(&PreferIsNotEmpty, source, false)
+    }
+
     fn count_with_types(source: &str) -> usize {
-        let program = parse(source).0;
-        let config = FalconConfig::default();
-        let path = PathBuf::from("t.dart");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                program: &program,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path.as_path(),
-                falcon_analyze::LibrarySource {
-                    program: &program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let model = SemanticModel::new(&path, &identities, Some(&types));
-        let signatures = SignatureIndex::from_program(&program, &model);
-        let ctx = AnalyzeContext::new(&path, source, &config)
-            .with_types(&types)
-            .with_identities(&identities)
-            .with_signatures(&signatures);
-        PreferIsNotEmpty.analyze(&program, &ctx).len()
+        support::count(&PreferIsNotEmpty, source, true)
     }
 
     #[test]
