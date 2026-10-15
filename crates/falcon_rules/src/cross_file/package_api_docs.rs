@@ -38,7 +38,7 @@ impl CrossFileRule for PackageApiDocs {
                 let model = indexes.map(|indexes| {
                     SemanticModel::new(&file.path, &indexes.identities, Some(&indexes.types))
                 });
-                api_declarations(&file.program, &file.source, model.as_ref())
+                api_declarations(&file.program, &file.syntax, model.as_ref())
             })
             .collect();
         let packages: Vec<_> = files.iter().map(|f| lib_dir_package(&f.path)).collect();
@@ -114,11 +114,11 @@ impl CrossFileRule for PackageApiDocs {
             if packages[i].is_none() {
                 continue;
             }
-            let tokens = falcon_dart_parser::lexer::Lexer::new(&file.source).tokenize();
+            let tokens = file.syntax.tokens();
             for d in &declarations[i] {
                 if d.name.starts_with('_')
                     || annotation(d.annotations, "override")
-                    || d.documented(&tokens)
+                    || d.documented(tokens)
                     || !public.contains(&(i, d.owner.unwrap_or(d.name)))
                 {
                     continue;
@@ -138,7 +138,7 @@ impl CrossFileRule for PackageApiDocs {
                     let field = &representation.name;
                     if !field.name.starts_with('_')
                         && public.contains(&(i, node.name.name.as_str()))
-                        && !documented(&tokens, representation.span.start)
+                        && !documented(tokens, representation.span.start)
                     {
                         diagnostics.push(Diagnostic::new(
                             "package-api-docs",

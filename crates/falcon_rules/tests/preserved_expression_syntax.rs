@@ -20,7 +20,11 @@ use falcon_rules::lint::style::unnecessary_parenthesis::UnnecessaryParenthesis;
 use falcon_rules::lint::suspicious::no_equal_arguments::NoEqualArguments;
 
 fn reports(rule: &dyn Rule, source: &str) -> Vec<String> {
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program,
+        errors,
+        syntax,
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let path = Path::new("syntax.dart");
     let identities = IdentityIndex::from_project_files(
@@ -32,7 +36,7 @@ fn reports(rule: &dyn Rule, source: &str) -> Vec<String> {
         &[],
     );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, source, &config).with_identities(&identities);
+    let context = AnalyzeContext::new(path, source, &config, &syntax).with_identities(&identities);
     rule.analyze(&program, &context)
         .into_iter()
         .map(|diagnostic| source[diagnostic.span.start..diagnostic.span.end].to_owned())
@@ -247,7 +251,11 @@ void pattern<T>(T? value) {
   if (value case final captured /* ! */ !) {}
 }
 ";
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program,
+        errors,
+        syntax,
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let path = Path::new("syntax.dart");
     let identities = IdentityIndex::from_project_files(
@@ -259,7 +267,7 @@ void pattern<T>(T? value) {
         &[],
     );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, source, &config).with_identities(&identities);
+    let context = AnalyzeContext::new(path, source, &config, &syntax).with_identities(&identities);
     let diagnostics = NullCheckOnNullableTypeParameter.analyze(&program, &context);
     let positions: Vec<_> = diagnostics
         .iter()

@@ -72,9 +72,17 @@ mod tests {
     fn reports(source: &str, imported: &str) -> Vec<String> {
         let path = PathBuf::from("/project/lib/main.dart");
         let imported_path = PathBuf::from("/project/lib/imported.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
-        let (dependency, errors) = parse(imported);
+        let falcon_dart_parser::ParseResult {
+            program: dependency,
+            errors,
+            ..
+        } = parse(imported);
         assert!(errors.is_empty(), "{errors:?}");
         let sources = [
             IdentitySource {
@@ -111,7 +119,7 @@ mod tests {
             &types,
         );
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config)
+        let context = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);

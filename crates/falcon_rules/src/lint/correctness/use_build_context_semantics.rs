@@ -589,6 +589,9 @@ impl SemanticRuleVisitor for Collector<'_> {
                                         .unwrap_or(ResolvedType::Unknown),
                                 );
                             }
+                            CascadeOp::NullAssert { .. } => {
+                                receiver = Cow::Owned(receiver.non_null());
+                            }
                             CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => {}
                         }
                     }

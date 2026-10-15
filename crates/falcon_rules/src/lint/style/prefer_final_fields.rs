@@ -197,8 +197,9 @@ mod tests {
     /// Run the rule over file `target`, building the real library grouping so
     /// `ctx.library` mirrors production (owner + part siblings, unresolved flag).
     fn run_in_library(files: &[(&str, &str)], target: usize) -> usize {
-        let programs_owned: Vec<Program> = files.iter().map(|(_, s)| parse(s).0).collect();
-        let programs: Vec<&Program> = programs_owned.iter().collect();
+        let parsed: Vec<_> = files.iter().map(|(_, source)| parse(source)).collect();
+        let programs: Vec<&Program> = parsed.iter().map(|result| &result.program).collect();
+        let syntax: Vec<_> = parsed.iter().map(|result| &result.syntax).collect();
         let path_prog: Vec<(PathBuf, &Program)> = files
             .iter()
             .zip(&programs)
@@ -206,19 +207,22 @@ mod tests {
             .collect();
         let grouping = group_libraries(&path_prog);
         let sources: Vec<&str> = files.iter().map(|(_, source)| *source).collect();
-        let unit = library_unit(&grouping, &programs, &sources, target);
+        let unit = library_unit(&grouping, &programs, &sources, &syntax, target);
         let config = FalconConfig::default();
         let path = PathBuf::from(files[target].0);
-        let ctx = AnalyzeContext::new(&path, files[target].1, &config).with_library(&unit);
+        let ctx = AnalyzeContext::new(&path, files[target].1, &config, syntax[target])
+            .with_library(&unit);
         PreferFinalFields.analyze(programs[target], &ctx).len()
     }
 
     /// Run with no library context at all (standalone / degraded single-file).
     fn run_standalone(source: &str) -> usize {
-        let program = parse(source).0;
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(source);
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config);
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
         PreferFinalFields.analyze(&program, &ctx).len()
     }
 

@@ -185,10 +185,14 @@ mod tests {
   final (first, second) = (value, 2);
   print(first + second);
 }"#;
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &syntax);
         let diagnostics = UnnecessaryFinal.analyze(&program, &ctx);
         assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
         let local = source.find("final value").unwrap();

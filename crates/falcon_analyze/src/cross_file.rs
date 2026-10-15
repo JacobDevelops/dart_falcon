@@ -16,6 +16,7 @@ pub struct ProjectFile {
     pub path: PathBuf,
     pub source: String,
     pub program: Program,
+    pub syntax: falcon_syntax::SyntaxStore,
     /// Recovery nodes can create false declarations; keep these files only for reference detection.
     pub has_parse_errors: bool,
 }

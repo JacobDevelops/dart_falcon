@@ -73,7 +73,11 @@ fn assert_without_external_sources(rule_name: &str, source: &str) {
     use std::path::Path;
 
     let path = Path::new("/unloaded_project/main.dart");
-    let (program, errors) = falcon_dart_parser::parse(source);
+    let falcon_dart_parser::ParseResult {
+        program,
+        errors,
+        syntax,
+    } = falcon_dart_parser::parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::build(
         &[IdentitySource {
@@ -99,7 +103,7 @@ fn assert_without_external_sources(rule_name: &str, source: &str) {
     let model = SemanticModel::new(path, &identities, Some(&types));
     let signatures = SignatureIndex::from_program(&program, &model);
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, source, &config)
+    let context = AnalyzeContext::new(path, source, &config, &syntax)
         .with_types(&types)
         .with_identities(&identities)
         .with_signatures(&signatures);

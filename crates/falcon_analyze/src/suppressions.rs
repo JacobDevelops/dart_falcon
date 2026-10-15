@@ -9,9 +9,9 @@
 //! the next line of code (Biome semantics). Falcon does **not** read Dart's own
 //! `// ignore:` / `// ignore_for_file:` comments — those belong to the analyzer.
 //!
-//! Comments are read from a real lex pass (not a naive line scan), so a
-//! suppression phrase sitting inside a string literal is never mistaken for a
-//! real directive — the lexer tokenizes it as part of the `StringLit`.
+//! Comments are read from the retained lexical stream (not a naive line scan),
+//! so a suppression phrase sitting inside a string literal is never mistaken
+//! for a real directive.
 //!
 //! A malformed comment (missing reason, bad path, unknown rule, or a rule under
 //! the wrong group/section) does **not** suppress; instead it surfaces a
@@ -21,9 +21,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
-use falcon_syntax::token::{Token, TokenKind};
+use falcon_syntax::token::{SyntaxStore, Token, TokenKind};
 
 /// Rule name carried by the diagnostics emitted for malformed suppression
 /// comments. Internal: not registered in `meta.rs`, not configurable, and never
@@ -50,10 +49,11 @@ pub struct FileSuppressions {
 }
 
 impl FileSuppressions {
-    /// Lex `source` once and collect every `falcon-ignore` directive it
-    /// contains, validating each path against `lookup`. `file_path` is used only
-    /// to stamp the malformed-suppression diagnostics.
-    pub fn parse(source: &str, file_path: &str, lookup: RuleLookup) -> Self {
+    /// Collect directives from the retained primary token stream, validating
+    /// each path against `lookup`. `file_path` is used only to stamp malformed
+    /// suppression diagnostics. Interpolation comments stay inside their string
+    /// literal, preserving file-level suppression semantics.
+    pub fn parse(source: &str, file_path: &str, lookup: RuleLookup, syntax: &SyntaxStore) -> Self {
         let mut me = Self {
             all_file: HashSet::new(),
             by_line: HashMap::new(),
@@ -61,9 +61,7 @@ impl FileSuppressions {
             diagnostics: Vec::new(),
         };
 
-        // Fast path: the lexer pass only earns its keep on files that actually
-        // mention the directive. A match inside a string literal merely triggers
-        // the pass, which then correctly ignores it — so this stays correct.
+        // Skip token traversal when the source cannot contain a directive.
         if !source.contains("falcon-ignore") {
             return me;
         }
@@ -75,8 +73,8 @@ impl FileSuppressions {
         // Standalone directives awaiting the next code line (Biome stacking).
         let mut pending: Vec<String> = Vec::new();
 
-        for token in Lexer::new(source).tokenize() {
-            let line = line_for_offset(&me.line_starts, token.offset);
+        for token in syntax.tokens() {
+            let line = line_for_offset(&me.line_starts, token.offset());
 
             if token.is_trivia() {
                 // Only line-form comments carry directives: `//`/`///`. Block
@@ -100,7 +98,7 @@ impl FileSuppressions {
                         }
                         Err(message) => me
                             .diagnostics
-                            .push(malformed_diag(&token, source, file_path, message)),
+                            .push(malformed_diag(token, source, file_path, message)),
                     }
                 }
                 continue;
@@ -232,7 +230,7 @@ fn validate(keyword: &str, rest: &str, lookup: RuleLookup) -> Result<String, Str
 
 /// Build a `malformed-suppression` warning anchored to the offending comment.
 fn malformed_diag(token: &Token, source: &str, file_path: &str, message: String) -> Diagnostic {
-    let start = token.offset;
+    let start = token.offset();
     let end = start + token.text(source).len();
     Diagnostic::new(
         MALFORMED_SUPPRESSION,
@@ -280,7 +278,8 @@ mod tests {
     }
 
     fn parse(source: &str) -> FileSuppressions {
-        FileSuppressions::parse(source, "test.dart", lookup)
+        let syntax = falcon_dart_parser::parse(source).syntax;
+        FileSuppressions::parse(source, "test.dart", lookup, &syntax)
     }
 
     fn diag_rules(s: &FileSuppressions) -> Vec<&str> {
@@ -454,6 +453,20 @@ mod tests {
         let s = parse(src);
         assert!(s.is_suppressed("avoid-dynamic", 1));
         assert!(!s.is_suppressed("avoid-dynamic", 2));
+    }
+
+    #[test]
+    fn retained_interpolation_comments_do_not_become_file_directives() {
+        let source = "var text = '${1 // falcon-ignore-all lint/suspicious/avoid-dynamic: expression\n}';\ndynamic value;";
+        let syntax = falcon_dart_parser::parse(source).syntax;
+        assert!(
+            syntax
+                .comment_tokens()
+                .any(|token| token.text(source).contains("falcon-ignore"))
+        );
+        let suppressions = FileSuppressions::parse(source, "test.dart", lookup, &syntax);
+        assert!(suppressions.is_empty());
+        assert!(suppressions.diagnostics().is_empty());
     }
 
     #[test]

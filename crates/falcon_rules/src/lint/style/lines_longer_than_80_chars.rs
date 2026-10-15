@@ -24,11 +24,11 @@
 //! Adopted from the official `lines_longer_than_80_chars` lint.
 
 use crate::lint::string_lit::decode_escapes;
-use crate::lint::tokens::{comment_tokens, visit_interpolation_tokens};
+use crate::lint::tokens::comment_tokens;
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+use falcon_syntax::visitor::Visitor;
 
 const MAX_LENGTH: usize = 80;
 
@@ -54,6 +54,7 @@ impl Rule for LinesLongerThan80Chars {
         let mut strings = AllowedStrings {
             lines: &lines,
             allowed: &mut allowed,
+            syntax: ctx.syntax,
         };
         strings.visit_program(program);
         allow_comment_lines(ctx, &lines, &mut allowed);
@@ -148,16 +149,12 @@ fn looks_like_uri_or_path(text: &str) -> bool {
 struct AllowedStrings<'a, 'b> {
     lines: &'a Lines<'a>,
     allowed: &'b mut [bool],
+    syntax: &'a falcon_syntax::SyntaxStore,
 }
 
 impl Visitor for AllowedStrings<'_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        match node {
-            // The analyzer does not visit the expressions of interpolations.
-            Expr::StringLit(node) => self.visit_string_lit(node),
-            _ => walk_expr(self, node),
-        }
-    }
+    // Interpolated paths cannot exempt their surrounding line.
+    fn visit_string_interpolation(&mut self, _node: &StringInterpolation) {}
 
     fn visit_string_lit(&mut self, node: &StringLitNode) {
         for (lit, span) in node.segments() {
@@ -165,7 +162,7 @@ impl Visitor for AllowedStrings<'_, '_> {
             if lit.triple {
                 let last = self.lines.line_of(span.end);
                 self.allowed[first..=last].fill(true);
-            } else if literal_contains_path(&lit) {
+            } else if literal_contains_path(&lit, span.start + lit.content_offset, self.syntax) {
                 self.allowed[first] = true;
             }
         }
@@ -173,7 +170,11 @@ impl Visitor for AllowedStrings<'_, '_> {
 }
 
 /// Only literal text counts: a path inside an interpolated expression does not.
-fn literal_contains_path(lit: &StringDelimiter<'_>) -> bool {
+fn literal_contains_path(
+    lit: &StringDelimiter<'_>,
+    content_start: usize,
+    syntax: &falcon_syntax::SyntaxStore,
+) -> bool {
     if lit.is_raw {
         return looks_like_uri_or_path(lit.content);
     }
@@ -188,10 +189,10 @@ fn literal_contains_path(lit: &StringDelimiter<'_>) -> bool {
                     return true;
                 }
                 let inner = index + 2;
-                let Some(close) = visit_interpolation_tokens(&lit.content[inner..], |_| {}) else {
+                let Some(close) = syntax.interpolation_end(content_start + inner) else {
                     return false;
                 };
-                index = inner + close + 1;
+                index = close + 1 - content_start;
                 text_start = index;
             }
             _ => index += 1,
@@ -205,7 +206,7 @@ fn allow_comment_lines(ctx: &AnalyzeContext, lines: &Lines<'_>, allowed: &mut [b
     let source = ctx.source;
     for token in comment_tokens(ctx) {
         let lexeme = token.text(source);
-        let first = lines.line_of(token.offset);
+        let first = lines.line_of(token.offset());
         if let Some(text) = lexeme.strip_prefix("///") {
             if looks_like_uri_or_path(text) {
                 allowed[first] = true;

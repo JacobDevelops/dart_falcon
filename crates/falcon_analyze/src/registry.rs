@@ -82,8 +82,12 @@ impl RuleRegistry {
 
         // Parse even without rule diagnostics so malformed suppressions are surfaced.
         let mut diagnostics = diagnostics;
-        let suppressions =
-            FileSuppressions::parse(ctx.source, &ctx.file_path.to_string_lossy(), self.lookup);
+        let suppressions = FileSuppressions::parse(
+            ctx.source,
+            &ctx.file_path.to_string_lossy(),
+            self.lookup,
+            ctx.syntax,
+        );
         if !suppressions.is_empty() {
             diagnostics.retain(|diag| {
                 let line = suppressions.line_for_offset(diag.span.start);

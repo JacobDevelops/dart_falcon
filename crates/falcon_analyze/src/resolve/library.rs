@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 use falcon_syntax::ast::Program;
+use falcon_syntax::token::SyntaxStore;
 
 /// A file's library context: the sibling programs that complete its library,
 /// the source text each was parsed from, and whether that library has an
@@ -23,6 +24,7 @@ use falcon_syntax::ast::Program;
 pub struct LibraryUnit<'a> {
     siblings: Vec<&'a Program>,
     sibling_sources: Vec<&'a str>,
+    sibling_syntax: Vec<&'a SyntaxStore>,
     has_unresolved_parts: bool,
 }
 
@@ -37,6 +39,10 @@ impl<'a> LibraryUnit<'a> {
     /// index — the exact text its spans refer to.
     pub fn sibling_sources(&self) -> &[&'a str] {
         &self.sibling_sources
+    }
+
+    pub fn sibling_syntax(&self) -> &[&'a SyntaxStore] {
+        &self.sibling_syntax
     }
 
     /// Whether the library has a `part`/`part of` link that could not be resolved
@@ -156,12 +162,14 @@ pub fn library_unit<'a>(
     grouping: &LibraryGrouping,
     programs: &[&'a Program],
     sources: &[&'a str],
+    syntax: &[&'a SyntaxStore],
     i: usize,
 ) -> LibraryUnit<'a> {
     let siblings = grouping.siblings(i);
     LibraryUnit {
         siblings: siblings.iter().map(|&j| programs[j]).collect(),
         sibling_sources: siblings.iter().map(|&j| sources[j]).collect(),
+        sibling_syntax: siblings.iter().map(|&j| syntax[j]).collect(),
         has_unresolved_parts: grouping.is_unresolved(i),
     }
 }
@@ -254,7 +262,9 @@ mod tests {
     use falcon_dart_parser::parse;
 
     fn prog(src: &str) -> Program {
-        let (p, errors) = parse(src);
+        let falcon_dart_parser::ParseResult {
+            program: p, errors, ..
+        } = parse(src);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         p
     }
@@ -383,21 +393,23 @@ mod tests {
 
     #[test]
     fn library_unit_maps_siblings_to_programs() {
-        let owner = prog("part 'part.dart'; class Owner {}");
-        let part = prog("part of 'owner.dart'; class Extra {}");
-        let files = vec![
-            (PathBuf::from("/proj/owner.dart"), &owner),
-            (PathBuf::from("/proj/part.dart"), &part),
-        ];
-        let g = group_libraries(&files);
-        let programs = vec![&owner, &part];
         let sources = [
             "part 'part.dart'; class Owner {}",
             "part of 'owner.dart'; class Extra {}",
         ];
-        let unit = library_unit(&g, &programs, &sources, 0);
+        let owner = falcon_dart_parser::parse(sources[0]);
+        let part = falcon_dart_parser::parse(sources[1]);
+        let files = vec![
+            (PathBuf::from("/proj/owner.dart"), &owner.program),
+            (PathBuf::from("/proj/part.dart"), &part.program),
+        ];
+        let g = group_libraries(&files);
+        let programs = vec![&owner.program, &part.program];
+        let syntax = [&owner.syntax, &part.syntax];
+        let unit = library_unit(&g, &programs, &sources, &syntax, 0);
         assert_eq!(unit.siblings().len(), 1);
         assert_eq!(unit.sibling_sources(), [sources[1]]);
+        assert!(std::ptr::eq(unit.sibling_syntax()[0], &part.syntax));
         assert!(!unit.has_unresolved_parts());
     }
 }

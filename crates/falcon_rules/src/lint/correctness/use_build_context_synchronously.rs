@@ -999,7 +999,11 @@ mod test_directories {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join("pubspec.yaml"), "name: example\n").unwrap();
         let source = "class Suite { test_example() {} solo_test_example() {} }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = FalconConfig::default();
         for (relative, expected) in [
@@ -1015,7 +1019,7 @@ mod test_directories {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, source).unwrap();
             assert_eq!(is_test_file(&path), expected, "{relative}");
-            let ctx = AnalyzeContext::new(&path, source, &config);
+            let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
             let diagnostics =
                 crate::lint::style::always_declare_return_types::AlwaysDeclareReturnTypes
                     .analyze(&program, &ctx);

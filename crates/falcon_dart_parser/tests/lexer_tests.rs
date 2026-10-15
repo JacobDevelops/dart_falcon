@@ -1,7 +1,14 @@
-use falcon_dart_parser::lexer::{Lexer, filter_trivia};
+use falcon_dart_parser::lexer::Lexer;
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::{Token, TokenKind};
+
+fn significant_tokens(tokens: Vec<Token>) -> Vec<Token> {
+    tokens
+        .into_iter()
+        .filter(|token| !token.is_trivia())
+        .collect()
+}
 
 #[test]
 fn test_integer_decimal() {
@@ -76,8 +83,8 @@ fn test_unterminated_interpolation_and_comment_consume_source() {
         let tokens = Lexer::new(src).tokenize();
         assert_eq!(tokens.len(), 2, "{src:?}: {tokens:?}");
         assert_eq!(tokens[0].kind, TokenKind::Error, "{src:?}");
-        assert_eq!(tokens[0].offset, 0);
-        assert_eq!(tokens[0].len, src.len());
+        assert_eq!(tokens[0].offset(), 0);
+        assert_eq!(tokens[0].len(), src.len());
         assert_eq!(tokens[1].kind, TokenKind::Eof);
     }
 }
@@ -378,33 +385,33 @@ fn test_newline() {
 }
 
 #[test]
-fn test_filter_trivia_removes_whitespace() {
+fn test_significant_tokens_exclude_whitespace() {
     let raw_tokens = Lexer::new("foo   bar").tokenize();
-    let filtered = filter_trivia(raw_tokens.clone());
+    let filtered = significant_tokens(raw_tokens);
     assert!(filtered.iter().all(|t| !t.is_trivia()));
     assert_eq!(filtered.len(), 3); // foo, bar, eof
 }
 
 #[test]
-fn test_filter_trivia_removes_comments() {
+fn test_significant_tokens_exclude_comments() {
     let raw_tokens = Lexer::new("foo // comment\nbar").tokenize();
-    let filtered = filter_trivia(raw_tokens);
+    let filtered = significant_tokens(raw_tokens);
     assert_eq!(filtered.len(), 3); // foo, bar, eof
     assert_eq!(filtered[0].kind, TokenKind::Ident);
     assert_eq!(filtered[1].kind, TokenKind::Ident);
 }
 
 #[test]
-fn test_filter_trivia_keeps_eof() {
+fn test_significant_tokens_keep_eof() {
     let raw_tokens = Lexer::new("42").tokenize();
-    let filtered = filter_trivia(raw_tokens);
+    let filtered = significant_tokens(raw_tokens);
     assert_eq!(filtered.last().unwrap().kind, TokenKind::Eof);
 }
 
 #[test]
 fn test_sequence_class_decl() {
     let tokens = Lexer::new("class Foo {}").tokenize();
-    let filtered = filter_trivia(tokens);
+    let filtered = significant_tokens(tokens);
     assert_eq!(filtered[0].kind, TokenKind::Class);
     assert_eq!(filtered[1].kind, TokenKind::Ident);
     assert_eq!(filtered[2].kind, TokenKind::LBrace);
@@ -414,7 +421,7 @@ fn test_sequence_class_decl() {
 #[test]
 fn test_sequence_function_call() {
     let tokens = Lexer::new("foo(42, 'text')").tokenize();
-    let filtered = filter_trivia(tokens);
+    let filtered = significant_tokens(tokens);
     assert_eq!(filtered[0].kind, TokenKind::Ident);
     assert_eq!(filtered[1].kind, TokenKind::LParen);
     assert_eq!(filtered[2].kind, TokenKind::IntLit);
@@ -425,7 +432,7 @@ fn test_sequence_function_call() {
 #[test]
 fn test_sequence_null_aware_chain() {
     let tokens = Lexer::new("obj?.field?[0]??alt").tokenize();
-    let filtered = filter_trivia(tokens);
+    let filtered = significant_tokens(tokens);
     assert_eq!(filtered[0].kind, TokenKind::Ident);
     assert_eq!(filtered[1].kind, TokenKind::QmarkDot);
     assert_eq!(filtered[2].kind, TokenKind::Ident);
@@ -438,7 +445,7 @@ fn test_sequence_null_aware_chain() {
 #[test]
 fn test_sequence_cascade() {
     let tokens = Lexer::new("obj..foo()..bar = 42").tokenize();
-    let filtered = filter_trivia(tokens);
+    let filtered = significant_tokens(tokens);
     assert_eq!(filtered[0].kind, TokenKind::Ident);
     assert_eq!(filtered[1].kind, TokenKind::DotDot);
     assert_eq!(filtered[2].kind, TokenKind::Ident);
@@ -573,7 +580,7 @@ fn empty_block_comment_is_block_not_doc() {
     let src = "/**/";
     let toks = Lexer::new(src).tokenize();
     assert_eq!(toks[0].kind, TokenKind::BlockComment);
-    assert_eq!(toks[0].len, 4);
+    assert_eq!(toks[0].len(), 4);
     assert_no_errors(src);
 }
 
@@ -627,7 +634,7 @@ fn triple_string_honors_escaped_quote() {
     // The whole source is one string literal — nothing trails it.
     assert_no_errors(src);
     let toks = Lexer::new(src).tokenize();
-    assert_eq!(toks[0].len, src.len());
+    assert_eq!(toks[0].len(), src.len());
 }
 
 #[test]
@@ -654,7 +661,7 @@ fn interpolation_brace_inside_nested_single_string() {
     assert_eq!(only_kind(src), TokenKind::StringLit);
     assert_no_errors(src);
     let toks = Lexer::new(src).tokenize();
-    assert_eq!(toks[0].len, src.len());
+    assert_eq!(toks[0].len(), src.len());
 }
 
 #[test]
@@ -716,7 +723,7 @@ fn significant_texts(src: &str) -> Vec<String> {
     all_tokens(src)
         .into_iter()
         .filter(|t| !t.is_trivia() && t.kind != TokenKind::Eof)
-        .map(|t| src[t.offset..t.offset + t.len].to_string())
+        .map(|t| src[t.offset()..t.offset() + t.len()].to_string())
         .collect()
 }
 
@@ -747,7 +754,7 @@ fn shebang_is_the_first_token_as_a_comment() {
         "shebang must be trivia so the parser skips it"
     );
     assert_eq!(
-        &"#!/usr/bin/env dart\nvoid main() {}"[first.offset..first.offset + first.len],
+        &"#!/usr/bin/env dart\nvoid main() {}"[first.offset()..first.offset() + first.len()],
         "#!/usr/bin/env dart"
     );
 }
@@ -761,7 +768,11 @@ fn shebang_without_trailing_newline_lexes_clean() {
 
 #[test]
 fn shebang_file_parses_with_zero_errors() {
-    let (_program, errors) = parse("#!/usr/bin/env dart\nvoid main() {}");
+    let falcon_dart_parser::ParseResult {
+        program: _program,
+        errors,
+        ..
+    } = parse("#!/usr/bin/env dart\nvoid main() {}");
     assert!(
         errors.is_empty(),
         "shebang file should parse cleanly: {errors:?}"
@@ -800,7 +811,7 @@ fn adjacent_ident_then_braced_is_one_string_token() {
 #[test]
 fn adjacent_ident_then_braced_interpolations() {
     let (node, src) = string_lit("'$a${ 'y' }'");
-    assert_eq!(interp_texts(&node, &src), vec!["a", "'y'"]);
+    assert_eq!(interp_texts(&node, &src), vec!["a", " 'y' "]);
     assert!(matches!(&node.interpolations[0].expr, Expr::Ident(id) if id.name == "a"));
     assert!(matches!(&node.interpolations[1].expr, Expr::StringLit(_)));
 }
@@ -808,7 +819,7 @@ fn adjacent_ident_then_braced_interpolations() {
 #[test]
 fn adjacent_braced_then_braced_interpolations() {
     let (node, src) = string_lit("'${a}${ 'y' }'");
-    assert_eq!(interp_texts(&node, &src), vec!["a", "'y'"]);
+    assert_eq!(interp_texts(&node, &src), vec!["a", " 'y' "]);
 }
 
 #[test]
@@ -862,12 +873,16 @@ fn leading_bom_is_stripped_no_error() {
     let toks = all_tokens(src);
     assert_ne!(toks[0].kind, TokenKind::Error);
     // First token begins just past the 3-byte BOM.
-    assert_eq!(toks[0].offset, '\u{FEFF}'.len_utf8());
+    assert_eq!(toks[0].offset(), '\u{FEFF}'.len_utf8());
 }
 
 #[test]
 fn bom_file_parses_with_zero_errors() {
-    let (_program, errors) = parse("\u{FEFF}void main() {}");
+    let falcon_dart_parser::ParseResult {
+        program: _program,
+        errors,
+        ..
+    } = parse("\u{FEFF}void main() {}");
     assert!(errors.is_empty(), "BOM file should parse clean: {errors:?}");
 }
 
@@ -899,7 +914,7 @@ fn non_ascii_char_is_single_error_token_no_panic() {
     let toks = all_tokens("é");
     let errs: Vec<_> = toks.iter().filter(|t| t.kind == TokenKind::Error).collect();
     assert_eq!(errs.len(), 1, "expected a single Error token: {toks:?}");
-    assert_eq!(errs[0].len, 'é'.len_utf8());
+    assert_eq!(errs[0].len(), 'é'.len_utf8());
 }
 
 #[test]
@@ -916,7 +931,7 @@ fn test_raw_string_with_backslash_in_interpolation() {
     // string has no escapes, so `r'\'` closes at its second quote. Without this
     // the backslash swallows the closing quote and the outer literal never ends.
     let src = "var x = '${d.replaceAll(r'\\', '/')}';";
-    let tokens = filter_trivia(Lexer::new(src).tokenize());
+    let tokens = significant_tokens(Lexer::new(src).tokenize());
     assert!(
         tokens.iter().all(|t| t.kind != TokenKind::Error),
         "unexpected Error token: {tokens:?}"
@@ -927,7 +942,11 @@ fn test_raw_string_with_backslash_in_interpolation() {
     );
 
     // And it parses cleanly end-to-end, recording the interpolation.
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let init = match &prog.declarations[0] {
         TopLevelDecl::Variable(v) => v.declarators[0].initializer.as_ref().unwrap(),
@@ -973,7 +992,9 @@ fn line_comments_end_at_every_dart_line_ending() {
                 .count(),
             3
         );
-        let (program, errors) = parse(&source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&source);
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(program.declarations.len(), 2);
     }

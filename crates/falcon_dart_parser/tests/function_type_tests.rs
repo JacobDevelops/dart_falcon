@@ -18,7 +18,11 @@ use common_class::only_class;
 
 /// Parse a single top-level `typedef` and return its aliased type.
 fn typedef_aliased(src: &str) -> DartType {
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &prog.declarations[0] {
         TopLevelDecl::TypeAlias(t) => t.aliased.clone(),
@@ -35,7 +39,11 @@ fn as_function(ty: &DartType) -> &FunctionType {
 
 /// The type of the sole positional formal of a top-level `void f(<param>) {}`.
 fn sole_param_type(param: &str) -> DartType {
-    let (prog, errors) = parse(&format!("void f({param}) {{}}"));
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(&format!("void f({param}) {{}}"));
     assert!(errors.is_empty(), "errors: {errors:?}");
     let func = match &prog.declarations[0] {
         TopLevelDecl::Function(f) => f,
@@ -95,7 +103,7 @@ fn nullable_function_parameters_in_every_type_position() {
                 "bool f(Object value) => switch (value) {{ {ty} callback => true, _ => false }};"
             ),
         ] {
-            let (_, errors) = parse(&source);
+            let falcon_dart_parser::ParseResult { errors, .. } = parse(&source);
             assert!(errors.is_empty(), "{source}: {errors:?}");
         }
     }
@@ -103,8 +111,9 @@ fn nullable_function_parameters_in_every_type_position() {
 
 #[test]
 fn is_function_type_restores_conditional_question_mark() {
-    let (program, errors) =
-        parse("bool f(Object value) => value is void Function({String? label}) ? true : false;");
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse("bool f(Object value) => value is void Function({String? label}) ? true : false;");
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Function(function) = &program.declarations[0] else {
         panic!("expected function");
@@ -271,7 +280,11 @@ fn object_pattern_generic_function_field() {
 
 /// The declared type of the sole field of a top-level `class C { <field> }`.
 fn sole_field_type(field: &str) -> DartType {
-    let (prog, errors) = parse(&format!("class C {{ {field} }}"));
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(&format!("class C {{ {field} }}"));
     assert!(errors.is_empty(), "errors: {errors:?}");
     let class = only_class(&prog);
     match &class.members[0] {
@@ -311,7 +324,11 @@ fn only_function(prog: &Program) -> &FunctionDecl {
 
 #[test]
 fn generic_inline_function_typed_positional_formal() {
-    let (prog, errors) = parse("void f(int cb<T>(T x)) {}");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("void f(int cb<T>(T x)) {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let params = only_function(&prog).params().unwrap();
     let p = &params.params[0];
@@ -325,7 +342,11 @@ fn generic_inline_function_typed_positional_formal() {
 
 #[test]
 fn generic_inline_function_typed_named_formal() {
-    let (prog, errors) = parse("void f({int cb<T>(T x)?}) {}");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("void f({int cb<T>(T x)?}) {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let p = &only_function(&prog).params().unwrap().params[0];
     assert_eq!(p.kind, ParamKind::Named { required: false });
@@ -335,7 +356,11 @@ fn generic_inline_function_typed_named_formal() {
 
 #[test]
 fn generic_inline_function_typed_type_param_return() {
-    let (prog, errors) = parse("void f(T select<T>(List<T> xs)) {}");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("void f(T select<T>(List<T> xs)) {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let p = &only_function(&prog).params().unwrap().params[0];
     assert_eq!(p.kind, ParamKind::Positional);
@@ -347,7 +372,11 @@ fn generic_inline_function_typed_type_param_return() {
 fn generic_function_typed_formal_rejected_inside_function_type() {
     // A generic function-typed formal is NOT valid inside a generic function
     // TYPE — Dart rejects it and falcon must keep rejecting it there.
-    let (_prog, errors) = parse("typedef Old = void Function(int cb<T>(T x));");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("typedef Old = void Function(int cb<T>(T x));");
     assert!(
         !errors.is_empty(),
         "expected rejection inside function type"
@@ -357,7 +386,11 @@ fn generic_function_typed_formal_rejected_inside_function_type() {
 #[test]
 fn test_generic_function_typed_formal_retains_type_params() {
     // `int cb<T>(T x)` must be distinguishable from `int cb(T x)` in the AST.
-    let (prog, errors) = parse("void f(int cb<T>(T x)) {}");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("void f(int cb<T>(T x)) {}");
     assert_eq!(errors.len(), 0, "{errors:?}");
     let func = match &prog.declarations[0] {
         TopLevelDecl::Function(f) => f,
@@ -369,7 +402,11 @@ fn test_generic_function_typed_formal_retains_type_params() {
     assert_eq!(param.type_params.len(), 1, "generic <T> must be retained");
     assert_eq!(param.type_params[0].name.name, "T");
 
-    let (prog2, errors2) = parse("void f(int cb(int x)) {}");
+    let falcon_dart_parser::ParseResult {
+        program: prog2,
+        errors: errors2,
+        ..
+    } = parse("void f(int cb(int x)) {}");
     assert_eq!(errors2.len(), 0, "{errors2:?}");
     let func2 = match &prog2.declarations[0] {
         TopLevelDecl::Function(f) => f,

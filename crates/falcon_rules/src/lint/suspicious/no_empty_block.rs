@@ -132,10 +132,19 @@ mod tests {
     #[test]
     fn exact_block_end_excludes_following_comment_and_preserves_inner_comment() {
         let source = "void empty() {} /* trailing } */\nvoid intentional() { /* } */ }\n";
-        let (program, errors) = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("/project/lib/test.dart"), source, &config);
+        let ctx = AnalyzeContext::new(
+            Path::new("/project/lib/test.dart"),
+            source,
+            &config,
+            &syntax,
+        );
         let diagnostics = NoEmptyBlock.analyze(&program, &ctx);
         let closing_brace = source.find("{}").unwrap() + 1;
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");

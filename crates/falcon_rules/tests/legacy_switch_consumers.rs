@@ -13,13 +13,13 @@ use falcon_rules::lint::correctness::no_adjacent_strings_in_list::NoAdjacentStri
 use falcon_syntax::ast::{Stmt, SwitchCaseKind};
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
-fn case_program(source: &str, legacy: bool) -> falcon_syntax::Program {
+fn case_program(source: &str, legacy: bool) -> falcon_dart_parser::ParseResult {
     let source = format!(
         "// @dart = {}\n{source}",
         if legacy { "2.19" } else { "3.13" }
     );
-    let (program, errors) = parse(&source);
-    assert!(errors.is_empty(), "{errors:?}");
+    let parsed = parse(&source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     struct CaseKinds(bool, usize);
     impl Visitor for CaseKinds {
         fn visit_stmt(&mut self, node: &Stmt) {
@@ -36,13 +36,15 @@ fn case_program(source: &str, legacy: bool) -> falcon_syntax::Program {
         }
     }
     let mut kinds = CaseKinds(legacy, 0);
-    kinds.visit_program(&program);
+    kinds.visit_program(&parsed.program);
     assert!(kinds.1 > 0);
-    program
+    parsed
 }
 
 fn diagnostics(rule: &dyn Rule, source: &str, legacy: bool) -> Vec<String> {
-    let program = case_program(source, legacy);
+    let falcon_dart_parser::ParseResult {
+        program, syntax, ..
+    } = case_program(source, legacy);
     let source = format!(
         "// @dart = {}\n{source}",
         if legacy { "2.19" } else { "3.13" }
@@ -68,7 +70,7 @@ fn diagnostics(rule: &dyn Rule, source: &str, legacy: bool) -> Vec<String> {
         &identities,
     );
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext::new(path, &source, &config)
+    let ctx = AnalyzeContext::new(path, &source, &config, &syntax)
         .with_identities(&identities)
         .with_types(&types);
     let mut messages: Vec<_> = rule

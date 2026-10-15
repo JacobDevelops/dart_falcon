@@ -37,7 +37,7 @@ fn corpus_root() -> Option<PathBuf> {
 /// Load every .dart file in the corpus via the same walker the CLI uses.
 fn load_corpus() -> Option<Vec<(PathBuf, String)>> {
     let root = corpus_root()?;
-    let files = walk_files(&[root], &PathFilter::default());
+    let files = walk_files(&[root], &PathFilter::default()).expect("read benchmark corpus");
     (!files.is_empty()).then_some(files)
 }
 

@@ -3,7 +3,9 @@ use falcon_syntax::ast::{Expr, FunctionBody, Stmt, StringLitNode, TopLevelDecl};
 
 pub fn string_lit(expr_src: &str) -> (StringLitNode, String) {
     let src = format!("void f() {{ var x = {expr_src}; }}");
-    let (program, errors) = parse(&src);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(&src);
     assert!(
         errors.is_empty(),
         "parse errors for `{expr_src}`: {errors:?}"

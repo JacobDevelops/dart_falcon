@@ -855,7 +855,9 @@ mod tests {
             let source = format!(
                 "// @dart = {version}\nvoid f(int value, Object input) {{ switch (input) {{ case const [value]: break; }} }}"
             );
-            let (program, errors) = parse(&source);
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(&source);
             assert!(errors.is_empty(), "{errors:?}");
             let TopLevelDecl::Function(function) = &program.declarations[0] else {
                 panic!()
@@ -878,7 +880,9 @@ mod tests {
             // Parameter constants need not be valid Dart to test lexical
             // resolution independently of constant evaluation.
             let source = format!("Object? f(int value, Object input) {{ {body} }}");
-            let (program, errors) = parse(&source);
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(&source);
             assert!(errors.is_empty(), "{errors:?}");
             let TopLevelDecl::Function(function) = &program.declarations[0] else {
                 panic!()
@@ -892,7 +896,9 @@ mod tests {
     #[test]
     fn const_pattern_names_resolve_to_the_nearest_local_at_each_use() {
         let source = "void f(Object input) { const Box = 1; switch (input) { case Box: break; } { const Box = 2; if (input case [Box]) {} } switch (input) { case Box: break; } }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let offsets: Vec<_> = source
             .match_indices("Box")
@@ -915,7 +921,9 @@ mod tests {
     #[test]
     fn const_pattern_qualified_names_only_read_the_head() {
         let source = "void f(Object prefix, Object member, Object input) { if (input case prefix.member) {} }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!()
@@ -937,7 +945,9 @@ mod tests {
         for pattern in ["Box()", "Box value", "Box _"] {
             let source =
                 format!("void f(Object Box, Object input) {{ if (input case {pattern}) {{}} }}");
-            let (program, errors) = parse(&source);
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(&source);
             assert!(errors.is_empty(), "{errors:?}");
             let TopLevelDecl::Function(function) = &program.declarations[0] else {
                 panic!()
@@ -954,7 +964,9 @@ mod tests {
 
     #[test]
     fn nested_callback_parameter_shadows_target() {
-        let (program, errors) = parse("void f(int value) { [1].map((value) => value + 1); }");
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse("void f(int value) { [1].map((value) => value + 1); }");
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!()
@@ -970,7 +982,9 @@ mod tests {
     #[test]
     fn pattern_if_binding_shadows_target_in_guard_and_then_branch() {
         let source = "void f(int value, Object input) { if (input case int value when value > 0) print(value); }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!()
@@ -988,7 +1002,9 @@ mod tests {
             "void f(int value, Object input) { if (input case int value when value > 0) print(value); else print(value); }",
             "void f(int value, Object input) { if (input case int value when value > 0) print(value); print(value); }",
         ] {
-            let (program, errors) = parse(source);
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(source);
             assert!(errors.is_empty(), "{errors:?}");
             let TopLevelDecl::Function(function) = &program.declarations[0] else {
                 panic!()
@@ -1013,7 +1029,9 @@ mod tests {
                 let source = format!(
                     "void f(int value, bool condition, Object input) {{ {literal}; {suffix} }}"
                 );
-                let (program, errors) = parse(&source);
+                let falcon_dart_parser::ParseResult {
+                    program, errors, ..
+                } = parse(&source);
                 assert!(errors.is_empty(), "{errors:?}");
                 let TopLevelDecl::Function(function) = &program.declarations[0] else {
                     panic!()
@@ -1038,7 +1056,9 @@ mod tests {
             "void f(int value, bool condition) { do int value = 1; while (condition); print(value); }",
             "void f(int value, bool condition) { for (; condition;) int value = 1; print(value); }",
         ] {
-            let (program, errors) = parse(source);
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(source);
             assert!(errors.is_empty(), "{errors:?}");
             let TopLevelDecl::Function(function) = &program.declarations[0] else {
                 panic!()

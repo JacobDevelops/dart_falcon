@@ -22,6 +22,19 @@ fn simple_identifier_interpolation() {
 }
 
 #[test]
+fn this_interpolation_is_a_this_expression() {
+    let (node, src) = string_lit("'$this $thisValue ${this}'");
+    assert_eq!(node.interpolations.len(), 3);
+    for index in [0, 2] {
+        let interpolation = &node.interpolations[index];
+        assert!(matches!(interpolation.expr, Expr::This { .. }));
+        assert_eq!(span_text(&src, interpolation), "this");
+        assert_eq!(*interpolation.expr.span(), interpolation.span);
+    }
+    assert!(matches!(&node.interpolations[1].expr, Expr::Ident(id) if id.name == "thisValue"));
+}
+
+#[test]
 fn braced_binary_interpolation() {
     let (node, src) = string_lit("'${a + b}'");
     assert_eq!(node.interpolations.len(), 1);
@@ -38,11 +51,16 @@ fn interpolation_amidst_text() {
 }
 
 #[test]
-fn braced_expression_span_is_trimmed_to_expression() {
-    // Interior whitespace inside the braces is not part of the expression span.
-    let (node, src) = string_lit("'${ a }'");
-    assert_eq!(node.interpolations.len(), 1);
-    assert_eq!(span_text(&src, &node.interpolations[0]), "a");
+fn braced_interpolation_span_preserves_full_interior() {
+    for interior in [" a ", " /* leading */ a /* trailing */ ", "\n a \n"] {
+        let (node, src) = string_lit(&format!("'''${{{interior}}}'''"));
+        assert_eq!(node.interpolations.len(), 1);
+        let interpolation = &node.interpolations[0];
+        assert_eq!(span_text(&src, interpolation), interior);
+        let expr_span = interpolation.expr.span();
+        assert_eq!(&src[expr_span.start..expr_span.end], "a");
+        assert!(matches!(&interpolation.expr, Expr::Ident(id) if id.name == "a"));
+    }
 }
 
 #[test]
@@ -85,7 +103,9 @@ fn malformed_inner_expression_is_dropped_but_error_propagates() {
     // `${` with an unparseable body records no interpolation, but its parse
     // diagnostic reaches the enclosing program with an absolute source offset.
     let src = "void f() { var x = '${a +}'; }";
-    let (program, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(src);
     assert!(
         !errors.is_empty(),
         "expected a propagated interpolation error"

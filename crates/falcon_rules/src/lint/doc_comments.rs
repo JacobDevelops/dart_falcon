@@ -1,7 +1,7 @@
 //! Doc-comment scanning and resolution shared by the rules that read
 //! `[reference]`s.
 //!
-//! Scanning finds blocks of consecutive doc-comment tokens and the bracketed
+//! The retained syntax store supplies doc-comment blocks; scanning finds bracketed
 //! references in them as the analyzer's doc-comment parser does, skipping
 //! code spans, fenced and indented code blocks, Markdown links and
 //! link-reference definitions. Resolution follows the analyzer's
@@ -27,44 +27,7 @@ use falcon_analyze::{
     NameIdentity, ResolvedType, SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope,
 };
 use falcon_syntax::ast::*;
-use falcon_syntax::token::{Token, TokenKind};
-
-/// A run of doc-comment tokens separated only by whitespace.
-pub(crate) struct DocBlock {
-    pub(crate) start: usize,
-    /// Offset of the first token after the block.
-    pub(crate) next_token: usize,
-    /// `(start, end)` of each doc-comment token.
-    pub(crate) tokens: Vec<(usize, usize)>,
-}
-
-/// The doc-comment tokens before each declaration, as the analyzer collects
-/// a documentation comment: every `///` token since the previous code token
-/// (plain comments between them are skipped), or a `/**` comment and what
-/// follows it.
-pub(crate) fn doc_blocks(tokens: &[Token], source: &str) -> Vec<DocBlock> {
-    let mut blocks: Vec<DocBlock> = Vec::new();
-    let mut current: Option<DocBlock> = None;
-    for token in tokens {
-        if token.kind == TokenKind::DocComment {
-            if source[token.offset..].starts_with("/**") {
-                current = None;
-            }
-            let block = current.get_or_insert_with(|| DocBlock {
-                start: token.offset,
-                next_token: source.len(),
-                tokens: Vec::new(),
-            });
-            block.tokens.push((token.offset, token.offset + token.len));
-        } else if !token.is_trivia()
-            && let Some(mut block) = current.take()
-        {
-            block.next_token = token.offset;
-            blocks.push(block);
-        }
-    }
-    blocks
-}
+use falcon_syntax::token::DocBlock;
 
 /// A `[reference]` in a doc comment: its text and source offset.
 pub(crate) struct Reference<'s> {
@@ -134,15 +97,16 @@ fn leading_whitespace(content: &str) -> usize {
 /// dartdoc directive, `@docImport` and `@nodoc` lines carry no references.
 pub(crate) fn references<'s>(
     source: &'s str,
-    block: &DocBlock,
+    block: &DocBlock<'_>,
 ) -> (Vec<Reference<'s>>, HashSet<&'s str>) {
     let mut found = Vec::new();
     let mut definitions = HashSet::new();
     let mut previous_empty = true;
     let mut indented = false;
     let mut fence: Option<usize> = None;
-    for &(start, end) in &block.tokens {
-        let lexeme = &source[start..end];
+    for token in block.tokens() {
+        let start = token.offset();
+        let lexeme = token.text(source);
         if let Some(left) = lexeme.find('[')
             && let Some(length) = lexeme[left..].find(']')
             && lexeme[..left].trim_end().starts_with("///")
@@ -196,10 +160,14 @@ pub(crate) fn references<'s>(
 /// `[this]`, `[null]`, `[true]` and `[false]` anywhere in the block's tokens
 /// (code spans included), as the `comment_references` lint scans each token
 /// from one `[` to the next `]`; with their offsets.
-pub(crate) fn keyword_references<'s>(source: &'s str, block: &DocBlock) -> Vec<(usize, &'s str)> {
+pub(crate) fn keyword_references<'s>(
+    source: &'s str,
+    block: &DocBlock<'_>,
+) -> Vec<(usize, &'s str)> {
     let mut found = Vec::new();
-    for &(start, end) in &block.tokens {
-        let lexeme = &source[start..end];
+    for token in block.tokens() {
+        let start = token.offset();
+        let lexeme = token.text(source);
         let mut from = 0;
         while let Some(left) = lexeme[from..].find('[').map(|left| from + left)
             && let Some(right) = lexeme[left..].find(']').map(|right| left + right)
@@ -847,7 +815,7 @@ impl DocScopes {
     }
 
     /// The scope of the declaration `block` documents.
-    pub(crate) fn scope_for(&self, block: &DocBlock) -> Option<&DocScope> {
+    pub(crate) fn scope_for(&self, block: &DocBlock<'_>) -> Option<&DocScope> {
         self.scopes
             .iter()
             .filter(|scope| block.start <= scope.start && scope.start <= block.next_token)
@@ -1236,7 +1204,9 @@ mod tests {
 
     fn with_resolver(source: &str, check: impl FnOnce(&DocResolver<'_, '_>, &DocScopes)) {
         let path = Path::new("/project/lib/test.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {

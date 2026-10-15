@@ -790,9 +790,17 @@ mod tests {
     fn reports(source: &str, imported: &str) -> Vec<String> {
         let path = PathBuf::from("/project/lib/main.dart");
         let imported_path = PathBuf::from("/project/lib/imported.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
-        let (dependency, errors) = parse(imported);
+        let falcon_dart_parser::ParseResult {
+            program: dependency,
+            errors,
+            ..
+        } = parse(imported);
         assert!(errors.is_empty(), "{errors:?}");
         let sources = [
             IdentitySource {
@@ -823,7 +831,7 @@ mod tests {
         );
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config)
+        let context = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
@@ -890,7 +898,11 @@ void run() {
 }
 "#;
         std::fs::write(&path, source).unwrap();
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
@@ -931,7 +943,7 @@ void run() {
             &types,
         );
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config)
+        let context = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);

@@ -15,7 +15,11 @@ use common_errs::errs;
 
 #[test]
 fn test_metadata_before_export() {
-    let (prog, errors) = parse("@Deprecated('x') export 'p.dart' show B;");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("@Deprecated('x') export 'p.dart' show B;");
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.exports.len(), 1);
     let e = &prog.exports[0];
@@ -36,7 +40,11 @@ fn test_metadata_before_export() {
 
 #[test]
 fn test_metadata_before_import() {
-    let (prog, errors) = parse("@A import 'a.dart';");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("@A import 'a.dart';");
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.imports.len(), 1);
     let i = &prog.imports[0];
@@ -48,7 +56,11 @@ fn test_metadata_before_import() {
 
 #[test]
 fn test_metadata_before_part() {
-    let (prog, errors) = parse("@A part 'p.dart';");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("@A part 'p.dart';");
     assert!(errors.is_empty(), "errors: {errors:?}");
     assert_eq!(prog.part_directives.len(), 1);
     let p = &prog.part_directives[0];
@@ -59,7 +71,11 @@ fn test_metadata_before_part() {
 
 #[test]
 fn test_metadata_before_library_dotted_name() {
-    let (prog, errors) = parse("@A library a.b.c;");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("@A library a.b.c;");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let lib = prog.library_directive.as_ref().expect("library directive");
     assert_eq!(
@@ -75,7 +91,11 @@ fn test_metadata_before_library_dotted_name() {
 #[test]
 fn test_metadata_with_args_before_part_of() {
     // Annotation carrying an argument list must be skipped when routing `part of`.
-    let (prog, errors) = parse("@A('x') part of foo.bar;");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("@A('x') part of foo.bar;");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let po = prog.part_of_directive.as_ref().expect("part-of directive");
     assert_eq!(
@@ -89,7 +109,11 @@ fn test_metadata_with_args_before_part_of() {
 
 #[test]
 fn test_getter_named_on() {
-    let (prog, errors) = parse("class C { Reference? get on; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { Reference? get on; }");
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &only_class(&prog).members[0] {
         ClassMember::Getter(g) => {
@@ -102,7 +126,11 @@ fn test_getter_named_on() {
 
 #[test]
 fn test_method_named_show() {
-    let (prog, errors) = parse("class C { void show() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { void show() {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => assert_eq!(m.name.name, "show"),
@@ -112,7 +140,11 @@ fn test_method_named_show() {
 
 #[test]
 fn test_field_named_hide() {
-    let (prog, errors) = parse("class C { int hide = 0; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { int hide = 0; }");
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &only_class(&prog).members[0] {
         ClassMember::Field(f) => assert_eq!(f.declarators[0].name.name, "hide"),
@@ -122,7 +154,11 @@ fn test_field_named_hide() {
 
 #[test]
 fn test_param_named_when() {
-    let (prog, errors) = parse("void f(int when) {}");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("void f(int when) {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &prog.declarations[0] {
         TopLevelDecl::Function(fun) => {
@@ -136,7 +172,11 @@ fn test_param_named_when() {
 
 #[test]
 fn test_local_var_named_of() {
-    let (prog, errors) = parse("void g() { var of = 1; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("void g() { var of = 1; }");
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &prog.declarations[0] {
         TopLevelDecl::Function(_) => {}
@@ -147,7 +187,11 @@ fn test_local_var_named_of() {
 #[test]
 fn test_getter_named_override() {
     // `override` is a builtin identifier; it must be usable as a getter name too.
-    let (prog, errors) = parse("class C { bool get override => true; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { bool get override => true; }");
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &only_class(&prog).members[0] {
         ClassMember::Getter(g) => assert_eq!(g.name.name, "override"),
@@ -157,7 +201,11 @@ fn test_getter_named_override() {
 
 #[test]
 fn test_mixin_on_clause_still_parses() {
-    let (prog, errors) = parse("mixin M on A {}");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("mixin M on A {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &prog.declarations[0] {
         TopLevelDecl::Mixin(m) => {
@@ -169,7 +217,11 @@ fn test_mixin_on_clause_still_parses() {
 
 #[test]
 fn test_import_show_hide_still_parses() {
-    let (prog, errors) = parse("import 'a.dart' show A hide B;");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("import 'a.dart' show A hide B;");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let combos = &prog.imports[0].combinators;
     assert!(matches!(combos[0], ImportCombinator::Show(..)));
@@ -178,7 +230,11 @@ fn test_import_show_hide_still_parses() {
 
 #[test]
 fn test_part_of_still_parses() {
-    let (prog, errors) = parse("part of foo.bar;");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("part of foo.bar;");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let po = prog.part_of_directive.as_ref().expect("part-of directive");
     let dotted: Vec<_> = po.name.iter().map(|s| s.name.as_str()).collect();
@@ -187,7 +243,11 @@ fn test_part_of_still_parses() {
 
 #[test]
 fn test_async_body_marker_still_parses() {
-    let (prog, errors) = parse("class C { foo() async {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { foo() async {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {

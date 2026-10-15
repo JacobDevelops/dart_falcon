@@ -334,13 +334,17 @@ mod tests {
             if (dart.library.io) 'package:configured_app/src/present.dart?query'\n\
             if (dart.library.html) '?query'\n\
             if (dart.library.js_interop) 'package:configured_app/src/present.dart#fragment';";
-        let (program, errors) = falcon_dart_parser::parser::parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = falcon_dart_parser::parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([file.as_path()], |_| None);
         let config = falcon_config::FalconConfig::default();
-        let context =
-            AnalyzeContext::new(&file, source, &config).with_environment(Some(&environment));
+        let context = AnalyzeContext::new(&file, source, &config, &syntax)
+            .with_environment(Some(&environment));
         let diagnostics = ConditionalUriDoesNotExist.analyze(&program, &context);
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(

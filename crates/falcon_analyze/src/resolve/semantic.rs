@@ -13844,7 +13844,9 @@ mod tests {
             .unwrap();
             std::fs::write(path, source).unwrap();
         }
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let environment = crate::AnalysisEnvironment::discover_with_sdk_locator(
             paths.iter().map(PathBuf::as_path),
@@ -14162,9 +14164,17 @@ final partial = [first, unresolved];
             final viaNullable = GenericTools(maybeBase)?.chosen(); \
             final viaNonNull = GenericTools(Base<int>(1))?.chosen(); \
             final viaInferredMethod = GenericTools(Base<int>(1)).choose('value');";
-        let (old_program, errors) = parse(old_source);
+        let falcon_dart_parser::ParseResult {
+            program: old_program,
+            errors,
+            ..
+        } = parse(old_source);
         assert!(errors.is_empty(), "{errors:?}");
-        let (new_program, errors) = parse(new_source);
+        let falcon_dart_parser::ParseResult {
+            program: new_program,
+            errors,
+            ..
+        } = parse(new_source);
         assert!(errors.is_empty(), "{errors:?}");
         std::fs::write(&path, old_source).unwrap();
         let environment =
@@ -14704,30 +14714,31 @@ final partial = [first, unresolved];
             "dynamic f() => () { int? x = 1; while (true) { x = null; } return x; };",
             "dynamic f() => () { int? y = 1; while (true) { y = null; } return y; };",
         ];
-        let programs = sources.map(|source| {
-            let (program, errors) = parse(source);
-            assert!(errors.is_empty(), "{errors:?}");
-            program
+        let parsed = sources.map(|source| {
+            let parsed = parse(source);
+            assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+            parsed
         });
+        let programs = parsed.each_ref().map(|parsed| &parsed.program);
         let identities = IdentityIndex::from_project_files(
             &[
                 IdentitySource {
                     path: &paths[0],
-                    program: &programs[0],
+                    program: programs[0],
                     has_parse_errors: false,
                 },
                 IdentitySource {
                     path: &paths[1],
-                    program: &programs[1],
+                    program: programs[1],
                     has_parse_errors: false,
                 },
             ],
             &[],
         );
-        let types = TypeIndex::from_program(&programs[0]);
+        let types = TypeIndex::from_program(programs[0]);
         let files = vec![
-            (paths[0].clone(), &programs[0]),
-            (paths[1].clone(), &programs[1]),
+            (paths[0].clone(), programs[0]),
+            (paths[1].clone(), programs[1]),
         ];
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let config = falcon_config::FalconConfig::default();
@@ -14738,11 +14749,16 @@ final partial = [first, unresolved];
                 signatures.flow_writes[&model.file].region_writes[&start],
                 HashSet::from([name.to_owned()]),
             );
-            let mut context = crate::AnalyzeContext::new(&paths[index], sources[index], &config);
+            let mut context = crate::AnalyzeContext::new(
+                &paths[index],
+                sources[index],
+                &config,
+                &parsed[index].syntax,
+            );
             context.identities = Some(&identities);
             context.signatures = Some(&signatures);
             assert!(std::ptr::eq(
-                context.flow_writes(&programs[index]),
+                context.flow_writes(programs[index]),
                 signatures
                     .flow_writes(model.file.unwrap())
                     .unwrap()
@@ -14970,7 +14986,9 @@ final nullableIndex = holder?.items[0].size;
 
     fn with_model(source: &str, test: impl FnOnce(&Program, &SemanticModel<'_>)) {
         let path = PathBuf::from("/project/lib/main.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         let sources = [IdentitySource {
             path: &path,
@@ -15108,7 +15126,7 @@ final intermediate = nested.$1();
                 else {
                     panic!("lost function type for {name}")
                 };
-                assert_eq!(alias.identity(), retains_alias.then_some(&g), "{name}",);
+                assert_eq!(alias.identity(), retains_alias.then_some(&g), "{name}");
             }
             let ResolvedType::Function { alias, .. } = signatures
                 .value_type(&model.resolve_value("intermediate").unwrap())
@@ -15250,7 +15268,9 @@ final integer = integers.first;
         let path = root.join("app/lib/main.dart");
         std::fs::write(&path, source).unwrap();
         let path = crate::canonical_or_lexical(&path);
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         let environment =
             crate::AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {
@@ -15763,13 +15783,21 @@ final integer = integers.first;
     fn imported_partial_global_inference_is_independent_of_file_order() {
         let main_path = PathBuf::from("/project/lib/main.dart");
         let origin_path = PathBuf::from("/project/lib/origin.dart");
-        let (main, errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program: main,
+            errors,
+            ..
+        } = parse(
             "import 'origin.dart' as origin; final items = [origin.later]; \
              dynamic readItems() => items; dynamic readNull() => origin.empty; \
              final cycle = [origin.other];",
         );
         assert!(errors.is_empty(), "{errors:?}");
-        let (origin, errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program: origin,
+            errors,
+            ..
+        } = parse(
             "import 'main.dart' as root; final later = 1; var empty = null; \
              final other = [root.cycle];",
         );
@@ -16197,7 +16225,9 @@ final integer = integers.first;
                 assert_eq!(actual.arguments().len(), arguments.len(), "{expression}");
                 for (actual, expected) in actual.arguments().iter().zip(*arguments) {
                     let expected = expected.map_or(ResolvedType::Unknown, |ty| {
-                        let (program, errors) = parse(&format!("{ty} expected;"));
+                        let falcon_dart_parser::ParseResult {
+                            program, errors, ..
+                        } = parse(&format!("{ty} expected;"));
                         assert!(errors.is_empty(), "{errors:?}");
                         let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
                             panic!()
@@ -16573,12 +16603,19 @@ final integer = integers.first;
     fn mixin_application_private_constructors_are_library_scoped() {
         let base_path = PathBuf::from("/project/lib/base.dart");
         let alias_path = PathBuf::from("/project/lib/alias.dart");
-        let (base, base_errors) = parse(concat!(
+        let falcon_dart_parser::ParseResult {
+            program: base,
+            errors: base_errors,
+            ..
+        } = parse(concat!(
             "class Base { Base(); Base._private(); } mixin Extra {} ",
             "class LocalAlias = Base with Extra;",
         ));
-        let (alias, alias_errors) =
-            parse("import 'base.dart'; class ImportedAlias = Base with Extra;");
+        let falcon_dart_parser::ParseResult {
+            program: alias,
+            errors: alias_errors,
+            ..
+        } = parse("import 'base.dart'; class ImportedAlias = Base with Extra;");
         assert!(base_errors.is_empty());
         assert!(alias_errors.is_empty());
         let sources = [
@@ -17625,7 +17662,9 @@ final integer = integers.first;
         let programs: Vec<_> = inputs
             .iter()
             .map(|(_, source)| {
-                let (program, errors) = parse(source);
+                let falcon_dart_parser::ParseResult {
+                    program, errors, ..
+                } = parse(source);
                 assert!(errors.is_empty(), "{errors:?}");
                 program
             })
@@ -19091,10 +19130,18 @@ final integer = integers.first;
     fn private_inherited_members_are_visible_from_same_library_parts() {
         let root_path = PathBuf::from("/project/lib/root.dart");
         let part_path = PathBuf::from("/project/lib/part.dart");
-        let (root, root_errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program: root,
+            errors: root_errors,
+            ..
+        } = parse(
             "library shared; part 'part.dart'; class Base { int _method() => 0; int _field = 0; }",
         );
-        let (part, part_errors) = parse("part of shared; class Child extends Base {}");
+        let falcon_dart_parser::ParseResult {
+            program: part,
+            errors: part_errors,
+            ..
+        } = parse("part of shared; class Child extends Base {}");
         assert!(root_errors.is_empty());
         assert!(part_errors.is_empty());
         let sources = [
@@ -19155,9 +19202,16 @@ final integer = integers.first;
     fn private_inherited_members_are_hidden_across_libraries() {
         let base_path = PathBuf::from("/project/lib/base.dart");
         let child_path = PathBuf::from("/project/lib/child.dart");
-        let (base, base_errors) = parse("class Base { int _method() => 0; int _field = 0; }");
-        let (child_program, child_errors) =
-            parse("import 'base.dart'; class Child extends Base {}");
+        let falcon_dart_parser::ParseResult {
+            program: base,
+            errors: base_errors,
+            ..
+        } = parse("class Base { int _method() => 0; int _field = 0; }");
+        let falcon_dart_parser::ParseResult {
+            program: child_program,
+            errors: child_errors,
+            ..
+        } = parse("import 'base.dart'; class Child extends Base {}");
         assert!(base_errors.is_empty());
         assert!(child_errors.is_empty());
         let sources = [
@@ -19218,10 +19272,18 @@ final integer = integers.first;
     fn private_inherited_lookup_skips_invisible_override() {
         let base_path = PathBuf::from("/project/lib/a.dart");
         let middle_path = PathBuf::from("/project/lib/b.dart");
-        let (base, base_errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program: base,
+            errors: base_errors,
+            ..
+        } = parse(
             "import 'b.dart'; class Base { int _method() => 0; int _field = 0; } class Child extends Middle {}",
         );
-        let (middle, middle_errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program: middle,
+            errors: middle_errors,
+            ..
+        } = parse(
             "import 'a.dart'; class Middle extends Base { int _method() => 1; int _field = 1; }",
         );
         assert!(base_errors.is_empty());
@@ -19380,11 +19442,21 @@ final integer = integers.first;
         let base_path = PathBuf::from("/project/lib/base.dart");
         let middle_path = PathBuf::from("/project/lib/middle.dart");
         let leaf_path = PathBuf::from("/project/lib/leaf.dart");
-        let (base, base_errors) = parse("class Base<T> { final T value; Base(this.value); }");
-        let (middle, middle_errors) =
-            parse("import 'base.dart'; class Middle extends Base<String> { Middle(super.value); }");
-        let (leaf, leaf_errors) =
-            parse("import 'middle.dart'; class Leaf extends Middle { Leaf(super.value); }");
+        let falcon_dart_parser::ParseResult {
+            program: base,
+            errors: base_errors,
+            ..
+        } = parse("class Base<T> { final T value; Base(this.value); }");
+        let falcon_dart_parser::ParseResult {
+            program: middle,
+            errors: middle_errors,
+            ..
+        } = parse("import 'base.dart'; class Middle extends Base<String> { Middle(super.value); }");
+        let falcon_dart_parser::ParseResult {
+            program: leaf,
+            errors: leaf_errors,
+            ..
+        } = parse("import 'middle.dart'; class Leaf extends Middle { Leaf(super.value); }");
         assert!(base_errors.is_empty());
         assert!(middle_errors.is_empty());
         assert!(leaf_errors.is_empty());
@@ -19445,10 +19517,18 @@ final integer = integers.first;
     fn constructor_formal_fixpoint_handles_deep_chains_across_two_files() {
         let a_path = PathBuf::from("/project/lib/a.dart");
         let b_path = PathBuf::from("/project/lib/b.dart");
-        let (a, a_errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program: a,
+            errors: a_errors,
+            ..
+        } = parse(
             "import 'b.dart'; class A0<T> { final T value; A0(this.value); } class A2 extends B1 { A2(super.value); } class A4 extends B3 { A4(super.value); } class A6 extends B5 { A6(super.value); }",
         );
-        let (b, b_errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program: b,
+            errors: b_errors,
+            ..
+        } = parse(
             "import 'a.dart'; class B1 extends A0<String> { B1(super.value); } class B3 extends A2 { B3(super.value); } class B5 extends A4 { B5(super.value); }",
         );
         assert!(a_errors.is_empty());
@@ -19501,8 +19581,16 @@ final integer = integers.first;
         // judge `_value` from its scope, where every `_` name is invisible.
         let other_path = PathBuf::from("/project/lib/other.dart");
         let fake_path = PathBuf::from("/project/lib/fake.dart");
-        let (other, other_errors) = parse("class Other {}");
-        let (fake, fake_errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program: other,
+            errors: other_errors,
+            ..
+        } = parse("class Other {}");
+        let falcon_dart_parser::ParseResult {
+            program: fake,
+            errors: fake_errors,
+            ..
+        } = parse(
             "abstract class Api { int? get _value; } class Fake { dynamic noSuchMethod(Invocation invocation) => null; } class Impl extends Fake implements Api { final int? _value; Impl(this._value); }",
         );
         assert!(other_errors.is_empty());

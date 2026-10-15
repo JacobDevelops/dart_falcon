@@ -19,7 +19,7 @@ use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 use crate::lint::doc_comments::{
-    DocLookup, DocResolver, DocScopes, doc_blocks, keyword_references, references,
+    DocLookup, DocResolver, DocScopes, keyword_references, references,
 };
 use crate::lint::semantic_scope::SemanticState;
 
@@ -44,7 +44,6 @@ impl Rule for CommentReferences {
             &scopes,
             sdk_loaded,
         );
-        let tokens = ctx.tokens();
         let mut diagnostics = Vec::new();
         let mut report = |offset: usize, text: &str| {
             diagnostics.push(ctx.diagnostic(
@@ -56,7 +55,7 @@ impl Rule for CommentReferences {
                 },
             ));
         };
-        for block in doc_blocks(tokens, ctx.source) {
+        for block in ctx.syntax.doc_blocks(ctx.source) {
             let Some(scope) = scopes.scope_for(&block) else {
                 continue;
             };

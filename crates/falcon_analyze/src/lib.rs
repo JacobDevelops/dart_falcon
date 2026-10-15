@@ -10,6 +10,7 @@ pub mod parallel;
 pub mod registry;
 pub mod resolve;
 pub mod rule;
+pub mod source;
 pub mod suppressions;
 
 pub use constant_value::{

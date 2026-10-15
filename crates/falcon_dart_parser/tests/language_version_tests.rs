@@ -3,7 +3,9 @@ use falcon_syntax::LanguageVersion;
 use falcon_syntax::ast::*;
 
 fn switch_case(source: &str, package_version: Option<LanguageVersion>) -> SwitchCaseKind {
-    let (program, errors) = parse_for_package(source, package_version);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse_for_package(source, package_version);
     assert!(errors.is_empty(), "source: {source}\nerrors: {errors:?}");
     let TopLevelDecl::Function(function) = &program.declarations[0] else {
         panic!("expected function, got {:?}", program.declarations);
@@ -73,7 +75,9 @@ fn file_marker_precedes_package_language_for_switch_grammar() {
 #[test]
 fn legacy_switch_labels_keep_full_expression_ast() {
     let source = "// @dart = 2.19\nvoid f(Object o) { switch (o) {\ncase 1 + 2: break;\ncase true ? 1 : 2: break;\ncase 1 is int: break;\ncase -x: break;\ncase !b: break;\ncase 1 == 2: break;\ncase x ?? 2: break;\ncase 'text'.length: break;\n} }";
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Function(function) = &program.declarations[0] else {
         panic!("expected function");
@@ -112,17 +116,19 @@ fn primary_constructor_syntax_requires_313() {
         "class C(int x) { this : assert(x > 0); }",
         "class C;",
     ] {
-        let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 12)));
+        let falcon_dart_parser::ParseResult { errors, .. } =
+            parse_for_package(source, Some(LanguageVersion::new(3, 12)));
         assert!(
             errors
                 .iter()
                 .any(|error| error.message.starts_with("This requires the '")),
             "{source}: {errors:?}"
         );
-        let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 13)));
+        let falcon_dart_parser::ParseResult { errors, .. } =
+            parse_for_package(source, Some(LanguageVersion::new(3, 13)));
         assert!(errors.is_empty(), "{source}: {errors:?}");
     }
-    let (_, errors) = parse_for_package(
+    let falcon_dart_parser::ParseResult { errors, .. } = parse_for_package(
         "extension type E(int value) {}",
         Some(LanguageVersion::new(3, 12)),
     );
@@ -136,14 +142,16 @@ fn empty_class_feature_gate_reports_the_consumed_semicolon() {
         "class Empty; /* next declaration */ class Next {}",
         "// café\nclass Empty;\n",
     ] {
-        let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 9)));
+        let falcon_dart_parser::ParseResult { errors, .. } =
+            parse_for_package(source, Some(LanguageVersion::new(3, 9)));
         assert_eq!(errors.len(), 1, "{source}: {errors:?}");
         assert_eq!(
             errors[0].message,
             "This requires the 'primary-constructors' language feature"
         );
         assert_eq!(errors[0].offset, source.find(';').unwrap(), "{source}");
-        let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 13)));
+        let falcon_dart_parser::ParseResult { errors, .. } =
+            parse_for_package(source, Some(LanguageVersion::new(3, 13)));
         assert!(errors.is_empty(), "{source}: {errors:?}");
     }
 }
@@ -155,7 +163,8 @@ fn private_named_formal_feature_gate_reports_the_field_name() {
         "class A { final int _x; A({this._x = 1}); }",
         "// café\nclass A { final int _x; A({required this._x /* field */}); }",
     ] {
-        let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 11)));
+        let falcon_dart_parser::ParseResult { errors, .. } =
+            parse_for_package(source, Some(LanguageVersion::new(3, 11)));
         assert_eq!(errors.len(), 1, "{source}: {errors:?}");
         assert_eq!(
             errors[0].message,
@@ -163,7 +172,8 @@ fn private_named_formal_feature_gate_reports_the_field_name() {
         );
         assert_eq!(errors[0].offset, source.rfind("_x").unwrap(), "{source}");
         for version in [LanguageVersion::new(3, 12), LanguageVersion::new(3, 13)] {
-            let (_, errors) = parse_for_package(source, Some(version));
+            let falcon_dart_parser::ParseResult { errors, .. } =
+                parse_for_package(source, Some(version));
             assert!(errors.is_empty(), "{source}: {errors:?}");
         }
     }
@@ -172,9 +182,11 @@ fn private_named_formal_feature_gate_reports_the_field_name() {
 #[test]
 fn private_named_formals_follow_file_language_version() {
     let source = "// @dart=3.12\nclass Example { const Example._({required this._value}); final int _value; }";
-    let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 11)));
+    let falcon_dart_parser::ParseResult { errors, .. } =
+        parse_for_package(source, Some(LanguageVersion::new(3, 11)));
     assert!(errors.is_empty(), "{errors:?}");
     let source = "class Example { const Example({required this.value}); final int value; }";
-    let (_, errors) = parse_for_package(source, Some(LanguageVersion::new(3, 11)));
+    let falcon_dart_parser::ParseResult { errors, .. } =
+        parse_for_package(source, Some(LanguageVersion::new(3, 11)));
     assert!(errors.is_empty(), "{errors:?}");
 }

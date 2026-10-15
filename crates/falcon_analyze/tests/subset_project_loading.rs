@@ -123,7 +123,9 @@ fn part_only_indexes_uri_owner_siblings_and_imports() {
     fs::write(&sibling, "part of 'b.dart'; class Sibling {}").unwrap();
     fs::write(root.join("dep.dart"), "class Imported {}").unwrap();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([part.as_path()], |_| None);
-    let (program, errors) = falcon_dart_parser::parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = falcon_dart_parser::parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let external = falcon_analyze::ExternalLibraries::load(
         &environment,
@@ -178,9 +180,17 @@ fn requested_parts_are_not_disk_companions_but_their_unopened_parts_are() {
     fs::write(&part, "part of 'owner.dart';").unwrap();
     fs::write(&nested, "part of 'owner.dart'; class Nested {}").unwrap();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([owner.as_path()], |_| None);
-    let (owner_program, errors) = falcon_dart_parser::parse(owner_source);
+    let falcon_dart_parser::ParseResult {
+        program: owner_program,
+        errors,
+        ..
+    } = falcon_dart_parser::parse(owner_source);
     assert!(errors.is_empty(), "{errors:?}");
-    let (part_program, errors) = falcon_dart_parser::parse(part_source);
+    let falcon_dart_parser::ParseResult {
+        program: part_program,
+        errors,
+        ..
+    } = falcon_dart_parser::parse(part_source);
     assert!(errors.is_empty(), "{errors:?}");
     let external = falcon_analyze::ExternalLibraries::load(
         &environment,
@@ -208,9 +218,15 @@ fn closing_an_unimported_root_removes_its_disk_companions() {
     fs::write(&part, "part of 'owner.dart'; class Part {}").unwrap();
     fs::write(&remaining, "").unwrap();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([owner.as_path()], |_| None);
-    let (program, errors) = falcon_dart_parser::parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = falcon_dart_parser::parse(source);
     assert!(errors.is_empty(), "{errors:?}");
-    let (empty, errors) = falcon_dart_parser::parse("");
+    let falcon_dart_parser::ParseResult {
+        program: empty,
+        errors,
+        ..
+    } = falcon_dart_parser::parse("");
     assert!(errors.is_empty(), "{errors:?}");
     let mut external = falcon_analyze::ExternalLibraries::load(
         &environment,
@@ -243,7 +259,9 @@ fn failed_local_import_targets_remain_available_for_file_watches() {
     fs::write(&app, source).unwrap();
     fs::write(&bridge, "export 'transitive.dart';").unwrap();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
-    let (program, errors) = falcon_dart_parser::parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = falcon_dart_parser::parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let roots = [(app.as_path(), &program, source)];
     let external =

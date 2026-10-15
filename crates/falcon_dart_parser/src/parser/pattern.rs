@@ -15,7 +15,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_logical_or_pattern(&mut self) -> Pattern {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let mut left = self.parse_logical_and_pattern();
         while self.eat(TokenKind::PipePipe).is_some() {
             let right = self.parse_logical_and_pattern();
@@ -30,7 +30,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_logical_and_pattern(&mut self) -> Pattern {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let mut left = self.parse_relational_pattern();
         while self.eat(TokenKind::AmpAmp).is_some() {
             let right = self.parse_relational_pattern();
@@ -45,7 +45,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_relational_pattern(&mut self) -> Pattern {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         // A `<` that opens a typed collection pattern (`<int>[...]`, `<K, V>{...}`)
         // is not the relational `<` operator — defer to the primary parser.
         if self.at(TokenKind::Lt) && self.typed_collection_ahead() {
@@ -89,7 +89,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_postfix_pattern(&mut self) -> Pattern {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let mut inner = self.parse_primary_pattern();
         loop {
             if self.eat(TokenKind::Qmark).is_some() {
@@ -120,7 +120,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_primary_pattern(&mut self) -> Pattern {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
 
         // Dot-shorthand constant pattern (Dart 3.x): `.name` / `.new` — an
         // enum/static-member shorthand used as a pattern (`case .build => ...`).
@@ -401,7 +401,7 @@ impl<'src> Parser<'src> {
             let close = self.expect(TokenKind::RParen);
             Pattern::ParenPattern {
                 inner: Box::new(first),
-                span: Span::new(start, close.offset + close.len),
+                span: Span::new(start, close.offset() + close.len()),
             }
         }
     }
@@ -425,7 +425,7 @@ impl<'src> Parser<'src> {
     /// whose getter name is the bound name), `name: pattern`, or a positional
     /// `pattern`.
     fn parse_record_field(&mut self) -> RecordPatternField {
-        let fs = self.cur().offset;
+        let fs = self.cur().offset();
         if self.at(TokenKind::Colon) {
             self.advance(); // :
             // `:name` (also `:var name` / `:final name`) always binds a variable.
@@ -458,7 +458,7 @@ impl<'src> Parser<'src> {
 
         let mut elements = Vec::new();
         while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
-            let es = self.cur().offset;
+            let es = self.cur().offset();
             if self.at(TokenKind::DotDotDot) {
                 self.advance();
                 let rest_pat = if !self.at(TokenKind::RBracket) && !self.at(TokenKind::Comma) {
@@ -496,7 +496,7 @@ impl<'src> Parser<'src> {
                 }
                 continue;
             }
-            let es = self.cur().offset;
+            let es = self.cur().offset();
             let key = self.parse_expr();
             self.expect(TokenKind::Colon);
             let pattern = self.parse_pattern();
@@ -589,7 +589,7 @@ impl<'src> Parser<'src> {
             self.advance(); // (
             let mut fields = Vec::new();
             while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
-                let fs = self.cur().offset;
+                let fs = self.cur().offset();
                 // Dart 3 colon-shorthand: `:field` binds a variable whose getter
                 // name is the bound name (also `:var x` / `:final x`). Parse in
                 // binding mode so `field` becomes a variable, not a constant

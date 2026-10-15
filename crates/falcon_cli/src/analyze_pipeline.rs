@@ -11,11 +11,13 @@ use falcon_analyze::{
     AnalysisEnvironment, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
 };
 use falcon_config::{load_config, load_or_default};
+use falcon_dart_parser::lex_syntax;
 use falcon_diagnostics::{Diagnostic, LineIndex};
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, package_identities,
     requires_resolution, run_cross_file,
 };
+use falcon_syntax::{Program, ast::Span};
 
 use crate::file_walker::{walk_files, walk_pubspecs};
 use crate::output;
@@ -83,8 +85,8 @@ pub struct CheckOutput {
 ///
 /// # Errors
 ///
-/// Returns an error message if the explicit `--config` file cannot be loaded
-/// or the current directory is inaccessible.
+/// Returns an error message if configuration, directory traversal, or source
+/// reading fails (including files exceeding the compact source-size limit).
 pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     collect_check_with_sdk_locator(options, DartSdk::locate)
 }
@@ -118,13 +120,13 @@ pub fn collect_check_with_sdk_locator(
         cli_filter.extend_excludes(&options.exclude_patterns);
         &cli_filter
     };
-    let files = walk_files(&options.paths, filter);
+    let mut files = walk_files(&options.paths, filter)?;
     let registry = build_registry(&config);
     let cross_file_registry = build_cross_file_registry(&config);
     let collect_programs = !cross_file_registry.is_empty();
     let resolve = requires_resolution(&registry);
-    let manifests = if collect_programs || resolve {
-        walk_pubspecs(&options.paths, filter)
+    let mut manifests = if collect_programs || resolve {
+        walk_pubspecs(&options.paths, filter)?
     } else {
         Vec::new()
     };
@@ -170,14 +172,28 @@ pub fn collect_check_with_sdk_locator(
         resolve,
         workspace,
     );
+    let total_files = files.len() + manifests.len();
     if collect_programs {
-        let (empty_program, _) = falcon_dart_parser::parse("");
-        project_files.extend(manifests.iter().map(|(path, source)| ProjectFile {
-            path: path.clone(),
-            source: source.clone(),
-            program: empty_program.clone(),
-            has_parse_errors: false,
+        let empty_program = Program {
+            library_directive: None,
+            part_of_directive: None,
+            part_directives: Vec::new(),
+            imports: Vec::new(),
+            exports: Vec::new(),
+            declarations: Vec::new(),
+            span: Span::new(0, 0),
+        };
+        project_files.extend(manifests.drain(..).map(|(path, source)| {
+            let syntax = lex_syntax(&source);
+            ProjectFile {
+                path,
+                source,
+                program: empty_program.clone(),
+                syntax,
+                has_parse_errors: false,
+            }
         }));
+        files.clear();
     }
 
     apply_severities(&mut diagnostics, &config);
@@ -193,11 +209,18 @@ pub fn collect_check_with_sdk_locator(
 
     // Resolve 1-based line/col for every diagnostic from its file's source, so
     // text and JSON output carry navigable positions rather than byte offsets.
-    let sources: HashMap<Cow<'_, str>, &str> = files
-        .iter()
-        .chain(manifests.iter())
-        .map(|(path, source)| (path.to_string_lossy(), source.as_str()))
-        .collect();
+    let sources: HashMap<Cow<'_, str>, &str> = if collect_programs {
+        project_files
+            .iter()
+            .map(|file| (file.path.to_string_lossy(), file.source.as_str()))
+            .collect()
+    } else {
+        files
+            .iter()
+            .chain(manifests.iter())
+            .map(|(path, source)| (path.to_string_lossy(), source.as_str()))
+            .collect()
+    };
     let mut lines: HashMap<&str, LineIndex<'_>> = HashMap::new();
     for d in &mut diagnostics {
         if let Some((path, src)) = sources.get_key_value(d.file_path.as_str()) {
@@ -230,7 +253,7 @@ pub fn collect_check_with_sdk_locator(
     };
     Ok(CheckOutput {
         diagnostics,
-        total_files: files.len() + manifests.len(),
+        total_files,
         exit_code,
     })
 }

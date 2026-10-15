@@ -307,6 +307,7 @@ impl Scope<'_, '_> {
                 let mut member_names = Vec::new();
                 for op in sections.iter().flat_map(|section| &section.ops) {
                     match op {
+                        CascadeOp::NullAssert { .. } => {}
                         CascadeOp::Field { name, .. } => member_names.push(name),
                         CascadeOp::Index { index, .. } => nodes.push(index.as_ref()),
                         CascadeOp::Call(name, _, args) => {
@@ -711,9 +712,17 @@ mod tests {
     fn diagnostics(source: &str, imported: &str) -> Vec<Diagnostic> {
         let path = Path::new("/project/lib/main.dart");
         let imported_path = Path::new("/project/lib/output.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
-        let (output, errors) = parse(imported);
+        let falcon_dart_parser::ParseResult {
+            program: output,
+            errors,
+            ..
+        } = parse(imported);
         assert!(errors.is_empty(), "{errors:?}");
         let files = [(path, &program), (imported_path, &output)];
         let identities = IdentityIndex::from_project_files(
@@ -744,7 +753,7 @@ mod tests {
             &types,
         );
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);

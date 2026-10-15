@@ -96,7 +96,7 @@ impl Rule for AnnotateOverrides {
                             &owner,
                             operator.lookup_name(),
                             MemberKind::Operator,
-                            operator_token_span(operator, ctx.source),
+                            operator_token_span(operator, ctx.syntax),
                         );
                     }
                     ClassMember::Field(_)

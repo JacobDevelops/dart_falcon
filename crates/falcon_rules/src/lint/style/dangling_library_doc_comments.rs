@@ -154,10 +154,12 @@ mod tests {
     use std::path::PathBuf;
 
     fn diags(source: &str) -> Vec<Diagnostic> {
-        let program = parse(source).0;
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(source);
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config);
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
         DanglingLibraryDocComments.analyze(&program, &ctx)
     }
 

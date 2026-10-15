@@ -64,19 +64,19 @@ impl Collector<'_, '_> {
         let body_start = body.span().start;
         let before = self
             .tokens
-            .partition_point(|token| token.offset < body_start);
+            .partition_point(|token| token.offset() < body_start);
         let Some(control) = before.checked_sub(1).map(|index| self.tokens[index]) else {
             return;
         };
-        let control_end = control.offset + control.len;
+        let control_end = control.offset() + control.len();
         if self.ctx.source[control_end.min(first)..first].contains('\n') {
             return;
         }
         let begin_len = self
             .tokens
             .get(before)
-            .filter(|token| token.offset == body_start)
-            .map_or(1, |token| token.len);
+            .filter(|token| token.offset() == body_start)
+            .map_or(1, |token| token.len());
         self.diags.push(self.ctx.diagnostic(
             "always-put-control-body-on-new-line",
             "Statement should be on a separate line.",

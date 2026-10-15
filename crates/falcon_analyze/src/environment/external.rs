@@ -205,7 +205,7 @@ impl ExternalLibraries {
         context: Option<usize>,
         path: &Path,
     ) -> Option<&CompanionDependencies> {
-        let source = match std::fs::read_to_string(path) {
+        let source = match crate::source::read_source(path) {
             Ok(source) => source,
             Err(_) => {
                 self.companion_dependencies.remove(path);
@@ -411,7 +411,7 @@ fn dependencies(
 }
 
 /// Read and parse the library defined at `path` with its parts; `None` when
-/// the file is unreadable or is itself a part.
+/// the file is unreadable, exceeds the source-size limit or is itself a part.
 fn load_library(
     environment: &AnalysisEnvironment,
     path: &Path,
@@ -471,7 +471,7 @@ fn load_library(
 }
 
 fn read(path: &Path, package_version: Option<LanguageVersion>) -> std::io::Result<ExternalFile> {
-    let source = std::fs::read_to_string(path)?;
+    let source = crate::source::read_source(path)?;
     Ok(read_source(path, &source, package_version))
 }
 
@@ -480,7 +480,11 @@ fn read_source(
     source: &str,
     package_version: Option<LanguageVersion>,
 ) -> ExternalFile {
-    let (mut program, errors) = parse_for_package(source, package_version);
+    let falcon_dart_parser::ParseResult {
+        mut program,
+        errors,
+        ..
+    } = parse_for_package(source, package_version);
     let has_parse_errors = !declarations_intact(&program, &errors);
     let doc_imports = crate::resolve::doc_imports(&program, source)
         .map(str::to_owned)
@@ -679,6 +683,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn oversized_import_outside_explicit_root_is_unavailable() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("selected");
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("main.dart");
+        let source = "import '../oversized.dart';";
+        std::fs::write(&path, source).unwrap();
+        let imported = directory.path().join("oversized.dart");
+        std::fs::File::create(&imported)
+            .unwrap()
+            .set_len(u64::from(u32::MAX) + 1)
+            .unwrap();
+        let error = read(&imported, None).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("maximum supported source size"));
+
+        let environment =
+            AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
+        let parsed = falcon_dart_parser::parse(source);
+        let libraries = ExternalLibraries::load(
+            &environment,
+            &[(path.as_path(), &parsed.program, source)],
+            |candidate| candidate.starts_with(&root),
+        );
+        assert!(libraries.is_empty());
+        assert!(libraries.attempted.contains(&imported));
+        assert!(
+            libraries
+                .attempted_project_paths()
+                .any(|path| path == imported)
+        );
+        assert_eq!(
+            libraries.resolve_uri(&environment, &path, "../oversized.dart"),
+            Some(imported),
+        );
+    }
+
+    #[test]
+    fn oversized_companion_evicts_cached_directives() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("part.dart");
+        std::fs::write(&path, "import 'dependency.dart';").unwrap();
+        let environment =
+            AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
+        let mut libraries = ExternalLibraries::default();
+        assert!(
+            libraries
+                .companion_dependencies(&environment, None, &path)
+                .is_some()
+        );
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(u64::from(u32::MAX) + 1)
+            .unwrap();
+        assert!(
+            libraries
+                .companion_dependencies(&environment, None, &path)
+                .is_none()
+        );
+        assert!(!libraries.companion_dependencies.contains_key(&path));
+    }
+
+    #[test]
     fn companion_directives_cache_refreshes_content_changes_and_failed_reads() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("part.dart");
@@ -739,7 +806,11 @@ mod tests {
 
     #[test]
     fn const_primary_and_implicit_enum_fields_survive_compaction() {
-        let (mut program, errors) = falcon_dart_parser::parse(
+        let falcon_dart_parser::ParseResult {
+            mut program,
+            errors,
+            ..
+        } = falcon_dart_parser::parse(
             "class const C(final int x) { final int y = 1; }\n\
              enum E { first; final int y = 2; }\n\
              class Ordinary { final int y = 3; }",

@@ -636,7 +636,7 @@ impl Collector<'_> {
                 for section in sections {
                     for op in &section.ops {
                         match op {
-                            CascadeOp::Field { .. } => {}
+                            CascadeOp::Field { .. } | CascadeOp::NullAssert { .. } => {}
                             CascadeOp::Index { index, .. } => {
                                 self.check(index, Parent::OtherExpression);
                             }

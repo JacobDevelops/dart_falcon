@@ -47,7 +47,7 @@ pub(crate) struct ApiDeclaration<'a> {
 }
 
 pub(crate) fn documented(tokens: &[falcon_syntax::Token], start: usize) -> bool {
-    let end = tokens.partition_point(|t| t.offset < start);
+    let end = tokens.partition_point(|t| t.offset() < start);
     tokens[..end]
         .iter()
         .rev()
@@ -55,7 +55,7 @@ pub(crate) fn documented(tokens: &[falcon_syntax::Token], start: usize) -> bool 
         // The lexer leaves `/**/` as ordinary trivia; analyzer still attaches
         // that empty block as a declaration's documentation comment.
         .any(|t| {
-            t.kind == TokenKind::DocComment || (t.kind == TokenKind::BlockComment && t.len == 4)
+            t.kind == TokenKind::DocComment || (t.kind == TokenKind::BlockComment && t.len() == 4)
         })
 }
 
@@ -66,11 +66,11 @@ impl ApiDeclaration<'_> {
         let Some(last) = self.annotations.last() else {
             return documented(tokens, self.start);
         };
-        let after = tokens.partition_point(|t| t.offset < last.span.end);
+        let after = tokens.partition_point(|t| t.offset() < last.span.end);
         let keyword = tokens[after..]
             .iter()
             .find(|t| !t.is_trivia())
-            .map_or(last.span.end, |t| t.offset);
+            .map_or(last.span.end, |t| t.offset());
         documented(tokens, self.start)
             || self
                 .annotations
@@ -82,7 +82,7 @@ impl ApiDeclaration<'_> {
 
 pub(crate) fn api_declarations<'a>(
     program: &'a Program,
-    source: &str,
+    syntax: &falcon_syntax::SyntaxStore,
     model: Option<&SemanticModel<'_>>,
 ) -> Vec<ApiDeclaration<'a>> {
     let is_internal = |annotations: &[Annotation]| {
@@ -259,7 +259,7 @@ pub(crate) fn api_declarations<'a>(
                 }
                 ClassMember::Operator(n) => candidates.push(ApiDeclaration {
                     name: n.lookup_name(),
-                    span: crate::lint::declarations::operator_token_span(n, source),
+                    span: crate::lint::declarations::operator_token_span(n, syntax),
                     start: n.annotations.first().map_or(n.span.start, |a| a.span.start),
                     annotations: &n.annotations,
                     owner: Some(&name.name),
@@ -315,7 +315,7 @@ impl Rule for PublicMemberApiDocs {
         let model = ctx
             .identities
             .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types));
-        let declarations = api_declarations(program, ctx.source, model.as_ref());
+        let declarations = api_declarations(program, ctx.syntax, model.as_ref());
         let tokens = ctx.tokens();
         let missing = |d: &ApiDeclaration<'_>| {
             if d.name.starts_with('_')
@@ -399,12 +399,16 @@ mod tests {
     #[test]
     fn carriage_return_line_comments_do_not_hide_public_declarations() {
         let source = "// ordinary comment\rvoid visible() {}";
-        let (program, errors) = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/public-member-api-docs/project/lib/cr_only.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config);
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
         let diagnostics = PublicMemberApiDocs.analyze(&program, &ctx);
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(
@@ -423,17 +427,21 @@ mod tests {
             sealed class Closed();\n\
             class _Private();\n\
             extension type Wrapper(int value) {}";
-        let (program, errors) = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
-        let declarations = api_declarations(&program, source, None);
-        let tokens = falcon_dart_parser::lexer::Lexer::new(source).tokenize();
+        let declarations = api_declarations(&program, &syntax, None);
+        let tokens = syntax.tokens();
         let constructor = declarations.iter().find(|d| d.name == "named").unwrap();
         assert_eq!(
             &source[constructor.span.start..constructor.span.end],
             "this"
         );
         assert_eq!(constructor.owner, Some("Public"));
-        assert!(!constructor.documented(&tokens));
+        assert!(!constructor.documented(tokens));
         assert!(constructor.annotations.is_empty());
         assert_eq!(
             declarations
@@ -463,12 +471,16 @@ mod tests {
             class C();\n\
             /// Documents only the mixin class.\n\
             mixin class M();";
-        let (program, errors) = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/public-member-api-docs/project/lib/primary.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config);
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
         let names: Vec<_> = PublicMemberApiDocs
             .analyze(&program, &ctx)
             .into_iter()

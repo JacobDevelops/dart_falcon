@@ -46,9 +46,7 @@ use falcon_syntax::visitor::{
 };
 use falcon_syntax::{Token, TokenKind};
 
-use crate::lint::doc_comments::{
-    DocElement, DocLookup, DocResolver, DocScopes, doc_blocks, references,
-};
+use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
 use crate::lint::semantic_scope::{
     CascadeAssignment, SemanticRuleVisitor, SemanticState, visit_program,
 };
@@ -193,7 +191,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
             &scopes,
             sdk_loaded,
         );
-        for block in doc_blocks(tokens, ctx.source) {
+        for block in ctx.syntax.doc_blocks(ctx.source) {
             let Some(scope) = scopes.scope_for(&block) else {
                 continue;
             };
@@ -662,7 +660,7 @@ impl Visitor for Frontier<'_> {
         self.metadata_scope = previous;
     }
     fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        let previous = self.declaration.replace(node.span);
+        let previous = self.declaration.replace(node.full_range());
         if let Some(scope) = self.blocks.last()
             && let Some(message) = deprecation(&node.annotations, self.model, self.signatures)
         {
@@ -1122,11 +1120,11 @@ impl<'ctx> Uses<'ctx> {
     fn cascade_index_span(&self, start: usize, index: &Expr) -> Span {
         let after = self
             .tokens
-            .partition_point(|token| token.offset < index.span().end);
+            .partition_point(|token| token.offset() < index.span().end);
         let end = self.tokens[after..]
             .iter()
             .find(|token| token.kind == TokenKind::RBracket)
-            .map_or(index.span().end, |token| token.offset + token.len);
+            .map_or(index.span().end, |token| token.offset() + token.len());
         Span { start, end }
     }
 
@@ -1493,7 +1491,7 @@ impl SemanticRuleVisitor for Uses<'_> {
                     });
                 }
             }
-            CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => {}
+            CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) | CascadeOp::NullAssert { .. } => {}
         }
     }
 
@@ -1814,7 +1812,11 @@ mod tests {
     use std::path::Path;
 
     fn analyze(source: &str, path: &Path) -> Vec<Diagnostic> {
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -1838,7 +1840,7 @@ mod tests {
         let model = SemanticModel::new(path, &identities, Some(&types));
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);

@@ -525,7 +525,9 @@ mod tests {
         let source = "void f(int? a, int? b, int c) { while (a != null) { a = b; var d = 0; d = 1; \
             void g() { c = 1; } } for (var i = 0; i < 1; i++) { (b, _) = (null, 0); } \
             try { c = 2; } catch (e) {} do { c++; } while (c < 3); }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let writes = FlowWrites::program(&program);
         let region = |text: &str| source.find(text).expect(text);
@@ -549,7 +551,9 @@ mod tests {
             while (true) { void h() { x = null; } } for (x in xs) {} try {} catch (e) {} \
             cbs.add(() => x = null); for (var x in xs) { x = null; } \
             var g = () { do { x = null; } while (true); }; }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let writes = FlowWrites::program(&program);
         let at = |text: &str| source.find(text).expect(text);
@@ -581,7 +585,9 @@ mod tests {
         let source = "void f(int? x) { while (true) { \
             { int? x; void inner() { x = null; } } \
             while (true) { void outer() { x = null; } } } }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let writes = FlowWrites::program(&program);
         let x = HashSet::from(["x".to_owned()]);
@@ -589,8 +595,11 @@ mod tests {
             assert_eq!(writes.captured_region_writes[&start], x);
         }
         assert_eq!(writes.captured_region_writes.len(), 2);
-        let (shadowed, errors) =
-            parse("void f(int? x) { while (true) { int? x; void inner() { x = null; } } }");
+        let falcon_dart_parser::ParseResult {
+            program: shadowed,
+            errors,
+            ..
+        } = parse("void f(int? x) { while (true) { int? x; void inner() { x = null; } } }");
         assert!(errors.is_empty(), "{errors:?}");
         assert!(
             FlowWrites::program(&shadowed)
@@ -604,7 +613,9 @@ mod tests {
         let source = "void f(int? x, Object value) { while (true) { \
             var list = [if (value case int x) x else (x = null), (x = null)]; \
             var map = {if (value case int x) x: x else 0: (x = null)}; } }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let writes = FlowWrites::program(&program);
         assert_eq!(
@@ -616,7 +627,9 @@ mod tests {
     #[test]
     fn cached_results_drop_traversal_only_bindings() {
         let source = "void f(int x) { void g() { x = 1; } while (true) { g(); } }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let writes = FlowWrites::program(&program);
         assert!(!writes.anywhere_writes.is_empty());

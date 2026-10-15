@@ -19,19 +19,17 @@ impl Rule for PreferNullAwareOperators {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
-            source: ctx.source,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-use crate::lint::expressions::{null_check, text};
+use crate::lint::expressions::{equivalent, null_check};
 
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
     ctx: &'s AnalyzeContext<'s>,
-    source: &'s str,
 }
 
 /// The receiver of a direct member access, index, or method call — the part
@@ -66,7 +64,7 @@ impl Visitor for Collector<'_> {
             };
             if matches!(null_branch.unparenthesized(), Expr::NullLit { .. })
                 && let Some(receiver) = access_receiver(access_branch)
-                && text(receiver, self.source) == text(operand, self.source)
+                && equivalent(receiver, operand, self.ctx)
             {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-null-aware-operators",

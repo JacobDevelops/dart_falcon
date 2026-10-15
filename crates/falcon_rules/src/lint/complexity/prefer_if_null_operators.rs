@@ -19,19 +19,17 @@ impl Rule for PreferIfNullOperators {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
-            source: ctx.source,
         };
         collector.visit_program(program);
         collector.diags
     }
 }
 
-use crate::lint::expressions::{null_check, text};
+use crate::lint::expressions::{equivalent, null_check};
 
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
     ctx: &'s AnalyzeContext<'s>,
-    source: &'s str,
 }
 
 impl Visitor for Collector<'_> {
@@ -47,7 +45,7 @@ impl Visitor for Collector<'_> {
             // `x == null ? y : x` keeps `x` in the else branch;
             // `x != null ? x : y` keeps `x` in the then branch.
             let fallthrough = if is_eq { else_expr } else { then_expr };
-            if text(operand, self.source) == text(fallthrough, self.source) {
+            if equivalent(operand, fallthrough, self.ctx) {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-if-null-operators",
                     "Prefer using the if-null operator '??'.",

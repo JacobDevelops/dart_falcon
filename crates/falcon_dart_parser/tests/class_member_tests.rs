@@ -24,7 +24,11 @@ fn assert_clean(errors: &[falcon_dart_parser::parser::ParseError]) {
 
 #[test]
 fn test_untyped_member_is_method_not_constructor() {
-    let (prog, errors) = parse("class C { foo() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { foo() {} }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -41,7 +45,11 @@ fn test_untyped_member_is_method_not_constructor() {
 #[test]
 fn test_test_prefixed_member_is_method() {
     // The ubiquitous real-world case: `test_x() {}` in a test class.
-    let (prog, errors) = parse("class MyTest { test_login() {} test_logout() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class MyTest { test_login() {} test_logout() {} }");
     assert_clean(&errors);
     let c = only_class(&prog);
     for m in &c.members {
@@ -54,7 +62,11 @@ fn test_test_prefixed_member_is_method() {
 
 #[test]
 fn test_untyped_member_with_body_and_params_is_method() {
-    let (prog, errors) = parse("class C { doWork(int a, int b) { return; } }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { doWork(int a, int b) { return; } }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -75,7 +87,11 @@ fn test_untyped_member_with_body_and_params_is_method() {
 #[test]
 fn test_untyped_abstract_member_is_method() {
     // No body → abstract method, still classified as a method (name != type).
-    let (prog, errors) = parse("class C { foo(); }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { foo(); }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -90,7 +106,11 @@ fn test_untyped_abstract_member_is_method() {
 
 #[test]
 fn test_unnamed_constructor_still_constructor() {
-    let (prog, errors) = parse("class C { C() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { C() {} }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Constructor(ctor) => {
@@ -105,7 +125,11 @@ fn test_unnamed_constructor_still_constructor() {
 
 #[test]
 fn test_named_constructor_still_constructor() {
-    let (prog, errors) = parse("class C { C.named() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { C.named() {} }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Constructor(ctor) => {
@@ -121,7 +145,11 @@ fn test_named_constructor_still_constructor() {
 
 #[test]
 fn test_unnamed_and_named_constructor_with_initializers() {
-    let (prog, errors) = parse("class C { int x; C(this.x); C.zero() : x = 0; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { int x; C(this.x); C.zero() : x = 0; }");
     assert_clean(&errors);
     let c = only_class(&prog);
     assert!(matches!(&c.members[1], ClassMember::Constructor(_)));
@@ -130,7 +158,11 @@ fn test_unnamed_and_named_constructor_with_initializers() {
 
 #[test]
 fn test_const_constructor_still_constructor() {
-    let (prog, errors) = parse("class C { const C(); }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { const C(); }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Constructor(ctor) => {
@@ -143,7 +175,11 @@ fn test_const_constructor_still_constructor() {
 
 #[test]
 fn test_factory_constructor_still_constructor() {
-    let (prog, errors) = parse("class C { factory C.make() => C._(); C._(); }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { factory C.make() => C._(); C._(); }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Constructor(ctor) => {
@@ -160,7 +196,11 @@ fn test_factory_constructor_still_constructor() {
 #[test]
 fn test_generic_untyped_member_named_like_type_is_method() {
     // A constructor cannot declare type parameters, so `C<T>()` is a method.
-    let (prog, errors) = parse("class C { C<T>() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { C<T>() {} }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -175,7 +215,11 @@ fn test_generic_untyped_member_named_like_type_is_method() {
 #[test]
 fn test_async_untyped_member_named_like_type_is_method() {
     // A constructor cannot be async, so `C() async {}` is a method.
-    let (prog, errors) = parse("class C { C() async {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { C() async {} }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -189,7 +233,11 @@ fn test_async_untyped_member_named_like_type_is_method() {
 
 #[test]
 fn test_enum_untyped_member_is_method() {
-    let (prog, errors) = parse("enum E { a, b; foo() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("enum E { a, b; foo() {} }");
     assert_clean(&errors);
     match &prog.declarations[0] {
         TopLevelDecl::Enum(e) => match &e.members[0] {
@@ -205,7 +253,11 @@ fn test_enum_untyped_member_is_method() {
 
 #[test]
 fn test_enum_constructor_is_constructor() {
-    let (prog, errors) = parse("enum E { a(1), b(2); final int n; const E(this.n); }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("enum E { a(1), b(2); final int n; const E(this.n); }");
     assert_clean(&errors);
     match &prog.declarations[0] {
         TopLevelDecl::Enum(e) => {
@@ -227,7 +279,11 @@ fn test_enum_constructor_is_constructor() {
 #[test]
 fn test_mixin_untyped_member_is_method() {
     // Even a member named after the mixin is a method — mixins have no ctors.
-    let (prog, errors) = parse("mixin M { M() {} foo() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("mixin M { M() {} foo() {} }");
     assert_clean(&errors);
     match &prog.declarations[0] {
         TopLevelDecl::Mixin(m) => {
@@ -244,7 +300,11 @@ fn test_mixin_untyped_member_is_method() {
 
 #[test]
 fn test_extension_untyped_member_is_method() {
-    let (prog, errors) = parse("extension E on int { foo() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("extension E on int { foo() {} }");
     assert_clean(&errors);
     match &prog.declarations[0] {
         TopLevelDecl::Extension(e) => match &e.members[0] {
@@ -260,7 +320,11 @@ fn test_extension_untyped_member_is_method() {
 
 #[test]
 fn test_extension_type_untyped_member_is_method() {
-    let (prog, errors) = parse("extension type E(int it) { foo() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("extension type E(int it) { foo() {} }");
     assert_clean(&errors);
     match &prog.declarations[0] {
         TopLevelDecl::ExtensionType(e) => match &e.members[0] {
@@ -276,7 +340,11 @@ fn test_extension_type_untyped_member_is_method() {
 
 #[test]
 fn test_extension_type_named_constructor_is_constructor() {
-    let (prog, errors) = parse("extension type E(int it) { E.zero() : it = 0; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("extension type E(int it) { E.zero() : it = 0; }");
     assert_clean(&errors);
     match &prog.declarations[0] {
         TopLevelDecl::ExtensionType(e) => match &e.members[0] {
@@ -319,7 +387,11 @@ fn arrow_closure_field_then_more_members() {
 #[test]
 fn enum_constant_named_constructor() {
     let src = "enum E { a.foo(1); const E.foo(this.n); final int n; }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert_eq!(errors.len(), 0, "errors: {errors:?}");
     let en = match &prog.declarations[0] {
         TopLevelDecl::Enum(e) => e,
@@ -361,7 +433,11 @@ fn modifier_keyword_static_used_as_field_name() {
 fn static_record_return_type_with_generic_args() {
     // `static (A<int>, B<int>) m()` — a record return type carrying generic args,
     // reached through the modifier-prefixed member path.
-    let (prog, errors) = parse("class C { static (A<int>, B<int>) m() => x; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { static (A<int>, B<int>) m() => x; }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -380,7 +456,11 @@ fn static_record_return_type_with_generic_args() {
 #[test]
 fn static_nullable_named_record_return_type() {
     // `static ({int a})? m()` — a nullable named-field record return type.
-    let (prog, errors) = parse("class C { static ({int a})? m() => x; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { static ({int a})? m() => x; }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -395,7 +475,11 @@ fn static_nullable_named_record_return_type() {
 fn late_record_typed_field() {
     // `late (int, int) r;` — `late` must stay a modifier, not be read as the
     // member's own name when a record type follows.
-    let (prog, errors) = parse("class C { late (int, int) r; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { late (int, int) r; }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Field(f) => {
@@ -411,7 +495,11 @@ fn late_record_typed_field() {
 fn annotation_before_nullable_record_return_type() {
     // `@override ()? m()` — the `()?` is the nullable empty-record return type, not
     // the annotation's argument list.
-    let (prog, errors) = parse("class C { @override ()? m() => x; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { @override ()? m() => x; }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -437,7 +525,11 @@ fn annotation_before_nullable_record_return_type() {
 fn builtin_override_identifier_as_field_name() {
     // `const override = 1;` — `override` is the field's own name here, not a
     // modifier to be silently consumed.
-    let (prog, errors) = parse("class C { const override = 1; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { const override = 1; }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Field(f) => {
@@ -456,7 +548,11 @@ fn builtin_override_identifier_as_field_name() {
 
 #[test]
 fn test_member_named_external_with_async_body() {
-    let (prog, errors) = parse("class C { external() async {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { external() async {} }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -471,7 +567,11 @@ fn test_member_named_external_with_async_body() {
 
 #[test]
 fn test_member_named_late_with_async_body() {
-    let (prog, errors) = parse("class C { late() async {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { late() async {} }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -485,7 +585,11 @@ fn test_member_named_late_with_async_body() {
 
 #[test]
 fn test_member_named_covariant_with_sync_star_body() {
-    let (prog, errors) = parse("class C { covariant() sync* {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { covariant() sync* {} }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -499,7 +603,11 @@ fn test_member_named_covariant_with_sync_star_body() {
 #[test]
 fn test_static_record_return_type_still_modifier() {
     // Control: a genuine record return type keeps `static` as a modifier.
-    let (prog, errors) = parse("class C { static (int, int) m() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { static (int, int) m() {} }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -519,7 +627,11 @@ fn test_static_record_return_type_still_modifier() {
 
 #[test]
 fn test_static_record_return_method_named_async() {
-    let (prog, errors) = parse("class C { static (int, int) async() => (1, 2); }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { static (int, int) async() => (1, 2); }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -537,7 +649,11 @@ fn test_static_record_return_method_named_async() {
 
 #[test]
 fn test_external_record_return_method_named_sync() {
-    let (prog, errors) = parse("class C { external (int, int) sync(); }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { external (int, int) sync(); }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Method(m) => {
@@ -552,7 +668,11 @@ fn test_external_record_return_method_named_sync() {
 
 #[test]
 fn test_late_record_typed_field_named_async() {
-    let (prog, errors) = parse("class C { late (int, int) async; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { late (int, int) async; }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Field(f) => {
@@ -568,7 +688,11 @@ fn test_late_record_typed_field_named_async() {
 fn test_factory_is_field_name() {
     // `factory` followed by `=`/`;`/`,` is the field's own name, not the factory
     // keyword — the SDK accepts a field named `factory`.
-    let (prog, errors) = parse("class C { late final factory = 1; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { late final factory = 1; }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Field(f) => {
@@ -583,7 +707,11 @@ fn test_factory_is_field_name() {
 #[test]
 fn test_factory_constructor_still_parses() {
     // Control: a genuine factory constructor (name follows `factory`) is intact.
-    let (prog, errors) = parse("class C { factory C() => C._(); C._(); }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { factory C() => C._(); C._(); }");
     assert_clean(&errors);
     assert!(matches!(
         &only_class(&prog).members[0],
@@ -595,13 +723,21 @@ fn test_factory_constructor_still_parses() {
 fn test_private_named_initializing_formal_accepted() {
     // `{required this._x}` is valid from language 3.12 (private named
     // parameters); the parser accepts it regardless of language version.
-    let (_prog, errors) = parse("class C { final int _x; C({required this._x}); }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class C { final int _x; C({required this._x}); }");
     assert_clean(&errors);
 }
 
 #[test]
 fn test_private_named_super_formal_accepted() {
-    let (_prog, errors) = parse("class C extends B { C({super._x}); }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class C extends B { C({super._x}); }");
     assert_clean(&errors);
 }
 
@@ -609,14 +745,22 @@ fn test_private_named_super_formal_accepted() {
 fn test_private_positional_initializing_formal_ok() {
     // Control: a *positional* private initializing formal is legal — the feature
     // only gates named private formals.
-    let (_prog, errors) = parse("class C { final int _x; C(this._x); }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class C { final int _x; C(this._x); }");
     assert_clean(&errors);
 }
 
 #[test]
 fn test_public_named_initializing_formal_ok() {
     // Control: a public named initializing formal is always legal.
-    let (_prog, errors) = parse("class C { int x; C({required this.x}); }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class C { int x; C({required this.x}); }");
     assert_clean(&errors);
 }
 
@@ -624,7 +768,11 @@ fn test_public_named_initializing_formal_ok() {
 fn test_missing_semicolon_after_getter_arrow_body() {
     // `num get a => 42` with no `;` before the next member must ERROR — falcon
     // used to silently recover the missing terminator.
-    let (_prog, errors) = parse("class A { num get a => 42 int get b => 42; }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class A { num get a => 42 int get b => 42; }");
     assert!(!errors.is_empty(), "expected a missing-semicolon error");
     assert!(errors.iter().any(|e| e.message.contains("Semicolon")));
 }
@@ -632,13 +780,21 @@ fn test_missing_semicolon_after_getter_arrow_body() {
 #[test]
 fn test_getter_arrow_body_with_semicolon_ok() {
     // Control: the terminated form parses clean.
-    let (_prog, errors) = parse("class A { int get b => 42; }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class A { int get b => 42; }");
     assert_clean(&errors);
 }
 
 #[test]
 fn test_const_factory_preserves_is_const() {
-    let (prog, errors) = parse("class C { const factory C.i() = D; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { const factory C.i() = D; }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Constructor(c) => {
@@ -653,7 +809,11 @@ fn test_const_factory_preserves_is_const() {
 #[test]
 fn test_non_const_factory_is_not_const() {
     // Control: a plain factory keeps `is_const: false`.
-    let (prog, errors) = parse("class C { factory C.i() = D; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { factory C.i() = D; }");
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Constructor(c) => {
@@ -667,7 +827,11 @@ fn test_non_const_factory_is_not_const() {
 #[test]
 fn test_constructor_call_block_is_initializer_lambda() {
     // Keep this odd recovery outcome pinned until a deliberate parser-behavior change.
-    let (prog, errors) = parse("class C { var g; C(): g = (e) { f(); } }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { var g; C(): g = (e) { f(); } }");
     assert_clean(&errors);
     let ClassMember::Constructor(ctor) = &only_class(&prog).members[1] else {
         panic!("expected constructor: {prog:?}");
@@ -711,7 +875,11 @@ fn test_constructor_call_block_is_initializer_lambda() {
 #[test]
 fn test_leading_async_method_splits_await_and_operand_statements() {
     // The AST marker does not reserve body keywords without a trailing marker.
-    let (prog, errors) = parse("class Foo { async void bar() { await x; } }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class Foo { async void bar() { await x; } }");
     assert_clean(&errors);
     let ClassMember::Method(method) = &only_class(&prog).members[0] else {
         panic!("expected method: {prog:?}");
@@ -740,7 +908,11 @@ fn test_leading_async_method_splits_await_and_operand_statements() {
 #[test]
 fn test_async_sync_star_method_has_async_star_ast_marker() {
     // The combined AST marker differs from the trailing marker used in the body.
-    let (prog, errors) = parse("class C { async m() sync* { yield 1; } }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { async m() sync* { yield 1; } }");
     assert_clean(&errors);
     let ClassMember::Method(method) = &only_class(&prog).members[0] else {
         panic!("expected method: {prog:?}");
@@ -763,7 +935,11 @@ fn test_async_sync_star_method_has_async_star_ast_marker() {
 #[test]
 fn test_async_constructor_initializer_keeps_synchronous_body() {
     let src = "class C { var f; C(bool async) : f = async { var await = 1; await; } }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert_clean(&errors);
     let ClassMember::Constructor(ctor) = &only_class(&prog).members[1] else {
         panic!("expected constructor: {prog:?}");
@@ -812,7 +988,11 @@ fn test_async_constructor_initializer_keeps_synchronous_body() {
 /// `factory(`, `factory name(`. Each maps onto the classic constructor shape,
 /// with the enclosing type name spanning the keyword.
 fn only_ctor(src: &str) -> ConstructorDecl {
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert_clean(&errors);
     match &only_class(&prog).members[0] {
         ClassMember::Constructor(ctor) => ctor.clone(),
@@ -883,7 +1063,11 @@ fn test_classic_factory_keeps_type_name() {
 
 #[test]
 fn test_factory_in_mixin_is_method() {
-    let (prog, errors) = parse("mixin M { factory() {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("mixin M { factory() {} }");
     assert_clean(&errors);
     assert!(
         matches!(&prog.declarations[0], TopLevelDecl::Mixin(m) if matches!(m.members[0], ClassMember::Method(_)))
@@ -892,7 +1076,11 @@ fn test_factory_in_mixin_is_method() {
 
 #[test]
 fn test_semicolon_empty_class_body() {
-    let (prog, errors) = parse("abstract class Marker;\nmixin M;\nclass After {}");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("abstract class Marker;\nmixin M;\nclass After {}");
     assert_clean(&errors);
     assert!(only_class_named(&prog, "Marker").members.is_empty());
     assert_eq!(prog.declarations.len(), 3);
@@ -910,7 +1098,11 @@ fn only_class_named<'a>(prog: &'a Program, name: &str) -> &'a ClassDecl {
 
 #[test]
 fn test_native_member_bodies() {
-    let (prog, errors) = parse("class C { int get length native; void f() native \"g\"; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { int get length native; void f() native \"g\"; }");
     assert_clean(&errors);
     let ClassMember::Getter(getter) = &only_class(&prog).members[0] else {
         panic!("expected getter: {prog:?}");
@@ -920,8 +1112,11 @@ fn test_native_member_bodies() {
 
 #[test]
 fn test_setter_parameter_metadata_and_function_type() {
-    let (prog, errors) =
-        parse("class C { set length(@nullCheck int v) {} set onPause(void handler()?) {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { set length(@nullCheck int v) {} set onPause(void handler()?) {} }");
     assert_clean(&errors);
     assert_eq!(only_class(&prog).members.len(), 2);
     let ClassMember::Setter(setter) = &only_class(&prog).members[0] else {
@@ -945,6 +1140,10 @@ fn test_setter_parameter_metadata_and_function_type() {
 
 #[test]
 fn test_extension_type_representation_trailing_comma() {
-    let (_prog, errors) = parse("extension type E(\n  p.T _value,\n) implements Object {}");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("extension type E(\n  p.T _value,\n) implements Object {}");
     assert_clean(&errors);
 }

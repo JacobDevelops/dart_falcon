@@ -125,10 +125,12 @@ mod tests {
     use std::path::PathBuf;
 
     fn run(source: &str) -> usize {
-        let program = parse(source).0;
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(source);
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config);
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
         NoLeadingUnderscoresForLocalIdentifiers
             .analyze(&program, &ctx)
             .len()

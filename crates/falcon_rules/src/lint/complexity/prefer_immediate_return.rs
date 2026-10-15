@@ -36,7 +36,7 @@ fn check_stmts(stmts: &[Stmt], diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext
                 diags.push(ctx.diagnostic(
                     "prefer-immediate-return",
                     "Prefer returning the value directly instead of assigning to a variable first",
-                    local.span,
+                    local.full_range(),
                 ));
             }
         }

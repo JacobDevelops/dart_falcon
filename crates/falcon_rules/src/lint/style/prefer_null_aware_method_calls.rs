@@ -16,7 +16,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
-use crate::lint::expressions::{is_parenthesized, paren_text};
+use crate::lint::expressions::{equivalent, is_parenthesized};
 
 #[derive(Default)]
 pub struct PreferNullAwareMethodCalls;
@@ -53,7 +53,6 @@ impl Collector<'_> {
         }
     }
     fn check(&mut self, call: &Expr, tested: &Expr) {
-        let source = self.ctx.source;
         if is_parenthesized(call) {
             return;
         }
@@ -63,7 +62,7 @@ impl Collector<'_> {
         let Expr::NullAssert { operand, .. } = callee.as_ref() else {
             return;
         };
-        if !is_parenthesized(callee) && paren_text(operand, source) == paren_text(tested, source) {
+        if !is_parenthesized(callee) && equivalent(operand, tested, self.ctx) {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-null-aware-method-calls",
                 "Use a null-aware invocation of the 'call' method rather than explicitly testing for null.",

@@ -294,15 +294,19 @@ mod tests {
     use std::path::PathBuf;
 
     fn count_no_types(source: &str) -> usize {
-        let program = parse(source).0;
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(source);
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config);
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
         PreferCollectionLiterals.analyze(&program, &ctx).len()
     }
 
     fn count_with_types(source: &str) -> usize {
-        let program = parse(source).0;
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(source);
         let identities = falcon_analyze::IdentityIndex::from_project_files(
             &[falcon_analyze::IdentitySource {
                 path: std::path::Path::new("t.dart"),
@@ -324,7 +328,7 @@ mod tests {
         );
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config)
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_types(&types)
             .with_identities(&identities);
         PreferCollectionLiterals.analyze(&program, &ctx).len()
@@ -441,7 +445,11 @@ mod tests {
             "part 'missing.dart'; class Map {} void f() { var value = Map(); }",
             "part 'missing.dart'; class Duration {} void f() { var value = Map(); }",
         ] {
-            let (program, errors) = parse(source);
+            let falcon_dart_parser::ParseResult {
+                program,
+                errors,
+                syntax,
+            } = parse(source);
             assert!(errors.is_empty());
             let path = PathBuf::from("/project/t.dart");
             let identities = IdentityIndex::from_project_files(
@@ -464,7 +472,7 @@ mod tests {
                 &identities,
             );
             let config = FalconConfig::default();
-            let ctx = AnalyzeContext::new(&path, source, &config)
+            let ctx = AnalyzeContext::new(&path, source, &config, &syntax)
                 .with_types(&types)
                 .with_identities(&identities);
             assert!(

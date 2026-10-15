@@ -13,6 +13,34 @@ fn run_check(options: CheckOptions) -> i32 {
     falcon_cli::run_check_with_sdk_locator(options, |_| None)
 }
 
+#[test]
+fn oversized_sources_abort_before_partial_workspace_analysis() {
+    for name in ["oversized.dart", "pubspec.yaml"] {
+        let temp = tempdir().unwrap();
+        let config = temp.path().join("falcon.json");
+        fs::write(
+            &config,
+            r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
+        )
+        .unwrap();
+        fs::write(temp.path().join("orphan.dart"), "class Orphan {}").unwrap();
+        fs::File::create(temp.path().join(name))
+            .unwrap()
+            .set_len(u64::from(u32::MAX) + 1)
+            .unwrap();
+        let options = CheckOptions {
+            paths: vec![temp.path().to_path_buf()],
+            config_path: Some(config),
+            quiet: true,
+            ..Default::default()
+        };
+        let error = collect_check(&options).unwrap_err();
+        assert!(error.contains(name));
+        assert!(error.contains("maximum supported source size"));
+        assert_ne!(run_check(options), 0);
+    }
+}
+
 /// Test 1: No files found returns zero exit code
 #[test]
 fn test_run_check_no_files_returns_zero() {

@@ -3,7 +3,9 @@ use crate::resolve::IdentitySource;
 use falcon_dart_parser::parse;
 
 fn with_model(source: &str, test: impl FnOnce(&SemanticModel<'_>)) {
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let path = Path::new("/project/aliases.dart");
     let identities = IdentityIndex::build(

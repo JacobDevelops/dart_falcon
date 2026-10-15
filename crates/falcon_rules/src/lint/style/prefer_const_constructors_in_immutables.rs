@@ -103,7 +103,7 @@ impl Rule for PreferConstConstructorsInImmutables {
                     let start = first_token_after_annotations(
                         &constructor.annotations,
                         constructor.span,
-                        ctx.source,
+                        ctx.syntax,
                     );
                     let end = if members.representation {
                         ctx.source[start..constructor.span.end]

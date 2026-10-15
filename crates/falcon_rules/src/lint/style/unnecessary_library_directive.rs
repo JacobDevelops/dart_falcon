@@ -47,7 +47,7 @@ impl Rule for UnnecessaryLibraryDirective {
 
 /// Whether the comments directly preceding `offset` include a doc comment.
 fn has_doc_comment(tokens: &[Token], offset: usize) -> bool {
-    let before = tokens.partition_point(|token| token.offset < offset);
+    let before = tokens.partition_point(|token| token.offset() < offset);
     tokens[..before]
         .iter()
         .rev()

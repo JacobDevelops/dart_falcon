@@ -13,3 +13,11 @@ void main() {
   use("contains '$name'");
   use(r'raw');
 }
+
+void patternStrings(Object value) {
+  switch (value) {
+    case 'a${"b"}':
+    case 'a${"b ${"c"}"}':
+      break;
+  }
+}

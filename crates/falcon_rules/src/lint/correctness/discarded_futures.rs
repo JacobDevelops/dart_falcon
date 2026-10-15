@@ -183,6 +183,7 @@ impl Collector<'_> {
             for op in &section.ops {
                 let previous = std::mem::replace(&mut receiver, ResolvedType::Unknown);
                 (receiver, reported) = match op {
+                    CascadeOp::NullAssert { .. } => (previous.non_null(), reported),
                     CascadeOp::Call(name, _, _) => (
                         member_return_type(&previous, &name.name, state),
                         Some((
@@ -212,7 +213,7 @@ impl Collector<'_> {
                 callee_end = match op {
                     CascadeOp::Field { name, .. } => name.span.end,
                     CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) => args.span.end,
-                    CascadeOp::Index { span, .. } => span.end,
+                    CascadeOp::Index { span, .. } | CascadeOp::NullAssert { span } => span.end,
                     CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => section.span.end,
                 };
             }

@@ -3,11 +3,10 @@ use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
 
 use super::{Parser, expr::Brackets};
-use crate::lexer::Lexer;
 
 impl<'src> Parser<'src> {
     pub(super) fn parse_block(&mut self) -> Block {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.expect(TokenKind::LBrace);
         let mut stmts = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
@@ -31,7 +30,7 @@ impl<'src> Parser<'src> {
                 })
             },
             |p| {
-                let start = p.cur().offset;
+                let start = p.cur().offset();
 
                 // A statement-leading `label:` is unambiguous; labels may nest.
                 if p.at(TokenKind::Ident) && p.peek(1).kind == TokenKind::Colon {
@@ -122,7 +121,7 @@ impl<'src> Parser<'src> {
                         let token = p.advance();
                         let mut span = Self::tok_span(&token);
                         if let Some(semicolon) = p.eat(TokenKind::Semicolon) {
-                            span.end = semicolon.offset + semicolon.len;
+                            span.end = semicolon.offset() + semicolon.len();
                         }
                         Stmt::Rethrow(span)
                     }
@@ -137,7 +136,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_if_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.advance(); // if
         let condition = self.parse_if_condition();
         let then_branch = self.parse_stmt();
@@ -391,6 +390,7 @@ impl<'src> Parser<'src> {
             var_type,
             declarators,
             span,
+            full_span: span,
         })))
     }
 
@@ -427,7 +427,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_while_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.advance(); // while
         self.expect(TokenKind::LParen);
         let condition = self.parse_expr();
@@ -441,7 +441,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_do_while_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.advance(); // do
         let body = self.parse_stmt();
         self.expect(TokenKind::While);
@@ -457,7 +457,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_switch_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.advance(); // switch
         self.expect(TokenKind::LParen);
         let subject = self.parse_expr();
@@ -466,7 +466,7 @@ impl<'src> Parser<'src> {
         let mut cases = Vec::new();
 
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let case_start = self.cur().offset;
+            let case_start = self.cur().offset();
             let mut case_kinds = Vec::new();
             let mut labels = Vec::new();
 
@@ -556,13 +556,13 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_try_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.advance(); // try
         let body = self.parse_block();
         let mut catches = Vec::new();
 
         while self.at(TokenKind::On) || self.at(TokenKind::Catch) {
-            let catch_start = self.cur().offset;
+            let catch_start = self.cur().offset();
             let exception_type = if self.at(TokenKind::On) {
                 self.advance(); // on
                 Some(self.parse_type())
@@ -607,7 +607,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_return_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.advance(); // return
         let value = if !self.at(TokenKind::Semicolon)
             && !self.at(TokenKind::RBrace)
@@ -625,7 +625,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_assert_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.advance(); // assert
         self.expect(TokenKind::LParen);
         let condition = self.parse_expr();
@@ -645,7 +645,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_yield_stmt(&mut self) -> Stmt {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.advance(); // yield
         let is_star = self.eat(TokenKind::Star).is_some();
         let value = self.parse_expr();
@@ -659,7 +659,7 @@ impl<'src> Parser<'src> {
 
     fn parse_expr_or_local_decl_stmt(&mut self) -> Stmt {
         let start_index = self.pos;
-        let start = self.cur().offset;
+        let start = self.cur().offset();
 
         let mut annotations = Vec::new();
         while self.at(TokenKind::At) {
@@ -672,7 +672,7 @@ impl<'src> Parser<'src> {
             Stmt::LocalVar(decl) => {
                 decl.annotations = annotations;
                 if let Some(start) = self.local_documentation_start(start_index) {
-                    decl.span.start = start;
+                    decl.full_span.start = start;
                 }
             }
             Stmt::LocalFunc(decl) => decl.annotations = annotations,
@@ -682,34 +682,15 @@ impl<'src> Parser<'src> {
         stmt
     }
 
-    /// Recover attached documentation from the already skipped trivia before a
-    /// local declaration. Only this bounded gap is re-lexed, without allocation.
+    /// Recover attached documentation from retained trivia before a local declaration.
     fn local_documentation_start(&self, declaration_index: usize) -> Option<usize> {
         let trivia_start = declaration_index.checked_sub(1).map_or(0, |index| {
             let token = &self.tokens[index];
-            token.offset + token.len
+            token.offset() + token.len()
         });
-        let trivia_end = self.tokens[declaration_index].offset;
-        let trivia = &self.src[trivia_start..trivia_end];
-        let mut lexer = Lexer::new(trivia);
-        let mut start = None;
-        let mut previous_block = false;
-        loop {
-            let token = lexer.next_token();
-            if token.kind == TokenKind::Eof {
-                break;
-            }
-            if token.kind == TokenKind::DocComment {
-                let is_block = token.text(trivia).starts_with("/**");
-                // Each block doc is its own group; line docs form a group even
-                // when ordinary comments occur between them.
-                if is_block || previous_block || start.is_none() {
-                    start = Some(trivia_start + token.offset);
-                }
-                previous_block = is_block;
-            }
-        }
-        start
+        let trivia_end = self.tokens[declaration_index].offset();
+        self.syntax
+            .documentation_start(Span::new(trivia_start, trivia_end), self.src)
     }
 
     fn parse_local_decl_or_expr_stmt(&mut self, start: usize, unannotated: bool) -> Stmt {
@@ -788,6 +769,7 @@ impl<'src> Parser<'src> {
                         return None;
                     }
                     p.eat(TokenKind::Semicolon);
+                    let span = p.span_from(start);
                     Some(Stmt::LocalVar(LocalVarDecl {
                         annotations: Vec::new(),
                         keyword: VarKeyword::Var,
@@ -795,7 +777,8 @@ impl<'src> Parser<'src> {
                         is_late: false,
                         var_type: Some(ty),
                         declarators,
-                        span: p.span_from(start),
+                        span,
+                        full_span: span,
                     }))
                 } else {
                     None
@@ -880,6 +863,7 @@ impl<'src> Parser<'src> {
         let name = self.expect_ident();
         let declarators = self.parse_declarators(name);
         self.eat(TokenKind::Semicolon);
+        let span = self.span_from(start);
         Stmt::LocalVar(LocalVarDecl {
             annotations: Vec::new(),
             keyword: Self::var_keyword(is_const, is_final),
@@ -887,7 +871,8 @@ impl<'src> Parser<'src> {
             is_late,
             var_type,
             declarators,
-            span: self.span_from(start),
+            span,
+            full_span: span,
         })
     }
 

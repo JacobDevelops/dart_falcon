@@ -2,15 +2,15 @@
 //! `visitor.rs`. Each test plants a unique sentinel (an int literal, a named
 //! type, an identifier, or a string) in a position that the default walk chain
 //! only reaches through a newly-added walk edge, then asserts the recording
-//! visitor observed it. If any of these walk edges is removed, the corresponding
-//! sentinel stops being visited and the test fails.
+//! visitor observed it exactly once. Missing and duplicated walk edges both
+//! fail the corresponding sentinel assertion.
 
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::*;
 
 /// Records every leaf the default walk delivers, keyed by kind, so a sentinel's
-/// presence proves the traversal reached the position that carries it.
+/// exact-once presence proves traversal reached its position without duplication.
 #[derive(Default)]
 struct Recorder {
     ints: Vec<String>,
@@ -23,16 +23,16 @@ struct Recorder {
 
 impl Recorder {
     fn has_int(&self, v: &str) -> bool {
-        self.ints.iter().any(|s| s == v)
+        self.ints.iter().filter(|s| s.as_str() == v).count() == 1
     }
     fn has_string(&self, v: &str) -> bool {
-        self.strings.iter().any(|s| s == v)
+        self.strings.iter().filter(|s| s.as_str() == v).count() == 1
     }
     fn has_named(&self, v: &str) -> bool {
-        self.named_types.iter().any(|s| s == v)
+        self.named_types.iter().filter(|s| s.as_str() == v).count() == 1
     }
     fn has_ident(&self, v: &str) -> bool {
-        self.idents.iter().any(|s| s == v)
+        self.idents.iter().filter(|s| s.as_str() == v).count() == 1
     }
 }
 
@@ -72,7 +72,11 @@ impl Visitor for Recorder {
 }
 
 fn record(src: &str) -> Recorder {
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(
         errors.is_empty(),
         "unexpected parse errors in {src:?}: {errors:?}"
@@ -154,10 +158,12 @@ fn local_var_hook_borrows_statement_and_loop_declarations() {
         }
     }
 
-    let (program, errors) = parse(
+    let falcon_dart_parser::parser::ParseResult {
+        program, errors, ..
+    } = parse(
         "void f() { var statement = 1; \
-         for (var counter = 0; counter < 1; counter++) {} \
-         var collection = [for (var item = 0; item < 1; item++) item]; }",
+     for (var counter = 0; counter < 1; counter++) {} \
+     var collection = [for (var item = 0; item < 1; item++) item]; }",
     );
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Function(function) = &program.declarations[0] else {
@@ -404,7 +410,11 @@ fn walks_function_typed_param_inner_params() {
 #[test]
 fn adjacent_string_span_covers_full_run() {
     let src = r"var x = 'a\q' 'b\w';";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty(), "parse errors: {errors:?}");
 
     let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
@@ -457,7 +467,11 @@ impl Visitor for CountingVisitor {
 #[test]
 fn test_visitor_empty_program() {
     let src = "";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let mut visitor = CountingVisitor::default();
@@ -470,7 +484,11 @@ fn test_visitor_empty_program() {
 #[test]
 fn test_visitor_single_class() {
     let src = "class Foo {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let mut visitor = CountingVisitor::default();
@@ -482,7 +500,11 @@ fn test_visitor_single_class() {
 #[test]
 fn test_visitor_class_with_fields() {
     let src = "class Foo { int x; String y; }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let mut visitor = CountingVisitor::default();
@@ -495,7 +517,11 @@ fn test_visitor_class_with_fields() {
 #[test]
 fn test_visitor_multiple_declarations() {
     let src = "class Foo {} void bar() {} class Baz {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let mut visitor = CountingVisitor::default();
@@ -507,17 +533,19 @@ fn test_visitor_multiple_declarations() {
 
 #[test]
 fn program_callbacks_preserve_traversal_order_and_coverage() {
-    let (program, errors) = parse(
+    let falcon_dart_parser::parser::ParseResult {
+        program, errors, ..
+    } = parse(
         "@tag(1 + 2) int top = 3; \
-         class C { \
-           int field = 4; \
-           C([int value = 5]) : field = 6; \
-           Object f([int value = 7]) { \
-             for (var i = 8; i < 9; i += 10) { (() { return 11; })(); } \
-             return [for (var j = 12; j < 13; j += 14) 15, \
-                     for (final x in [16]) 17]; \
-           } \
-         }",
+     class C { \
+       int field = 4; \
+       C([int value = 5]) : field = 6; \
+       Object f([int value = 7]) { \
+         for (var i = 8; i < 9; i += 10) { (() { return 11; })(); } \
+         return [for (var j = 12; j < 13; j += 14) 15, \
+                 for (final x in [16]) 17]; \
+       } \
+     }",
     );
     assert!(errors.is_empty(), "{errors:?}");
 
@@ -548,4 +576,93 @@ fn program_callbacks_preserve_traversal_order_and_coverage() {
         });
     });
     assert_eq!(statements, ["for", "block", "expr", "return", "return"]);
+}
+
+#[test]
+fn string_observation_override_does_not_suppress_interpolation_children() {
+    // Recorder deliberately overrides visit_string_lit without recursing.
+    let recorder = record("void f() { var text = '${90060}'; }");
+    assert!(recorder.has_int("90060"));
+    assert_eq!(recorder.strings.len(), 1);
+}
+
+#[test]
+fn source_name_observation_preserves_semantic_identifier_boundary() {
+    #[derive(Default)]
+    struct Names {
+        semantic: Vec<String>,
+        source: Vec<String>,
+    }
+
+    impl Visitor for Names {
+        fn visit_identifier(&mut self, node: &Identifier) {
+            self.semantic.push(node.name.clone());
+        }
+
+        fn visit_name(&mut self, node: &Identifier) {
+            self.source.push(node.name.clone());
+        }
+    }
+
+    let result = parse("void f() { target.field; }");
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let mut names = Names::default();
+    names.visit_program(&result.program);
+    assert_eq!(names.semantic, ["f", "target"]);
+    assert_eq!(names.source, ["field"]);
+}
+
+#[test]
+fn non_expression_strings_walk_interpolations_once() {
+    let parsed = parse("var text = '${90061}';");
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let TopLevelDecl::Variable(variable) = &parsed.program.declarations[0] else {
+        panic!("expected variable");
+    };
+    let Some(Expr::StringLit(literal)) = &variable.declarators[0].initializer else {
+        panic!("expected interpolated string");
+    };
+
+    let mut pattern = Recorder::default();
+    pattern.visit_literal_pattern_value(&LiteralPatternValue::String(literal.clone()));
+    assert!(pattern.has_int("90061"));
+
+    let mut native = Recorder::default();
+    native.visit_function_body(&FunctionBody::Native(Some(literal.clone()), literal.span));
+    assert!(native.has_int("90061"));
+}
+
+#[test]
+fn shorthand_pattern_labels_are_not_duplicate_source_names() {
+    #[derive(Default)]
+    struct Names {
+        bindings: usize,
+        labels: usize,
+    }
+
+    impl Visitor for Names {
+        fn visit_identifier(&mut self, node: &Identifier) {
+            if matches!(node.name.as_str(), "first" | "second") {
+                self.bindings += 1;
+            }
+        }
+
+        fn visit_name(&mut self, node: &Identifier) {
+            if matches!(node.name.as_str(), "first" | "second") {
+                self.labels += 1;
+            }
+        }
+    }
+
+    let parsed = parse(
+        "void f(Object value) { \
+         if (value case (:var first)) {} \
+         if (value case C(:var second)) {} \
+         }",
+    );
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let mut names = Names::default();
+    names.visit_program(&parsed.program);
+    assert_eq!(names.bindings, 2);
+    assert_eq!(names.labels, 0);
 }

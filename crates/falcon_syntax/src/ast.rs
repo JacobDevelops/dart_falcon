@@ -129,8 +129,8 @@ pub struct StringInterpolation {
     /// The parsed interpolated expression.
     pub expr: Expr,
     /// Absolute byte range of the interpolated expression text in the original
-    /// source: for `${e}` the range of `e` inside the braces, for `$ident` the
-    /// range of `ident`.
+    /// source: for `${e}` the full interior of the braces, including trivia;
+    /// for `$ident` the range of `ident`.
     pub span: Span,
 }
 
@@ -1156,7 +1156,20 @@ pub struct LocalVarDecl {
     pub is_late: bool,
     pub var_type: Option<DartType>,
     pub declarators: Vec<VarDeclarator>,
+    /// Syntax-only range, excluding leading documentation comments.
     pub span: Span,
+    /// Full declaration range, including attached documentation comments.
+    pub full_span: Span,
+}
+
+impl LocalVarDecl {
+    pub fn range(&self) -> Span {
+        self.span
+    }
+
+    pub fn full_range(&self) -> Span {
+        self.full_span
+    }
 }
 
 /// Dart 3 pattern-variable declaration: `(var|final) <pattern> = <init>`.
@@ -1582,6 +1595,10 @@ pub enum CascadeOp {
         /// Complete bracket selector, including its closing delimiter.
         span: Span,
     },
+    /// Assert that the value produced by the preceding selector is non-null.
+    NullAssert {
+        span: Span,
+    },
     Call(Identifier, Vec<DartType>, ArgList),
     /// Invoke the value produced by the preceding cascade selector.
     Invoke(Vec<DartType>, ArgList),
@@ -1818,6 +1835,15 @@ pub struct RecordPatternField {
     pub span: Span,
 }
 
+impl RecordPatternField {
+    /// The explicit source label, excluding a shorthand's cloned binding name.
+    pub fn source_name(&self) -> Option<&Identifier> {
+        self.name
+            .as_ref()
+            .filter(|name| name.span.end <= self.pattern.span().start)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MapPattern {
     pub type_args: Vec<DartType>,
@@ -1846,6 +1872,21 @@ pub struct ObjectPatternField {
     pub name: Identifier,
     pub pattern: Option<Pattern>,
     pub span: Span,
+}
+
+impl ObjectPatternField {
+    /// The explicit source label, excluding inferred names and recovery tokens.
+    pub fn source_name(&self) -> Option<&Identifier> {
+        let span = self.name.span;
+        (self.span.start <= span.start
+            && span.start < span.end
+            && span.end <= self.span.end
+            && self
+                .pattern
+                .as_ref()
+                .is_none_or(|pattern| span.end <= pattern.span().start))
+        .then_some(&self.name)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

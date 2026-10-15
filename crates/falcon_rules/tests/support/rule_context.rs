@@ -7,7 +7,7 @@ use falcon_dart_parser::parse;
 use std::path::Path;
 
 pub fn count(rule: &dyn Rule, source: &str, with_types: bool) -> usize {
-    let program = parse(source).0;
+    let falcon_dart_parser::ParseResult { program, syntax, .. } = parse(source);
     let config = FalconConfig::default();
     let path = Path::new("t.dart");
     let identities = IdentityIndex::from_project_files(
@@ -33,7 +33,7 @@ pub fn count(rule: &dyn Rule, source: &str, with_types: bool) -> usize {
     });
     let model = SemanticModel::new(path, &identities, types.as_ref());
     let signatures = SignatureIndex::from_program(&program, &model);
-    let mut ctx = AnalyzeContext::new(path, source, &config)
+    let mut ctx = AnalyzeContext::new(path, source, &config, &syntax)
         .with_identities(&identities)
         .with_signatures(&signatures);
     if let Some(types) = &types {

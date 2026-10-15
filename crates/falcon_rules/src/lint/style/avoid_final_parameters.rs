@@ -65,18 +65,18 @@ struct Collector<'a, 'ctx> {
 impl Collector<'_, '_> {
     /// Reports the first `final` token in `[start, end)`.
     fn report_final_in(&mut self, start: usize, end: usize) {
-        let from = self.tokens.partition_point(|token| token.offset < start);
+        let from = self.tokens.partition_point(|token| token.offset() < start);
         if let Some(token) = self.tokens[from..]
             .iter()
-            .take_while(|token| token.offset < end)
+            .take_while(|token| token.offset() < end)
             .find(|token| token.kind == TokenKind::Final)
         {
             self.diags.push(self.ctx.diagnostic(
                 RULE,
                 MESSAGE,
                 DiagSpan {
-                    start: token.offset,
-                    end: token.offset + token.len,
+                    start: token.offset(),
+                    end: token.offset() + token.len(),
                 },
             ));
         }
@@ -87,7 +87,7 @@ impl Collector<'_, '_> {
     fn check_setter(&mut self, setter: &SetterDecl) {
         let from = self
             .tokens
-            .partition_point(|token| token.offset < setter.name.span.end);
+            .partition_point(|token| token.offset() < setter.name.span.end);
         let mut tokens = self.tokens[from..].iter();
         if tokens.next().map(|token| token.kind) != Some(TokenKind::LParen) {
             return;
@@ -97,8 +97,10 @@ impl Collector<'_, '_> {
             .collect();
         let function_typed = param.iter().any(|token| token.kind == TokenKind::LParen);
         if !function_typed && let Some(first) = param.first() {
-            let start = first.offset;
-            let end = param.last().map_or(start, |token| token.offset + token.len);
+            let start = first.offset();
+            let end = param
+                .last()
+                .map_or(start, |token| token.offset() + token.len());
             self.report_final_in(start, end);
         }
     }

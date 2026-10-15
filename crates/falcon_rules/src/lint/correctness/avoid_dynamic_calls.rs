@@ -112,7 +112,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         let end = match operation {
             CascadeOp::Field { name, .. } => name.span.end,
             CascadeOp::Call(_, _, args) | CascadeOp::Invoke(_, args) => args.span.end,
-            CascadeOp::Index { span, .. } => span.end,
+            CascadeOp::Index { span, .. } | CascadeOp::NullAssert { span } => span.end,
             CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => section.end,
         };
         let previous = self
@@ -136,6 +136,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             return;
         };
         let reportable = match operation {
+            CascadeOp::NullAssert { .. } => false,
             CascadeOp::Call(name, _, args) => !is_universal_call(&name.name, args),
             CascadeOp::Field { name, .. } => !ALLOWED_MEMBERS.contains(&name.name.as_str()),
             CascadeOp::Invoke(..)
@@ -290,7 +291,7 @@ impl SemanticRuleVisitor for Collector<'_> {
                         target.unparenthesized(),
                         Expr::Ident(name) if ALLOWED_MEMBERS.contains(&name.name.as_str())
                     ),
-                    None => false,
+                    Some(CascadeOp::NullAssert { .. }) | None => false,
                 });
                 if dynamic_section {
                     self.report_if_dynamic(object, state);
@@ -366,9 +367,17 @@ void use(dynamic value) {
 ";
         let path = Path::new("/project/lib/test.dart");
         let expect_path = Path::new("/project/lib/expect.dart");
-        let (expect_program, errors) = parse("void expect(dynamic actual) {}");
+        let falcon_dart_parser::ParseResult {
+            program: expect_program,
+            errors,
+            ..
+        } = parse("void expect(dynamic actual) {}");
         assert!(errors.is_empty(), "{errors:?}");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[
@@ -406,7 +415,7 @@ void use(dynamic value) {
             &types,
         );
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_signatures(&signatures);
         struct AccumulatorTypes(Vec<ResolvedType>);
@@ -441,7 +450,11 @@ void use(dynamic value) {
     fn reports_dynamic_operations_at_their_ast_receivers() {
         let source = "class Callbacks { final Function callback; Callbacks(this.callback); }\nvoid f(dynamic d, Function fn, Callbacks callbacks) {\n  d\n    ..x += 1;\n  d\n    ..a.b();\n  fn.call();\n  --d.z;\n  (d)();\n  d.toString();\n  (d as dynamic).foo();\n  callbacks\n      .callback();\n}";
         let path = Path::new("/project/lib/test.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -454,7 +467,7 @@ void use(dynamic value) {
         let model = SemanticModel::new(path, &identities, None);
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let diagnostics = AvoidDynamicCalls.analyze(&program, &ctx);
@@ -482,7 +495,11 @@ void use(dynamic value) {
     fn cascade_receivers_and_updates_keep_exact_spans_through_registry() {
         let source = "class SpanOps {\n  dynamic a;\n  Function f;\n  SpanOps(this.a, this.f);\n}\nvoid cascadeSpanWitness(SpanOps o, dynamic e) {\n  o..f.call();\n  ++e;\n  e--;\n  o..a.x += 1;\n  o..a.b();\n  o..a[0].x;\n  o..a[0].x += 1;\n}\n";
         let path = Path::new("/project/lib/test.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -495,7 +512,7 @@ void use(dynamic value) {
         let model = SemanticModel::new(path, &identities, None);
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let mut registry = falcon_analyze::RuleRegistry::new();
@@ -570,7 +587,11 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
 }
 "#;
         let path = Path::new("/project/lib/test.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -583,7 +604,7 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
         let model = SemanticModel::new(path, &identities, None);
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let mut registry = falcon_analyze::RuleRegistry::new();
@@ -660,7 +681,11 @@ void cases(dynamic d, Function fn, Holder h) {
 }
 "#;
         let path = Path::new("/project/lib/test.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -673,7 +698,7 @@ void cases(dynamic d, Function fn, Holder h) {
         let model = SemanticModel::new(path, &identities, None);
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let mut registry = falcon_analyze::RuleRegistry::new();

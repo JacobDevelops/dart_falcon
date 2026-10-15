@@ -11,7 +11,11 @@ pub struct Lexer<'src> {
 }
 
 impl<'src> Lexer<'src> {
+    /// # Panics
+    ///
+    /// Panics if the source exceeds the compact token limit of `u32::MAX` bytes.
     pub fn new(src: &'src str) -> Self {
+        u32::try_from(src.len()).expect("source exceeds u32 token capacity");
         // Only a leading BOM is valid source.
         let pos = if src.starts_with('\u{FEFF}') {
             '\u{FEFF}'.len_utf8()
@@ -455,9 +459,4 @@ fn is_ident_start(c: char) -> bool {
 #[inline]
 fn is_ident_continue(c: char) -> bool {
     c == '_' || c == '$' || c.is_ascii_alphanumeric()
-}
-
-/// Remove trivia while preserving the final `Eof` token.
-pub fn filter_trivia(tokens: Vec<Token>) -> Vec<Token> {
-    tokens.into_iter().filter(|t| !t.is_trivia()).collect()
 }

@@ -224,7 +224,9 @@ mod tests {
     #[test]
     fn doc_imports_use_literal_segments_and_import_spans() {
         let source = "/// @docImport r'dart:' '\\x63ollection';\n/// @docImport r'dart:' '\\x61sync';\nlibrary;\n";
-        let (program, errors) = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let imports: Vec<_> = library_doc_imports(&program, source).collect();
         assert_eq!(imports.len(), 2);
@@ -239,7 +241,7 @@ mod tests {
     #[test]
     fn doc_import_spans_preserve_tabs_crlf_and_block_offsets() {
         let source = "\t/**\r\n\t * @docImport r'dart:collection';\r\n\t * @docImport 'dart:async';\r\n\t */\r\nlibrary;\r\n";
-        let (program, _) = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { program, .. } = falcon_dart_parser::parse(source);
         let imports: Vec<_> = library_doc_imports(&program, source).collect();
         assert_eq!(imports.len(), 2);
         assert_eq!(
@@ -255,7 +257,7 @@ mod tests {
     #[test]
     fn doc_import_keyword_requires_a_space_and_maps_extra_whitespace() {
         let source = "/// @docImport\t'dart:io';\n/// @docImport   'dart:async';\nlibrary;\n";
-        let (program, _) = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult { program, .. } = falcon_dart_parser::parse(source);
         let imports: Vec<_> = library_doc_imports(&program, source).collect();
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].span.start, source.rfind("Import").unwrap() + 2);
@@ -265,7 +267,9 @@ mod tests {
     #[test]
     fn doc_import_span_excludes_trailing_comment_trivia() {
         let source = "/// @docImport 'dart:async'; /* trailing trivia */\r\nlibrary;\r\n";
-        let (program, errors) = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let imports: Vec<_> = library_doc_imports(&program, source).collect();
         assert_eq!(imports.len(), 1);

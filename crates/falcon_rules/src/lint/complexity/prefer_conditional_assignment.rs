@@ -19,7 +19,6 @@ impl Rule for PreferConditionalAssignment {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
-            source: ctx.source,
         };
         collector.visit_program(program);
         collector.diags
@@ -29,7 +28,6 @@ impl Rule for PreferConditionalAssignment {
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
     ctx: &'s AnalyzeContext<'s>,
-    source: &'s str,
 }
 
 /// The non-null operand of a `E == null` comparison.
@@ -58,7 +56,7 @@ fn single_stmt(stmt: &Stmt) -> Option<&Stmt> {
     }
 }
 
-use crate::lint::expressions::text;
+use crate::lint::expressions::equivalent;
 
 impl Visitor for Collector<'_> {
     fn visit_stmt(&mut self, node: &Stmt) {
@@ -72,7 +70,7 @@ impl Visitor for Collector<'_> {
                 op: AssignOp::Eq,
                 ..
             } = es.expr.unparenthesized()
-            && text(target, self.source) == text(checked, self.source)
+            && equivalent(target, checked, self.ctx)
         {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-conditional-assignment",

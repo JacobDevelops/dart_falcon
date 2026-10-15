@@ -23,7 +23,6 @@ impl Rule for NoSelfComparisons {
         };
         let mut collector = Collector {
             ctx,
-            source: ctx.source,
             diags: Vec::new(),
         };
         visit_program(&mut collector, program, state);
@@ -33,7 +32,6 @@ impl Rule for NoSelfComparisons {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    source: &'a str,
     diags: Vec<Diagnostic>,
 }
 
@@ -55,13 +53,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         {
             return;
         }
-        let (Some(left_text), Some(right_text)) = (
-            normalized(self.source, left.span()),
-            normalized(self.source, right.span()),
-        ) else {
-            return;
-        };
-        if left_text != right_text {
+        if !equivalent(left, right, self.ctx) {
             return;
         }
         self.diags.push(self.ctx.diagnostic(
@@ -134,7 +126,7 @@ fn scalar_type(ty: &ResolvedType) -> bool {
             && matches!(name.as_str(), "bool" | "int" | "double" | "num" | "String"))
 }
 
-use crate::lint::expressions::normalized;
+use crate::lint::expressions::equivalent;
 
 #[cfg(test)]
 mod tests {
@@ -167,7 +159,11 @@ class Child extends Values {
   bool inheritedFieldEqual() => value == value;
 }
 "#;
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("self_comparisons.dart");
         let identities = IdentityIndex::from_project_files(
@@ -192,7 +188,7 @@ class Child extends Values {
         let model = SemanticModel::new(path, &identities, Some(&types));
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);

@@ -3938,6 +3938,9 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                             &self.state,
                         );
                         match operation {
+                            CascadeOp::NullAssert { .. } => {
+                                current = current.non_null();
+                            }
                             CascadeOp::Field { name, .. } => {
                                 current = self
                                     .state
@@ -4423,7 +4426,11 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
 }
 "#;
         let path = PathBuf::from("/project/lib/main.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -4447,7 +4454,7 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
         let signatures =
             SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config)
+        let context = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
@@ -4564,7 +4571,11 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
 
         let source = "// @dart=2.19\nvoid f(int x) { switch (x) { case 7: break; } }";
         let path = PathBuf::from("/project/lib/main.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -4575,7 +4586,8 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
             &[],
         );
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config).with_identities(&identities);
+        let context =
+            AnalyzeContext::new(&path, source, &config, &syntax).with_identities(&identities);
         #[derive(Default)]
         struct CaseOperand(usize);
         impl SemanticRuleVisitor for CaseOperand {
@@ -4618,7 +4630,11 @@ extension type E(int? y) {
 }
 "#;
         let path = PathBuf::from("/project/lib/main.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -4642,7 +4658,7 @@ extension type E(int? y) {
         let signatures =
             SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config)
+        let context = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
@@ -4715,7 +4731,11 @@ void run(Numeric number) {
 }
 "#;
         let path = PathBuf::from("/project/lib/main.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -4739,7 +4759,7 @@ void run(Numeric number) {
         let signatures =
             SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config)
+        let context = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
@@ -4775,7 +4795,11 @@ void cascades(C? value) {
 }
 "#;
         let path = PathBuf::from("/project/lib/main.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -4799,7 +4823,7 @@ void cascades(C? value) {
         let signatures =
             SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config)
+        let context = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
@@ -4854,7 +4878,9 @@ void cascades(C? value) {
 
     #[test]
     fn finds_nested_returns_without_crossing_function_boundaries() {
-        let (program, errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(
             "void f() {
                 if (true) { return 1; } else { return 2; }
                 for (;;) { return 3; }
@@ -4885,7 +4911,9 @@ void cascades(C? value) {
 
     #[test]
     fn returns_borrowed_block_and_arrow_expressions() {
-        let (program, errors) = parse("int block() { return 1; } int arrow() => 2;");
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse("int block() { return 1; } int arrow() => 2;");
         assert!(errors.is_empty(), "{errors:?}");
         for declaration in &program.declarations {
             let TopLevelDecl::Function(function) = declaration else {

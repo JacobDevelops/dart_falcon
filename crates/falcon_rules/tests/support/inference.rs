@@ -42,7 +42,11 @@ pub fn analyze(
     fs::create_dir_all(app.parent().unwrap()).unwrap();
     fs::write(&app, source).unwrap();
     let app = canonical_or_lexical(&app);
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program,
+        errors,
+        syntax,
+    } = parse(source);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |config| {
         let root = config?.flutter_root.as_ref()?;
         falcon_analyze::environment::DartSdk::load(&root.join("bin/cache/dart-sdk"))
@@ -94,7 +98,7 @@ pub fn analyze(
         &identities,
         &types,
     );
-    let context = AnalyzeContext::new(&app, source, config)
+    let context = AnalyzeContext::new(&app, source, config, &syntax)
         .with_types(&types)
         .with_identities(&identities)
         .with_signatures(&signatures)
@@ -129,7 +133,7 @@ pub fn assert_diagnostics(source: &str, rule_name: &str, diagnostics: &[Diagnost
 
 #[allow(dead_code)]
 pub fn assert_lints(rule_name: &str, source: &str, count: usize) {
-    let (_, errors) = parse(source);
+    let falcon_dart_parser::ParseResult { errors, .. } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let rules = crate::all_rules();
     let rule = &rules.iter().find(|(name, _)| *name == rule_name).unwrap().1;

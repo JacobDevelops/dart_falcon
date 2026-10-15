@@ -338,7 +338,11 @@ abstract class StatelessWidget extends Widget { const StatelessWidget({super.key
         .unwrap();
         let path = app.join("lib/main.dart");
         std::fs::write(&path, source).unwrap();
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         let environment = AnalysisEnvironment::discover([path.as_path()]);
         assert_eq!(
@@ -382,7 +386,7 @@ abstract class StatelessWidget extends Widget { const StatelessWidget({super.key
             &types,
         );
         let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config)
+        let context = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_types(&types)
             .with_identities(&identities)
             .with_signatures(&signatures);

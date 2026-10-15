@@ -111,7 +111,9 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
             fs::write(sdk.join(part), [0xff]).unwrap();
         }
         let source = "/// [Object] exists, but [Missing] does not.\nvoid f() {}\n";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty());
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
@@ -155,7 +157,9 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
 fn indexes_sdk_and_dependency_declarations() {
     let (_dir, app) = workspace();
     let source = fs::read_to_string(&app).unwrap();
-    let (program, errors) = parse(&source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(&source);
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     assert!(environment.has_sdk());
@@ -264,9 +268,15 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
     let source = "import 'package:dep/dep.dart'; import 'other.dart'; class App {}";
     let other_source = "class Base {}";
     let other = write(dir.path(), "app/lib/other.dart", other_source);
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty());
-    let (other_program, errors) = parse(other_source);
+    let falcon_dart_parser::ParseResult {
+        program: other_program,
+        errors,
+        ..
+    } = parse(other_source);
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     std::fs::create_dir_all(dir.path().join("cache/dep/lib/unreadable.dart")).unwrap();
@@ -407,7 +417,9 @@ fn compact_external_operators_and_constructor_headers_keep_semantic_bits() {
         r#"{"configVersion":2,"packages":[{"name":"dep","rootUri":"../../cache/dep","packageUri":"lib/","languageVersion":"3.4"}]}"#,
     );
     let source = "import 'package:dep/dep.dart'; class App implements Concrete {}";
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let externals =
@@ -507,7 +519,9 @@ fn compact_external_types_do_not_collide_with_project_names() {
     let source = "import 'package:dep/dep.dart' as dep;\n\
                   class Base { void local() {} }\n\
                   class App extends dep.Base {}\n";
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let externals =
@@ -592,7 +606,9 @@ fn reexports_keep_distinct_same_package_declarations_resolvable() {
         write(dir.path(), &format!("cache/dep/lib/{file}"), source);
     }
     let source = "import 'package:dep/dep.dart'; import 'package:dep/right.dart' as right;";
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let externals =
@@ -701,10 +717,12 @@ fn compact_external_facts_keep_body_errors_separate_from_header_errors() {
         "class Base { int method() { var broken = ; return 0; } }\n",
     );
     let dep_source = fs::read_to_string(&dep).unwrap();
-    let (_, errors) = parse(&dep_source);
+    let falcon_dart_parser::ParseResult { errors, .. } = parse(&dep_source);
     assert!(!errors.is_empty());
     let source = fs::read_to_string(&app).unwrap();
-    let (program, errors) = parse(&source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(&source);
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let roots = [(app.as_path(), &program, source.as_str())];
@@ -758,7 +776,9 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
         "part of 'dep.dart'; enum Choice { first, second }\n",
     );
     let source = fs::read_to_string(&app).unwrap();
-    let (program, errors) = parse(&source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(&source);
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let roots = [(app.as_path(), &program, source.as_str())];
@@ -899,7 +919,9 @@ fn compact_external_const_constructors_preserve_instance_values() {
         const formalOther = Formal(value: 2); const invalid = Value(0); \
         const expectedSeed = 42; const expectedValue = 1;";
     fs::write(&app, source).unwrap();
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let roots = [(app.as_path(), &program, source)];
@@ -1015,14 +1037,17 @@ fn analyze_context_caches_the_package_version_and_prefers_the_file_override() {
     let config = falcon_config::FalconConfig::default();
     let package_version = LanguageVersion::new(2, 19);
 
-    let ctx = falcon_analyze::AnalyzeContext::new(&file, "void main() {}", &config)
+    let syntax = parse("void main() {}").syntax;
+    let ctx = falcon_analyze::AnalyzeContext::new(&file, "void main() {}", &config, &syntax)
         .with_environment(Some(&environment));
     assert_eq!(ctx.package_language_version, Some(package_version));
     assert_eq!(ctx.language_version(), package_version);
 
     let source = "// @dart = 2.12\nvoid main() {}";
-    let overridden = falcon_analyze::AnalyzeContext::new(&file, source, &config)
-        .with_environment(Some(&environment));
+    let overridden_syntax = parse(source).syntax;
+    let overridden =
+        falcon_analyze::AnalyzeContext::new(&file, source, &config, &overridden_syntax)
+            .with_environment(Some(&environment));
     assert_eq!(overridden.package_language_version, Some(package_version));
     assert_eq!(overridden.language_version(), LanguageVersion::new(2, 12));
 }
@@ -1059,7 +1084,9 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
         const instance = dep.Values.instance; const cyclic = dep.Values.cycleA; \
         const unprefixedAnswer = Values.answer; const unprefixedChoice = Choice.first;";
     fs::write(&app, source).unwrap();
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let roots = [(app.as_path(), &program, source)];
@@ -1117,7 +1144,7 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
             ))
         })
         .collect();
-    let expected = parse("const expected = 42;").0;
+    let expected = parse("const expected = 42;").program;
     let TopLevelDecl::Variable(expected) = &expected.declarations[0] else {
         panic!()
     };
@@ -1208,7 +1235,9 @@ abstract class SameLeft implements Generic<FirstValue> {}
 abstract class SameRight implements Generic<FirstValue> {}
 abstract class EquivalentDiamond implements SameLeft, SameRight {}
 "#;
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let externals =
@@ -1297,7 +1326,9 @@ fn doc_imports_share_the_transitive_external_loader() {
         "export 'dep.dart'; class Documented {}",
     );
     let source = "/// @docImport 'package:dep/doc.dart';\nlibrary;\n/// [Documented]\nvoid f() {}";
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let external =
@@ -1322,7 +1353,7 @@ fn opening_external_files_evicts_the_disk_copy_and_allows_reloading_after_close(
     let (dir, app) = workspace();
     let dependency = canonical_or_lexical(&dir.path().join("cache/dep/lib/dep.dart"));
     let source = fs::read_to_string(&app).unwrap();
-    let (program, _) = parse(&source);
+    let falcon_dart_parser::ParseResult { program, .. } = parse(&source);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let roots = [(app.as_path(), &program, source.as_str())];
     let mut external = ExternalLibraries::load(&environment, &roots, |path| path == app);
@@ -1352,7 +1383,7 @@ fn external_snapshots_reload_dependency_edits_and_removal_explicitly() {
     let (dir, app) = workspace();
     let dependency = dir.path().join("cache/dep/lib/dep.dart");
     let source = fs::read_to_string(&app).unwrap();
-    let (program, _) = parse(&source);
+    let falcon_dart_parser::ParseResult { program, .. } = parse(&source);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let roots = [(app.as_path(), &program, source.as_str())];
     let external = ExternalLibraries::load(&environment, &roots, |path| path == app);
@@ -1433,7 +1464,7 @@ fn explicit_reload_observes_same_time_same_size_rewrites_and_atomic_replacements
     let (dir, app) = workspace();
     let dependency = dir.path().join("cache/dep/lib/dep.dart");
     let source = fs::read_to_string(&app).unwrap();
-    let (program, _) = parse(&source);
+    let falcon_dart_parser::ParseResult { program, .. } = parse(&source);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let roots = [(app.as_path(), &program, source.as_str())];
     for atomic in [false, true] {
@@ -1535,7 +1566,7 @@ fn external_documentation_imports_load_transitively_and_resolve_in_overlays() {
     );
     write(dir.path(), "cache/dep/lib/leaf.dart", "class Leaf {}");
     let source = fs::read_to_string(&app).unwrap();
-    let (program, _) = parse(&source);
+    let falcon_dart_parser::ParseResult { program, .. } = parse(&source);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let external = ExternalLibraries::load(
         &environment,
@@ -1595,7 +1626,7 @@ fn configuration_stamps_detect_same_time_sdk_manifest_changes_without_installed_
 fn missing_external_package_sources_and_parts_are_available_after_explicit_reload() {
     let (dir, app) = workspace();
     let source = "import 'package:dep/generated.dart';";
-    let (program, _) = parse(source);
+    let falcon_dart_parser::ParseResult { program, .. } = parse(source);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let roots = [(app.as_path(), &program, source)];
     let missing_library = ExternalLibraries::load(&environment, &roots, |path| path == app);
@@ -1634,7 +1665,7 @@ fn missing_external_package_sources_and_parts_are_available_after_explicit_reloa
 fn replacing_package_directory_refreshes_facts_on_explicit_reload() {
     let (dir, app) = workspace();
     let source = fs::read_to_string(&app).unwrap();
-    let (program, _) = parse(&source);
+    let falcon_dart_parser::ParseResult { program, .. } = parse(&source);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let external = ExternalLibraries::load(
         &environment,
@@ -1687,7 +1718,9 @@ fn transitive_libraries_and_parts_reload_after_project_buffers_close_without_sdk
         "part of leaf; class LeafPart {}",
     );
     let source = "import 'package:dep/bridge.dart';";
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let roots = [(app.as_path(), &program, source)];

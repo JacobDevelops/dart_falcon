@@ -4,7 +4,11 @@ use falcon_syntax::ast::*;
 #[test]
 fn test_identifier_basic() {
     let src = "class Foo {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -17,7 +21,11 @@ fn test_identifier_basic() {
 #[test]
 fn test_identifier_with_underscore() {
     let src = "void _privateFunc() {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
@@ -29,7 +37,11 @@ fn test_identifier_with_underscore() {
 #[test]
 fn test_string_lit_node_value() {
     let src = r#"var s = "hello";"#;
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
@@ -48,7 +60,11 @@ fn test_string_lit_node_value() {
 #[test]
 fn test_class_member_span() {
     let src = "class Foo { int x; void bar() {} }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -66,7 +82,11 @@ fn test_class_member_span() {
 #[test]
 fn test_field_declarator_span() {
     let src = "class Foo { int x, y, z; }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -85,7 +105,11 @@ fn test_field_declarator_span() {
 #[test]
 fn test_named_type_simple() {
     let src = "int x;";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
@@ -103,7 +127,11 @@ fn test_named_type_simple() {
 #[test]
 fn test_named_type_qualified() {
     let src = "dart.core.List x;";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
@@ -121,7 +149,11 @@ fn test_named_type_qualified() {
 #[test]
 fn test_named_type_with_args() {
     let src = "List<String> list;";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
@@ -139,7 +171,11 @@ fn test_named_type_with_args() {
 #[test]
 fn test_named_type_nullable() {
     let src = "int? x;";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Variable(v) = &prog.declarations[0] else {
@@ -154,7 +190,11 @@ fn test_named_type_nullable() {
 #[test]
 fn test_formal_param_positional() {
     let src = "void foo(int x) {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
@@ -168,7 +208,11 @@ fn test_formal_param_positional() {
 #[test]
 fn test_formal_param_named() {
     let src = "void foo({int x}) {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
@@ -182,7 +226,11 @@ fn test_formal_param_named() {
 #[test]
 fn test_formal_param_optional() {
     let src = "void foo([int x]) {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
@@ -196,7 +244,11 @@ fn test_formal_param_optional() {
 #[test]
 fn test_formal_param_multiple_kinds() {
     let src = "void foo(int a, {int c}) {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
@@ -207,12 +259,20 @@ fn test_formal_param_multiple_kinds() {
     assert_eq!(params[0].kind, ParamKind::Positional);
     assert_eq!(params[1].kind, ParamKind::Named { required: false });
     // Optional-positional and named groups cannot both appear.
-    assert!(!parse("void foo(int a, [int b], {int c}) {}").1.is_empty());
+    assert!(
+        !parse("void foo(int a, [int b], {int c}) {}")
+            .errors
+            .is_empty()
+    );
 }
 
 #[test]
 fn test_formal_param_named_required_and_source_order() {
-    let (prog, errors) = parse("void foo(int z, {required int y, int a = 1}) {}");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("void foo(int z, {required int y, int a = 1}) {}");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
         panic!("expected function")
@@ -236,7 +296,11 @@ fn test_formal_param_named_required_and_source_order() {
 #[test]
 fn test_local_var_decl() {
     let src = "main() { int x = 42; }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
@@ -256,7 +320,11 @@ fn test_local_var_decl() {
 #[test]
 fn test_local_var_final() {
     let src = "main() { final int x = 42; }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Function(fun) = &prog.declarations[0] else {
@@ -276,7 +344,11 @@ fn test_local_var_final() {
 #[test]
 fn test_type_param_simple() {
     let src = "class Box<T> {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -289,7 +361,11 @@ fn test_type_param_simple() {
 #[test]
 fn test_type_param_with_bound() {
     let src = "class Box<T extends num> {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -302,7 +378,11 @@ fn test_type_param_with_bound() {
 #[test]
 fn test_type_params_multiple() {
     let src = "class Map<K, V> {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -314,7 +394,11 @@ fn test_type_params_multiple() {
 #[test]
 fn test_annotation_simple() {
     let src = "@deprecated class Foo {}";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -326,7 +410,11 @@ fn test_annotation_simple() {
 #[test]
 fn test_annotation_with_args() {
     let src = r#"@Deprecated('use Bar') class Foo {}"#;
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -339,7 +427,11 @@ fn test_annotation_with_args() {
 #[test]
 fn test_constructor_default() {
     let src = "class Foo { Foo(); }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -356,7 +448,11 @@ fn test_constructor_default() {
 #[test]
 fn test_constructor_const() {
     let src = "class Foo { const Foo(); }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -371,7 +467,11 @@ fn test_constructor_const() {
 #[test]
 fn test_constructor_factory() {
     let src = "class Foo { factory Foo() => Foo._(); }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -386,7 +486,11 @@ fn test_constructor_factory() {
 #[test]
 fn test_constructor_named() {
     let src = "class Foo { Foo.named(); }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -401,7 +505,11 @@ fn test_constructor_named() {
 #[test]
 fn test_method_basic() {
     let src = "class Foo { void bar() {} }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -416,7 +524,11 @@ fn test_method_basic() {
 #[test]
 fn test_method_async() {
     let src = "class Foo { async void bar() {} }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -431,7 +543,11 @@ fn test_method_async() {
 #[test]
 fn test_method_static() {
     let src = "class Foo { static void bar() {} }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -446,7 +562,11 @@ fn test_method_static() {
 #[test]
 fn test_method_abstract() {
     let src = "abstract class Foo { void bar(); }";
-    let (prog, errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(src);
     assert!(errors.is_empty());
 
     let TopLevelDecl::Class(cls) = &prog.declarations[0] else {
@@ -460,7 +580,9 @@ fn test_method_abstract() {
 
 #[test]
 fn nullable_written_void_recovers_as_canonical_void_without_diagnostics() {
-    let (program, errors) = parse("void? f() {}");
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse("void? f() {}");
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Function(function) = &program.declarations[0] else {
         panic!("expected function");
@@ -470,7 +592,9 @@ fn nullable_written_void_recovers_as_canonical_void_without_diagnostics() {
 
 #[test]
 fn nullable_dynamic_has_one_canonical_representation() {
-    let (program, errors) = parse("dynamic? x; Map<String, dynamic?> y;");
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse("dynamic? x; Map<String, dynamic?> y;");
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Variable(first) = &program.declarations[0] else {
         panic!("expected variable");
@@ -504,7 +628,9 @@ fn string_delimiters_preserve_content_and_escape_text() {
         assert_eq!(delimiter.is_raw, is_raw);
         assert_eq!(delimiter.content_offset, offset);
         assert!(delimiter.terminated);
-        let (program, errors) = parse(&format!("var s = {raw};"));
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&format!("var s = {raw};"));
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
             panic!("expected variable");
@@ -530,7 +656,9 @@ fn unterminated_string_delimiters_keep_recovery_content() {
 
 #[test]
 fn adjacent_string_values_concatenate_without_decoding_escapes() {
-    let (program, errors) = parse("var s = 'a\\n' r\"b\\t\";");
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse("var s = 'a\\n' r\"b\\t\";");
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
         panic!("expected variable");
@@ -551,7 +679,9 @@ fn operator_markers_and_constructor_context_are_preserved() {
         ("async*", AsyncMarker::AsyncStar),
         ("sync*", AsyncMarker::SyncStar),
     ] {
-        let (program, errors) = parse(&format!("class C {{ C operator +(o) {marker} {{}} }}"));
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&format!("class C {{ C operator +(o) {marker} {{}} }}"));
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Class(class) = &program.declarations[0] else {
             panic!("class");
@@ -561,7 +691,9 @@ fn operator_markers_and_constructor_context_are_preserved() {
         };
         assert_eq!(operator.async_marker, expected);
     }
-    let (program, errors) = parse("class C { C() : m = Mode.async { var await = 1; } }");
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse("class C { C() : m = Mode.async { var await = 1; } }");
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Class(class) = &program.declarations[0] else {
         panic!("class");
@@ -580,7 +712,9 @@ fn operator_markers_and_constructor_context_are_preserved() {
 
 #[test]
 fn annotated_local_declaration_keeps_all_declarators() {
-    let (program, errors) = parse("void f() { @a int x = 1, y = 2; }");
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse("void f() { @a int x = 1, y = 2; }");
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Function(function) = &program.declarations[0] else {
         panic!("function");
@@ -622,7 +756,9 @@ fn adjacent_delimiters_never_mix_raw_and_interpolated_segments() {
         ("'${\"x\"}' r'\\d'", true),
     ] {
         let source = format!("var s = {raw};");
-        let (program, errors) = parse(&source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&source);
         assert!(errors.is_empty(), "{raw}: {errors:?}");
         let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
             panic!("variable");
@@ -655,7 +791,9 @@ fn statement_loops_share_complete_headers() {
         ("final x in xs", "for-in", 0),
         ("final (x, y) in xs", "pattern", 0),
     ] {
-        let (program, errors) = parse(&format!("void f() {{ for ({clause}) {{}} }}"));
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&format!("void f() {{ for ({clause}) {{}} }}"));
         assert!(errors.is_empty(), "{clause}: {errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!("function");
@@ -682,7 +820,9 @@ fn statement_loops_share_complete_headers() {
 #[test]
 fn grouping_parentheses_and_operator_spans_are_preserved() {
     let source = "var value = (( /* why */ 1)) == 2;";
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
         panic!("expected variable");
@@ -702,7 +842,9 @@ fn grouping_parentheses_and_operator_spans_are_preserved() {
 
 #[test]
 fn cascade_index_assignments_have_distinct_syntax() {
-    let (program, errors) = parse("var value = target..field /* [ */ = 1..[index] = 2;");
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse("var value = target..field /* [ */ = 1..[index] = 2;");
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
         panic!("expected variable");
@@ -748,7 +890,9 @@ fn shared_visitor_observes_each_effective_constructor_once() {
         mixin class M() {} \
         enum E([int x = 42]) { first; } \
         extension type X(int value) { X.other(this.value); }";
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let mut visitor = Constructors::default();
     visitor.visit_program(&program);
@@ -770,7 +914,9 @@ fn expression_spans_end_at_consumed_tokens_not_following_trivia() {
         "a < b >> c",
     ] {
         let source = format!("var value = {expression} /* trailing */ \n;");
-        let (program, errors) = parse(&source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&source);
         assert!(errors.is_empty(), "{source}: {errors:?}");
         let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
             panic!("expected variable");
@@ -797,7 +943,9 @@ fn nested_type_spans_end_after_each_consumed_shift_token_delimiter() {
         ][..],
     ] {
         let source = format!("{} /* trailing */ value;", names[0]);
-        let (program, errors) = parse(&source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&source);
         assert!(errors.is_empty(), "{source}: {errors:?}");
         let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
             panic!("expected variable");
@@ -818,7 +966,9 @@ fn nested_type_spans_end_after_each_consumed_shift_token_delimiter() {
 #[test]
 fn cascade_chained_invocations_preserve_type_arguments_and_delimiters() {
     let source = "var value = target..method()()<int>(1)..[0]() /* trailing */ ;";
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
         panic!("expected variable");
@@ -860,10 +1010,56 @@ fn cascade_chained_invocations_preserve_type_arguments_and_delimiters() {
 }
 
 #[test]
+fn cascade_null_assertions_preserve_selectors_and_following_statements() {
+    let source = "void f() { c..clear()..parent!.go(c); c.go; }";
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
+    assert!(errors.is_empty(), "{errors:?}");
+    let TopLevelDecl::Function(function) = &program.declarations[0] else {
+        panic!("expected function");
+    };
+    let Some(FunctionBody::Block(block)) = &function.body else {
+        panic!("expected block");
+    };
+    assert_eq!(block.stmts.len(), 2);
+    let Stmt::Expr(statement) = &block.stmts[0] else {
+        panic!("expected expression statement");
+    };
+    let Expr::Cascade { sections, span, .. } = &statement.expr else {
+        panic!("expected cascade statement");
+    };
+    assert_eq!(&source[span.start..span.end], "c..clear()..parent!.go(c)");
+    assert_eq!(sections.len(), 2);
+    assert!(matches!(
+        sections[0].ops.as_slice(),
+        [CascadeOp::Call(name, _, _)] if name.name == "clear"
+    ));
+    let [
+        CascadeOp::Field { name, .. },
+        CascadeOp::NullAssert { span },
+        CascadeOp::Call(method, _, args),
+    ] = sections[1].ops.as_slice()
+    else {
+        panic!("expected field, assertion, and call");
+    };
+    assert_eq!(name.name, "parent");
+    assert_eq!(&source[span.start..span.end], "!");
+    assert_eq!(method.name, "go");
+    assert_eq!(args.positional.len(), 1);
+    let Stmt::Expr(statement) = &block.stmts[1] else {
+        panic!("expected tearoff statement");
+    };
+    assert!(matches!(&statement.expr, Expr::Field { field, .. } if field.name == "go"));
+}
+
+#[test]
 fn legacy_typedef_function_span_ends_at_parameter_closure() {
     for declaration in ["typedef void F(int x);", "typedef F(int x);"] {
         let source = format!("{declaration} /* trailing trivia */\n\nvoid next() {{}}");
-        let (program, errors) = parse(&source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&source);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::TypeAlias(alias) = &program.declarations[0] else {
             panic!("expected typedef");
@@ -889,7 +1085,9 @@ fn local_variable_spans_preserve_attached_documentation_and_metadata() {
         ("", "@deprecated"),
     ] {
         let source = format!("void f() {{\n{documentation}@deprecated\nfinal value = 1;\n}}");
-        let (program, errors) = parse(&source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&source);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!("expected function");
@@ -902,9 +1100,16 @@ fn local_variable_spans_preserve_attached_documentation_and_metadata() {
         };
         assert_eq!(declaration.annotations.len(), 1);
         assert_eq!(
-            declaration.span,
+            declaration.full_range(),
             Span::new(
                 source.find(first_documentation).unwrap(),
+                source.find(";\n}").unwrap() + 1,
+            )
+        );
+        assert_eq!(
+            declaration.range(),
+            Span::new(
+                source.find("@deprecated").unwrap(),
                 source.find(";\n}").unwrap() + 1,
             )
         );
@@ -925,7 +1130,9 @@ fn local_variable_keyword_spans_are_consumed_tokens_not_documentation_words() {
         let source = format!(
             "void f() {{\n/// Documentation mentioning var final const.\n@deprecated\n{declaration}\n}}"
         );
-        let (program, errors) = parse(&source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&source);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!("expected function");
@@ -941,7 +1148,11 @@ fn local_variable_keyword_spans_are_consumed_tokens_not_documentation_words() {
             Span::new(start, start + keyword.len())
         });
         assert_eq!(declaration.keyword_span, expected);
-        assert_eq!(declaration.span.start, source.find("///").unwrap());
+        assert_eq!(
+            declaration.range().start,
+            source.find("@deprecated").unwrap()
+        );
+        assert_eq!(declaration.full_range().start, source.find("///").unwrap());
     }
 }
 
@@ -956,7 +1167,9 @@ fn for_loop_local_variable_keyword_spans_distinguish_keywordless_types() {
         ("int value = 1", None),
     ] {
         let source = format!("void f() {{ for ({declaration}; false;) {{}} }}");
-        let (program, errors) = parse(&source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&source);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!("expected function");
@@ -986,7 +1199,9 @@ fn pattern_declaration_keyword_span_is_the_consumed_token() {
     ] {
         let source =
             format!("void f() {{\n/// Documentation mentioning var final.\n{declaration}\n}}");
-        let (program, errors) = parse(&source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(&source);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!("expected function");

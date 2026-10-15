@@ -431,7 +431,7 @@ impl Visitor for Collector<'_> {
     fn visit_local_var(&mut self, node: &LocalVarDecl) {
         self.check_declaration(
             &node.annotations,
-            node.span,
+            node.full_range(),
             node.var_type.as_ref(),
             &node.declarators,
         );

@@ -104,7 +104,7 @@ impl CrossFileRule for UnnecessaryNullable {
             {
                 continue;
             }
-            let ctx = AnalyzeContext::new(&file.path, &file.source, config)
+            let ctx = AnalyzeContext::new(&file.path, &file.source, config, &file.syntax)
                 .with_types(&indexes.types)
                 .with_identities(&indexes.identities)
                 .with_signatures(&indexes.signatures);
@@ -551,7 +551,7 @@ impl Visitor for CallCollector<'_> {
                                 self.visit_expr(target);
                                 self.visit_expr(value);
                             }
-                            CascadeOp::Field { .. } => {}
+                            CascadeOp::Field { .. } | CascadeOp::NullAssert { .. } => {}
                         }
                     }
                 }
@@ -604,7 +604,11 @@ mod tests {
     use falcon_dart_parser::parse;
 
     fn count(source: &str) -> usize {
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         UnnecessaryNullable
             .analyze_project(
@@ -612,6 +616,7 @@ mod tests {
                     path: "test.dart".into(),
                     source: source.into(),
                     program,
+                    syntax,
                     has_parse_errors: false,
                 }],
                 &FalconConfig::default(),
@@ -678,12 +683,17 @@ mod tests {
                     },
                 );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
-            let (program, errors) = parse("");
+            let falcon_dart_parser::ParseResult {
+                program,
+                errors,
+                syntax,
+            } = parse("");
             assert!(errors.is_empty());
             files.push(ProjectFile {
                 path: manifest.clone(),
                 source: "name: app\n".into(),
                 program,
+                syntax,
                 has_parse_errors: false,
             });
             for indexes in [None, indexes.as_ref()] {

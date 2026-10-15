@@ -176,9 +176,11 @@ class AppConfig {
 ];
 
 fn run_all_rules_on_source(rules: &[(&'static str, Box<dyn Rule>)], path: &Path, source: &str) {
-    let (program, _) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program, syntax, ..
+    } = parse(source);
     let config = FalconConfig::default();
-    let ctx = AnalyzeContext::new(path, source, &config);
+    let ctx = AnalyzeContext::new(path, source, &config, &syntax);
     for (_, rule) in rules {
         let _ = rule.analyze(&program, &ctx);
     }
@@ -239,13 +241,15 @@ fn bench_per_rule(c: &mut Criterion) {
     let rules = all_rules();
     let snippet = SNIPPETS[0];
     let path = std::path::PathBuf::from("benchmark.dart");
-    let (program, _) = parse(snippet);
+    let falcon_dart_parser::ParseResult {
+        program, syntax, ..
+    } = parse(snippet);
     let config = FalconConfig::default();
 
     for (rule_name, rule) in &rules {
         c.bench_with_input(BenchmarkId::new("rule", rule_name), rule_name, |b, _| {
             b.iter(|| {
-                let ctx = AnalyzeContext::new(&path, snippet, &config);
+                let ctx = AnalyzeContext::new(&path, snippet, &config, &syntax);
                 let _ = rule.analyze(&program, &ctx);
             });
         });

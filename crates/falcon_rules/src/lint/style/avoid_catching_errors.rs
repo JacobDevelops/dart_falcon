@@ -64,8 +64,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             {
                 "The type 'Error' should not be caught.".to_string()
             } else {
-                let name =
-                    expressions::normalized(self.ctx.source, caught.span()).unwrap_or_default();
+                let name = expressions::normalized(self.ctx, caught.span()).unwrap_or_default();
                 format!(
                     "The type '{name}' should not be caught because it is a subclass of 'Error'."
                 )

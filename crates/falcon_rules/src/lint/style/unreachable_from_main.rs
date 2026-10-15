@@ -138,6 +138,7 @@ struct Unit<'a> {
     program: &'a Program,
     /// The in-memory text `program` was parsed from, so its spans index it.
     source: &'a str,
+    syntax: &'a falcon_syntax::SyntaxStore,
 }
 
 /// The analyzed file plus every sibling unit of its library, each with the
@@ -146,6 +147,7 @@ fn library_units<'a>(program: &'a Program, ctx: &'a AnalyzeContext<'a>) -> Optio
     let current = Unit {
         program,
         source: ctx.source,
+        syntax: ctx.syntax,
     };
     if ctx
         .library
@@ -161,7 +163,12 @@ fn library_units<'a>(program: &'a Program, ctx: &'a AnalyzeContext<'a>) -> Optio
         .siblings()
         .iter()
         .zip(library.sibling_sources())
-        .map(|(&program, &source)| Unit { program, source });
+        .zip(library.sibling_syntax())
+        .map(|((&program, &source), &syntax)| Unit {
+            program,
+            source,
+            syntax,
+        });
     Some(std::iter::once(current).chain(siblings).collect())
 }
 
@@ -340,6 +347,7 @@ impl<'a> Tables<'a> {
             tables.add_members(
                 container,
                 units[tables.containers[container].unit].source,
+                units[tables.containers[container].unit].syntax,
                 semantic,
             );
         }
@@ -586,6 +594,7 @@ impl<'a> Tables<'a> {
         &mut self,
         container: ContainerId,
         source: &str,
+        syntax: &falcon_syntax::SyntaxStore,
         semantic: Option<(
             &falcon_analyze::SemanticModel<'_>,
             &falcon_analyze::SignatureIndex,
@@ -650,7 +659,7 @@ impl<'a> Tables<'a> {
                 ClassMember::Operator(operator) => {
                     let key = operator.lookup_name().to_string();
                     if !self.may_override(container, &key, semantic) {
-                        let name_span = operator_token_span(operator, source);
+                        let name_span = operator_token_span(operator, syntax);
                         entries.push((span.start, key, operator.op.clone(), name_span, span));
                     }
                 }
@@ -1854,6 +1863,7 @@ impl Visitor for RefWalker<'_, '_> {
             } => {
                 for operation in sections.iter().flat_map(|section| &section.ops) {
                     match operation {
+                        CascadeOp::NullAssert { .. } => {}
                         CascadeOp::Field { name, .. } => self.instance_member(object, &name.name),
                         CascadeOp::Call(name, type_args, _) => {
                             self.visit_type_arguments(type_args);
@@ -1951,9 +1961,11 @@ mod tests {
     use super::{UnreachableFromMain, doc_comment_references, doc_start};
 
     fn lint(source: &str) -> Vec<String> {
-        let (program, _) = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = falcon_dart_parser::parse(source);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(std::path::Path::new("main.dart"), source, &config);
+        let ctx = AnalyzeContext::new(std::path::Path::new("main.dart"), source, &config, &syntax);
         UnreachableFromMain
             .analyze(&program, &ctx)
             .into_iter()

@@ -68,7 +68,7 @@ fn corpus_parses_without_panic() {
             }
         };
         // parse() must not panic — if it does the test aborts with a clear message.
-        let (_, errors) = parse(&source);
+        let falcon_dart_parser::ParseResult { errors, .. } = parse(&source);
         if !errors.is_empty() {
             error_files.push((path.clone(), errors.len()));
         }

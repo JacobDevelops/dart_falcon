@@ -146,11 +146,14 @@ mod tests {
     use falcon_dart_parser::parser::parse;
 
     fn pf(path: &str, src: &str) -> ProjectFile {
-        let (program, _errors) = parse(src);
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(src);
         ProjectFile {
             path: PathBuf::from(path),
             source: src.to_string(),
             program,
+            syntax,
             has_parse_errors: false,
         }
     }

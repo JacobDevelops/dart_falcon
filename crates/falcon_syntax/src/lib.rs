@@ -5,4 +5,4 @@ pub mod visitor;
 
 pub use ast::Program;
 pub use language_version::{Feature, LanguageVersion};
-pub use token::{Token, TokenKind};
+pub use token::{SyntaxStore, Token, TokenId, TokenKind, TokenRange};

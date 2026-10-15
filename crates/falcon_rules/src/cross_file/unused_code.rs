@@ -16,10 +16,8 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
-use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::ast::*;
-use falcon_syntax::token::TokenKind;
 
 use super::{canonical_or_lexical, detect_package, is_under_lib, resolve_directive_uri};
 
@@ -56,7 +54,7 @@ impl CrossFileRule for UnusedCode {
         // comment contents are excluded because the lexer tokenizes them apart.
         let mut mentions: HashMap<String, HashSet<usize>> = HashMap::new();
         for (idx, f) in files.iter().enumerate() {
-            for name in collect_used_names(&f.source) {
+            for name in collect_used_names(&f.source, &f.syntax) {
                 mentions.entry(name).or_default().insert(idx);
             }
         }
@@ -85,7 +83,7 @@ impl CrossFileRule for UnusedCode {
             }
             // Identifier ranges in the declaring file, used to detect same-file
             // references (dcl counts these as usage).
-            let idents = identifier_ranges(&f.source);
+            let idents: Vec<_> = identifier_ranges(&f.syntax).collect();
             for cand in cands {
                 let used_elsewhere = mentions
                     .get(&cand.name)
@@ -190,91 +188,77 @@ fn collect_exported_files(
 /// references the AST walker would miss (type-name segments, `case` patterns,
 /// member access, `show`/`hide` combinators) and survives partial parses.
 ///
-/// Identifier tokens are taken directly; identifiers inside string-interpolation
-/// regions (`$name`, `${expr}`) are extracted separately because the lexer folds
-/// them into the enclosing string-literal token — without this, a symbol
-/// referenced only inside an interpolation (a common Dart idiom) would look
-/// unused and be falsely flagged. Keywords, plain string content, and comments
-/// are distinct token kinds and stay excluded.
-fn identifier_ranges(source: &str) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    for token in Lexer::new(source).tokenize() {
-        match token.kind {
-            TokenKind::Ident => out.push((token.offset, token.len)),
-            TokenKind::StringLit => {
-                push_interpolation_idents(token.text(source), token.offset, &mut out);
-            }
-            _ => {}
-        }
-    }
-    out
+/// Retained identifiers include both simple and braced string interpolations,
+/// but exclude plain string contents and comments.
+fn identifier_ranges(
+    syntax: &falcon_syntax::SyntaxStore,
+) -> impl Iterator<Item = (usize, usize)> + '_ {
+    syntax
+        .identifier_tokens()
+        .map(|token| (token.offset(), token.len()))
 }
 
 /// The set of identifier names a file uses (see [`identifier_ranges`]).
-fn collect_used_names(source: &str) -> HashSet<String> {
-    identifier_ranges(source)
-        .into_iter()
+fn collect_used_names(source: &str, syntax: &falcon_syntax::SyntaxStore) -> HashSet<String> {
+    identifier_ranges(syntax)
         .filter_map(|(offset, len)| source.get(offset..offset + len).map(str::to_string))
         .collect()
 }
 
-fn is_ident_start_byte(b: u8) -> bool {
-    b == b'_' || b == b'$' || b.is_ascii_alphabetic()
-}
+#[cfg(test)]
+mod tests {
+    use super::collect_used_names;
 
-fn is_ident_continue_byte(b: u8) -> bool {
-    b == b'_' || b == b'$' || b.is_ascii_alphanumeric()
-}
-
-/// Append `(offset, len)` for each identifier inside the interpolation regions of
-/// a string-literal token. `text` is the token's full source slice and `base` its
-/// byte offset in the file. Raw strings (`r'…'`) never interpolate. Mirrors the
-/// lexer's own `$`/`${…}` scanning and is over-inclusive (member names count
-/// too), which only ever suppresses flags.
-fn push_interpolation_idents(text: &str, base: usize, out: &mut Vec<(usize, usize)>) {
-    let bytes = text.as_bytes();
-    if bytes.first() == Some(&b'r') {
-        return;
-    }
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => i += 2, // escape: the next byte is literal
-            b'$' => {
-                i += 1;
-                if bytes.get(i) == Some(&b'{') {
-                    i += 1;
-                    let mut depth = 1usize;
-                    while i < bytes.len() && depth > 0 {
-                        match bytes[i] {
-                            b'{' => {
-                                depth += 1;
-                                i += 1;
-                            }
-                            b'}' => {
-                                depth -= 1;
-                                i += 1;
-                            }
-                            b'\\' => i += 2,
-                            b if is_ident_start_byte(b) => {
-                                let start = i;
-                                while i < bytes.len() && is_ident_continue_byte(bytes[i]) {
-                                    i += 1;
-                                }
-                                out.push((base + start, i - start));
-                            }
-                            _ => i += 1,
-                        }
-                    }
-                } else if matches!(bytes.get(i), Some(&b) if is_ident_start_byte(b)) {
-                    let start = i;
-                    while i < bytes.len() && is_ident_continue_byte(bytes[i]) {
-                        i += 1;
-                    }
-                    out.push((base + start, i - start));
-                }
-            }
-            _ => i += 1,
+    #[test]
+    fn retained_interpolation_identifiers_exclude_literal_text_and_comments() {
+        let source = r#"final text = '$simple ${call(nested /* ghost */)} ${"literal"}';"#;
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let names = collect_used_names(source, &parsed.syntax);
+        for name in ["text", "simple", "call", "nested"] {
+            assert!(names.contains(name), "{name}: {names:?}");
         }
+        for name in ["ghost", "literal"] {
+            assert!(!names.contains(name), "{name}: {names:?}");
+        }
+    }
+
+    #[test]
+    fn contextual_identifiers_in_interpolations_count_as_references() {
+        let source = r#"final text = '${type} ${show} ${get} ${set} ${on} ${hide}';"#;
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let names = collect_used_names(source, &parsed.syntax);
+        for name in ["type", "show", "get", "set", "on", "hide"] {
+            assert!(names.contains(name), "{name}: {names:?}");
+        }
+    }
+
+    #[test]
+    fn unrelated_required_modifier_does_not_reference_required_declaration() {
+        let source = "const required = 1; void unrelated({required int value}) {}";
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let names = collect_used_names(source, &parsed.syntax);
+        assert!(!names.contains("required"), "{names:?}");
+    }
+
+    #[test]
+    fn required_identifier_in_interpolation_counts_as_a_reference() {
+        let source = r#"const required = 1; final text = '${required}';"#;
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let names = collect_used_names(source, &parsed.syntax);
+        assert!(names.contains("required"), "{names:?}");
+    }
+
+    #[test]
+    fn raw_and_escaped_dollars_do_not_reference_identifiers() {
+        let source = r#"final raw = r'$ghost'; final escaped = '\$other';"#;
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let names = collect_used_names(source, &parsed.syntax);
+        assert!(!names.contains("ghost"));
+        assert!(!names.contains("other"));
     }
 }

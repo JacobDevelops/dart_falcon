@@ -13,7 +13,11 @@ use common_class::only_class;
 /// expression parser through the public `parse` entry point.
 fn parse_expr(expr_src: &str) -> (Expr, Vec<ParseError>) {
     let src = format!("var x = {expr_src};");
-    let (prog, errors) = parse(&src);
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(&src);
     let init = match &prog.declarations[0] {
         TopLevelDecl::Variable(v) => v.declarators[0]
             .initializer
@@ -728,7 +732,11 @@ fn paren_expr_initializer_before_block_body_is_not_a_lambda() {
     // `C(): g = (() => b) {}` — the trailing `{}` is the constructor body, so the
     // `(...)` is a parenthesized expression, not a lambda parameter list. The
     // `(...) {` shape used to be mis-detected as a function literal.
-    let (prog, errors) = parse("class C { var g; C(): g = (() => b) {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { var g; C(): g = (() => b) {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let class = only_class(&prog);
     let ctor = class
@@ -754,7 +762,11 @@ fn paren_expr_initializer_before_block_body_is_not_a_lambda() {
 #[test]
 fn nested_paren_arithmetic_initializer_before_block_body() {
     // The same rollback must cover a plain parenthesized arithmetic expression.
-    let (_prog, errors) = parse("class C { var g; C(): g = (((o + 1) << 8) | 1) {} }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class C { var g; C(): g = (((o + 1) << 8) | 1) {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
 
@@ -764,7 +776,11 @@ fn valid_param_list_initializer_before_block_body_is_not_a_lambda() {
     // speculative lambda parse *succeeds*, yet the trailing `{}` is the
     // constructor body: the initializer value is the parenthesized expression
     // `(e)`, not a lambda `(e) {}`.
-    let (prog, errors) = parse("class C { var g; C(): g = (e) {} }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("class C { var g; C(): g = (e) {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
     let class = only_class(&prog);
     let ctor = class
@@ -791,7 +807,11 @@ fn valid_param_list_initializer_before_block_body_is_not_a_lambda() {
 fn lambda_in_ctor_init_argument_is_still_a_lambda() {
     // The ctor-body disambiguation must not leak into bracketed sub-parses:
     // `foo((e) {})` inside an initializer is a genuine lambda argument.
-    let (_prog, errors) = parse("class C { var g; C(): g = foo((e) {}) {} }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class C { var g; C(): g = foo((e) {}) {} }");
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
 
@@ -810,7 +830,11 @@ fn bare_block_lambda_conditional_branch_in_ctor_init_matches_sdk_rejection() {
     // `C(): g = c ? () {} : null;` — the SDK parses `c ? ()` (empty record) and then
     // treats `{` as the constructor body, leaving the conditional dangling: a syntax
     // error. `() {}` is *not* accepted as the then-branch closure. Falcon must agree.
-    let (_prog, errors) = parse("class C { var g; C(): g = c ? () {} : null; }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class C { var g; C(): g = c ? () {} : null; }");
     assert!(
         !errors.is_empty(),
         "SDK rejects a bare block closure in a ctor-init conditional branch; \
@@ -822,7 +846,11 @@ fn bare_block_lambda_conditional_branch_in_ctor_init_matches_sdk_rejection() {
 fn bare_block_lambda_binary_rhs_in_ctor_init_matches_sdk_rejection() {
     // `C(): g = f + () {};` — the SDK parses `f + ()` and takes `{}` as the ctor body,
     // leaving `;` stranded: a syntax error. Not a `f + <closure>` binary expression.
-    let (_prog, errors) = parse("class C { var g; C(): g = f + () {}; }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class C { var g; C(): g = f + () {}; }");
     assert!(
         !errors.is_empty(),
         "SDK rejects a bare block closure on a ctor-init binary RHS; \
@@ -834,7 +862,11 @@ fn bare_block_lambda_binary_rhs_in_ctor_init_matches_sdk_rejection() {
 fn bare_block_lambda_outermost_in_ctor_init_is_ctor_body_then_stray_semicolon() {
     // `C(): g = () {};` — even outermost, `()` is a record and `{}` is the ctor body,
     // so the trailing `;` is a stray token: the SDK reports a syntax error, as must we.
-    let (_prog, errors) = parse("class C { var g; C(): g = () {}; }");
+    let falcon_dart_parser::ParseResult {
+        program: _prog,
+        errors,
+        ..
+    } = parse("class C { var g; C(): g = () {}; }");
     assert!(
         !errors.is_empty(),
         "SDK treats `() {{}}` as record + ctor body, stranding `;`; \
@@ -884,7 +916,11 @@ fn test_assignment_in_both_conditional_branches() {
 
 /// Parse `void f(o) { <src> }` and return the first statement's expression.
 fn first_stmt_expr(src: &str) -> (Expr, usize) {
-    let (prog, errors) = parse(&format!("void f(o) {{ {src} }}"));
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse(&format!("void f(o) {{ {src} }}"));
     let expr = common_expr::first_stmt_expr(&prog);
     (expr, errors.len())
 }
@@ -937,7 +973,7 @@ fn test_deep_unary_chain_does_not_overflow() {
     // aborts. The guard must instead emit a "nesting too deep" error. The chain
     // trips the guard at a bounded depth, so it fits the default test stack.
     let src = format!("var x = {}1;", "-".repeat(1000));
-    let (_, errors) = parse(&src);
+    let falcon_dart_parser::ParseResult { errors, .. } = parse(&src);
     assert!(
         errors
             .iter()
@@ -958,7 +994,7 @@ fn test_deep_parens_do_not_overflow() {
         .spawn(|| {
             let n = 3000;
             let src = format!("var x = {}1{};", "(".repeat(n), ")".repeat(n));
-            let (_, errors) = parse(&src);
+            let falcon_dart_parser::ParseResult { errors, .. } = parse(&src);
             errors
                 .iter()
                 .any(|e| e.message.contains("nesting too deep"))

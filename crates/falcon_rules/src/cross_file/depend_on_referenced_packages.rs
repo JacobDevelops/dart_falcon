@@ -168,12 +168,17 @@ mod tests {
             .map(|relative| {
                 let path = root.join(relative);
                 let source = std::fs::read_to_string(&path).unwrap();
-                let (program, errors) = falcon_dart_parser::parse(&source);
+                let falcon_dart_parser::ParseResult {
+                    program,
+                    errors,
+                    syntax,
+                } = falcon_dart_parser::parse(&source);
                 assert!(errors.is_empty());
                 ProjectFile {
                     path,
                     source,
                     program,
+                    syntax,
                     has_parse_errors: false,
                 }
             })

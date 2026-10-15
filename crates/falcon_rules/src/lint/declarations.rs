@@ -104,25 +104,21 @@ pub(crate) fn declaration_key(declaration: &TopLevelDecl) -> usize {
 
 /// The span of the operator token (`==`, `[]=`) after the `operator` keyword
 /// of `operator`; the declaration's span when the keyword is not found.
-pub(crate) fn operator_token_span(operator: &OperatorDecl, source: &str) -> Span {
+pub(crate) fn operator_token_span(
+    operator: &OperatorDecl,
+    syntax: &falcon_syntax::SyntaxStore,
+) -> Span {
     let header_start = operator
         .annotations
         .last()
         .map_or(operator.span.start, |annotation| annotation.span.end);
-    source
-        .get(header_start..operator.params.span.start)
-        .and_then(|header| {
-            let tokens = falcon_dart_parser::lexer::Lexer::new(header).tokenize();
-            let keyword = tokens
-                .iter()
-                .position(|token| token.kind == falcon_syntax::TokenKind::Operator)?;
-            let token = tokens[keyword + 1..]
-                .iter()
-                .find(|token| !token.is_trivia())?;
-            let offset = header_start + token.offset;
-            Some(Span::new(offset, offset + operator.op.len()))
+    let mut tokens = syntax.tokens_in(Span::new(header_start, operator.params.span.start));
+    tokens
+        .find(|token| token.kind == falcon_syntax::TokenKind::Operator)
+        .and_then(|_| tokens.find(|token| !token.is_trivia()))
+        .map_or(operator.span, |token| {
+            Span::new(token.offset(), token.offset() + operator.op.len())
         })
-        .unwrap_or(operator.span)
 }
 
 /// Offset of a declaration's first token after its annotations (the
@@ -131,26 +127,16 @@ pub(crate) fn operator_token_span(operator: &OperatorDecl, source: &str) -> Span
 pub(crate) fn first_token_after_annotations(
     annotations: &[Annotation],
     span: Span,
-    source: &str,
+    syntax: &falcon_syntax::SyntaxStore,
 ) -> usize {
-    let mut offset = annotations
+    let offset = annotations
         .iter()
         .map(|annotation| annotation.span.end)
         .fold(span.start, usize::max);
-    let bytes = source.as_bytes();
-    while offset < span.end {
-        let rest = &source[offset..];
-        if bytes[offset].is_ascii_whitespace() {
-            offset += 1;
-        } else if rest.starts_with("//") {
-            offset += rest.find('\n').unwrap_or(rest.len());
-        } else if rest.starts_with("/*") {
-            offset += rest.find("*/").map_or(rest.len(), |end| end + 2);
-        } else {
-            break;
-        }
-    }
-    offset.min(span.end)
+    syntax
+        .tokens_in(Span::new(offset, span.end))
+        .find(|token| !token.is_trivia())
+        .map_or(span.end, |token| token.offset())
 }
 
 #[cfg(test)]
@@ -161,7 +147,9 @@ mod tests {
 
     #[test]
     fn extracts_members_from_every_member_bearing_declaration() {
-        let (program, errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(
             "class C { void f() {} }
              mixin M { void f() {} }
              mixin class MC { void f() {} }
@@ -186,7 +174,9 @@ mod tests {
 
     #[test]
     fn preserves_empty_member_lists() {
-        let (program, errors) = parse("class C {} enum E { value } extension on int {}");
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse("class C {} enum E { value } extension on int {}");
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(program.declarations.len(), 3);
         for declaration in &program.declarations {
@@ -349,9 +339,14 @@ mod tests {
                 };
                 let variants = if kind == "Enum" { "value;" } else { "" };
                 let source = format!("{header} {{ {variants} {member_source} }}");
-                let (program, errors) = parse(&source);
+                let falcon_dart_parser::ParseResult {
+                    program,
+                    errors,
+                    syntax,
+                } = parse(&source);
                 assert!(errors.is_empty(), "{name}/{kind}: {errors:?}");
-                let ctx = AnalyzeContext::new(Path::new("containers.dart"), &source, &config);
+                let ctx =
+                    AnalyzeContext::new(Path::new("containers.dart"), &source, &config, &syntax);
                 let diagnostics = rule.analyze(&program, &ctx);
                 assert!(
                     diagnostics.iter().any(|diagnostic| diagnostic.rule == name),

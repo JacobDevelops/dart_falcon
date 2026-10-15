@@ -2195,12 +2195,12 @@ pub fn library_doc_imports<'s>(
             break;
         }
         if !token.is_trivia() {
-            attached_start = token.offset + token.len;
+            attached_start = token.offset() + token.len();
             previous_block = false;
         } else if token.kind == TokenKind::DocComment {
             let is_block = token.text(header).starts_with("/**");
             if is_block || previous_block {
-                attached_start = token.offset;
+                attached_start = token.offset();
             }
             previous_block = is_block;
         }
@@ -2217,7 +2217,7 @@ pub fn library_doc_imports<'s>(
         token
             .text(header)
             .split_inclusive('\n')
-            .scan(token.offset, move |offset, line| {
+            .scan(token.offset(), move |offset, line| {
                 let start = *offset + attached_start;
                 *offset += line.len();
                 Some((start, line))
@@ -2242,7 +2242,9 @@ pub fn library_doc_imports<'s>(
         import_source.clear();
         import_source.push_str("import ");
         import_source.push_str(rest);
-        let (parsed, _) = falcon_dart_parser::parse(&import_source);
+        let falcon_dart_parser::ParseResult {
+            program: parsed, ..
+        } = falcon_dart_parser::parse(&import_source);
         let import = parsed.imports.into_iter().next()?;
         let (first, first_span) = import.uri.segments().next()?;
         let content_start = first_span.start.checked_sub("import ".len())? + first.content_offset;
@@ -2674,7 +2676,9 @@ mod tests {
             paths.iter().map(PathBuf::as_path),
             |_| None,
         );
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let project: Vec<_> = paths
             .iter()
@@ -2737,14 +2741,21 @@ mod tests {
         let sources: Vec<_> = inputs
             .iter()
             .zip(&parsed)
-            .map(|((path, _), (program, errors))| {
-                assert!(errors.is_empty(), "{errors:?}");
-                IdentitySource {
-                    path: Path::new(path),
-                    program,
-                    has_parse_errors: false,
-                }
-            })
+            .map(
+                |(
+                    (path, _),
+                    falcon_dart_parser::ParseResult {
+                        program, errors, ..
+                    },
+                )| {
+                    assert!(errors.is_empty(), "{errors:?}");
+                    IdentitySource {
+                        path: Path::new(path),
+                        program,
+                        has_parse_errors: false,
+                    }
+                },
+            )
             .collect();
         IdentityIndex::from_project_files(&sources, packages)
     }
@@ -3458,7 +3469,9 @@ mod tests {
         let path = app.join("lib/main.dart");
         let source = "import 'package:dep/api.dart' as p; const _limit = 9;";
         std::fs::write(&path, source).unwrap();
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);

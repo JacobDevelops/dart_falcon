@@ -2,21 +2,37 @@
 
 mod decl;
 mod expr;
+mod lexical;
 mod pattern;
 mod stmt;
 mod types;
 
+pub use lexical::lex_syntax;
+
 use falcon_syntax::LanguageVersion;
 use falcon_syntax::ast::*;
-use falcon_syntax::token::{Token, TokenKind};
+use falcon_syntax::token::{SyntaxStore, Token, TokenKind};
 use tracing::debug;
 
-use crate::lexer::{Lexer, filter_trivia};
+#[cfg(test)]
+use crate::lexer::Lexer;
+
+/// Parsed syntax and diagnostics sharing one retained lexical store.
+#[derive(Debug)]
+pub struct ParseResult {
+    pub program: Program,
+    pub errors: Vec<ParseError>,
+    pub syntax: SyntaxStore,
+}
 
 /// Parse Dart into an AST and recoverable errors at the language version of a
 /// file outside any package: its `// @dart` override, else
 /// [`LanguageVersion::CURRENT`].
-pub fn parse(source: &str) -> (Program, Vec<ParseError>) {
+///
+/// # Panics
+///
+/// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
+pub fn parse(source: &str) -> ParseResult {
     parse_for_package(source, None)
 }
 
@@ -24,10 +40,11 @@ pub fn parse(source: &str) -> (Program, Vec<ParseError>) {
 /// language version — its `// @dart` override, else `package_version`, else
 /// [`LanguageVersion::CURRENT`] — on a depth-bounded worker stack, so deeply
 /// nested input cannot exhaust the caller's stack.
-pub fn parse_for_package(
-    source: &str,
-    package_version: Option<LanguageVersion>,
-) -> (Program, Vec<ParseError>) {
+///
+/// # Panics
+///
+/// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
+pub fn parse_for_package(source: &str, package_version: Option<LanguageVersion>) -> ParseResult {
     let version = LanguageVersion::file_override(source)
         .or(package_version)
         .unwrap_or(LanguageVersion::CURRENT);
@@ -50,15 +67,18 @@ pub fn parse_for_package(
 /// (that ceiling costs well under 16 MB of native stack).
 const PARSER_STACK_SIZE: usize = 256 * 1024 * 1024;
 
-fn parse_inner(source: &str, version: LanguageVersion) -> (Program, Vec<ParseError>) {
+fn parse_inner(source: &str, version: LanguageVersion) -> ParseResult {
     debug!("parsing file");
-    let raw_tokens = Lexer::new(source).tokenize();
-    let tokens = filter_trivia(raw_tokens);
-    let mut p = Parser::new(tokens, source, version);
+    let syntax = lex_syntax(source);
+    let mut p = Parser::new(&syntax, source, version);
     let program = p.parse_program();
-    let error_count = p.errors.len();
-    debug!(errors = error_count, "parse complete");
-    (program, p.errors)
+    let errors = p.errors;
+    debug!(errors = errors.len(), "parse complete");
+    ParseResult {
+        program,
+        errors,
+        syntax,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -96,8 +116,66 @@ pub(super) struct Checkpoint {
     depth_limit_hit: bool,
 }
 
+/// Temporary dense indices borrowing canonical tokens, not copying them.
+pub(super) struct SignificantTokens<'a> {
+    syntax: &'a SyntaxStore,
+    indices: Vec<u32>,
+}
+
+impl<'a> SignificantTokens<'a> {
+    fn new(syntax: &'a SyntaxStore) -> Self {
+        let indices = syntax
+            .tokens()
+            .iter()
+            .enumerate()
+            .filter(|(_, token)| !token.is_trivia())
+            .map(|(index, _)| {
+                u32::try_from(index).expect("syntax store exceeds u32 token capacity")
+            })
+            .collect();
+        Self { syntax, indices }
+    }
+
+    fn len(&self) -> usize {
+        self.indices.len()
+    }
+
+    fn get(&self, index: usize) -> Option<&Token> {
+        self.indices
+            .get(index)
+            .map(|index| &self.syntax.tokens()[*index as usize])
+    }
+
+    fn last(&self) -> Option<&Token> {
+        self.len().checked_sub(1).and_then(|index| self.get(index))
+    }
+
+    /// Slice before mapping so lookahead starts in O(1), independent of the prefix.
+    fn iter_from(
+        &self,
+        start: usize,
+    ) -> Option<impl ExactSizeIterator<Item = &Token> + DoubleEndedIterator> {
+        Some(
+            self.indices
+                .get(start..)?
+                .iter()
+                .map(|index| &self.syntax.tokens()[*index as usize]),
+        )
+    }
+}
+
+impl std::ops::Index<usize> for SignificantTokens<'_> {
+    type Output = Token;
+
+    fn index(&self, index: usize) -> &Token {
+        self.get(index)
+            .expect("significant token index out of bounds")
+    }
+}
+
 pub(super) struct Parser<'src> {
-    pub(super) tokens: Vec<Token>,
+    pub(super) tokens: SignificantTokens<'src>,
+    pub(super) syntax: &'src SyntaxStore,
     pub(super) pos: usize,
     pub(super) src: &'src str,
     /// The language version the source is parsed at; gates grammar that
@@ -105,12 +183,9 @@ pub(super) struct Parser<'src> {
     pub(super) version: LanguageVersion,
     pub(super) errors: Vec<ParseError>,
     pub(super) ctx: Ctx<'src>,
-    /// Undo log for the in-place `>>`/`>>>` → `>` splits that [`parse_type_args`]
-    /// performs while closing nested generics. Each entry is `(token index,
-    /// original kind)`. A speculative rollback must restore these — see
-    /// [`rewind_to`] — otherwise a discarded type parse over a shift-token close
-    /// leaves the token permanently narrowed and corrupts the re-parse.
-    pub(super) gt_undo: Vec<(usize, TokenKind)>,
+    /// A narrowed view of the current shift token while closing generic types.
+    split: Option<Token>,
+    split_count: usize,
     /// Current recursive-descent nesting depth and a latch marking that the
     /// [`MAX_PARSE_DEPTH`](Self::MAX_PARSE_DEPTH) guard has fired. Bounds the
     /// hand-rolled recursion so pathological/generated source (deeply nested
@@ -124,15 +199,17 @@ pub(super) struct Parser<'src> {
 }
 
 impl<'src> Parser<'src> {
-    pub(super) fn new(tokens: Vec<Token>, src: &'src str, version: LanguageVersion) -> Self {
+    pub(super) fn new(syntax: &'src SyntaxStore, src: &'src str, version: LanguageVersion) -> Self {
         Self {
-            tokens,
+            tokens: SignificantTokens::new(syntax),
+            syntax,
             pos: 0,
             src,
             version,
             errors: Vec::new(),
             ctx: Ctx::default(),
-            gt_undo: Vec::new(),
+            split: None,
+            split_count: 0,
             depth: 0,
             depth_limit_hit: false,
             last_function_keyword: None,
@@ -216,19 +293,10 @@ impl<'src> Parser<'src> {
         result
     }
 
-    /// Roll the cursor back to `saved`, restoring any `>>`/`>>>` tokens that were
-    /// split at or after that position back to their original kind. Speculative
-    /// parses that may have entered [`parse_type_args`] must rewind through this
-    /// rather than assigning `self.pos` directly, so a discarded type parse never
-    /// leaves a narrowed shift token behind.
+    /// Discard a speculative cursor split without mutating canonical tokens.
     pub(super) fn rewind_to(&mut self, saved: usize) {
-        while let Some((idx, _)) = self.gt_undo.last() {
-            if *idx < saved {
-                break;
-            }
-            let (idx, kind) = self.gt_undo.pop().unwrap();
-            self.tokens[idx].kind = kind;
-        }
+        self.split = None;
+        self.split_count = 0;
         self.pos = saved;
     }
 
@@ -288,12 +356,17 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn cur(&self) -> &Token {
-        self.tokens
-            .get(self.pos)
-            .unwrap_or_else(|| self.tokens.last().unwrap())
+        self.split.as_ref().unwrap_or_else(|| {
+            self.tokens
+                .get(self.pos)
+                .unwrap_or_else(|| self.tokens.last().unwrap())
+        })
     }
 
     pub(super) fn peek(&self, offset: usize) -> &Token {
+        if offset == 0 {
+            return self.cur();
+        }
         let idx = (self.pos + offset).min(self.tokens.len().saturating_sub(1));
         &self.tokens[idx]
     }
@@ -308,6 +381,8 @@ impl<'src> Parser<'src> {
 
     pub(super) fn advance(&mut self) -> Token {
         let tok = *self.cur();
+        self.split = None;
+        self.split_count = 0;
         if self.pos + 1 < self.tokens.len() {
             self.pos += 1;
         }
@@ -332,7 +407,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn error(&mut self, msg: impl Into<String>) {
-        self.error_at(self.cur().offset, msg);
+        self.error_at(self.cur().offset(), msg);
     }
 
     /// Report a diagnostic at a retained token or AST span after consuming it.
@@ -351,25 +426,12 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn span_from(&self, start: usize) -> Span {
-        // Nested type arguments consume a `>` from a shift token without
-        // advancing the cursor. Each undo entry at this position records one
-        // consumed closing delimiter; the rest of the token remains pending.
-        let end = if self
-            .gt_undo
-            .last()
-            .is_some_and(|(index, _)| *index == self.pos)
-        {
-            self.cur().offset
-                + self
-                    .gt_undo
-                    .iter()
-                    .rev()
-                    .take_while(|(index, _)| *index == self.pos)
-                    .count()
+        let end = if self.split.is_some() {
+            self.cur().offset() + self.split_count
         } else {
             self.pos.checked_sub(1).map_or(start, |index| {
                 let token = &self.tokens[index];
-                token.offset + token.len
+                token.offset() + token.len()
             })
         };
         Span::new(start, end.max(start))
@@ -377,15 +439,15 @@ impl<'src> Parser<'src> {
 
     pub(super) fn cur_span(&self) -> Span {
         let t = self.cur();
-        Span::new(t.offset, t.offset + t.len)
+        Span::new(t.offset(), t.offset() + t.len())
     }
 
     pub(super) fn tok_span(tok: &Token) -> Span {
-        Span::new(tok.offset, tok.offset + tok.len)
+        Span::new(tok.offset(), tok.offset() + tok.len())
     }
 
     pub(super) fn tok_text(&self, tok: &Token) -> &'src str {
-        &self.src[tok.offset..tok.offset + tok.len]
+        &self.src[tok.offset()..tok.offset() + tok.len()]
     }
 
     pub(super) fn cur_text(&self) -> &str {
@@ -465,7 +527,7 @@ impl<'src> Parser<'src> {
     pub(super) fn parse_annotations(&mut self) -> Vec<Annotation> {
         let mut anns = Vec::new();
         while self.at(TokenKind::At) {
-            let start = self.cur().offset;
+            let start = self.cur().offset();
             self.advance(); // @
             // A `.new` reference names the unnamed constructor (`@X.new()`); `new`
             // is a keyword token, so accept it in the dotted-name segments here and
@@ -509,7 +571,7 @@ impl<'src> Parser<'src> {
     pub(super) fn parse_function_body(&mut self, marker: AsyncMarker) -> Option<FunctionBody> {
         self.with_body(marker, |parser| match parser.cur().kind {
             TokenKind::Arrow => {
-                let start = parser.cur().offset;
+                let start = parser.cur().offset();
                 parser.advance();
                 let expr = parser.parse_expr();
                 // An `=> expr` declaration body is terminated by `;`; a missing one
@@ -527,7 +589,7 @@ impl<'src> Parser<'src> {
             // SDK-internal `native` bodies: `int get length native;`,
             // `void f() native "name";`.
             TokenKind::Ident if parser.cur_text() == "native" => {
-                let start = parser.cur().offset;
+                let start = parser.cur().offset();
                 parser.advance();
                 let name = parser
                     .at(TokenKind::StringLit)
@@ -541,7 +603,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_arg_list(&mut self) -> ArgList {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.expect(TokenKind::LParen);
         // Inside an argument list a trailing `{` never opens the constructor body.
         self.ctx.in_ctor_init_value = false;
@@ -556,7 +618,7 @@ impl<'src> Parser<'src> {
 
             // Named arg: name: expr
             if self.cur().kind.is_identifier_like() && self.peek(1).kind == TokenKind::Colon {
-                let arg_start = self.cur().offset;
+                let arg_start = self.cur().offset();
                 let name = self.expect_ident();
                 self.advance(); // :
                 let value = self.parse_expr();
@@ -593,18 +655,15 @@ impl<'src> Parser<'src> {
                 break;
             }
         }
-        // consume > or >> (split)
-        // For nested types like Map<String, List<int>>, >> must be split:
-        // the inner close mutates >> → > in place but does NOT advance, so the
-        // enclosing type-args list sees the remaining > and closes on it.
-        if self.at(TokenKind::GtGtGt) {
-            self.gt_undo.push((self.pos, TokenKind::GtGtGt));
-            self.tokens[self.pos].kind = TokenKind::GtGt;
-            // Do NOT advance — leave >> for the next two outer closes.
-        } else if self.at(TokenKind::GtGt) {
-            self.gt_undo.push((self.pos, TokenKind::GtGt));
-            self.tokens[self.pos].kind = TokenKind::Gt;
-            // Do NOT advance — leave > for the outer close.
+        // Narrow only the cursor view; canonical shift tokens stay unchanged.
+        let narrowed = match self.cur().kind {
+            TokenKind::GtGtGt => Some(TokenKind::GtGt),
+            TokenKind::GtGt => Some(TokenKind::Gt),
+            _ => None,
+        };
+        if let Some(kind) = narrowed {
+            self.split = Some(Token::new(kind, self.cur().offset(), self.cur().len()));
+            self.split_count += 1;
         } else {
             self.eat(TokenKind::Gt);
         }
@@ -759,9 +818,78 @@ mod tests {
     use super::*;
 
     #[test]
+    fn significant_iteration_starts_directly_at_each_index() {
+        let source = "/* trivia */ first + second < third > (fourth);";
+        let syntax = lexical::lex_syntax(source);
+        let tokens = SignificantTokens::new(&syntax);
+        for (start, canonical) in tokens.indices.iter().enumerate() {
+            let mut suffix = tokens.iter_from(start).unwrap();
+            assert_eq!(suffix.len(), tokens.len() - start);
+            assert!(std::ptr::eq(
+                suffix.next().unwrap(),
+                &syntax.tokens()[*canonical as usize]
+            ));
+            assert_eq!(suffix.len(), tokens.len() - start - 1);
+        }
+        assert_eq!(tokens.iter_from(tokens.len()).unwrap().len(), 0);
+        assert!(tokens.iter_from(tokens.len() + 1).is_none());
+        assert!(tokens.iter_from(usize::MAX).is_none());
+
+        let parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
+        assert_eq!(
+            parser.matching_close(usize::MAX, expr::Brackets::Mixed, |_| false, None),
+            None
+        );
+        assert_eq!(
+            parser.matching_angle_close(usize::MAX, |_| true, None),
+            None
+        );
+    }
+
+    #[test]
+    fn generic_cursor_splits_leave_retained_shift_tokens_unchanged() {
+        let source = "Map<int, List<int>> value;";
+        let syntax = lexical::lex_syntax(source);
+        let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
+        let checkpoint = parser.checkpoint();
+        parser.parse_type();
+        assert!(parser.errors.is_empty());
+        assert_eq!(parser.cur_text(), "value");
+        assert!(
+            syntax
+                .tokens()
+                .iter()
+                .any(|token| token.kind == TokenKind::GtGt)
+        );
+        parser.restore(checkpoint);
+        parser.parse_type();
+        assert!(parser.errors.is_empty());
+        assert_eq!(parser.cur_text(), "value");
+    }
+
+    #[test]
+    fn retained_trivia_and_significant_cursor_share_canonical_tokens() {
+        let source = "// doc\nvar value = 1;";
+        let syntax = lexical::lex_syntax(source);
+        let parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
+        assert_eq!(parser.cur().kind, TokenKind::Var);
+        let index = parser.tokens.indices[0] as usize;
+        assert!(std::ptr::eq(parser.cur(), &syntax.tokens()[index]));
+        assert_eq!(syntax.comment_tokens().count(), 1);
+        assert_eq!(syntax.tokens()[0].kind, TokenKind::LineComment);
+        let reconstructed: String = syntax
+            .tokens()
+            .iter()
+            .map(|token| token.text(source))
+            .collect();
+        assert_eq!(reconstructed, source);
+    }
+
+    #[test]
     fn failed_type_probe_discards_only_speculative_diagnostics() {
         let src = "Map<int, +>;";
-        let mut parser = Parser::new(Lexer::new(src).tokenize(), src, LanguageVersion::CURRENT);
+        let syntax = SyntaxStore::new(Lexer::new(src).tokenize());
+        let mut parser = Parser::new(&syntax, src, LanguageVersion::CURRENT);
         parser.error("retained");
         assert!(
             parser
@@ -777,7 +905,8 @@ mod tests {
 
     #[test]
     fn speculative_depth_limit_does_not_suppress_real_error() {
-        let mut parser = Parser::new(Lexer::new("x").tokenize(), "x", LanguageVersion::CURRENT);
+        let syntax = SyntaxStore::new(Lexer::new("x").tokenize());
+        let mut parser = Parser::new(&syntax, "x", LanguageVersion::CURRENT);
         parser.depth = Parser::MAX_PARSE_DEPTH;
         let result: Option<()> = parser.speculate(|parser| {
             parser.parse_expr();

@@ -52,7 +52,8 @@ impl Rule for RequireTrailingCommas {
         }
         let mut collector = Collector {
             ctx,
-            tokens: significant_tokens(ctx),
+            // Delimiter matching below needs indexed access to this pass's tokens.
+            tokens: significant_tokens(ctx).collect(),
             diags: Vec::new(),
         };
         collector.visit_program(program);
@@ -71,7 +72,7 @@ enum Last<'a> {
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
     /// Significant tokens in source order.
-    tokens: Vec<Token>,
+    tokens: Vec<&'a Token>,
     diags: Vec<Diagnostic>,
 }
 
@@ -92,7 +93,7 @@ fn closes(kind: TokenKind) -> bool {
 impl Collector<'_, '_> {
     /// Index of the first token of `kind` starting at or after `offset`.
     fn find_from(&self, offset: usize, kind: TokenKind) -> Option<usize> {
-        let start = self.tokens.partition_point(|token| token.offset < offset);
+        let start = self.tokens.partition_point(|token| token.offset() < offset);
         self.tokens[start..]
             .iter()
             .position(|token| token.kind == kind)
@@ -133,7 +134,7 @@ impl Collector<'_, '_> {
     }
 
     fn end(&self, index: usize) -> usize {
-        self.tokens[index].offset + self.tokens[index].len
+        self.tokens[index].offset() + self.tokens[index].len()
     }
 
     /// Whether the significant source of `span` sits on one line.
@@ -151,8 +152,8 @@ impl Collector<'_, '_> {
             "require-trailing-commas",
             "Missing a required trailing comma.",
             DiagSpan {
-                start: token.offset,
-                end: token.offset + token.len,
+                start: token.offset(),
+                end: token.offset() + token.len(),
             },
         ));
     }
@@ -167,7 +168,7 @@ impl Collector<'_, '_> {
         if before_close <= open || self.tokens[before_close].kind == TokenKind::Comma {
             return;
         }
-        if self.same_line(self.tokens[open].offset, self.end(close)) {
+        if self.same_line(self.tokens[open].offset(), self.end(close)) {
             return;
         }
         if let Last::Expr(expr) = last
@@ -202,7 +203,7 @@ impl Collector<'_, '_> {
         if self.tokens[error - 1].kind == TokenKind::Comma {
             return;
         }
-        if self.same_line(self.tokens[open].offset, self.end(close)) {
+        if self.same_line(self.tokens[open].offset(), self.end(close)) {
             return;
         }
         self.report(error);
@@ -374,7 +375,9 @@ impl Visitor for Collector<'_, '_> {
             && !function.params.is_empty()
         {
             let span = function.span;
-            let end = self.tokens.partition_point(|token| token.offset < span.end);
+            let end = self
+                .tokens
+                .partition_point(|token| token.offset() < span.end);
             let mut close = end.checked_sub(1);
             // A legacy `typedef void F(...);` type span runs through its `;`.
             if let Some(index) = close
@@ -390,7 +393,7 @@ impl Visitor for Collector<'_, '_> {
             }
             if let Some(close) = close
                 && self.tokens[close].kind == TokenKind::RParen
-                && self.tokens[close].offset >= span.start
+                && self.tokens[close].offset() >= span.start
             {
                 let open = self.matching_open(close);
                 self.check_params(open);

@@ -422,10 +422,14 @@ mod tests {
     use super::*;
 
     fn lines(source: &str) -> Vec<usize> {
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("a.dart"), source, &config);
+        let ctx = AnalyzeContext::new(Path::new("a.dart"), source, &config, &syntax);
         PreferFinalLocals
             .analyze(&program, &ctx)
             .iter()
@@ -460,10 +464,14 @@ mod tests {
   var [first, second] = [inferred, typed];
   print(first + second);
 }"#;
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &syntax);
         let diagnostics = PreferFinalLocals.analyze(&program, &ctx);
         assert_eq!(diagnostics.len(), 3, "{diagnostics:?}");
         let keyword = source.find("var inferred").unwrap();

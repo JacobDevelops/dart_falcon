@@ -268,7 +268,11 @@ void shadowed() {
 "#;
     let path = app.join("lib/main.dart");
     std::fs::write(&path, source).unwrap();
-    let (program, errors) = parse(source);
+    let falcon_dart_parser::ParseResult {
+        program,
+        errors,
+        syntax,
+    } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {
         let root = config?.flutter_root.as_ref()?;
@@ -311,7 +315,7 @@ void shadowed() {
         &types,
     );
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(&path, source, &config)
+    let context = AnalyzeContext::new(&path, source, &config, &syntax)
         .with_environment(Some(&environment))
         .with_identities(&identities)
         .with_types(&types)

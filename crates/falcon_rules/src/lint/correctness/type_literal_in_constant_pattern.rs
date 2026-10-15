@@ -119,7 +119,11 @@ mod tests {
     fn qualified_constant_patterns_report_the_complete_pattern_span() {
         let source = "class A { static const ty = String; }\nvoid f(Object o, Type type) {\n  if (o case A.ty) {}\n  if (o case const (String)) {}\n  if (type case A.ty) {}\n  if (o case int?) {}\n}";
         let path = Path::new("/project/lib/test.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -132,7 +136,7 @@ mod tests {
         let model = SemanticModel::new(path, &identities, None);
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let diagnostics = TypeLiteralInConstantPattern.analyze(&program, &ctx);

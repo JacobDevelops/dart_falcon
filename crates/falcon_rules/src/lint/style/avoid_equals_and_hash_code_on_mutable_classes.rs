@@ -81,7 +81,7 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
                     }
                     _ => continue,
                 };
-                let start = first_token_after_annotations(annotations, span, ctx.source);
+                let start = first_token_after_annotations(annotations, span, ctx.syntax);
                 diags.push(ctx.diagnostic(
                     "avoid-equals-and-hash-code-on-mutable-classes",
                     format!(

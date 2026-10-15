@@ -38,9 +38,7 @@ use falcon_syntax::visitor::{
 };
 
 use crate::lint::declarations::declaration_key;
-use crate::lint::doc_comments::{
-    DocElement, DocLookup, DocResolver, DocScopes, doc_blocks, references,
-};
+use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
 use crate::lint::expressions::is_parenthesized;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use crate::lint::semantic_type_operations::nullability;
@@ -96,7 +94,12 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
             &mut disqualified,
         );
         if let Some(library) = ctx.library {
-            for (sibling, source) in library.siblings().iter().zip(library.sibling_sources()) {
+            for ((sibling, source), syntax) in library
+                .siblings()
+                .iter()
+                .zip(library.sibling_sources())
+                .zip(library.sibling_syntax())
+            {
                 let sibling_ctx = AnalyzeContext {
                     types: ctx.types,
                     identities: ctx.identities,
@@ -104,7 +107,7 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
                     library: ctx.library,
                     environment: ctx.environment,
                     package_language_version: ctx.package_language_version,
-                    ..AnalyzeContext::new(ctx.file_path, source, ctx.config)
+                    ..AnalyzeContext::new(ctx.file_path, source, ctx.config, syntax)
                 };
                 if let Some(state) = SemanticState::new(sibling, &sibling_ctx) {
                     check_uses(
@@ -156,7 +159,7 @@ fn check_uses<'n>(
 ) {
     let doc_scopes = DocScopes::new(program, &state.model, ctx.source);
     let resolver = DocResolver::new(program, &state.model, &state.signatures, &doc_scopes, false);
-    for block in doc_blocks(ctx.tokens(), ctx.source) {
+    for block in ctx.syntax.doc_blocks(ctx.source) {
         let Some(scope) = doc_scopes.scope_for(&block) else {
             continue;
         };
@@ -720,6 +723,7 @@ impl Visitor for Mentions<'_, '_> {
                         CascadeOp::Field { name, .. } | CascadeOp::Call(name, ..) => Some(name),
                         CascadeOp::Assign(target, ..) => receiver_root(target),
                         CascadeOp::Invoke(..)
+                        | CascadeOp::NullAssert { .. }
                         | CascadeOp::Index { .. }
                         | CascadeOp::IndexAssign(..) => None,
                     };

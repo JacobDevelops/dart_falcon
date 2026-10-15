@@ -527,7 +527,11 @@ void use(Value value) {
 }
 ";
         let path = Path::new("/project/lib/test.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -540,7 +544,7 @@ void use(Value value) {
         let model = SemanticModel::new(path, &identities, None);
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let diagnostics = VoidChecks.analyze(&program, &ctx);
@@ -569,7 +573,11 @@ void use() {
 }
 ";
         let path = Path::new("/project/lib/test.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -582,7 +590,7 @@ void use() {
         let model = SemanticModel::new(path, &identities, None);
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_signatures(&signatures);
         struct ContextProbe(usize);
@@ -678,7 +686,11 @@ void use() {
 ";
         std::fs::write(&path, source).unwrap();
         let path = falcon_analyze::canonical_or_lexical(&path);
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {
@@ -723,7 +735,7 @@ void use() {
             &types,
         );
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(&path, source, &config)
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);
@@ -762,7 +774,11 @@ void cases(Factory owner, Object value) {
 }
 "#;
         let path = Path::new("/project/lib/test.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -775,7 +791,7 @@ void cases(Factory owner, Object value) {
         let model = SemanticModel::new(path, &identities, None);
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_signatures(&signatures);
         let mut registry = falcon_analyze::RuleRegistry::new();

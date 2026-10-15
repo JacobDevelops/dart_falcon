@@ -107,10 +107,10 @@ impl Rule for AvoidRenamingMethodParameters {
 fn is_documented(tokens: &[Token], start: usize, annotations: &[Annotation]) -> bool {
     documented(tokens, start)
         || annotations.last().is_some_and(|annotation| {
-            let after = tokens.partition_point(|token| token.offset < annotation.span.end);
+            let after = tokens.partition_point(|token| token.offset() < annotation.span.end);
             tokens[after..]
                 .iter()
                 .find(|token| !token.is_trivia())
-                .is_some_and(|token| documented(tokens, token.offset))
+                .is_some_and(|token| documented(tokens, token.offset()))
         })
 }

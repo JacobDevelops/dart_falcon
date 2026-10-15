@@ -334,7 +334,9 @@ mod tests {
     use falcon_dart_parser::parse;
 
     fn with_model(source: &str, test: impl FnOnce(&Program, &SemanticModel<'_>, &SignatureIndex)) {
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("/project/queries.dart");
         let identities = IdentityIndex::build(
@@ -363,7 +365,9 @@ mod tests {
             ("f(a?.b)", false),
         ];
         for (expression, expected) in cases {
-            let (program, errors) = parse(&format!("dynamic probe(dynamic a) => {expression};"));
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(&format!("dynamic probe(dynamic a) => {expression};"));
             assert!(errors.is_empty(), "{expression}: {errors:?}");
             let TopLevelDecl::Function(function) = &program.declarations[0] else {
                 panic!()

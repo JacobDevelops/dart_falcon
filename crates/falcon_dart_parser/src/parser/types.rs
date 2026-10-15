@@ -6,7 +6,7 @@ use super::Parser;
 
 impl<'src> Parser<'src> {
     pub(super) fn parse_type(&mut self) -> DartType {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
 
         if matches!(self.cur().kind, TokenKind::Void | TokenKind::Dynamic) {
             let kind = self.advance().kind;
@@ -223,7 +223,7 @@ impl<'src> Parser<'src> {
         self.advance(); // <
         let mut params = Vec::new();
         while !self.at(TokenKind::Gt) && !self.at(TokenKind::GtGt) && !self.at(TokenKind::Eof) {
-            let start = self.cur().offset;
+            let start = self.cur().offset();
             let annotations = self.parse_annotations();
             let name = self.expect_ident();
             let bound = if self.eat(TokenKind::Extends).is_some() {
@@ -250,7 +250,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_formal_param_list(&mut self) -> FormalParamList {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.expect(TokenKind::LParen);
 
         let mut params = Vec::new();
@@ -293,7 +293,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_formal_param(&mut self, mut kind: ParamKind) -> FormalParam {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let mut annotations = Vec::new();
         while self.at(TokenKind::At) {
             annotations.extend(self.parse_annotations());

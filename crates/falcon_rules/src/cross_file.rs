@@ -507,8 +507,10 @@ pub(crate) fn assert_project_fixture(rule_name: &str, rule: &dyn falcon_analyze:
     let mut failures = Vec::new();
     for path in files {
         let source = std::fs::read_to_string(&path).unwrap();
-        let (program, _) = falcon_dart_parser::parser::parse(&source);
-        let ctx = falcon_analyze::AnalyzeContext::new(&path, &source, &config)
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = falcon_dart_parser::parser::parse(&source);
+        let ctx = falcon_analyze::AnalyzeContext::new(&path, &source, &config, &syntax)
             .with_environment(Some(&environment));
         let line_of = |offset: usize| source[..offset].matches('\n').count() + 1;
         let diagnostics = if inference::requires_sdk(&path) {
@@ -627,12 +629,17 @@ mod tests {
         std::fs::create_dir(&sources).unwrap();
         std::fs::write(package_root.join("pubspec.yaml"), "name: 'pkg' # comment\n").unwrap();
         std::os::unix::fs::symlink(&sources, package_root.join("lib")).unwrap();
-        let (program, errors) = parse("");
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse("");
         assert!(errors.is_empty());
         let package = detect_package(&[ProjectFile {
             path: package_root.join("test.dart"),
             source: String::new(),
             program,
+            syntax,
             has_parse_errors: false,
         }]);
         let expected_root = canonical_or_lexical(&sources);
@@ -645,7 +652,9 @@ mod tests {
     #[test]
     fn program_reference_uris_yields_configurable_uris() {
         let src = "export 'src/impl_stub.dart'\n    if (dart.library.io) 'src/impl_io.dart'\n    if (dart.library.html) 'src/impl_web.dart';";
-        let (program, errors) = parse(src);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(src);
         assert!(errors.is_empty(), "{errors:?}");
         let uris: Vec<&str> = program_reference_uris(&program).collect();
         assert!(
@@ -659,7 +668,7 @@ mod tests {
     #[test]
     fn conditional_import_uris_are_collected_too() {
         let src = "import 'src/stub.dart' if (dart.library.io) 'src/io.dart';";
-        let (program, _) = parse(src);
+        let falcon_dart_parser::ParseResult { program, .. } = parse(src);
         let uris: Vec<&str> = program_reference_uris(&program).collect();
         assert!(uris.contains(&"src/io.dart"), "import branch: {uris:?}");
     }

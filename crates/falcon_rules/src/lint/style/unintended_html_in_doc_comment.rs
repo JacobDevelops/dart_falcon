@@ -224,10 +224,12 @@ mod tests {
     /// Text each diagnostic actually spans, sliced back out of the source. A
     /// wrong byte offset yields wrong text, so this checks spans, not just count.
     fn spanned(source: &str) -> Vec<&str> {
-        let program = parse(source).0;
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(source);
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config);
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
         UnintendedHtmlInDocComment
             .analyze(&program, &ctx)
             .into_iter()

@@ -2,10 +2,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use falcon_config::FalconConfig;
-use falcon_dart_parser::lexer::Lexer;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
-use falcon_syntax::Token;
 use falcon_syntax::ast::{FunctionKind, Program, TopLevelDecl};
+use falcon_syntax::token::{SyntaxStore, Token};
 
 use crate::environment::{AnalysisEnvironment, LanguageVersion};
 use crate::resolve::flow_writes::FlowWrites;
@@ -19,7 +18,6 @@ use crate::resolve::{
 pub struct AnalysisCache {
     flow_writes: OnceLock<Arc<FlowWrites>>,
     globals: OnceLock<HashMap<String, ResolvedType>>,
-    tokens: OnceLock<Vec<Token>>,
 }
 
 /// Per-file analysis context passed to every rule.
@@ -29,6 +27,7 @@ pub struct AnalysisCache {
 pub struct AnalyzeContext<'a> {
     pub file_path: &'a std::path::Path,
     pub source: &'a str,
+    pub syntax: &'a SyntaxStore,
     pub config: &'a FalconConfig,
     /// Cross-file type facts, when resolving analysis is enabled.
     pub types: Option<&'a TypeIndex>,
@@ -54,10 +53,16 @@ pub struct AnalyzeContext<'a> {
 
 impl<'a> AnalyzeContext<'a> {
     /// Construct a non-resolving context.
-    pub fn new(file_path: &'a std::path::Path, source: &'a str, config: &'a FalconConfig) -> Self {
+    pub fn new(
+        file_path: &'a std::path::Path,
+        source: &'a str,
+        config: &'a FalconConfig,
+        syntax: &'a SyntaxStore,
+    ) -> Self {
         Self {
             file_path,
             source,
+            syntax,
             config,
             types: None,
             identities: None,
@@ -119,11 +124,9 @@ impl<'a> AnalyzeContext<'a> {
         })
     }
 
-    /// Source tokens, including trivia, lexed once per file.
+    /// Retained source tokens, including trivia.
     pub fn tokens(&self) -> &[Token] {
-        self.cache
-            .tokens
-            .get_or_init(|| Lexer::new(self.source).tokenize())
+        self.syntax.tokens()
     }
 
     /// The language version the file is analyzed at, as the analyzer

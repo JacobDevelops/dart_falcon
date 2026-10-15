@@ -275,6 +275,7 @@ fn needs_instance(
                         properties.push(name.name.clone());
                     }
                     CascadeOp::Invoke(..)
+                    | CascadeOp::NullAssert { .. }
                     | CascadeOp::Index { .. }
                     | CascadeOp::Assign(..)
                     | CascadeOp::IndexAssign(..) => {}

@@ -350,11 +350,11 @@ fn prefixed_extensions_obey_show_and_hide_without_explicit_extension_access() {
     let sources: Vec<_> = inputs
         .iter()
         .zip(&parsed)
-        .map(|((path, _), (program, errors))| {
-            assert!(errors.is_empty(), "{path}: {errors:?}");
+        .map(|((path, _), parsed)| {
+            assert!(parsed.errors.is_empty(), "{path}: {:?}", parsed.errors);
             IdentitySource {
                 path: Path::new(path),
-                program,
+                program: &parsed.program,
                 has_parse_errors: false,
             }
         })
@@ -382,11 +382,16 @@ fn prefixed_extensions_obey_show_and_hide_without_explicit_extension_access() {
     let rule_name = "omit-local-variable-types";
     let rule = &rules.iter().find(|(name, _)| *name == rule_name).unwrap().1;
     let config = FalconConfig::default();
-    let context = AnalyzeContext::new(Path::new(inputs[0].0), inputs[0].1, &config)
-        .with_types(&types)
-        .with_identities(&identities)
-        .with_signatures(&signatures);
-    let diagnostics = rule.analyze(&parsed[0].0, &context);
+    let context = AnalyzeContext::new(
+        Path::new(inputs[0].0),
+        inputs[0].1,
+        &config,
+        &parsed[0].syntax,
+    )
+    .with_types(&types)
+    .with_identities(&identities)
+    .with_signatures(&signatures);
+    let diagnostics = rule.analyze(&parsed[0].program, &context);
     assert_diagnostics(inputs[0].1, rule_name, &diagnostics, 4);
 }
 

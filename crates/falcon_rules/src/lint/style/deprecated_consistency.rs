@@ -207,7 +207,11 @@ mod tests {
             class C(this.value) { @deprecated int value; }\n\
             @deprecated class D() { @deprecated this {} }\n\
             class F(@deprecated this.value) { int value; }";
-        let (program, errors) = falcon_dart_parser::parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("/project/lib/api.dart");
         let sources = [IdentitySource {
@@ -217,7 +221,7 @@ mod tests {
         }];
         let identities = IdentityIndex::build(&sources, &[source], &[], None);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config).with_identities(&identities);
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax).with_identities(&identities);
         let spans: Vec<_> = DeprecatedConsistency
             .analyze(&program, &ctx)
             .into_iter()

@@ -289,7 +289,11 @@ mod tests {
     #[test]
     fn single_file_fallback_preserves_owner_constant_dependencies() {
         let source = include_str!("../../../tests/corpus/exhaustive-cases/owner-dependencies.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("owner-dependencies.dart");
         let identities = IdentityIndex::from_project_files(
@@ -312,7 +316,7 @@ mod tests {
             &identities,
         );
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types);
         let diagnostics = ExhaustiveCases.analyze(&program, &ctx);
@@ -324,7 +328,11 @@ mod tests {
     fn missing_cases_follow_declaration_order_with_preferred_aliases() {
         let source =
             include_str!("../../../tests/corpus/exhaustive-cases/review_declaration_order.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("review_declaration_order.dart");
         let identities = IdentityIndex::from_project_files(
@@ -337,7 +345,7 @@ mod tests {
         );
         let types = TypeIndex::from_program(&program);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types);
         let diagnostics = ExhaustiveCases.analyze(&program, &ctx);

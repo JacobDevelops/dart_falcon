@@ -93,18 +93,18 @@ pub fn run_cross_file(
     indexes: Option<&SemanticIndexes>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = registry.run_all(files, config, indexes);
-    let sources: HashMap<_, &str> = files
+    let files_by_path: HashMap<_, _> = files
         .iter()
-        .map(|file| (file.path.to_string_lossy(), file.source.as_str()))
+        .map(|file| (file.path.to_string_lossy(), file))
         .collect();
     let mut suppressions = HashMap::new();
     diagnostics.retain(|diagnostic| {
-        let Some((path, source)) = sources.get_key_value(diagnostic.file_path.as_str()) else {
+        let Some((path, file)) = files_by_path.get_key_value(diagnostic.file_path.as_str()) else {
             return true;
         };
-        let suppression = suppressions
-            .entry(path.as_ref())
-            .or_insert_with(|| FileSuppressions::parse(source, path, suppression_lookup));
+        let suppression = suppressions.entry(path.as_ref()).or_insert_with(|| {
+            FileSuppressions::parse(&file.source, path, suppression_lookup, &file.syntax)
+        });
         !suppression.is_suppressed(
             diagnostic.rule,
             suppression.line_for_offset(diagnostic.span.start),

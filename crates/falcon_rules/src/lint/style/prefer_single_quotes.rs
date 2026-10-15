@@ -20,7 +20,7 @@ use crate::lint::string_lit::{LiteralPart, decoded_text, literal_parts};
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
+use falcon_syntax::visitor::{Visitor, walk_string_interpolation};
 
 #[derive(Default)]
 pub struct PreferSingleQuotes;
@@ -72,16 +72,9 @@ impl<'a> QuoteVisitor<'a> {
 }
 
 impl Visitor for QuoteVisitor<'_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        let Expr::StringLit(literal) = node else {
-            walk_expr(self, node);
-            return;
-        };
-        self.visit_string_lit(literal);
+    fn visit_string_interpolation(&mut self, node: &StringInterpolation) {
         self.interpolation_depth += 1;
-        for interpolation in &literal.interpolations {
-            self.visit_expr(&interpolation.expr);
-        }
+        walk_string_interpolation(self, node);
         self.interpolation_depth -= 1;
     }
 

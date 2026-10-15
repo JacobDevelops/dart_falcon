@@ -63,7 +63,11 @@ fn run_rule(
     let diagnostics = if inference::requires_sdk(file) {
         inference::analyze(rule, file, source, config)
     } else {
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         let resolver_dependent = rule_requires_resolution(rule_name);
         let identity_sources = [IdentitySource {
             path: file,
@@ -95,7 +99,7 @@ fn run_rule(
         let environment =
             falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator([file], |_| None);
         let mut ctx =
-            AnalyzeContext::new(file, source, config).with_environment(Some(&environment));
+            AnalyzeContext::new(file, source, config, &syntax).with_environment(Some(&environment));
         if let Some(types) = types.as_ref() {
             ctx = ctx.with_types(types);
         }
@@ -530,7 +534,7 @@ fn nullable_extension_getter_is_not_an_instance_member() {
     let source = "class Target {}\n\
                   extension NullableValues on Target? { int get value => 1; }\n\
                   void read(Target? target) { target?.value; }\n";
-    let (_, errors) = parse(source);
+    let falcon_dart_parser::ParseResult { errors, .. } = parse(source);
     assert!(errors.is_empty(), "parse errors: {errors:?}");
     let rule_name = "unnecessary-null-aware-operator-on-extension-on-nullable";
     let diagnostics = run_rule(
@@ -552,12 +556,16 @@ Widget build(BuildContext context) {
   return Container(child: Text('hi'));
 }
 "#;
-    let (program, _errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program,
+        errors: _errors,
+        syntax,
+    } = parse(src);
     let rule = UseDesignSystemItem;
 
     // Without configuration the rule is a no-op.
     let default_cfg = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &default_cfg);
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &default_cfg, &syntax);
     assert!(
         rule.analyze(&program, &ctx).is_empty(),
         "rule must be a no-op without configuration"
@@ -581,7 +589,7 @@ Widget build(BuildContext context) {
         }
     }))
     .expect("valid config");
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &configured);
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &configured, &syntax);
     let diags = rule.analyze(&program, &ctx);
     assert_eq!(
         diags.len(),
@@ -597,8 +605,12 @@ Widget build(BuildContext context) {
 
     // Static calls are not constructions.
     let static_src = "Widget f(BuildContext c) => Container.of(c);";
-    let (static_program, _e) = parse(static_src);
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), static_src, &configured);
+    let falcon_dart_parser::ParseResult {
+        program: static_program,
+        errors: _e,
+        syntax,
+    } = parse(static_src);
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), static_src, &configured, &syntax);
     assert!(
         rule.analyze(&static_program, &ctx).is_empty(),
         "static access `Container.of(...)` must not be flagged"
@@ -622,13 +634,17 @@ class Bar {
   void run() {}
 }
 "#;
-    let (program, _errors) = parse(src);
+    let falcon_dart_parser::ParseResult {
+        program,
+        errors: _errors,
+        syntax,
+    } = parse(src);
     let rule = ClassMembersOrdering;
 
     // Default config → built-in pyramid order (fields → constructors → methods).
     // `Foo.run` (a method before a field/constructor) is flagged; `Bar` is fine.
     let default_cfg = FalconConfig::default();
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &default_cfg);
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &default_cfg, &syntax);
     let default_diags = rule.analyze(&program, &ctx);
     assert!(
         !default_diags.is_empty(),
@@ -658,7 +674,7 @@ class Bar {
         }
     }))
     .expect("valid config");
-    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &configured);
+    let ctx = AnalyzeContext::new(Path::new("t.dart"), src, &configured, &syntax);
     let diags = rule.analyze(&program, &ctx);
     assert_eq!(
         diags.len(),
@@ -703,16 +719,25 @@ fn cross_file_corpus_matches_expectations() {
                     path.extension().and_then(|extension| extension.to_str()) == Some("dart")
                 })
                 .map(|(path, source)| {
-                    let (program, errors) = parse(source);
+                    let falcon_dart_parser::ParseResult {
+                        program,
+                        errors,
+                        syntax,
+                    } = parse(source);
                     ProjectFile {
                         path: path.clone(),
                         source: source.clone(),
                         program,
+                        syntax,
                         has_parse_errors: !errors.is_empty(),
                     }
                 })
                 .collect();
-            let (empty_program, _) = parse("");
+            let falcon_dart_parser::ParseResult {
+                program: empty_program,
+                syntax: empty_syntax,
+                ..
+            } = parse("");
             files.extend(
                 fixture_sources
                     .iter()
@@ -723,6 +748,7 @@ fn cross_file_corpus_matches_expectations() {
                         path: path.clone(),
                         source: source.clone(),
                         program: empty_program.clone(),
+                        syntax: empty_syntax.clone(),
                         has_parse_errors: false,
                     }),
             );
@@ -830,14 +856,9 @@ fn resolver_dependent_per_file_project_corpus() {
             .iter()
             .map(|p| fs::read_to_string(p).unwrap())
             .collect();
-        let parsed: Vec<(Program, bool)> = sources
-            .iter()
-            .map(|s| {
-                let (p, e) = parse(s);
-                (p, !e.is_empty())
-            })
-            .collect();
-        let programs: Vec<&Program> = parsed.iter().map(|(p, _)| p).collect();
+        let parsed: Vec<_> = sources.iter().map(|source| parse(source)).collect();
+        let programs: Vec<&Program> = parsed.iter().map(|result| &result.program).collect();
+        let syntax: Vec<_> = parsed.iter().map(|result| &result.syntax).collect();
         let path_prog: Vec<(PathBuf, &Program)> = paths
             .iter()
             .cloned()
@@ -847,10 +868,10 @@ fn resolver_dependent_per_file_project_corpus() {
         let identity_sources: Vec<_> = paths
             .iter()
             .zip(&parsed)
-            .map(|(path, (program, has_parse_errors))| IdentitySource {
+            .map(|(path, result)| IdentitySource {
                 path,
-                program,
-                has_parse_errors: *has_parse_errors,
+                program: &result.program,
+                has_parse_errors: !result.errors.is_empty(),
             })
             .collect();
         let source_refs: Vec<&str> = sources.iter().map(String::as_str).collect();
@@ -881,19 +902,16 @@ fn resolver_dependent_per_file_project_corpus() {
             }),
         );
         let mut type_index = TypeIndex::from_resolved_files(
-            parsed
-                .iter()
-                .enumerate()
-                .map(|(i, (program, has_parse_errors))| {
-                    (
-                        paths[i].as_path(),
-                        LibrarySource {
-                            program,
-                            has_parse_errors: *has_parse_errors,
-                            has_unresolved_parts: grouping.is_unresolved(i),
-                        },
-                    )
-                }),
+            parsed.iter().enumerate().map(|(i, result)| {
+                (
+                    paths[i].as_path(),
+                    LibrarySource {
+                        program: &result.program,
+                        has_parse_errors: !result.errors.is_empty(),
+                        has_unresolved_parts: grouping.is_unresolved(i),
+                    },
+                )
+            }),
             &identities,
         );
         type_index.add_external(&externals, &identities);
@@ -901,8 +919,8 @@ fn resolver_dependent_per_file_project_corpus() {
             SignatureIndex::build(&path_prog, Some(&externals), &identities, &type_index);
 
         for (i, path) in paths.iter().enumerate() {
-            let unit = library_unit(&grouping, &programs, &source_refs, i);
-            let ctx = AnalyzeContext::new(path, &sources[i], &config)
+            let unit = library_unit(&grouping, &programs, &source_refs, &syntax, i);
+            let ctx = AnalyzeContext::new(path, &sources[i], &config, syntax[i])
                 .with_types(&type_index)
                 .with_identities(&identities)
                 .with_signatures(&signatures)

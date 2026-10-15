@@ -110,9 +110,11 @@ mod tests {
 
     fn diagnostic_lines(path: &Path) -> Vec<usize> {
         let source = std::fs::read_to_string(path).unwrap();
-        let program = parse(&source).0;
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(&source);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, &source, &config);
+        let ctx = AnalyzeContext::new(path, &source, &config, &syntax);
         PackagePrefixedLibraryNames
             .analyze(&program, &ctx)
             .into_iter()

@@ -91,7 +91,9 @@ mod tests {
     use std::path::Path;
 
     fn resolving(source: &str, check: impl FnOnce(&Program, &AnalyzeContext<'_>)) {
-        let program = parse(source).0;
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(source);
         let path = Path::new("test.dart");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -115,7 +117,7 @@ mod tests {
         let model = SemanticModel::new(path, &identities, Some(&types));
         let signatures = SignatureIndex::from_program(&program, &model);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(path, source, &config)
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);

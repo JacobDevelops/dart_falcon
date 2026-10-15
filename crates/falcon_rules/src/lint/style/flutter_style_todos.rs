@@ -37,7 +37,6 @@ pub struct FlutterStyleTodos;
 impl Rule for FlutterStyleTodos {
     fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         comment_tokens(ctx)
-            .into_iter()
             .filter(|token| matches!(token.kind, TokenKind::LineComment | TokenKind::DocComment))
             .filter(|token| {
                 let comment = token.text(ctx.source);
@@ -48,8 +47,8 @@ impl Rule for FlutterStyleTodos {
                     "flutter-style-todos",
                     "To-do comment doesn't follow the Flutter style.",
                     DiagSpan {
-                        start: token.offset,
-                        end: token.offset + token.len,
+                        start: token.offset(),
+                        end: token.offset() + token.len(),
                     },
                 )
             })

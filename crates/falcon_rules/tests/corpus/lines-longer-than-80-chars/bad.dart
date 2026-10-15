@@ -18,3 +18,11 @@ var bindingMessage =
         '`runWidget` allows you to provide a `View` widget, without requiring '
         'a default view.'
         '${kIsWeb ? "\nSee: https://flutter.dev/to/web-multiview-runwidget" : ""}'; /* expect: lines-longer-than-80-chars */
+
+void patternStrings(Object value) {
+  switch (value) {
+    case '${"a/b"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx': /* expect: lines-longer-than-80-chars */
+    case '${"${"a/b"}"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx': /* expect: lines-longer-than-80-chars */
+      break;
+  }
+}

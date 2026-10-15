@@ -711,7 +711,9 @@ mod tests {
     #[test]
     fn extension_type_inheritance_uses_only_explicit_superinterfaces() {
         let path = PathBuf::from("/project/lib/main.dart");
-        let (program, errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(
             "extension type Nullable(Object? value) {}
              extension type Described(Object? value) implements Nullable {
                String describe() => '';
@@ -751,7 +753,11 @@ mod tests {
     fn override_headers_settle_across_files_before_initializers() {
         let early_path = PathBuf::from("/project/lib/early.dart");
         let base_path = PathBuf::from("/project/lib/base.dart");
-        let (early, errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program: early,
+            errors,
+            ..
+        } = parse(
             "import 'base.dart'; final top = Early().measured;
              class Early extends Middle {
                late final measured = measure(''); measure(text) => 0;
@@ -759,7 +765,11 @@ mod tests {
              class FieldSetter extends FieldBase { set value(next) {} }",
         );
         assert!(errors.is_empty(), "{errors:?}");
-        let (base, errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program: base,
+            errors,
+            ..
+        } = parse(
             "abstract class Middle extends Base { measure(text); }
              abstract class Base { int measure(String text); }
              class FieldBase { var value = 0; }",
@@ -844,7 +854,9 @@ mod tests {
               final int major; Version(this.major);
               compareTo(other) => major - other.major;
             }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -1019,7 +1031,9 @@ mod tests {
                  abstract class KnownConflict implements Cmp, Q {{}}
                  abstract class KindConflict implements P, Getter {{}}"
             );
-            let (program, errors) = parse(&source);
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(&source);
             assert!(errors.is_empty(), "{errors:?}");
             let identities = IdentityIndex::from_project_files(
                 &[IdentitySource {
@@ -1087,7 +1101,9 @@ mod tests {
     #[test]
     fn repeated_diamonds_cache_one_unsubstituted_interface_signature() {
         let path = PathBuf::from("/project/lib/main.dart");
-        let (program, errors) = parse(
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(
             "abstract class Base<T> { T make(); }
              abstract class L1<T> implements Base<T> {}
              abstract class R1<T> implements Base<T> {}

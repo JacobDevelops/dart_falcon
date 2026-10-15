@@ -19,7 +19,7 @@ impl<'src> Parser<'src> {
         max_scan: Option<usize>,
     ) -> Option<usize> {
         let mut depth = 0i32;
-        for (offset, token) in self.tokens.get(open..)?.iter().enumerate() {
+        for (offset, token) in self.tokens.iter_from(open)?.enumerate() {
             if max_scan.is_some_and(|limit| offset >= limit) || token.kind == TokenKind::Eof {
                 return None;
             }
@@ -56,7 +56,7 @@ impl<'src> Parser<'src> {
         max_scan: Option<usize>,
     ) -> Option<usize> {
         let mut depth = 0i32;
-        for (offset, token) in self.tokens.get(open..)?.iter().enumerate() {
+        for (offset, token) in self.tokens.iter_from(open)?.enumerate() {
             if max_scan.is_some_and(|limit| offset >= limit) || token.kind == TokenKind::Eof {
                 return None;
             }
@@ -97,7 +97,7 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::LBrace);
         let mut arms = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let start = self.cur().offset;
+            let start = self.cur().offset();
             let pattern = self.parse_pattern();
             let guard = self.eat(TokenKind::When).map(|_| self.parse_expr());
             self.expect(TokenKind::Arrow);
@@ -185,7 +185,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_assign(&mut self) -> Expr {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let lhs = self.parse_cascade();
 
         let Some(op) = self.try_parse_assign_op() else {
@@ -206,7 +206,7 @@ impl<'src> Parser<'src> {
     /// and `a = b..c` is `a = (b..c)`. Parsed here — above the operator ladder —
     /// rather than in `parse_postfix`, which only ever sees a primary target.
     fn parse_cascade(&mut self) -> Expr {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let object = self.parse_conditional();
         if matches!(self.cur().kind, TokenKind::DotDot | TokenKind::DotDotQmark) {
             let is_null_aware = self.at(TokenKind::DotDotQmark);
@@ -222,7 +222,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_conditional(&mut self) -> Expr {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let cond = self.parse_null_coalesce();
         if self.eat(TokenKind::Qmark).is_some() {
             // Both branches are `expressionWithoutCascade` in the Dart grammar,
@@ -247,7 +247,7 @@ impl<'src> Parser<'src> {
     /// conditional (cascade-excluding) subject. Used for the branches of a ternary,
     /// where Dart permits assignment but not a bare cascade.
     fn parse_expr_without_cascade(&mut self) -> Expr {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let lhs = self.parse_conditional();
         let Some(op) = self.try_parse_assign_op() else {
             return lhs;
@@ -267,7 +267,7 @@ impl<'src> Parser<'src> {
         next: fn(&mut Self) -> Expr,
         operator: fn(TokenKind) -> Option<BinaryOp>,
     ) -> Expr {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let mut lhs = next(self);
         while let Some(op) = operator(self.cur().kind) {
             let op_span = self.cur_span();
@@ -306,7 +306,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_equality(&mut self) -> Expr {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let lhs = self.parse_relational();
         let op = match self.cur().kind {
             TokenKind::EqEq => BinaryOp::EqEq,
@@ -450,7 +450,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_relational(&mut self) -> Expr {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let lhs = self.parse_cast();
         let op = match self.cur().kind {
             TokenKind::Lt => BinaryOp::Lt,
@@ -475,7 +475,7 @@ impl<'src> Parser<'src> {
     /// relational comparison operators — so `a < b as C` is `a < (b as C)` and
     /// `x as int <= y` is `(x as int) <= y`. Loops to allow chains (`a as B as C`).
     fn parse_cast(&mut self) -> Expr {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let mut lhs = self.parse_bitwise_or();
         loop {
             match self.cur().kind {
@@ -557,7 +557,7 @@ impl<'src> Parser<'src> {
         self.guarded(
             |p| Expr::Error { span: p.cur_span() },
             |p| {
-                let start = p.cur().offset;
+                let start = p.cur().offset();
                 let op = match p.cur().kind {
                     TokenKind::Minus => Some(UnaryOp::Minus),
                     TokenKind::Bang => Some(UnaryOp::Bang),
@@ -605,7 +605,7 @@ impl<'src> Parser<'src> {
         self.guarded(
             |p| Expr::Error { span: p.cur_span() },
             |p| {
-                let start = p.cur().offset;
+                let start = p.cur().offset();
                 let mut expr = p.parse_primary();
 
                 loop {
@@ -734,7 +734,7 @@ impl<'src> Parser<'src> {
     fn parse_cascade_sections(&mut self) -> Vec<CascadeSection> {
         let mut sections = Vec::new();
         while matches!(self.cur().kind, TokenKind::DotDot | TokenKind::DotDotQmark) {
-            let start = self.cur().offset;
+            let start = self.cur().offset();
             // A `?..` section is reached null-awarely; that shorting also covers a
             // `?[` null-aware index selector on the section's first selector.
             let section_null_aware = self.at(TokenKind::DotDotQmark);
@@ -760,7 +760,7 @@ impl<'src> Parser<'src> {
         let mut ops = Vec::new();
         // First selector after `..`: bare identifier or `[index]`, no leading dot.
         let first = if self.at(TokenKind::LBracket) || self.at(TokenKind::QmarkLBracket) {
-            let selector_start = self.cur().offset;
+            let selector_start = self.cur().offset();
             let index_null_aware = section_null_aware || self.at(TokenKind::QmarkLBracket);
             self.advance();
             let idx = self.parse_expr();
@@ -830,7 +830,7 @@ impl<'src> Parser<'src> {
                     }
                 }
                 TokenKind::LBracket | TokenKind::QmarkLBracket => {
-                    let selector_start = self.cur().offset;
+                    let selector_start = self.cur().offset();
                     let is_null_safe = self.at(TokenKind::QmarkLBracket);
                     self.advance();
                     let idx = self.parse_expr();
@@ -849,6 +849,13 @@ impl<'src> Parser<'src> {
                         index: Box::new(idx),
                         is_null_aware: is_null_safe,
                         span: selector_span,
+                    });
+                }
+                TokenKind::Bang => {
+                    let start = self.cur().offset();
+                    self.advance();
+                    ops.push(CascadeOp::NullAssert {
+                        span: self.span_from(start),
                     });
                 }
                 TokenKind::LParen => {
@@ -899,7 +906,7 @@ impl<'src> Parser<'src> {
         self.guarded(
             |p| Expr::Error { span: p.cur_span() },
             |p| {
-                let start = p.cur().offset;
+                let start = p.cur().offset();
                 match p.cur().kind {
                     TokenKind::IntLit => {
                         let text = p.cur_text().to_string();
@@ -1064,7 +1071,7 @@ impl<'src> Parser<'src> {
             if first_name.is_none() {
                 return Expr::Paren {
                     expr: Box::new(first_value),
-                    span: Span::new(start, close.offset + close.len),
+                    span: Span::new(start, close.offset() + close.len()),
                 };
             }
             let fields = vec![RecordField {
@@ -1084,7 +1091,7 @@ impl<'src> Parser<'src> {
             span: self.span_from(start),
         }];
         while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
-            let f_start = self.cur().offset;
+            let f_start = self.cur().offset();
             if self.cur().kind.is_identifier_like() && self.peek(1).kind == TokenKind::Colon {
                 let name = self.expect_ident();
                 self.advance();
@@ -1151,7 +1158,7 @@ impl<'src> Parser<'src> {
         // Closure arrows leave the enclosing declaration's semicolon untouched.
         let body = self.with_body(async_marker, |p| match p.cur().kind {
             TokenKind::Arrow => {
-                let bstart = p.cur().offset;
+                let bstart = p.cur().offset();
                 p.advance();
                 let e = p.parse_expr();
                 FunctionBody::Arrow(Box::new(e), p.span_from(bstart))
@@ -1347,7 +1354,7 @@ impl<'src> Parser<'src> {
     /// Parse one element of a comprehension-form map literal (`k: v`, or a
     /// `for`/`if`/spread wrapping such entries).
     fn parse_map_element(&mut self) -> MapElement {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         match self.cur().kind {
             TokenKind::DotDotDot | TokenKind::DotDotDotQmark => {
                 let (expr, is_null_aware) = self.parse_spread();
@@ -1401,7 +1408,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_collection_element(&mut self) -> CollectionElement {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         match self.cur().kind {
             // Dart 3.0 null-aware element `?expr`
             TokenKind::Qmark => {
@@ -1553,16 +1560,16 @@ impl<'src> Parser<'src> {
     pub(super) fn parse_symbol_literal(&mut self, start: usize) -> Expr {
         use TokenKind::*;
         let hash = self.advance();
-        let mut end = hash.offset + hash.len;
+        let mut end = hash.offset() + hash.len();
         if self.cur().kind.is_identifier_like() || self.at(Void) {
             let tok = self.advance();
-            end = tok.offset + tok.len;
+            end = tok.offset() + tok.len();
             while self.at(Dot) {
                 let dot = self.advance();
-                end = dot.offset + dot.len;
+                end = dot.offset() + dot.len();
                 if self.cur().kind.is_identifier_like() || self.at(Void) {
                     let id = self.advance();
-                    end = id.offset + id.len;
+                    end = id.offset() + id.len();
                 } else {
                     self.error("expected identifier after '.' in symbol literal");
                     break;
@@ -1572,13 +1579,13 @@ impl<'src> Parser<'src> {
             // Index operator `[]` or index-assign `[]=`.
             self.advance();
             let rb = self.expect(RBracket);
-            end = rb.offset + rb.len;
+            end = rb.offset() + rb.len();
             if let Some(eq) = self.eat(Eq) {
-                end = eq.offset + eq.len;
+                end = eq.offset() + eq.len();
             }
         } else if self.cur().kind.is_user_definable_operator() {
             let op = self.advance();
-            end = op.offset + op.len;
+            end = op.offset() + op.len();
         } else {
             self.error("expected symbol name after '#'");
         }

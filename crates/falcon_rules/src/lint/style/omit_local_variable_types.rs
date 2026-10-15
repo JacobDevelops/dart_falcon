@@ -220,7 +220,11 @@ mod tests {
     #[test]
     fn annotation_spans_exclude_trailing_comments_and_whitespace() {
         let source = "void f() { List<int> /* named */ a; int Function() /* function */ b; (int, String) /* record */ c; }";
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {
             panic!("expected function");
@@ -229,7 +233,7 @@ mod tests {
             panic!("expected block");
         };
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &syntax);
         let mut collector = Collector {
             diags: Vec::new(),
             ctx: &ctx,

@@ -1327,7 +1327,9 @@ mod tests {
     use falcon_dart_parser::parse;
 
     fn program(src: &str) -> Program {
-        let (program, errors) = parse(src);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(src);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         program
     }
@@ -1619,7 +1621,7 @@ mod tests {
     fn parse_error_declarations_have_no_resolved_shape() {
         use super::super::IdentitySource;
         let path = Path::new("/project/bad.dart");
-        let (bad, _) = parse("class Bad extends {");
+        let falcon_dart_parser::ParseResult { program: bad, .. } = parse("class Bad extends {");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,

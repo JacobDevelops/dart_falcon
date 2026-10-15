@@ -1069,7 +1069,9 @@ mod tests {
         use crate::resolve::{IdentityIndex, IdentitySource, TypeIndex};
 
         let path = PathBuf::from("/project/lib/main.dart");
-        let (program, errors) = parse("import 'dart:async';");
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse("import 'dart:async';");
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -1157,7 +1159,9 @@ mod tests {
         use falcon_syntax::ast::{IfCondition, Stmt};
 
         for pattern in ["final y!", "1!", "(final y!)"] {
-            let (program, errors) = parse(&format!(
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(&format!(
                 "void f(Object? x) {{ if (x case {pattern}) {{}} }}"
             ));
             assert!(errors.is_empty(), "{errors:?}");
@@ -1241,7 +1245,9 @@ mod tests {
             "String assignment(Object? value) { if (value is String?) throw 0; value = 'a'; return value; } ",
             "int exhausted(int value) { if (value is int) throw 0; return value; } ",
         );
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = PathBuf::from("/project/lib/main.dart");
         let identities = IdentityIndex::from_project_files(
@@ -1384,7 +1390,9 @@ mod tests {
             ),
         ];
         for (body, expected) in cases {
-            let (program, errors) = parse(&format!("f(bool flag) {body}"));
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(&format!("f(bool flag) {body}"));
             assert!(errors.is_empty(), "{body}: {errors:?}");
             let Some(TopLevelDecl::Function(function)) = program.declarations.first() else {
                 panic!("{body}")

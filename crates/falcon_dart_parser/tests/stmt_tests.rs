@@ -567,7 +567,11 @@ fn test_yield_method_call_is_member_access_not_yield_stmt() {
 #[test]
 fn test_yield_still_reserved_in_generator() {
     // Inside a `sync*` generator, `yield` remains the yield keyword.
-    let (prog, errors) = parse("Iterable<int> f() sync* { yield 1; }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("Iterable<int> f() sync* { yield 1; }");
     assert_eq!(errors.len(), 0, "{errors:?}");
     let func = match &prog.declarations[0] {
         TopLevelDecl::Function(f) => f,
@@ -601,7 +605,11 @@ fn test_await_as_identifier_in_plain_function() {
 #[test]
 fn test_await_still_reserved_in_async_function() {
     // Inside an `async` body, a leading `await` is still an await-expression.
-    let (prog, errors) = parse("void f() async { await g(); }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("void f() async { await g(); }");
     assert_eq!(errors.len(), 0, "{errors:?}");
     let func = match &prog.declarations[0] {
         TopLevelDecl::Function(f) => f,
@@ -658,7 +666,7 @@ fn test_deep_block_nesting_does_not_overflow() {
         .spawn(|| {
             let n = 3000;
             let src = format!("void f() {{ {}{} }}", "{".repeat(n), "}".repeat(n));
-            let (_, errors) = parse(&src);
+            let falcon_dart_parser::ParseResult { errors, .. } = parse(&src);
             errors
                 .iter()
                 .any(|e| e.message.contains("nesting too deep"))
@@ -686,8 +694,11 @@ fn test_await_for_rejected_in_plain_function() {
 
 #[test]
 fn test_await_for_accepted_in_async_function() {
-    let (prog, errors) =
-        parse("void f(Stream<int> xs) async { await for (var x in xs) { print(x); } }");
+    let falcon_dart_parser::ParseResult {
+        program: prog,
+        errors,
+        ..
+    } = parse("void f(Stream<int> xs) async { await for (var x in xs) { print(x); } }");
     assert_eq!(errors.len(), 0, "{errors:?}");
     let func = match &prog.declarations[0] {
         TopLevelDecl::Function(f) => f,

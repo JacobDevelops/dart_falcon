@@ -95,7 +95,38 @@ notes, is in
 2. **Implement** the rule. Rule structs derive `Default` and implement the `Rule`
    trait from `falcon_analyze` (or `CrossFileRule` for project-wide analysis).
    Use the `Visitor` trait / `visit_*` helpers in `falcon_syntax::visitor` to
-   traverse the AST from `falcon_syntax` (`falcon_syntax::ast::*`).
+   traverse the AST from `falcon_syntax` (`falcon_syntax::ast::*`). Override the
+   hook for the syntax you inspect; call its `walk_*` helper to continue into
+   children. Shared walkers explicitly match every AST enum variant, so new
+   variants require a traversal decision at compile time. Focused regression
+   tests cover known traversal gaps; a representative parsed-program test pins
+   observed hook counts and exactly-once source-child traversal. Names not
+   delivered to `visit_identifier` use `visit_name`; native-body literals use
+   `visit_native_string`.
+   Synthesized duplicate legacy-typedef trees are not traversed as source.
+   Do not add a rule-local recursive AST walker.
+
+   `parse` and `parse_for_package` return a `ParseResult` containing `program`,
+   `errors`, and the retained `syntax` store. Pass that same store to
+   `AnalyzeContext::new(path, source, config, &syntax)`. Use `ctx.syntax`
+   `tokens_in(span)`, `keywords_in`, `closing_delimiter`, `comments_in`, and
+   `documentation_start`/`doc_blocks(source)` instead of constructing a lexer or
+   searching raw declaration text. `TokenId` is local to its store: use
+   `syntax_for_span(span)` before resolving a nested interpolation's token range.
+   Interpolation tokens are retained in the store too. Token text borrows the
+   existing source; use source slices only when spelling or layout is the rule's
+   actual subject. Expression comparisons must preserve literal spelling, not
+   strip whitespace from strings.
+
+   Source coordinates use compact `u32` byte offsets, so sources may contain at
+   most `u32::MAX` (4,294,967,295) UTF-8 bytes. Use
+   `falcon_analyze::source::read_source` at disk ingestion boundaries: oversized
+   files follow the existing unreadable-file error/skip path before parsing.
+   In-memory analysis and LSP open/change/save buffers report oversized input as
+   a `syntax-error` at byte zero. The LSP discards rejected text until the next
+   valid full-sync change and excludes that buffer from project indexes. Cross-file
+   diagnostics are withheld while any buffer is rejected, because its references
+   are unknown rather than absent. Never pass oversized source directly to the parser.
 
    > **Construction gotcha:** `Expr::New` is emitted **only** for `new X(...)` and
    > `const X(...)`. A plain `X()` or a named constructor like `X.from()` parses as

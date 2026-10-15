@@ -18,13 +18,13 @@ use falcon_analyze::{
     canonical_or_lexical, group_libraries, import_path, library_unit, syntax_error_diagnostics,
 };
 use falcon_config::{FalconConfig, load_config, load_or_default};
-use falcon_dart_parser::{parse, parse_for_package};
+use falcon_dart_parser::{lex_syntax, parse_for_package};
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, package_identities,
     requires_resolution, run_cross_file,
 };
-use falcon_syntax::{LanguageVersion, Program};
+use falcon_syntax::{LanguageVersion, Program, ast::Span};
 use tracing::{debug, warn};
 use walkdir::WalkDir;
 
@@ -36,10 +36,13 @@ pub struct DocumentState {
     unresolved_path: bool,
     pub version: Option<i32>,
     program: Program,
+    syntax: falcon_syntax::SyntaxStore,
     language_version: LanguageVersion,
     /// Whether the last parse produced errors — carried so the cross-file pass
     /// can populate [`ProjectFile::has_parse_errors`] without re-parsing.
     has_parse_errors: bool,
+    /// Rejected buffers keep no text or syntax; only their size diagnostic survives.
+    source_rejected: bool,
     /// `syntax-error` diagnostics from the last parse, kept so `analyze` can
     /// publish them alongside lints without re-parsing (parity with the CLI).
     syntax_diagnostics: Vec<Diagnostic>,
@@ -301,12 +304,20 @@ impl LspState {
     fn refresh_document_versions(&mut self) {
         let mut changed = false;
         for doc in self.documents.values_mut() {
+            if doc.source_rejected {
+                continue;
+            }
             let language_version = self.environment.language_version(&doc.path, &doc.text);
             if language_version == doc.language_version {
                 continue;
             }
-            let (program, errors) = parse_for_package(&doc.text, Some(language_version));
+            let falcon_dart_parser::ParseResult {
+                program,
+                errors,
+                syntax,
+            } = parse_for_package(&doc.text, Some(language_version));
             doc.program = program;
+            doc.syntax = syntax;
             doc.has_parse_errors = !errors.is_empty();
             doc.syntax_diagnostics = syntax_error_diagnostics(&doc.path, &errors);
             doc.language_version = language_version;
@@ -350,8 +361,9 @@ impl LspState {
     }
 
     /// `textDocument/didOpen`: cache and parse the document, then analyze it.
-    pub fn open(&mut self, uri: &str, text: String, version: Option<i32>) -> Vec<Diagnostic> {
+    pub fn open(&mut self, uri: &str, mut text: String, version: Option<i32>) -> Vec<Diagnostic> {
         let (path, unresolved_path) = document_path(uri);
+        let source_error = reject_oversized_buffer(&path, &mut text);
         self.pending_semantic_affected.remove(uri);
         if self.resolve_semantics && !self.documents.is_empty() {
             self.ensure_semantic_snapshot();
@@ -363,9 +375,15 @@ impl LspState {
         }
         self.refresh_environment(std::iter::once(path.as_path()));
         let package_version = self.environment.package_language_version(&path);
-        let (program, parse_errors) = parse_for_package(&text, package_version);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors: parse_errors,
+            syntax,
+        } = parse_for_package(&text, package_version);
         let language_version = self.environment.language_version(&path, &text);
-        let syntax_diagnostics = syntax_error_diagnostics(&path, &parse_errors);
+        let mut syntax_diagnostics = syntax_error_diagnostics(&path, &parse_errors);
+        let source_rejected = source_error.is_some();
+        syntax_diagnostics.extend(source_error);
         self.documents.insert(
             uri.to_string(),
             DocumentState {
@@ -374,8 +392,10 @@ impl LspState {
                 text,
                 version,
                 program,
+                syntax,
                 language_version,
-                has_parse_errors: !parse_errors.is_empty(),
+                has_parse_errors: source_rejected || !parse_errors.is_empty(),
+                source_rejected,
                 syntax_diagnostics,
                 last_diagnostics: Vec::new(),
                 had_cross_file_diags: false,
@@ -393,7 +413,7 @@ impl LspState {
     /// behind the debounce window.
     ///
     /// Returns false if the document is not open.
-    pub fn change(&mut self, uri: &str, text: String, version: Option<i32>) -> bool {
+    pub fn change(&mut self, uri: &str, mut text: String, version: Option<i32>) -> bool {
         if !self.documents.contains_key(uri) {
             warn!(uri, "didChange for unopened document — ignored");
             return false;
@@ -419,16 +439,24 @@ impl LspState {
 
         self.refresh_unresolved_paths();
         let path = self.documents[uri].path.clone();
+        let source_error = reject_oversized_buffer(&path, &mut text);
         self.refresh_environment(std::iter::once(path.as_path()));
         let package_version = self.environment.package_language_version(&path);
         let doc = self.documents.get_mut(uri).expect("document checked above");
-        let (program, parse_errors) = parse_for_package(&text, package_version);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors: parse_errors,
+            syntax,
+        } = parse_for_package(&text, package_version);
         doc.syntax_diagnostics = syntax_error_diagnostics(&doc.path, &parse_errors);
+        doc.source_rejected = source_error.is_some();
+        doc.syntax_diagnostics.extend(source_error);
         doc.text = text;
         doc.version = version;
         doc.program = program;
+        doc.syntax = syntax;
         doc.language_version = self.environment.language_version(&doc.path, &doc.text);
-        doc.has_parse_errors = !parse_errors.is_empty();
+        doc.has_parse_errors = doc.source_rejected || !parse_errors.is_empty();
         doc.parse_count += 1;
         self.invalidate_semantic_snapshot();
         true
@@ -485,6 +513,15 @@ impl LspState {
         if !self.documents.contains_key(uri) {
             return Vec::new();
         }
+        if let Some(doc) = self
+            .documents
+            .get_mut(uri)
+            .filter(|doc| doc.source_rejected)
+        {
+            doc.analyze_count += 1;
+            doc.last_diagnostics = doc.syntax_diagnostics.clone();
+            return doc.last_diagnostics.clone();
+        }
         if self.resolve_semantics {
             self.ensure_semantic_snapshot();
         } else {
@@ -504,10 +541,11 @@ impl LspState {
         let Some(doc) = self.documents.get_mut(uri) else {
             return Vec::new();
         };
-        let mut ctx = AnalyzeContext::new(&doc.path, &doc.text, &self.config)
+        let mut ctx = AnalyzeContext::new(&doc.path, &doc.text, &self.config, &doc.syntax)
             .with_environment(Some(&self.environment));
         let programs;
         let sources;
+        let syntax;
         let library;
         if let Some((snapshot, file_index)) = semantic {
             programs = snapshot
@@ -520,7 +558,12 @@ impl LspState {
                 .iter()
                 .map(|file| file.source.as_str())
                 .collect::<Vec<_>>();
-            library = library_unit(&snapshot.grouping, &programs, &sources, file_index);
+            syntax = snapshot
+                .files
+                .iter()
+                .map(|file| &file.syntax)
+                .collect::<Vec<_>>();
+            library = library_unit(&snapshot.grouping, &programs, &sources, &syntax, file_index);
             ctx = ctx
                 .with_types(&snapshot.indexes.types)
                 .with_identities(&snapshot.indexes.identities)
@@ -670,10 +713,17 @@ impl LspState {
     /// path. Open buffers contribute their in-memory text and cached AST; every
     /// other `.dart` file under the workspace root is read and parsed from disk.
     fn cross_file_diagnostics(&mut self) -> HashMap<String, Vec<Diagnostic>> {
-        if self.cross_file_rules.is_empty() {
+        // Rejected references are unknown, not absent: a partial workspace must
+        // not produce unused-file/declaration diagnostics for otherwise valid files.
+        if self.cross_file_rules.is_empty()
+            || self.documents.values().any(|doc| doc.source_rejected)
+        {
             return HashMap::new();
         }
-        let files = self.collect_project_files(ProjectView::CrossFile);
+        let (files, complete) = self.collect_project_files(ProjectView::CrossFile);
+        if !complete {
+            return HashMap::new();
+        }
         // Semantic views include unsaved buffers; cross-file views include manifests.
         // Reuse facts only when Dart revisions and package identities agree exactly.
         let indexes = self.semantic_snapshot.as_ref().and_then(|snapshot| {
@@ -772,10 +822,18 @@ impl LspState {
         if self.semantic_snapshot.is_some() || !self.resolve_semantics {
             return;
         }
-        let mut files = self.collect_project_files(ProjectView::Semantic);
+        let (mut files, _) = self.collect_project_files(ProjectView::Semantic);
         {
-            let project_paths: HashSet<&Path> =
-                files.iter().map(|file| file.path.as_path()).collect();
+            let project_paths: HashSet<&Path> = files
+                .iter()
+                .map(|file| file.path.as_path())
+                .chain(
+                    self.documents
+                        .values()
+                        .filter(|doc| doc.source_rejected)
+                        .map(|doc| doc.path.as_path()),
+                )
+                .collect();
             let roots: Vec<(&Path, &Program, &str)> = files
                 .iter()
                 .map(|file| (file.path.as_path(), &file.program, file.source.as_str()))
@@ -797,18 +855,28 @@ impl LspState {
         // An open dependency part promotes its whole library to the project
         // view. Keep the buffered member and read only its unopened companions.
         let mut seen: HashSet<PathBuf> = files.iter().map(|file| file.path.clone()).collect();
+        seen.extend(
+            self.documents
+                .values()
+                .filter(|doc| doc.source_rejected)
+                .map(|doc| doc.path.clone()),
+        );
         for path in self.external_libraries.project_companions() {
             if !seen.insert(path.to_path_buf()) {
                 continue;
             }
-            match std::fs::read_to_string(path) {
+            match falcon_analyze::source::read_source(path) {
                 Ok(source) => {
-                    let (program, errors) =
-                        parse_for_package(&source, self.environment.package_language_version(path));
+                    let falcon_dart_parser::ParseResult {
+                        program,
+                        errors,
+                        syntax,
+                    } = parse_for_package(&source, self.environment.package_language_version(path));
                     files.push(ProjectFile {
                         path: path.to_path_buf(),
                         source,
                         program,
+                        syntax,
                         has_parse_errors: !errors.is_empty(),
                     });
                 }
@@ -1046,7 +1114,10 @@ impl LspState {
     /// the workspace root, preferring an open buffer's text + cached AST over the
     /// on-disk copy. Semantic analysis also includes open buffers that do not exist
     /// on disk yet. Cross-file analysis can additionally include package manifests.
-    fn collect_project_files(&mut self, view: ProjectView) -> Vec<ProjectFile> {
+    /// The boolean is false when oversized ingestion left the workspace incomplete;
+    /// cross-file rules must not infer absence from that partial set.
+    fn collect_project_files(&mut self, view: ProjectView) -> (Vec<ProjectFile>, bool) {
+        let mut complete = true;
         let filter = &self.config.files.includes;
         let mut paths = Vec::new();
         // Never follow symlinks: Flutter's ephemeral/.plugin_symlinks point into
@@ -1090,45 +1161,221 @@ impl LspState {
             let path = normalized.as_path();
             seen.insert(normalized.clone());
             if let Some(doc) = open_by_path.get(path) {
+                if doc.source_rejected {
+                    complete = false;
+                    continue;
+                }
                 files.push(ProjectFile {
                     path: normalized,
                     source: doc.text.clone(),
                     program: doc.program.clone(),
+                    syntax: doc.syntax.clone(),
                     has_parse_errors: doc.has_parse_errors,
                 });
             } else {
-                match std::fs::read_to_string(path) {
+                match falcon_analyze::source::read_source(path) {
                     Ok(source) => {
-                        let (program, errors) = if is_dart {
+                        let falcon_dart_parser::ParseResult {
+                            program,
+                            errors,
+                            syntax,
+                        } = if is_dart {
                             let package_version = self.environment.package_language_version(path);
                             parse_for_package(&source, package_version)
                         } else {
-                            parse("")
+                            falcon_dart_parser::ParseResult {
+                                program: Program {
+                                    library_directive: None,
+                                    part_of_directive: None,
+                                    part_directives: Vec::new(),
+                                    imports: Vec::new(),
+                                    exports: Vec::new(),
+                                    declarations: Vec::new(),
+                                    span: Span::new(0, 0),
+                                },
+                                errors: Vec::new(),
+                                syntax: lex_syntax(&source),
+                            }
                         };
                         files.push(ProjectFile {
                             path: normalized,
                             source,
                             program,
+                            syntax,
                             has_parse_errors: is_dart && !errors.is_empty(),
                         });
                     }
-                    Err(e) => warn!("failed to read {}: {}", path.display(), e),
+                    Err(e) => {
+                        warn!("failed to read {}: {}", path.display(), e);
+                        if falcon_analyze::source::is_source_too_large(&e) {
+                            complete = false;
+                        }
+                    }
                 }
             }
         }
         if matches!(view, ProjectView::Semantic) {
             for (path, doc) in open_by_path {
-                if !seen.contains(path) {
+                if !doc.source_rejected && !seen.contains(path) {
                     files.push(ProjectFile {
                         path: path.to_path_buf(),
                         source: doc.text.clone(),
                         program: doc.program.clone(),
+                        syntax: doc.syntax.clone(),
                         has_parse_errors: doc.has_parse_errors,
                     });
                 }
             }
         }
-        files
+        (files, complete)
+    }
+}
+
+/// Drop rejected editor text before any parsing, language-version scanning, or
+/// semantic retention. A subsequent valid full-sync change recovers normally.
+fn reject_oversized_buffer(path: &Path, text: &mut String) -> Option<Diagnostic> {
+    let diagnostic = falcon_analyze::parallel::source_size_diagnostic(path, text.len() as u64)?;
+    *text = String::new();
+    Some(diagnostic)
+}
+
+#[cfg(test)]
+mod source_size_tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_disk_read_errors_keep_project_collection_complete() {
+        let directory = tempfile::tempdir().unwrap();
+        let valid = directory.path().join("main.dart");
+        std::fs::write(&valid, "void main() {}").unwrap();
+        std::fs::write(directory.path().join("invalid.dart"), [0xff]).unwrap();
+        std::fs::write(directory.path().join("pubspec.yaml"), [0xff]).unwrap();
+        std::fs::create_dir(directory.path().join("directory.dart")).unwrap();
+        let mut state = LspState::new(None);
+        state.workspace_root = directory.path().to_path_buf();
+        state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(complete);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, canonical_or_lexical(&valid));
+    }
+
+    #[test]
+    fn ordinary_walk_errors_keep_project_collection_complete() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut state = LspState::new(None);
+        state.workspace_root = directory.path().join("missing");
+        state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(complete);
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn rejected_buffer_diagnostic_survives_refresh_and_recovers_on_change() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("main.dart"), "void main() {}").unwrap();
+        let uri = format!("file://{}", directory.path().join("main.dart").display());
+        let mut state = LspState::new(None);
+        state.workspace_root = directory.path().to_path_buf();
+        state.open(&uri, String::new(), Some(1));
+        let doc = state.documents.get_mut(&uri).unwrap();
+        doc.source_rejected = true;
+        doc.has_parse_errors = true;
+        doc.syntax_diagnostics = vec![
+            falcon_analyze::parallel::source_size_diagnostic(&doc.path, u64::from(u32::MAX) + 1)
+                .unwrap(),
+        ];
+        let parse_count = doc.parse_count;
+        let diagnostics = state.analyze(&uri);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "syntax-error")
+        );
+        assert_eq!(state.document(&uri).unwrap().parse_count, parse_count);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(
+            state
+                .collect_project_files(ProjectView::Semantic)
+                .0
+                .is_empty()
+        );
+        assert!(
+            state
+                .collect_project_files(ProjectView::CrossFile)
+                .0
+                .is_empty()
+        );
+        assert!(state.cross_file_diagnostics().is_empty());
+
+        assert!(state.change(&uri, "void main() {}".into(), Some(2)));
+        assert!(!state.document(&uri).unwrap().source_rejected);
+        assert!(
+            !state
+                .analyze(&uri)
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "syntax-error")
+        );
+    }
+
+    #[test]
+    fn supported_buffer_text_is_not_modified() {
+        let mut text = "// 🦅\nvoid main() {}".to_string();
+        let original = text.clone();
+        assert!(reject_oversized_buffer(Path::new("main.dart"), &mut text).is_none());
+        assert_eq!(text, original);
+    }
+
+    #[test]
+    fn oversized_disk_sources_clear_cross_file_diagnostics_and_recover() {
+        for name in ["oversized.dart", "pubspec.yaml"] {
+            let directory = tempfile::tempdir().unwrap();
+            let config = directory.path().join("falcon.json");
+            std::fs::write(
+                &config,
+                r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
+            )
+            .unwrap();
+            let lib = directory.path().join("lib");
+            std::fs::create_dir(&lib).unwrap();
+            std::fs::write(lib.join("main.dart"), "void main() {}").unwrap();
+            let orphan = lib.join("orphan.dart");
+            std::fs::write(&orphan, "class Orphan {}").unwrap();
+            let uri = format!("file://{}", orphan.display());
+            let mut state = LspState::new(Some(config));
+            state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+            state.open(&uri, "class Orphan {}".into(), Some(1));
+            assert!(state.cross_file_pass().iter().any(|(_, diagnostics)| {
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "unused-files")
+            }));
+
+            let rejected = directory.path().join(name);
+            std::fs::File::create(&rejected)
+                .unwrap()
+                .set_len(u64::from(u32::MAX) + 1)
+                .unwrap();
+            let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+            assert!(!complete);
+            assert!(files.iter().all(|file| file.path != rejected));
+            assert!(state.cross_file_diagnostics().is_empty());
+            let published = state.cross_file_pass();
+            let (_, diagnostics) = published.iter().find(|(key, _)| key == &uri).unwrap();
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.rule != "unused-files")
+            );
+
+            std::fs::remove_file(rejected).unwrap();
+            assert!(state.cross_file_diagnostics().values().any(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "unused-files")
+            }));
+        }
     }
 }
 
@@ -1375,11 +1622,16 @@ mod dependency_tests {
         std::fs::write(outer.join("pubspec.yaml"), "name: outer\n").unwrap();
         std::fs::write(nested.join("pubspec.yaml"), [0xff, 0xfe]).unwrap();
         let path = nested.join("lib/main.dart");
-        let (program, errors) = parse("");
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = falcon_dart_parser::parse("");
         let files = [ProjectFile {
             path: path.clone(),
             source: String::new(),
             program,
+            syntax,
             has_parse_errors: !errors.is_empty(),
         }];
 
@@ -1528,7 +1780,7 @@ mod dependency_tests {
             assert_eq!(switch_has_pattern(&file.program), pattern);
             assert_eq!(file.has_parse_errors, pattern);
         }
-        let files = state.collect_project_files(ProjectView::CrossFile);
+        let (files, _) = state.collect_project_files(ProjectView::CrossFile);
         for (path, pattern) in paths.iter().zip([false, true]) {
             let file = files.iter().find(|file| &file.path == path).unwrap();
             assert_eq!(switch_has_pattern(&file.program), pattern);
@@ -1591,18 +1843,34 @@ mod dependency_tests {
         let config_path = dir.path().join("falcon.json");
         let manifest_path = dir.path().join("pubspec.yaml");
         std::fs::write(&config_path, "{}").unwrap();
-        std::fs::write(&manifest_path, "name: workspace\n").unwrap();
+        let source = "name: workspace\nvalue: '$Simple ${Braced}'\n";
+        std::fs::write(&manifest_path, source).unwrap();
         std::fs::write(dir.path().join("main.dart"), "void main() {}\n").unwrap();
         let mut state = LspState::new(Some(config_path));
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
 
-        let files = state.collect_project_files(ProjectView::CrossFile);
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(complete);
         let manifest = files
             .iter()
             .find(|file| file.path == canonical_or_lexical(&manifest_path))
             .expect("pubspec.yaml must be included in the cross-file project view");
-        assert_eq!(manifest.source, "name: workspace\n");
+        assert_eq!(manifest.source, source);
         assert!(!manifest.has_parse_errors);
+        assert!(manifest.program.declarations.is_empty());
+        assert_eq!(manifest.syntax.tokens()[0].text(&manifest.source), "name");
+        assert_eq!(
+            manifest.syntax.tokens().last().unwrap().kind,
+            falcon_syntax::TokenKind::Eof
+        );
+        assert_eq!(
+            manifest
+                .syntax
+                .identifier_tokens()
+                .map(|token| token.text(&manifest.source))
+                .collect::<Vec<_>>(),
+            ["name", "workspace", "value", "Simple", "Braced"]
+        );
     }
 
     #[cfg(unix)]
@@ -1710,7 +1978,7 @@ mod dependency_tests {
             assert_eq!(doc.path, canonical);
             assert_eq!(doc.parse_count, 1);
             for view in [ProjectView::Semantic, ProjectView::CrossFile] {
-                let files = state.collect_project_files(view);
+                let (files, _) = state.collect_project_files(view);
                 assert_eq!(files.len(), 2);
                 let file = files.iter().find(|file| file.path == canonical).unwrap();
                 assert_eq!(file.source, buffer);
@@ -1761,7 +2029,7 @@ mod dependency_tests {
         let canonical = canonical_or_lexical(&path);
         assert_ne!(old_path, canonical);
         assert_eq!(state.document(&uri).unwrap().path, canonical);
-        let files = state.collect_project_files(ProjectView::Semantic);
+        let (files, _) = state.collect_project_files(ProjectView::Semantic);
         assert_eq!(
             files.len(),
             2,

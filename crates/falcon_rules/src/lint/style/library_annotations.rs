@@ -314,10 +314,12 @@ mod tests {
     #[test]
     fn shadowing_pragma_suppresses_late_trust_without_a_resolver() {
         let source = "var other, pragma;\n@pragma('dart2js:late:trust')\nimport 'a.dart';\n";
-        let (program, _) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(source);
         let config = FalconConfig::default();
         let path = PathBuf::from("shadowed.dart");
-        let ctx = AnalyzeContext::new(&path, source, &config);
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax);
         assert!(LibraryAnnotations.analyze(&program, &ctx).is_empty());
     }
 }

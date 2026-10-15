@@ -60,8 +60,8 @@ impl Rule for PreferConstDeclarations {
                     group.span.start
                 } else {
                     let tokens = ctx.tokens();
-                    let from = tokens.partition_point(|token| token.offset < group.span.start);
-                    let until = tokens.partition_point(|token| token.offset < group.first_name);
+                    let from = tokens.partition_point(|token| token.offset() < group.span.start);
+                    let until = tokens.partition_point(|token| token.offset() < group.first_name);
                     let mut prefix = tokens[from..until]
                         .iter()
                         .rev()
@@ -73,7 +73,7 @@ impl Rule for PreferConstDeclarations {
                                 .next()
                                 .filter(|token| token.kind == TokenKind::Late)
                                 .unwrap_or(final_keyword)
-                                .offset
+                                .offset()
                         },
                     )
                 };
@@ -162,7 +162,12 @@ impl Visitor for Declarations {
 
     fn visit_stmt(&mut self, node: &Stmt) {
         if let Stmt::LocalVar(variable) = node {
-            self.collect(variable.keyword, &variable.declarators, variable.span, true);
+            self.collect(
+                variable.keyword,
+                &variable.declarators,
+                variable.full_range(),
+                true,
+            );
         }
         walk_stmt(self, node);
     }
@@ -244,7 +249,11 @@ void f() {
 }
 "#;
         let path = PathBuf::from("/project/lib/test.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -270,7 +279,7 @@ void f() {
         );
         let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(&path, source, &config)
+        let ctx = AnalyzeContext::new(&path, source, &config, &syntax)
             .with_identities(&identities)
             .with_types(&types)
             .with_signatures(&signatures);

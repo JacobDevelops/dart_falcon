@@ -2149,7 +2149,9 @@ mod tests {
 
     #[test]
     fn string_decoding_concatenates_decoded_adjacent_segments() {
-        let (program, errors) = parse(r#"const value = 'a\n' r'\b' "\x63";"#);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(r#"const value = 'a\n' r'\b' "\x63";"#);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Variable(declaration) = &program.declarations[0] else {
             panic!()
@@ -2342,7 +2344,9 @@ const nonNullableCast = null as int;
 const futureOrCast = null as FutureOr<int?>;
 "#;
         let path = PathBuf::from("/project/lib/main.dart");
-        let (program, errors) = parse(source);
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = parse(source);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         let sources = [IdentitySource {
             path: &path,
@@ -2458,7 +2462,9 @@ const futureOrCast = null as FutureOr<int?>;
             ("const value = 1 + 0;", 1, Number::Int(1)),
             ("const value = integer;", 1, Number::Int(1)),
         ] {
-            let (program, errors) = parse(source);
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(source);
             assert!(errors.is_empty(), "{errors:?}");
             let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
                 panic!()
@@ -2593,7 +2599,9 @@ const futureOrCast = null as FutureOr<int?>;
     fn member_context_sees_the_owners_static_namespace() {
         with_constants(|_, model, signatures| {
             let owner = model.resolve_name("Foo").unwrap();
-            let (program, errors) = parse("const expression = a;");
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse("const expression = a;");
             assert!(errors.is_empty());
             let TopLevelDecl::Variable(variable) = &program.declarations[0] else {
                 panic!()
@@ -2629,7 +2637,9 @@ const futureOrCast = null as FutureOr<int?>;
         let programs: Vec<_> = inputs
             .iter()
             .map(|(_, source)| {
-                let (program, errors) = parse(source);
+                let falcon_dart_parser::ParseResult {
+                    program, errors, ..
+                } = parse(source);
                 assert!(errors.is_empty(), "{errors:?}");
                 program
             })

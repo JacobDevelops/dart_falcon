@@ -1,9 +1,11 @@
 use falcon_syntax::ast::*;
-use falcon_syntax::token::{Token, TokenKind};
+use falcon_syntax::token::{SyntaxStore, Token, TokenKind};
 use falcon_syntax::{Feature, LanguageVersion};
 
-use super::{ParseError, Parser};
-use crate::lexer::{Lexer, filter_trivia, scan::interp_close};
+use super::{
+    ParseError, Parser,
+    lexical::{InterpolationRegion, visit_interpolations},
+};
 
 #[derive(Clone, Copy, Default)]
 struct MemberModifiers {
@@ -29,7 +31,7 @@ impl<'src> Parser<'src> {
         if self.peek_kind_after_annotations() != TokenKind::Library {
             return None;
         }
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let annotations = self.parse_annotations();
         self.advance(); // library
         // Dart 3 allows bare `library;` with no name.
@@ -58,7 +60,7 @@ impl<'src> Parser<'src> {
         if !is_part_of {
             return None;
         }
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let annotations = self.parse_annotations();
         self.advance(); // part
         self.advance(); // of
@@ -81,7 +83,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn try_parse_part(&mut self) -> Option<PartDirective> {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let annotations = self.parse_annotations();
         self.expect(TokenKind::Part);
         if !matches!(self.cur().kind, TokenKind::StringLit) {
@@ -98,7 +100,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_import(&mut self) -> ImportDirective {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let annotations = self.parse_annotations();
         self.expect(TokenKind::Import);
         let uri = self.parse_adjacent_strings();
@@ -119,7 +121,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_export(&mut self) -> ExportDirective {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let annotations = self.parse_annotations();
         self.expect(TokenKind::Export);
         let uri = self.parse_adjacent_strings();
@@ -140,7 +142,7 @@ impl<'src> Parser<'src> {
     fn parse_configurable_uris(&mut self) -> Vec<ConfigurableUri> {
         let mut uris = Vec::new();
         while self.at(TokenKind::If) {
-            let start = self.cur().offset;
+            let start = self.cur().offset();
             self.advance(); // if
             self.expect(TokenKind::LParen);
             let mut test = vec![self.expect_ident()];
@@ -164,12 +166,12 @@ impl<'src> Parser<'src> {
         let mut combinators = Vec::new();
         loop {
             if self.at(TokenKind::Show) {
-                let start = self.cur().offset;
+                let start = self.cur().offset();
                 self.advance();
                 let names = self.parse_ident_list();
                 combinators.push(ImportCombinator::Show(names, self.span_from(start)));
             } else if self.at(TokenKind::Hide) {
-                let start = self.cur().offset;
+                let start = self.cur().offset();
                 self.advance();
                 let names = self.parse_ident_list();
                 combinators.push(ImportCombinator::Hide(names, self.span_from(start)));
@@ -192,7 +194,7 @@ impl<'src> Parser<'src> {
 
     pub(super) fn parse_top_level_decl(&mut self) -> Option<TopLevelDecl> {
         let annotations = self.parse_annotations();
-        let start = self.cur().offset;
+        let start = self.cur().offset();
 
         let mut modifiers = ClassModifiers::default();
 
@@ -332,7 +334,7 @@ impl<'src> Parser<'src> {
         &mut self,
         representation: bool,
     ) -> (Identifier, Vec<TypeParam>, Option<PrimaryConstructor>) {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let is_const = self.eat(TokenKind::Const).is_some();
         let name = self.expect_ident();
         let type_params = self.parse_type_params();
@@ -478,7 +480,7 @@ impl<'src> Parser<'src> {
         if let Some(semicolon) = self.eat(TokenKind::Semicolon) {
             if !self.version.supports(Feature::PrimaryConstructors) {
                 self.error_at(
-                    semicolon.offset,
+                    semicolon.offset(),
                     "This requires the 'primary-constructors' language feature",
                 );
             }
@@ -583,7 +585,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_class_member(&mut self) -> ClassMember {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         let annotations = self.parse_annotations();
         let modifiers = self.parse_member_modifiers();
 
@@ -611,7 +613,7 @@ impl<'src> Parser<'src> {
                 self.error("This requires the 'primary-constructors' language feature");
             }
             let this_token = self.advance();
-            let this_span = Span::new(this_token.offset, this_token.offset + this_token.len);
+            let this_span = Span::new(this_token.offset(), this_token.offset() + this_token.len());
             let initializers = self.parse_constructor_initializers();
             let body = self.parse_function_body(AsyncMarker::Sync);
             return ClassMember::PrimaryConstructorBody(PrimaryConstructorBody {
@@ -931,7 +933,7 @@ impl<'src> Parser<'src> {
 
     /// Parse a redirecting-factory target after `=`: `Type[.name]`.
     fn parse_redirected_constructor(&mut self) -> RedirectedConstructor {
-        let start = self.cur().offset;
+        let start = self.cur().offset();
         self.expect(TokenKind::Eq);
         let type_ = self.parse_type();
         let constructor_name = self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
@@ -1221,7 +1223,7 @@ impl<'src> Parser<'src> {
         }
         let mut inits = Vec::new();
         loop {
-            let start = self.cur().offset;
+            let start = self.cur().offset();
             let init = match self.cur().kind {
                 TokenKind::Super => {
                     self.advance();
@@ -1330,7 +1332,7 @@ impl<'src> Parser<'src> {
         let mut members = Vec::new();
 
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let v_start = self.cur().offset;
+            let v_start = self.cur().offset();
             let v_annotations = self.parse_annotations();
             if !self.cur().kind.is_identifier_like() {
                 break;
@@ -1658,7 +1660,7 @@ impl<'src> Parser<'src> {
         }
         let interpolations = if is_string_lit {
             let (interps, interp_errors) =
-                scan_interpolations(self.src, tok.offset, raw, self.version);
+                scan_interpolations(self.syntax, self.src, tok.offset(), raw, self.version);
             // Surface any interpolation sub-parse diagnostics to the enclosing
             // program (their offsets are already absolute).
             self.errors.extend(interp_errors);
@@ -1692,102 +1694,52 @@ impl<'src> Parser<'src> {
 /// absolute source offsets) are returned alongside so the enclosing program can
 /// surface them.
 fn scan_interpolations(
+    syntax: &SyntaxStore,
     src: &str,
     lit_start: usize,
     raw: &str,
     version: LanguageVersion,
 ) -> (Vec<StringInterpolation>, Vec<ParseError>) {
-    let bytes = raw.as_bytes();
-    if bytes.first() == Some(&b'r') {
-        return (Vec::new(), Vec::new());
-    }
-    let dlen = if raw.starts_with("'''") || raw.starts_with("\"\"\"") {
-        3
-    } else if raw.starts_with('\'') || raw.starts_with('"') {
-        1
-    } else {
-        return (Vec::new(), Vec::new());
-    };
-    let content_start = dlen;
-    // A well-formed literal ends with the same delimiter; if it does not (e.g. a
-    // merged-adjacent fragment) scan to the end of the text instead.
-    let content_end = raw.len().saturating_sub(dlen).max(content_start);
-
     let mut out = Vec::new();
     let mut errs = Vec::new();
-    let mut i = content_start;
-    while i < content_end {
-        match bytes[i] {
-            b'\\' => i += 2,
-            b'$' if i + 1 < content_end && bytes[i + 1] == b'{' => {
-                if let Some(close) = interp_close(bytes, i + 1, content_end) {
-                    let inner_start = i + 2;
-                    let (interp, interp_errs) =
-                        parse_interp_expr(src, lit_start + inner_start, lit_start + close, version);
-                    if let Some(interp) = interp {
-                        out.push(interp);
-                    }
-                    errs.extend(interp_errs);
-                    i = close + 1;
-                } else {
-                    i += 1;
-                }
+    visit_interpolations(raw, lit_start, |region| match region {
+        InterpolationRegion::Expression(span) => {
+            let (interp, interp_errs) = parse_interp_expr(syntax, src, span, version);
+            if let Some(interp) = interp {
+                out.push(interp);
             }
-            b'$' if i + 1 < content_end && is_interp_ident_start(bytes[i + 1]) => {
-                let id_start = i + 1;
-                let mut k = id_start + 1;
-                while k < content_end && is_interp_ident_continue(bytes[k]) {
-                    k += 1;
-                }
-                let span = Span::new(lit_start + id_start, lit_start + k);
-                out.push(StringInterpolation {
-                    expr: Expr::Ident(Identifier::new(&raw[id_start..k], span)),
-                    span,
-                });
-                i = k;
-            }
-            _ => i += 1,
+            errs.extend(interp_errs);
         }
-    }
+        InterpolationRegion::Identifier(span) => out.push(StringInterpolation {
+            expr: if &src[span.start..span.end] == "this" {
+                Expr::This { span }
+            } else {
+                Expr::Ident(Identifier::new(&src[span.start..span.end], span))
+            },
+            span,
+        }),
+    });
     (out, errs)
 }
 
-/// Lex and parse the source slice `src[start..end]` as a standalone expression,
-/// shifting token offsets so the resulting AST carries absolute spans. The first
-/// element is `Some` only when the slice parses to a single non-error expression
-/// consuming the whole slice; otherwise it is `None` and the second element
-/// carries the sub-parse diagnostics (with absolute offsets) so the caller can
-/// surface them instead of dropping the failure silently.
+/// Parse a retained interpolation stream as one standalone expression. Invalid
+/// expressions keep their absolute diagnostics but do not become interpolations.
 fn parse_interp_expr(
+    syntax: &SyntaxStore,
     src: &str,
-    start: usize,
-    end: usize,
+    span: Span,
     version: LanguageVersion,
 ) -> (Option<StringInterpolation>, Vec<ParseError>) {
-    if start >= end {
+    if span.start >= span.end {
         return (None, Vec::new());
     }
-    let slice = &src[start..end];
-    let mut tokens = Lexer::new(slice).tokenize();
-    for tok in &mut tokens {
-        tok.offset += start;
-    }
-    let tokens = filter_trivia(tokens);
-    let mut sub = Parser::new(tokens, src, version);
+    let retained = syntax
+        .interpolation(span)
+        .expect("retained interpolation stream");
+    let mut sub = Parser::new(retained, src, version);
     let expr = sub.parse_expr();
     if !sub.errors.is_empty() || !sub.at(TokenKind::Eof) || matches!(expr, Expr::Error { .. }) {
         return (None, sub.errors);
     }
-    let span = *expr.span();
     (Some(StringInterpolation { expr, span }), Vec::new())
-}
-
-// `$` is excluded so `$a$b` reads as two interpolations, and `.`/`(` end a
-// simple `$identifier` region (mirroring Dart's interpolation grammar).
-fn is_interp_ident_start(c: u8) -> bool {
-    c.is_ascii_alphabetic() || c == b'_'
-}
-
-fn is_interp_ident_continue(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_'
 }

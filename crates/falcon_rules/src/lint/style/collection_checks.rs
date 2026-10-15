@@ -178,9 +178,11 @@ mod tests {
             print(s.length == 0); print(s.length != 0);
             xs.where((e) => e is String);
         }";
-        let program = parse(source).0;
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = parse(source);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config);
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &syntax);
         for rule in [
             &PreferIsEmpty as &dyn Rule,
             &PreferIsNotEmpty,
