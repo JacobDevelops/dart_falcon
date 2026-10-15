@@ -105,6 +105,12 @@ A bare `**` (or `**/*`) entry disables positive filtering entirely.
   values are `all`, `recommended`, or `none`.
 - `rules`: the recommended preset plus per-group rule levels.
 
+### Language server reloads
+
+The language server reloads configuration and mutable dependencies when the editor sends watched-file notifications. This includes path and git dependencies, Flutter SDK packages, and newly generated Dart files.
+
+Out-of-workspace dependency watches need editor support for LSP 3.17 relative patterns. Without it, restart the server after changing those dependencies. If watched-file registration is unavailable or fails, saving workspace configuration files still reloads configuration; restart after dependency changes. Restart after manually editing hosted-package or Dart SDK sources too.
+
 ### `linter.rules`
 
 - `recommended` (default `true`): whether the recommended preset is active.
