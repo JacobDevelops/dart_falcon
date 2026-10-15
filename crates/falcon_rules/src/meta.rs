@@ -2355,24 +2355,14 @@ pub fn canonicalize_config(config: &mut FalconConfig) {
 
 fn canonicalize_rules(rules: &mut Rules) {
     for group in rules.groups.values_mut() {
-        let renames: Vec<(String, String)> = group
-            .keys()
-            .filter_map(|key| {
-                let canonical = canonical_rule_name(key);
-                (canonical != key.as_str()).then(|| (key.clone(), canonical.to_string()))
-            })
-            .collect();
-        for (old, canonical) in renames {
-            let Some(cfg) = group.remove(&old) else {
+        for &(old, canonical) in RULE_ALIASES {
+            let Some(cfg) = group.remove(old) else {
                 continue;
             };
-            match group.get(&canonical) {
-                // A more-or-equally severe entry already occupies the canonical
-                // slot — keep it. Otherwise this entry wins (more severe, or the
-                // slot is empty).
+            match group.get(canonical) {
                 Some(existing) if severity_rank(existing) >= severity_rank(&cfg) => {}
                 _ => {
-                    group.insert(canonical, cfg);
+                    group.insert(canonical.to_owned(), cfg);
                 }
             }
         }

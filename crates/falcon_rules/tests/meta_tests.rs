@@ -131,30 +131,76 @@ fn canonicalize_config_rewrites_legacy_rule_keys() {
 }
 
 #[test]
-fn canonicalize_config_merges_twins_keeping_more_severe_level() {
-    use falcon_config::{FalconConfig, ResolvedSeverity};
+fn canonicalization_preserves_collisions_unknown_keys_and_all_override_maps() {
+    use falcon_config::{FalconConfig, RulePlainConfiguration};
     use falcon_rules::meta::canonicalize_config;
 
-    // Both legacy empty-block twins configured at different levels collapse to
-    // the surviving `no-empty-block`; the more severe level wins regardless of
-    // iteration order.
-    let mut config: FalconConfig = serde_json::from_value(serde_json::json!({
-        "linter": {
-            "rules": {
-                "suspicious": {
-                    "avoid_empty_blocks": "off",
-                    "no_empty_block": "error"
-                }
+    for (first, second) in [("error", "warn"), ("off", "error")] {
+        let rules = serde_json::json!({
+            "suspicious": {
+                "avoid_empty_blocks": first,
+                "no_empty_block": second,
+                "no-empty-block": "info",
+                "unknown-rule": "off"
             }
+        });
+        let mut config: FalconConfig = serde_json::from_value(serde_json::json!({
+            "linter": { "rules": rules },
+            "cross-file": { "rules": rules },
+            "overrides": [{
+                "includes": ["test/**"],
+                "linter": { "rules": rules },
+                "cross-file": { "rules": rules }
+            }]
+        }))
+        .expect("valid config");
+        canonicalize_config(&mut config);
+        let once = serde_json::to_value(&config).expect("serializable config");
+        canonicalize_config(&mut config);
+        assert_eq!(serde_json::to_value(&config).unwrap(), once);
+        for rules in [
+            &config.linter.rules,
+            &config.cross_file.rules,
+            &config.overrides[0].linter.as_ref().unwrap().rules,
+            &config.overrides[0].cross_file.as_ref().unwrap().rules,
+        ] {
+            let group = &rules.groups["suspicious"];
+            assert_eq!(group.len(), 2);
+            assert_eq!(
+                group["no-empty-block"].level(),
+                RulePlainConfiguration::Error
+            );
+            assert_eq!(group["unknown-rule"].level(), RulePlainConfiguration::Off);
         }
-    }))
-    .expect("valid config");
+    }
+}
 
-    canonicalize_config(&mut config);
+#[test]
+fn equal_severity_collisions_preserve_canonical_options_then_first_legacy_options() {
+    use falcon_config::FalconConfig;
+    use falcon_rules::meta::canonicalize_config;
 
-    assert_eq!(
-        config.resolve_rule("suspicious", "no-empty-block", false, &[]),
-        Some(ResolvedSeverity::Error),
-        "merged twins must keep the more severe level"
-    );
+    for canonical in [false, true] {
+        let first = serde_json::json!({ "level": "warn", "options": { "winner": "first" } });
+        let canonical_config =
+            serde_json::json!({ "level": "on", "options": { "winner": "canonical" } });
+        let mut group = serde_json::json!({
+            "avoid_empty_blocks": first,
+            "no_empty_block": { "level": "warn", "options": { "winner": "second" } }
+        });
+        if canonical {
+            group["no-empty-block"] = canonical_config.clone();
+        }
+        let mut config: FalconConfig = serde_json::from_value(serde_json::json!({
+            "linter": { "rules": { "suspicious": group } }
+        }))
+        .unwrap();
+        canonicalize_config(&mut config);
+        let result = &config.linter.rules.groups["suspicious"];
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&result["no-empty-block"]).unwrap(),
+            if canonical { canonical_config } else { first }
+        );
+    }
 }
