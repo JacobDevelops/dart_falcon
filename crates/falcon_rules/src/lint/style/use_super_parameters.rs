@@ -1,128 +1,223 @@
-//! Flags a constructor parameter forwarded verbatim to `super(...)` and used nowhere else.
+//! Prefer super parameters when a constructor only forwards parameters to its superclass.
 //!
-//! Since Dart 2.17, a parameter that exists only to be passed straight through to
-//! the superclass constructor can be declared as a super parameter — `super.x` —
-//! which removes both the parameter declaration and the redundant `super(x)`
-//! argument. Doing so cuts boilerplate and keeps subclass constructors in sync
-//! with the base class automatically. The rule is conservative: it fires only
-//! when the parameter is used exactly once across the entire constructor (all
-//! initializers plus the body), forwarded either as a plain positional `super`
-//! argument at the matching index or as a named argument `super(x: x)`. Convert
-//! it to a `super.` parameter.
+//! Super parameters remove repeated parameter declarations and explicit forwarding
+//! arguments. This rule reports a constructor once when its positional parameters
+//! can be converted together, or when an individual named parameter can be
+//! converted without changing its type contract. Parameters used in the constructor
+//! body and field-initializing formals are not suggested.
+//!
+//! Available starting with Dart 2.17. For example, replace
+//! `Child(int value) : super(value);` with `Child(super.value);`.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use std::collections::{HashMap, HashSet};
+
+use falcon_analyze::{AnalyzeContext, LanguageVersion, ResolvedType, Rule, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
-use std::collections::HashMap;
+
+use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]
 pub struct UseSuperParameters;
 
 impl Rule for UseSuperParameters {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            if let Some(members) = crate::lint::declarations::members_of(decl) {
-                for member in members {
-                    if let ClassMember::Constructor(ctor) = member {
-                        check_ctor(ctor, ctx, &mut diags);
+        if ctx.language_version() < LanguageVersion::new(2, 17) {
+            return Vec::new();
+        }
+        let Some(state) = SemanticState::new(program, ctx) else {
+            return Vec::new();
+        };
+        let mut collector = Collector::default();
+        visit_program(&mut collector, program, state);
+        collector
+            .constructors
+            .into_iter()
+            .filter_map(|constructor| {
+                let referenced = |parameter: Span| {
+                    collector
+                        .references
+                        .get(&parameter)
+                        .is_some_and(|(_, used)| *used)
+                };
+                let mut positional = !constructor.positional.is_empty();
+                for check in constructor.positional {
+                    match check {
+                        PositionalCheck::Invalid => return None,
+                        PositionalCheck::Blocked => {
+                            positional = false;
+                            break;
+                        }
+                        PositionalCheck::Reference(parameter) if referenced(parameter) => {
+                            positional = false;
+                            break;
+                        }
+                        PositionalCheck::Reference(_) => {}
                     }
                 }
-            }
-        }
-        diags
+                let convertible =
+                    positional || constructor.named.iter().any(|span| !referenced(*span));
+                convertible.then(|| {
+                    ctx.diagnostic(
+                        "use-super-parameters",
+                        "Use super parameters instead of forwarding parameters to super.",
+                        constructor.anchor,
+                    )
+                })
+            })
+            .collect()
     }
 }
 
 #[derive(Default)]
-struct Counter {
-    counts: HashMap<String, usize>,
+struct Collector {
+    references: HashMap<Span, (Span, bool)>,
+    constructors: Vec<Conversion>,
 }
 
-impl Visitor for Counter {
-    fn visit_expr(&mut self, node: &Expr) {
-        if let Expr::Ident(identifier) = node {
-            *self.counts.entry(identifier.name.clone()).or_insert(0) += 1;
-        } else {
-            walk_expr(self, node);
-        }
-    }
+struct Conversion {
+    anchor: Span,
+    positional: Vec<PositionalCheck>,
+    named: Vec<Span>,
 }
 
-fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    let Some(super_args) = ctor.initializers.iter().find_map(|init| match init {
-        ConstructorInitializer::SuperCall { args, .. } => Some(args),
-        _ => None,
-    }) else {
-        return;
-    };
+enum PositionalCheck {
+    Invalid,
+    Blocked,
+    Reference(Span),
+}
 
-    // Count every identifier use across all initializers and the body. A
-    // forwarded parameter used exactly once is used only by the super call.
-    let mut counter = Counter::default();
-    for init in &ctor.initializers {
-        match init {
-            ConstructorInitializer::SuperCall { args, .. }
-            | ConstructorInitializer::ThisCall { args, .. } => {
-                for a in &args.positional {
-                    counter.visit_expr(a);
-                }
-                for n in &args.named {
-                    counter.visit_expr(&n.value);
-                }
-            }
-            ConstructorInitializer::FieldInit { value, .. } => counter.visit_expr(value),
-            ConstructorInitializer::Assert {
-                condition, message, ..
-            } => {
-                counter.visit_expr(condition);
-                if let Some(m) = message {
-                    counter.visit_expr(m);
-                }
-            }
-        }
-    }
-    if let Some(body) = &ctor.body {
-        walk_function_body(&mut counter, body);
-    }
-
-    let used_once = |name: &str| counter.counts.get(name) == Some(&1);
-
-    // Positional params forward verbatim only when the super call passes the
-    // same identifier at the same positional index (order-preserving).
-    for (i, param) in ctor.params.positional().enumerate() {
-        if param.initializing.is_some() {
-            continue;
-        }
-        if let Some(Expr::Ident(id)) = super_args.positional.get(i).map(Expr::unparenthesized)
-            && id.name == param.name.name
-            && used_once(&param.name.name)
+impl SemanticRuleVisitor for Collector {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        if let Expr::Ident(identifier) = node
+            && let Some(binding) = state.environment.binding_declaration(&identifier.name)
+            && let Some((body, used)) = self.references.get_mut(&binding)
+            && body.start <= identifier.span.start
+            && identifier.span.start < body.end
         {
-            diags.push(ctx.diagnostic(
-                "use-super-parameters",
-                "Use a super parameter instead of forwarding a parameter to super.".to_string(),
-                param.name.span,
-            ));
+            *used = true;
         }
     }
 
-    // Named params forward verbatim only via `super(name: name)`.
-    for param in ctor.params.named() {
-        if param.initializing.is_some() {
-            continue;
+    fn visit_constructor_ref(&mut self, ctor: ConstructorRef<'_>, state: &SemanticState<'_>) {
+        let Some((args, name)) = ctor.initializers.iter().rev().find_map(|init| match init {
+            ConstructorInitializer::SuperCall {
+                args, call_name, ..
+            } => Some((
+                args,
+                call_name.as_ref().map_or("new", |name| name.name.as_str()),
+            )),
+            _ => None,
+        }) else {
+            return;
+        };
+        let Some(superclass) = &state.superclass else {
+            return;
+        };
+        let Some((signature, substitutions)) =
+            state.signatures.resolved_constructor(superclass, name)
+        else {
+            return;
+        };
+        let mut conversion = Conversion {
+            anchor: if ctor.is_primary {
+                Span::new(
+                    ctor.span.start,
+                    ctor.constructor_name.map_or_else(
+                        || {
+                            ctor.span.start
+                                + if ctor.is_const {
+                                    5
+                                } else {
+                                    ctor.name_span.end - ctor.name_span.start
+                                }
+                        },
+                        |name| name.span.end,
+                    ),
+                )
+            } else {
+                Span::new(
+                    ctor.name_span.start,
+                    ctor.constructor_name
+                        .map_or(ctor.name_span.end, |name| name.span.end),
+                )
+            },
+            positional: Vec::with_capacity(ctor.params.params.len()),
+            named: Vec::with_capacity(args.named.len()),
+        };
+        // Every positional super argument must be a distinct positional formal,
+        // in declaration order. Other constructor parameters may precede it.
+        if args
+            .positional
+            .iter()
+            .all(|arg| matches!(arg, Expr::Ident(_)))
+        {
+            let mut seen = HashSet::with_capacity(args.positional.len());
+            let mut previous = 0;
+            for argument in &args.positional {
+                let Expr::Ident(identifier) = argument else {
+                    unreachable!()
+                };
+                let Some(index) = ctor
+                    .params
+                    .params
+                    .iter()
+                    .position(|param| param.name.name == identifier.name)
+                else {
+                    conversion.positional.push(PositionalCheck::Invalid);
+                    break;
+                };
+                let parameter = &ctor.params.params[index];
+                if matches!(parameter.kind, ParamKind::Named { .. }) || !seen.insert(index) {
+                    conversion.positional.push(PositionalCheck::Invalid);
+                    break;
+                }
+                if index < previous {
+                    conversion.positional.push(PositionalCheck::Blocked);
+                    break;
+                }
+                for parameter in &ctor.params.params[previous..=index] {
+                    conversion.positional.push(match parameter.initializing {
+                        Some(InitializingFormal::Super) => PositionalCheck::Invalid,
+                        Some(InitializingFormal::This) => PositionalCheck::Blocked,
+                        None => PositionalCheck::Reference(parameter.name.span),
+                    });
+                }
+                previous = index + 1;
+            }
         }
-        let forwarded = super_args.named.iter().any(|n| {
-            n.name.name == param.name.name
-                && matches!(n.value.unparenthesized(), Expr::Ident(id) if id.name == param.name.name)
-        });
-        if forwarded && used_once(&param.name.name) {
-            diags.push(ctx.diagnostic(
-                "use-super-parameters",
-                "Use a super parameter instead of forwarding a parameter to super.".to_string(),
-                param.name.span,
-            ));
+        if let Some(body) = ctor.body {
+            for parameter in &ctor.params.params {
+                self.references
+                    .entry(parameter.name.span)
+                    .or_insert((*body.span(), false));
+            }
         }
+        for parameter in ctor.params.named() {
+            if parameter.initializing == Some(InitializingFormal::This)
+                || (ctor.is_primary && (parameter.is_final || parameter.is_var))
+            {
+                continue;
+            }
+            let Some(super_type) = signature.named.get(&parameter.name.name) else {
+                continue;
+            };
+            if !args.named.iter().any(|argument| {
+                argument.name.name == parameter.name.name
+                    && matches!(&argument.value, Expr::Ident(identifier) if identifier.name == parameter.name.name)
+            }) { continue; }
+            let super_type = state.model.substitute(super_type, &substitutions);
+            let this_type = state.environment.declared_type(&parameter.name.name);
+            if matches!(super_type, ResolvedType::Dynamic)
+                || matches!(this_type, ResolvedType::Dynamic)
+                || state
+                    .signatures
+                    .subtype(&super_type, &this_type, &state.model)
+                    == Truth::Yes
+            {
+                conversion.named.push(parameter.name.span);
+            }
+        }
+        self.constructors.push(conversion);
     }
 }

@@ -33,15 +33,15 @@ pub use parallel::{
 };
 pub use registry::{RuleRegistry, with_rules_stack};
 pub use resolve::{
-    DeclarationFacts, DeclarationIdentity, DocImport, DocName, ExternalSources, IdentityIndex,
-    IdentitySource, InferenceContext, LibraryGrouping, LibraryId, LibrarySource, MemberFacts,
-    MemberKind, MemberResult, MemberSelector, MemberSelectorKind, NameIdentity, PackageIdentity,
-    ParameterDefault, ParameterOwner, QualifiedName, ResolvedInvocation, ResolvedSignature,
-    ResolvedType, SemanticModel, SignatureIndex, SourceSelector, Truth, TypeEnvironment, TypeIndex,
-    TypeParameterId, TypeParameterScope, canonical_or_lexical, expression_has_dot_shorthand_base,
-    expression_segments, group_libraries, has_immutable_annotation, import_path,
-    library_doc_imports, library_unit, null_shorted, resolve_call_constructor,
-    resolve_new_constructor,
+    DeclarationFacts, DeclarationIdentity, DefaultSyntaxKey, DocImport, DocName, ExternalSources,
+    IdentityIndex, IdentitySource, InferenceContext, LibraryGrouping, LibraryId, LibrarySource,
+    MemberFacts, MemberKind, MemberResult, MemberSelector, MemberSelectorKind, NameIdentity,
+    PackageIdentity, ParameterContract, ParameterDefault, ParameterOwner, QualifiedName,
+    ResolvedInvocation, ResolvedSignature, ResolvedType, SemanticModel, SignatureIndex,
+    SourceSelector, Truth, TypeEnvironment, TypeIndex, TypeParameterId, TypeParameterScope,
+    canonical_or_lexical, expression_has_dot_shorthand_base, expression_segments, group_libraries,
+    has_immutable_annotation, import_path, library_doc_imports, library_unit, null_shorted,
+    resolve_call_constructor, resolve_new_constructor,
 };
 pub use rule::Rule;
 pub use suppressions::{FileSuppressions, RuleLookup};

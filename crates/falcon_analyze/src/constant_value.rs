@@ -67,6 +67,7 @@ pub enum ConstantType {
         Vec<(String, ConstantType)>,
         usize,
         bool,
+        Option<Vec<String>>,
     ),
     Record(Vec<ConstantType>, Vec<(String, ConstantType)>, bool),
 }
@@ -1871,6 +1872,7 @@ fn constant_type(ty: &ResolvedType) -> Option<ConstantType> {
             named: names,
             nullable,
             optional_positional,
+            shape,
             ..
         } => ConstantType::Function(
             Box::new(constant_type(return_type)?),
@@ -1878,6 +1880,10 @@ fn constant_type(ty: &ResolvedType) -> Option<ConstantType> {
             named(names)?,
             *optional_positional,
             *nullable,
+            shape
+                .as_ref()
+                .filter(|shape| shape.type_parameters.is_empty())
+                .map(|shape| shape.required_named.to_vec()),
         ),
         ResolvedType::Record {
             positional: fields,
@@ -1923,16 +1929,24 @@ fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
             nullable: *nullable,
             extension_type: false,
         },
-        ConstantType::Function(result, positional, names, optional_positional, nullable) => {
-            ResolvedType::Function {
-                optional_positional: *optional_positional,
-                alias: Default::default(),
-                return_type: std::sync::Arc::new(resolved_constant_type(result)),
-                positional: positional.iter().map(resolved_constant_type).collect(),
-                named: named(names),
-                nullable: *nullable,
-            }
-        }
+        ConstantType::Function(
+            result,
+            positional,
+            names,
+            optional_positional,
+            nullable,
+            required_named,
+        ) => ResolvedType::Function {
+            shape: required_named
+                .as_ref()
+                .map(|names| crate::resolve::FunctionTypeShape::new(names.clone(), Vec::new())),
+            optional_positional: *optional_positional,
+            alias: Default::default(),
+            return_type: std::sync::Arc::new(resolved_constant_type(result)),
+            positional: positional.iter().map(resolved_constant_type).collect(),
+            named: named(names),
+            nullable: *nullable,
+        },
         ConstantType::Record(positional, names, nullable) => ResolvedType::Record {
             occurrence: Default::default(),
             positional: positional.iter().map(resolved_constant_type).collect(),

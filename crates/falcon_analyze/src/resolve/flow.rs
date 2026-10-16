@@ -811,6 +811,7 @@ fn same_shape(left: &ResolvedType, right: &ResolvedType) -> bool {
                 positional: ap,
                 named: an,
                 optional_positional: ao,
+                shape: a_shape,
                 ..
             },
             ResolvedType::Function {
@@ -818,9 +819,10 @@ fn same_shape(left: &ResolvedType, right: &ResolvedType) -> bool {
                 positional: bp,
                 named: bn,
                 optional_positional: bo,
+                shape: b_shape,
                 ..
             },
-        ) => a == b && ap == bp && an == bn && ao == bo,
+        ) => a == b && ap == bp && an == bn && ao == bo && a_shape == b_shape,
         (
             ResolvedType::Record {
                 positional: a,

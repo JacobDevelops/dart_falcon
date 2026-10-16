@@ -138,14 +138,14 @@ impl SemanticRuleVisitor for Collector<'_> {
                         self.check_to_string(&args.positional[0]);
                     }
                 } else if let Expr::Field { object, field, .. } = callee.as_ref() {
-                    self.check_invocation(&state.infer_invocation(object), field);
+                    self.check_invocation(&state.infer(object), field);
                 }
             }
             // A cascade section's leading invocation targets the cascade object.
             Expr::Cascade {
                 object, sections, ..
             } => {
-                let receiver = state.infer_invocation(object);
+                let receiver = state.infer(object);
                 for section in sections {
                     if let [CascadeOp::Call(name, _, _), ..] = section.ops.as_slice() {
                         self.check_invocation(&receiver, name);

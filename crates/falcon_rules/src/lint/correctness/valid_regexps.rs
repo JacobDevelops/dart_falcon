@@ -1,5 +1,9 @@
 //! Disallow statically known invalid `dart:core` regular expressions.
+//!
+//! Validate decoded literal patterns with an ECMAScript parser, including the
+//! constructor's literal `unicode: true` flag, matching the SDK lint.
 
+use crate::lint::string_lit::{has_interpolation, literal_parts, multiline_lead_len};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -34,7 +38,28 @@ impl Collector<'_> {
         let Some(argument) = args.positional.first() else {
             return;
         };
-        if extractable_pattern(argument).is_some_and(|pattern| !valid_pattern(pattern)) {
+        if args
+            .named
+            .iter()
+            .any(|arg| arg.span.start < argument.span().start)
+        {
+            return;
+        }
+        let unicode = args.named.iter().any(|arg| {
+            arg.name.name == "unicode" && matches!(arg.value, Expr::BoolLit { value: true, .. })
+        });
+        if extractable_pattern(argument).is_some_and(|pattern| {
+            let pattern = regexp_units(pattern, unicode);
+            regress::Regex::from_unicode(
+                pattern.iter().copied(),
+                regress::Flags {
+                    unicode,
+                    no_opt: true,
+                    ..Default::default()
+                },
+            )
+            .is_err()
+        }) {
             let span = argument.span();
             self.diagnostics.push(self.ctx.diagnostic(
                 "valid-regexps",
@@ -65,139 +90,167 @@ impl Visitor for Collector<'_> {
     }
 }
 
-fn extractable_pattern(expr: &Expr) -> Option<&str> {
-    let Expr::StringLit(node) = expr.unparenthesized() else {
+fn extractable_pattern(expr: &Expr) -> Option<Vec<u32>> {
+    let Expr::StringLit(node) = expr else {
         return None;
     };
     if !node.interpolations.is_empty() {
         return None;
     }
+    let mut pattern = Vec::with_capacity(node.value.len());
     for (literal, _) in node.segments() {
-        if !literal.terminated || (!literal.is_raw && literal.content.contains('\\')) {
+        if !literal.terminated {
             return None;
         }
-    }
-    Some(&node.value)
-}
-
-fn valid_pattern(pattern: &str) -> bool {
-    let chars: Vec<char> = pattern.chars().collect();
-    let mut groups = 0usize;
-    let mut in_class = false;
-    let mut class_start = 0usize;
-    let mut escaped = false;
-    let mut can_quantify = false;
-    let mut index = 0usize;
-    while index < chars.len() {
-        let ch = chars[index];
-        if escaped {
-            if ch == 'x' && !has_hex(&chars, index + 1, 2) {
-                return false;
-            }
-            if ch == 'u' && !has_hex(&chars, index + 1, 4) {
-                return false;
-            }
-            index += if ch == 'x' {
-                2
-            } else if ch == 'u' {
-                4
-            } else {
-                0
-            };
-            escaped = false;
-            can_quantify = true;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if in_class {
-            // ECMAScript: `]` always closes, so `[]` is an empty class, and a
-            // hyphen before `]` is a literal rather than a range.
-            if ch == ']' {
-                in_class = false;
-                can_quantify = true;
-            } else if ch == '-'
-                && index > class_start
-                && index + 1 < chars.len()
-                && chars[index + 1] != ']'
-                && chars[index - 1] > chars[index + 1]
-            {
-                return false;
-            }
+        let parts = literal_parts(&literal);
+        if has_interpolation(&parts) {
+            return None;
+        }
+        let trim = if literal.triple {
+            multiline_lead_len(literal.content)
         } else {
-            match ch {
-                '[' => {
-                    in_class = true;
-                    class_start = index + 1;
-                    can_quantify = false;
-                }
-                '(' => {
-                    groups += 1;
-                    can_quantify = false;
-                }
-                ')' => {
-                    if groups == 0 {
-                        return false;
-                    }
-                    groups -= 1;
-                    can_quantify = true;
-                }
-                '|' => can_quantify = false,
-                '*' | '+' => {
-                    if !can_quantify {
-                        return false;
-                    }
-                    can_quantify = false;
-                }
-                '?' if index > 0 && chars[index - 1] == '(' => can_quantify = false,
-                '?' if can_quantify => can_quantify = false,
-                '?' if index > 0 && matches!(chars[index - 1], '*' | '+' | '?' | '}') => {
-                    can_quantify = false;
-                }
-                '?' => return false,
-                '{' => {
-                    if !can_quantify {
-                        return false;
-                    }
-                    let Some(close) = chars[index + 1..]
-                        .iter()
-                        .position(|candidate| *candidate == '}')
-                        .map(|offset| index + 1 + offset)
-                    else {
-                        return false;
-                    };
-                    let parts: Vec<_> = chars[index + 1..close]
-                        .split(|candidate| *candidate == ',')
-                        .collect();
-                    if parts.is_empty()
-                        || parts.len() > 2
-                        || parts[0].is_empty()
-                        || parts
-                            .iter()
-                            .flat_map(|part| part.iter())
-                            .any(|candidate| !candidate.is_ascii_digit())
-                    {
-                        return false;
-                    }
-                    let minimum: usize = parts[0].iter().collect::<String>().parse().unwrap_or(0);
-                    if parts.len() == 2 && !parts[1].is_empty() {
-                        let maximum: usize =
-                            parts[1].iter().collect::<String>().parse().unwrap_or(0);
-                        if maximum < minimum {
-                            return false;
+            0
+        };
+        let mut chars = literal.content[trim..].chars();
+        while let Some(c) = chars.next() {
+            let value = if !literal.is_raw && c == '\\' {
+                match chars.next()? {
+                    'n' => 10,
+                    'r' => 13,
+                    't' => 9,
+                    'b' => 8,
+                    'f' => 12,
+                    'v' => 11,
+                    escape @ ('x' | 'u') => {
+                        let braced = escape == 'u' && chars.clone().next() == Some('{');
+                        if braced {
+                            chars.next();
                         }
+                        let count = if escape == 'x' { 2 } else { 4 };
+                        let mut value = 0u32;
+                        if braced {
+                            loop {
+                                let c = chars.next()?;
+                                if c == '}' {
+                                    break;
+                                }
+                                value = value.checked_mul(16)?.checked_add(c.to_digit(16)?)?;
+                            }
+                        } else {
+                            for _ in 0..count {
+                                value = value * 16 + chars.next()?.to_digit(16)?;
+                            }
+                        }
+                        value
                     }
-                    index = close;
-                    can_quantify = false;
+                    c => c as u32,
                 }
-                _ => can_quantify = true,
+            } else {
+                c as u32
+            };
+            if value > 0x10ffff {
+                return None;
+            } else if value > 0xffff {
+                pattern.push(0xd800 + ((value - 0x10000) >> 10));
+                pattern.push(0xdc00 + ((value - 0x10000) & 0x3ff));
+            } else {
+                pattern.push(value);
             }
         }
-        index += 1;
     }
-    !escaped && !in_class && groups == 0
+    Some(pattern)
 }
 
-fn has_hex(chars: &[char], start: usize, count: usize) -> bool {
-    chars
-        .get(start..start + count)
-        .is_some_and(|digits| digits.iter().all(|digit| digit.is_ascii_hexdigit()))
+fn starts_named_group(pattern: &[u32]) -> bool {
+    pattern.starts_with(&[u32::from(b'('), u32::from(b'?'), u32::from(b'<')])
+        && !matches!(pattern.get(3), Some(&0x3d | &0x21))
+}
+
+fn has_named_capture(pattern: &[u32]) -> bool {
+    let mut in_class = false;
+    let mut i = 0;
+    while i < pattern.len() {
+        match pattern[i] {
+            0x5c => i += 1, // Skip escaped delimiters.
+            0x5b => in_class = true,
+            0x5d => in_class = false,
+            _ if !in_class && starts_named_group(&pattern[i..]) => return true,
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Regress parses code points even without `u`; Dart parses UTF-16 code units.
+/// Normalize the legacy escapes that regress otherwise interprets as Unicode.
+fn regexp_units(mut pattern: Vec<u32>, unicode: bool) -> Vec<u32> {
+    let mut read = 0;
+    let mut write = 0;
+    let mut in_class = false;
+    let mut name_start = None;
+    let has_named_capture = !unicode && has_named_capture(&pattern);
+    while read < pattern.len() {
+        let c = pattern[read];
+        // Group identifiers use Unicode identifier syntax even in legacy mode.
+        if !in_class && name_start.is_none() {
+            let tail = &pattern[read..];
+            if starts_named_group(tail)
+                || (has_named_capture
+                    && tail.starts_with(&[u32::from(b'\\'), u32::from(b'k'), u32::from(b'<')]))
+            {
+                name_start = Some(read + 3);
+            }
+        }
+        let in_name = name_start.is_some_and(|start| read >= start);
+        if in_name && c == u32::from(b'>') {
+            name_start = None;
+        }
+        if c == u32::from(b'[') {
+            in_class = true;
+        } else if c == u32::from(b']') {
+            in_class = false;
+        }
+        let mut value = c;
+        let mut consumed = 1;
+        if (unicode || in_name)
+            && (0xd800..=0xdbff).contains(&c)
+            && let Some(&low) = pattern.get(read + 1)
+            && (0xdc00..=0xdfff).contains(&low)
+        {
+            value = 0x10000 + ((c - 0xd800) << 10) + low - 0xdc00;
+            consumed = 2;
+        } else if !unicode
+            && !in_name
+            && c == u32::from(b'\\')
+            && pattern.get(read + 1) == Some(&u32::from(b'u'))
+        {
+            if pattern.get(read + 2) == Some(&u32::from(b'{')) {
+                value = u32::from(b'u');
+                consumed = 2;
+            } else if let Some(surrogate) = pattern
+                .get(read + 2..read + 6)
+                .and_then(|digits| {
+                    digits.iter().try_fold(0u32, |value, &digit| {
+                        Some(value * 16 + char::from_u32(digit)?.to_digit(16)?)
+                    })
+                })
+                .filter(|v| (0xd800..=0xdfff).contains(v))
+            {
+                value = surrogate;
+                consumed = 6;
+            }
+        }
+        pattern[write] = value;
+        write += 1;
+        read += consumed;
+        // Preserve escaped backslashes as pairs instead of reinterpreting them.
+        if !unicode && c == u32::from(b'\\') && consumed == 1 && read < pattern.len() {
+            pattern[write] = pattern[read];
+            write += 1;
+            read += 1;
+        }
+    }
+    pattern.truncate(write);
+    pattern
 }

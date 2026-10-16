@@ -366,6 +366,10 @@ impl<'src> Parser<'src> {
                     Some(base) if base == depth => {}
                     _ => return None,
                 },
+                At if !bracket_stack.is_empty() => {
+                    i = self.index_after_annotations(i);
+                    continue;
+                }
                 // Tokens that legitimately appear inside a type-argument list
                 // (named/qualified types, records, function types, nullability).
                 Dot | Comma | Qmark | Void => {}
@@ -1462,7 +1466,7 @@ impl<'src> Parser<'src> {
         let element = Box::new(self.parse_collection_element());
         CollectionElement::For {
             is_await,
-            header,
+            header: Box::new(header),
             element,
             span: self.span_from(start),
         }

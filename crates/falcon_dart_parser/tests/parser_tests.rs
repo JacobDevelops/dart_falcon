@@ -2650,13 +2650,14 @@ fn test_c_style_for_in_list_literal() {
     assert!(
         matches!(
             elements.first(),
-            Some(CollectionElement::For {
-                header: ForHeader {
-                    init: Some(ForInit::VarDecl(_)),
-                    ..
-                },
-                ..
-            })
+            Some(CollectionElement::For { header, .. })
+                if matches!(
+                    &**header,
+                    ForHeader {
+                        init: Some(ForInit::VarDecl(_)),
+                        ..
+                    }
+                )
         ),
         "expected C-style For element, got {elements:#?}"
     );

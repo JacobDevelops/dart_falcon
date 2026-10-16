@@ -40,7 +40,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         if matches!(expr.unparenthesized(), Expr::NullLit { .. }) {
             return;
         }
-        let ty = state.infer_invocation(expr);
+        let ty = state.infer(expr);
         if awaitable(&ty, state) == Truth::No {
             self.diagnostics.push(self.ctx.diagnostic(
                 "await-only-futures",

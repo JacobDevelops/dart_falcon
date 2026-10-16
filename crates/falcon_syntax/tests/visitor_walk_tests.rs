@@ -87,6 +87,14 @@ fn record(src: &str) -> Recorder {
 }
 
 #[test]
+fn walks_function_type_parameter_annotations() {
+    let r = record("typedef F = void Function(@sentinel(713) int value);");
+    assert_eq!(r.annotations, 1);
+    assert!(r.has_ident("sentinel"));
+    assert!(r.has_int("713"));
+}
+
+#[test]
 fn walks_catch_types_and_bindings() {
     let r = record("void f() { try {} on CatchType catch (caught, trace) {} }");
     assert!(r.has_named("CatchType"));

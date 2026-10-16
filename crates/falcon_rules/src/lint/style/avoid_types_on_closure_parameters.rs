@@ -8,6 +8,7 @@
 //! a record literal field, or a direct collection literal element/key/value
 //! (including collection `if`/`for`) has no context here. This does not suppress
 //! independently contextualized callbacks nested inside those expressions.
+//! Parenthesizing an operand (including the fallback of `??`) does not add context.
 //! A returned closure has context only in an `async` body returning `Future<F>`
 //! for a function type `F`. A conditional branch or assignment RHS takes its
 //! enclosing expression's own static type as its context, including function
@@ -150,10 +151,11 @@ impl Visitor for ReturnedClosures<'_, '_> {
                 });
             }
             Stmt::Return(ReturnStmt {
-                value: Some(value @ Expr::FuncExpr { .. }),
-                ..
+                value: Some(value), ..
             }) => {
-                if let Some(frame) = self.frames.last() {
+                if let Some(frame) = self.frames.last()
+                    && let value @ Expr::FuncExpr { .. } = value.unparenthesized()
+                {
                     self.returned.insert(value, *frame);
                 }
                 visitor::walk_stmt(self, node);
@@ -255,11 +257,36 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn visit_call_arguments(
+        &mut self,
+        args: &ArgList,
+        _positional: &[ResolvedType],
+        _named: &HashMap<String, ResolvedType>,
+        _state: &SemanticState<'_>,
+    ) {
+        // The SDK queries correspondingParameter on the closure itself.
+        // Unlike named arguments, positional parentheses have no such link.
+        for argument in &args.positional {
+            if matches!(argument, Expr::Paren { .. }) {
+                self.uncontextual.insert(argument);
+            }
+        }
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         match node {
+            Expr::Paren { expr, .. } => {
+                let pointer = node as *const Expr;
+                if self.uncontextual.contains(&pointer) {
+                    self.uncontextual.insert(&**expr);
+                }
+                if let Some(function) = self.expression_contexts.get(&pointer).copied() {
+                    self.expression_contexts.insert(&**expr, function);
+                }
+            }
             Expr::Binary { left, right, .. } => {
-                self.uncontextual.insert(&**left);
-                self.uncontextual.insert(&**right);
+                self.uncontextual.insert(left.unparenthesized());
+                self.uncontextual.insert(right.unparenthesized());
             }
             Expr::Await { expr, .. } => {
                 self.uncontextual.insert(&**expr);

@@ -14,8 +14,9 @@
 //!   variable or field holding a function (the analyzer does not count a
 //!   `const` variable, field, or enum value as final);
 //! - reached through a receiver that is a class name, an import prefix, or a
-//!   `final` variable or field, never through `this`, a parameter of the
-//!   closure, or a null-aware access (`a?.b`). A member falcon cannot resolve
+//!   `final` variable or field (including immutable record fields), never
+//!   through `this`, a parameter of the closure, or a null-aware access (`a?.b`).
+//!   A member falcon cannot resolve
 //!   on a stable receiver is taken to be a method, as the analyzer treats any
 //!   member that is not a getter.
 //!
@@ -464,10 +465,15 @@ impl Collector<'_> {
             return false;
         }
         fields.iter().rev().all(|(object, field)| {
+            // Record fields are immutable even though they have no member facts.
+            let receiver_type = state.infer(object);
+            if receiver_type.record_field(&field.name).is_some() {
+                return true;
+            }
             let facts = match self.type_name(object, state) {
                 Some(identity) => signatures.declared_member_facts(&identity, &field.name),
                 None => signatures
-                    .resolved_member_facts(&state.infer(object), &field.name, &state.model)
+                    .resolved_member_facts(&receiver_type, &field.name, &state.model)
                     .unwrap_or_default(),
             };
             self.final_field(facts, &field.name, signatures)
@@ -503,6 +509,10 @@ impl Collector<'_> {
             return Some(Callee::Function);
         }
         let signatures = state.signatures.as_ref();
+        let receiver_type = state.infer(receiver);
+        if receiver_type.record_field(name).is_some() {
+            return Some(Callee::Variable);
+        }
         if let Some(identity) = self.type_name(receiver, state) {
             let facts = signatures.declared_member_facts(&identity, name);
             return if facts.is_empty() {
@@ -511,7 +521,7 @@ impl Collector<'_> {
                 self.member_callee(facts, name, true, signatures)
             };
         }
-        match signatures.resolved_member_facts(&state.infer(receiver), name, &state.model) {
+        match signatures.resolved_member_facts(&receiver_type, name, &state.model) {
             Some(facts) => self.member_callee(facts, name, false, signatures),
             None => Some(Callee::Function),
         }

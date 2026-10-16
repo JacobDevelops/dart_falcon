@@ -4,23 +4,31 @@
 //! operator expresses: `x ??= y`. The shorter form removes a branch and states
 //! the intent — assign only when currently null — directly. The rule matches an
 //! `if` with no `else` whose condition is an `== null` check and whose single
-//! then-statement assigns to that same operand.
+//! then-statement assigns to the same canonical identifier/property chain.
+//! Indexed targets are not identifiers; inherited accessor halves must belong
+//! to the same declaring variable.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_stmt};
+
+use crate::lint::complexity::join_return_with_assignment::same_element;
+use crate::lint::expressions::null_check;
+use crate::lint::semantic_scope::{self, SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct PreferConditionalAssignment;
 
 impl Rule for PreferConditionalAssignment {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let Some(state) = SemanticState::new(program, ctx) else {
+            return Vec::new();
+        };
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        collector.visit_program(program);
+        semantic_scope::visit_program(&mut collector, program, state);
         collector.diags
     }
 }
@@ -30,47 +38,24 @@ struct Collector<'s> {
     ctx: &'s AnalyzeContext<'s>,
 }
 
-/// The non-null operand of a `E == null` comparison.
-fn eq_null_operand(cond: &Expr) -> Option<&Expr> {
-    let Expr::Binary {
-        op: BinaryOp::EqEq,
-        left,
-        right,
-        ..
-    } = cond.unparenthesized()
-    else {
-        return None;
-    };
-    match (left.unparenthesized(), right.unparenthesized()) {
-        (Expr::NullLit { .. }, other) | (other, Expr::NullLit { .. }) => Some(other),
-        _ => None,
-    }
-}
-
 /// The single statement of a `then` branch, unwrapping a one-statement block.
 fn single_stmt(stmt: &Stmt) -> Option<&Stmt> {
     match stmt {
-        Stmt::Block(b) if b.stmts.len() == 1 => Some(&b.stmts[0]),
+        Stmt::Block(b) if b.stmts.len() == 1 => single_stmt(&b.stmts[0]),
         Stmt::Block(_) => None,
         other => Some(other),
     }
 }
 
-use crate::lint::expressions::equivalent;
-
-impl Visitor for Collector<'_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
+impl SemanticRuleVisitor for Collector<'_> {
+    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         if let Stmt::If(if_stmt) = node
             && if_stmt.else_branch.is_none()
             && let IfCondition::Expr(cond) = &if_stmt.condition
-            && let Some(checked) = eq_null_operand(cond)
+            && let Some((checked, true)) = null_check(cond)
             && let Some(Stmt::Expr(es)) = single_stmt(&if_stmt.then_branch)
-            && let Expr::Assign {
-                target,
-                op: AssignOp::Eq,
-                ..
-            } = es.expr.unparenthesized()
-            && equivalent(target, checked, self.ctx)
+            && let Expr::Assign { target, .. } = &es.expr
+            && same_element(target, true, checked, false, state)
         {
             self.diags.push(self.ctx.diagnostic(
                 "prefer-conditional-assignment",
@@ -78,6 +63,5 @@ impl Visitor for Collector<'_> {
                 if_stmt.span,
             ));
         }
-        walk_stmt(self, node);
     }
 }

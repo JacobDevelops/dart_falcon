@@ -4,6 +4,8 @@
 //! whether a simple or import-prefixed name denotes a type, a value, or cannot
 //! be resolved uniquely. Ambiguity and incomplete bindings become
 //! [`NameIdentity::Unknown`] without suppressing unrelated external names.
+//! Missing project part files preserve explicit, unambiguous types unless they
+//! overlap `dart:core`; unresolvable external part URIs remain uncertain.
 //! A top-level getter and setter share one value identity, including across parts;
 //! repeated accessors and collisions with other declarations remain ambiguous.
 
@@ -123,6 +125,7 @@ struct Library {
     imports: Vec<Import>,
     exports: Vec<Export>,
     incomplete: bool,
+    missing_parts_only: bool,
     implicit_core: bool,
     /// `None` for project libraries.
     origin: Option<ExternalOrigin>,
@@ -464,6 +467,7 @@ impl IdentityIndex {
                         imports: Vec::new(),
                         exports: Vec::new(),
                         incomplete: grouping.is_unresolved(i),
+                        missing_parts_only: grouping.is_unresolved(i),
                         implicit_core: true,
                         origin: None,
                         doc_imports: Vec::new(),
@@ -492,6 +496,7 @@ impl IdentityIndex {
                 imports: Vec::new(),
                 exports: Vec::new(),
                 incomplete: library.has_unresolved_parts,
+                missing_parts_only: false,
                 implicit_core: true,
                 origin: (!matches!(library.origin, ExternalOrigin::Project))
                     .then(|| library.origin.clone()),
@@ -525,6 +530,7 @@ impl IdentityIndex {
             let library_id = library;
             let library = &mut libraries[library.0];
             library.incomplete |= has_parse_errors;
+            library.missing_parts_only &= !has_parse_errors;
             library.named |= program
                 .library_directive
                 .as_ref()
@@ -1596,8 +1602,17 @@ impl IdentityIndex {
         if name.starts_with('_') {
             return false;
         }
+        if unit.missing_parts_only
+            && self.implicit_core(unit, name, NameIdentity::Type).is_none()
+            && unit
+                .declarations
+                .get(name)
+                .is_some_and(|(identity, _)| *identity == NameIdentity::Type)
+        {
+            return false;
+        }
         let declares_name = unit.declarations.contains_key(name) || unit.extensions.contains(name);
-        if unit.incomplete && (unit.origin.is_none() || declares_name) {
+        if unit.incomplete && (unit.origin.is_none() || unit.missing_parts_only || declares_name) {
             return true;
         }
         if declares_name || !visited.insert(library) {
@@ -1745,8 +1760,20 @@ impl IdentityIndex {
     ) -> Option<DeclarationIdentity> {
         let unit = self.get(library);
         let declares_name = unit.declarations.contains_key(name) || unit.extensions.contains(name);
+        if !name.starts_with('_')
+            && namespace == NameIdentity::Type
+            && unit.missing_parts_only
+            && self.implicit_core(unit, name, namespace).is_none()
+            && unit
+                .declarations
+                .get(name)
+                .is_some_and(|(identity, _)| *identity == namespace)
+        {
+            return self.declared(library, name);
+        }
         if name.starts_with('_')
-            || (unit.incomplete && (unit.origin.is_none() || declares_name))
+            || (unit.incomplete
+                && (unit.origin.is_none() || unit.missing_parts_only || declares_name))
             || !visiting.insert(library)
         {
             return None;
@@ -2545,7 +2572,7 @@ const SDK_TYPES: Allowlist = &[
 ];
 
 const SDK_MEMBERS: Allowlist = &[
-    ("dart:core", &["print", "pragma", "deprecated"]),
+    ("dart:core", &["print", "pragma", "deprecated", "override"]),
     ("dart:async", &["scheduleMicrotask"]),
     ("dart:js_interop", &["JS", "staticInterop"]),
     ("dart:html", &["window"]),
@@ -2598,6 +2625,7 @@ const PACKAGE_MEMBERS: Allowlist = &[
             "TargetKind",
             "awaitNotRequired",
             "optionalTypeArgs",
+            "protected",
         ],
     ),
     (
@@ -2809,6 +2837,92 @@ mod tests {
         assert!(canonical.is_some());
         assert_eq!(index.file(&alias), canonical);
         assert_eq!(index.file(&directory.path().join("missing.dart")), None);
+    }
+
+    #[test]
+    fn missing_parts_preserve_explicit_generic_type_identity() {
+        let mut index = index(
+            &[
+                (
+                    "/project/lib/box.dart",
+                    "part 'missing.g.dart'; abstract class Box<T> { factory Box(T value) = Missing<T>; }",
+                ),
+                ("/project/lib/barrel.dart", "export 'box.dart';"),
+                (
+                    "/project/lib/main.dart",
+                    "import 'box.dart'; import 'box.dart' as direct; import 'box.dart' deferred as later; import 'barrel.dart' as barrel; final box = Box(1);",
+                ),
+            ],
+            &[],
+        );
+        let box_library = library(&index, "/project/lib/box.dart");
+        assert!(index.get(box_library).incomplete);
+        let expected = index.declared(box_library, "Box").unwrap();
+        let main = library(&index, "/project/lib/main.dart");
+        for prefix in [None, Some("direct"), Some("later"), Some("barrel")] {
+            let name = QualifiedName {
+                prefix,
+                name: "Box",
+            };
+            assert_eq!(
+                index.resolve_declaration(main, name),
+                Some(expected.clone())
+            );
+            assert_eq!(index.resolve(main, name), NameIdentity::Type);
+            for name in ["Missing", "Absent"] {
+                let name = QualifiedName { prefix, name };
+                assert_eq!(index.resolve_declaration(main, name), None);
+                assert_eq!(index.resolve(main, name), NameIdentity::Unknown);
+            }
+        }
+        assert!(index.target_may_hide_declaration(&ImportTarget::Library(box_library), "Missing"));
+        index.libraries[box_library.0].origin =
+            Some(ExternalOrigin::Package(InternedString::Static("example")));
+        index.memos = LookupMemos::default();
+        assert_eq!(
+            index.resolve_declaration(main, "Box".into()),
+            index.declared(box_library, "Box")
+        );
+        assert!(index.target_may_hide_declaration(&ImportTarget::Library(box_library), "Missing"));
+    }
+
+    #[test]
+    fn missing_parts_do_not_disambiguate_or_invent_type_declarations() {
+        let index = index(
+            &[
+                (
+                    "/project/lib/box.dart",
+                    "part 'missing.g.dart'; class Box<T> {} class Duration {}",
+                ),
+                ("/project/lib/other.dart", "class Box<T> {} class Absent {}"),
+                (
+                    "/project/lib/duplicate.dart",
+                    "part 'missing.g.dart'; class Duplicate {} class Duplicate {}",
+                ),
+                (
+                    "/project/lib/barrel.dart",
+                    "export 'box.dart'; export 'other.dart';",
+                ),
+                (
+                    "/project/lib/main.dart",
+                    "import 'box.dart'; import 'box.dart' as core; import 'other.dart'; import 'barrel.dart' as barrel; import 'duplicate.dart' as duplicate;",
+                ),
+            ],
+            &[],
+        );
+        let main = library(&index, "/project/lib/main.dart");
+        for name in [
+            QualifiedName::from("Box"),
+            QualifiedName::from("Absent"),
+            QualifiedName::prefixed("barrel", "Box"),
+            QualifiedName::prefixed("barrel", "Absent"),
+            QualifiedName::from("Duration"),
+            QualifiedName::prefixed("core", "Duration"),
+            QualifiedName::prefixed("duplicate", "Duplicate"),
+        ] {
+            assert_eq!(index.resolve_declaration(main, name), None);
+            assert_eq!(index.resolve(main, name), NameIdentity::Unknown);
+        }
     }
 
     #[test]

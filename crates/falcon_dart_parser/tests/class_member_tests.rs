@@ -1116,17 +1116,21 @@ fn test_setter_parameter_metadata_and_function_type() {
         program: prog,
         errors,
         ..
-    } = parse("class C { set length(@nullCheck int v) {} set onPause(void handler()?) {} }");
+    } = parse(
+        "class C { set length(@nullCheck covariant int v) {} set onPause(void handler()?) {} }",
+    );
     assert_clean(&errors);
     assert_eq!(only_class(&prog).members.len(), 2);
     let ClassMember::Setter(setter) = &only_class(&prog).members[0] else {
         panic!("expected setter: {prog:?}");
     };
+    assert!(setter.is_covariant);
     assert_eq!(setter.param_annotations.len(), 1);
     assert_eq!(setter.param_annotations[0].name[0].name, "nullCheck");
     let ClassMember::Setter(setter) = &only_class(&prog).members[1] else {
         panic!("expected function-typed setter");
     };
+    assert!(!setter.is_covariant);
     let Some(DartType::Function(function)) = &setter.param_type else {
         panic!("expected function type, got {:?}", setter.param_type);
     };

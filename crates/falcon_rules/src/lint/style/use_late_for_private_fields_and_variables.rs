@@ -12,8 +12,10 @@
 //! `abstract` declarations. Any other use — a plain read, a `this._x`
 //! initializing formal, a `: _x = ...` initializer, a compound or `??=`
 //! assignment, or an assignment whose value is not proven non-nullable —
-//! disqualifies the referenced declaration. Uses in every resolved library
-//! part are checked together; unresolved parts prevent proving a candidate safe.
+//! disqualifies the referenced declaration. Qualified and cascade accesses are
+//! attributed to their resolved declaration, not every implementation of an
+//! interface member. Uses in every resolved library part are checked together;
+//! unresolved parts prevent proving a candidate safe.
 //!
 //! ```dart
 //! int? _i; // flagged
@@ -40,7 +42,9 @@ use falcon_syntax::visitor::{
 use crate::lint::declarations::declaration_key;
 use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
 use crate::lint::expressions::is_parenthesized;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use crate::lint::semantic_scope::{
+    CascadeAssignment, SemanticRuleVisitor, SemanticState, visit_program,
+};
 use crate::lint::semantic_type_operations::nullability;
 
 #[derive(Default)]
@@ -379,6 +383,31 @@ struct SafeUses<'a> {
 }
 
 impl SafeUses<'_> {
+    fn record_owner(
+        &mut self,
+        identifier: &Identifier,
+        receiver: &ResolvedType,
+        state: &SemanticState<'_>,
+    ) {
+        if !self.names.contains(identifier.name.as_str()) {
+            return;
+        }
+        let owner = state
+            .signatures
+            .resolved_readable_member_owner(receiver, &identifier.name, &state.model)
+            .or_else(|| {
+                state.signatures.resolved_writable_member_owner(
+                    receiver,
+                    &identifier.name,
+                    &state.model,
+                )
+            });
+        if let Some(key) = owner.as_ref().and_then(|owner| self.owners.get(owner)) {
+            self.resolved_owners
+                .insert(identifier.span.start, Some(*key));
+        }
+    }
+
     fn record(&mut self, expression: &Expr) {
         let identifier = match expression.unparenthesized() {
             Expr::Ident(identifier) => identifier,
@@ -417,24 +446,37 @@ impl SafeUses<'_> {
 }
 
 impl SemanticRuleVisitor for SafeUses<'_> {
+    fn visit_cascade_operation(
+        &mut self,
+        operation: &CascadeOp,
+        receiver: &ResolvedType,
+        _section: Span,
+        state: &SemanticState<'_>,
+    ) {
+        if let CascadeOp::Field { name, .. } | CascadeOp::Call(name, ..) = operation {
+            self.record_owner(name, receiver, state);
+        }
+    }
+
+    fn visit_cascade_assignment(
+        &mut self,
+        assignment: CascadeAssignment<'_>,
+        receiver: &ResolvedType,
+        _section: Span,
+        state: &SemanticState<'_>,
+    ) {
+        if !assignment.indexed
+            && let Expr::Ident(identifier) = assignment.target.unparenthesized()
+        {
+            self.record_owner(identifier, receiver, state);
+        }
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Expr::Field { object, field, .. } = node
             && self.names.contains(field.name.as_str())
         {
-            let receiver = state.infer(object);
-            let owner = state
-                .signatures
-                .resolved_readable_member_owner(&receiver, &field.name, &state.model)
-                .or_else(|| {
-                    state.signatures.resolved_writable_member_owner(
-                        &receiver,
-                        &field.name,
-                        &state.model,
-                    )
-                });
-            if let Some(key) = owner.as_ref().and_then(|owner| self.owners.get(owner)) {
-                self.resolved_owners.insert(field.span.start, Some(*key));
-            }
+            self.record_owner(field, &state.infer(object), state);
         } else if let Expr::Ident(identifier) = node
             && self.names.contains(identifier.name.as_str())
             && state

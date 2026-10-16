@@ -90,14 +90,12 @@ impl Collector<'_> {
     }
 
     fn is_dynamic(&self, expr: &Expr, state: &SemanticState<'_>) -> bool {
-        matches!(state.infer_invocation(expr), ResolvedType::Dynamic)
+        matches!(state.infer(expr), ResolvedType::Dynamic)
             || dynamic_receiver(expr).is_some_and(|receiver| self.is_dynamic(receiver, state))
     }
 
     fn is_function_typed(&self, expr: &Expr, state: &SemanticState<'_>) -> bool {
-        state
-            .infer_invocation(expr)
-            .interface("dart:core", "Function")
+        state.infer(expr).interface("dart:core", "Function")
     }
 }
 

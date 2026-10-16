@@ -1,105 +1,200 @@
-//! Flags a constructor that copies a plain parameter straight into a field
-//! (`prefer-initializing-formals`, adopted from package:lints).
+//! Prefer initializing formals when a parameter is copied directly into its field.
 //!
-//! Dart's initializing formals (`this.x`) declare the parameter and assign the
-//! field in one step, so the manual copy — whether an initializer-list entry
-//! `: x = x` or a body statement `this.x = x;` — is redundant boilerplate. The
-//! rule is intentionally narrow: it matches only an exact `field = param` /
-//! `this.field = param` copy of a plain constructor parameter, never an existing
-//! initializing (`this.`) or super (`super.`) formal, so cases that already use
-//! the idiom or that transform the value are left untouched.
+//! An initializing formal makes field initialization explicit in the constructor
+//! signature: replace `Example(int value) : value = value;` with
+//! `Example(this.value);`. The rule also recognizes direct assignments in a
+//! constructor body, including primary constructors.
 //!
-//! A *named* parameter must already carry the field's name — renaming it would
-//! break callers — while a *positional* one may be named anything, since
-//! promoting it to `this.field` does not change the call-site API. A parameter
-//! copied into more than one field is skipped: it cannot become an initializing
-//! formal.
+//! Suggestions preserve the parameter's name and require its type to be a subtype
+//! of the field's type. Inherited fields, setters, static fields, and parameters
+//! referenced elsewhere in the constructor are excluded. Private fields are
+//! suggested only for named parameters when private named parameters are available.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use std::collections::HashMap;
+
+use falcon_analyze::resolve::MemberKind;
+use falcon_analyze::{AnalyzeContext, Feature, ResolvedType, Rule, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use std::collections::HashSet;
+
+use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]
 pub struct PreferInitializingFormals;
 
 impl Rule for PreferInitializingFormals {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut diags = Vec::new();
-        for decl in &program.declarations {
-            if let Some(members) = crate::lint::declarations::members_of(decl) {
-                for member in members {
-                    if let ClassMember::Constructor(ctor) = member {
-                        check_ctor(ctor, ctx, &mut diags);
-                    }
-                }
-            }
-        }
-        diags
+        let Some(state) = SemanticState::new(program, ctx) else {
+            return Vec::new();
+        };
+        let mut collector = Collector {
+            private_named: ctx
+                .language_version()
+                .supports(Feature::PrivateNamedParameters),
+            references: HashMap::new(),
+            candidates: Vec::new(),
+        };
+        visit_program(&mut collector, program, state);
+        collector
+            .candidates
+            .into_iter()
+            .filter_map(|candidate| {
+                let mut references = collector
+                    .references
+                    .get(&candidate.parameter)?
+                    .iter()
+                    .filter(|offset| {
+                        candidate
+                            .regions
+                            .iter()
+                            .flatten()
+                            .any(|region| region.start <= **offset && **offset < region.end)
+                    });
+                (references.next() == Some(&candidate.reference) && references.next().is_none())
+                    .then(|| {
+                        ctx.diagnostic(
+                            "prefer-initializing-formals",
+                            "Use an initializing formal to assign a parameter to a field.",
+                            candidate.anchor,
+                        )
+                    })
+            })
+            .collect()
     }
 }
 
-fn check_ctor(ctor: &ConstructorDecl, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
-    let plain = |p: &&FormalParam| p.initializing.is_none();
-    let positional: HashSet<&str> = ctor
-        .params
-        .positional()
-        .filter(plain)
-        .map(|p| p.name.name.as_str())
-        .collect();
-    // A named parameter's name is part of the call-site API, so converting it to
-    // an initializing formal is only non-breaking when it already matches the field.
-    let named: HashSet<&str> = ctor
-        .params
-        .named()
-        .filter(plain)
-        .map(|p| p.name.name.as_str())
-        .collect();
+struct Collector {
+    private_named: bool,
+    references: HashMap<Span, Vec<usize>>,
+    candidates: Vec<Candidate>,
+}
 
-    // (field, parameter name) for every `field = param` / `this.field = param`.
-    let mut copies: Vec<(&Identifier, &str)> = Vec::new();
+struct Candidate {
+    parameter: Span,
+    reference: usize,
+    anchor: Span,
+    regions: [Option<Span>; 2],
+}
 
-    for init in &ctor.initializers {
-        if let ConstructorInitializer::FieldInit { field, value, .. } = init
-            && let Expr::Ident(v) = value.unparenthesized()
+impl Collector {
+    fn check(
+        &mut self,
+        field: &Identifier,
+        value: &Expr,
+        anchor: Span,
+        ctor: ConstructorRef<'_>,
+        state: &SemanticState<'_>,
+    ) {
+        let Expr::Ident(value) = value else {
+            return;
+        };
+        let Some(parameter) = ctor.params.params.iter().find(|parameter| {
+            parameter.name.name == value.name
+                && parameter.initializing.is_none()
+                && !(ctor.is_primary && (parameter.is_final || parameter.is_var))
+        }) else {
+            return;
+        };
+        if field.name.starts_with('_') {
+            if !self.private_named
+                || !matches!(parameter.kind, ParamKind::Named { .. })
+                || (field.name != parameter.name.name
+                    && field.name.strip_prefix('_') != Some(parameter.name.name.as_str()))
+            {
+                return;
+            }
+        } else if field.name != parameter.name.name {
+            return;
+        }
+        let Some(receiver @ ResolvedType::Interface { identity, .. }) = &state.enclosing_type
+        else {
+            return;
+        };
+        if !state
+            .signatures
+            .declared_member_facts(identity, &field.name)
+            .iter()
+            .any(|fact| !fact.is_static && matches!(fact.kind, MemberKind::Field { .. }))
         {
-            copies.push((field, v.name.as_str()));
+            return;
+        }
+        let Some((field_type, substitutions)) =
+            state
+                .signatures
+                .resolved_field(receiver, &field.name, &state.model)
+        else {
+            return;
+        };
+        let field_type = state.model.substitute(&field_type, &substitutions);
+        let parameter_type = state.environment.declared_type(&parameter.name.name);
+        if state
+            .signatures
+            .subtype(&parameter_type, &field_type, &state.model)
+            != Truth::Yes
+        {
+            return;
+        }
+        let initializer_span = |initializer: &ConstructorInitializer| match initializer {
+            ConstructorInitializer::FieldInit { span, .. }
+            | ConstructorInitializer::SuperCall { span, .. }
+            | ConstructorInitializer::ThisCall { span, .. }
+            | ConstructorInitializer::Assert { span, .. } => *span,
+        };
+        let initializers =
+            ctor.initializers
+                .first()
+                .zip(ctor.initializers.last())
+                .map(|(first, last)| {
+                    Span::new(initializer_span(first).start, initializer_span(last).end)
+                });
+        let regions = [initializers, ctor.body.map(|body| *body.span())];
+        self.references.entry(parameter.name.span).or_default();
+        self.candidates.push(Candidate {
+            parameter: parameter.name.span,
+            reference: value.span.start,
+            anchor,
+            regions,
+        });
+    }
+}
+
+impl SemanticRuleVisitor for Collector {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        if let Expr::Ident(identifier) = node
+            && let Some(binding) = state.environment.binding_declaration(&identifier.name)
+            && let Some(references) = self.references.get_mut(&binding)
+        {
+            references.push(identifier.span.start);
         }
     }
-    if let Some(FunctionBody::Block(block)) = &ctor.body {
-        for stmt in &block.stmts {
-            if let Stmt::Expr(expr_stmt) = stmt
-                && let Expr::Assign {
-                    target,
-                    op: AssignOp::Eq,
-                    value,
-                    ..
-                } = expr_stmt.expr.unparenthesized()
-                && let Expr::Field { object, field, .. } = target.unparenthesized()
-                && matches!(object.unparenthesized(), Expr::This { .. })
-                && let Expr::Ident(v) = value.unparenthesized()
+
+    fn visit_constructor_ref(&mut self, ctor: ConstructorRef<'_>, state: &SemanticState<'_>) {
+        if ctor.is_factory {
+            return;
+        }
+        for initializer in ctor.initializers {
+            if let ConstructorInitializer::FieldInit {
+                field, value, span, ..
+            } = initializer
             {
-                copies.push((field, v.name.as_str()));
+                self.check(field, value, *span, ctor, state);
             }
         }
-    }
-
-    for (i, (field, param)) in copies.iter().enumerate() {
-        // One parameter feeding two fields cannot become an initializing formal.
-        if copies
-            .iter()
-            .enumerate()
-            .any(|(j, (_, p))| j != i && p == param)
-        {
-            continue;
-        }
-        if positional.contains(param) || (named.contains(param) && *param == field.name) {
-            diags.push(ctx.diagnostic(
-                "prefer-initializing-formals",
-                "Use an initializing formal to assign a parameter to a field.".to_string(),
-                field.span,
-            ));
+        if let Some(FunctionBody::Block(block)) = ctor.body {
+            for statement in &block.stmts {
+                if let Stmt::Expr(statement) = statement
+                    && let Expr::Assign {
+                        target,
+                        value,
+                        span,
+                        ..
+                    } = &statement.expr
+                    && let Expr::Field { object, field, .. } = target.as_ref()
+                    && matches!(object.as_ref(), Expr::This { .. })
+                {
+                    self.check(field, value.unparenthesized(), *span, ctor, state);
+                }
+            }
         }
     }
 }

@@ -113,33 +113,35 @@ fn collection_for_headers_preserve_declarations_and_clauses() {
     };
     assert!(matches!(
         &elements[0],
-        CollectionElement::For {
-            header: ForHeader {
-                init: Some(ForInit::ForIn {
-                    keyword: VarKeyword::Final,
-                    var_type: Some(_),
+        CollectionElement::For { header, .. }
+            if matches!(
+                &**header,
+                ForHeader {
+                    init: Some(ForInit::ForIn {
+                        keyword: VarKeyword::Final,
+                        var_type: Some(_),
+                        ..
+                    }),
                     ..
-                }),
-                ..
-            },
-            ..
-        }
+                }
+            )
     ));
     let Expr::List { elements, .. } = parse_ok("[for (final (key, value) in pairs) value]") else {
         panic!("expected list");
     };
     assert!(matches!(
         &elements[0],
-        CollectionElement::For {
-            header: ForHeader {
-                init: Some(ForInit::PatternForIn {
-                    keyword: VarKeyword::Final,
+        CollectionElement::For { header, .. }
+            if matches!(
+                &**header,
+                ForHeader {
+                    init: Some(ForInit::PatternForIn {
+                        keyword: VarKeyword::Final,
+                        ..
+                    }),
                     ..
-                }),
-                ..
-            },
-            ..
-        }
+                }
+            )
     ));
     let Expr::Map { elements, .. } = parse_ok("{for (var i = 0; i < n; i++) i: i}") else {
         panic!("expected map");
@@ -197,6 +199,29 @@ fn test_generic_instantiation_tearoff() {
             assert_eq!(type_args.len(), 1);
         }
         other => panic!("expected GenericInstantiation, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_generic_instantiation_function_type_annotations() {
+    for source in [
+        "identity<void Function(@deprecated int)>",
+        "identity<void Function(@Meta('value', 1 > 0) int)>",
+        "identity<void Function(@Meta<int>.named('value') int)>",
+    ] {
+        let expr = parse_ok(source);
+        let Expr::GenericInstantiation { type_args, .. } = expr else {
+            panic!("expected GenericInstantiation, got {expr:?}");
+        };
+        let DartType::Function(function) = &type_args[0] else {
+            panic!("expected function type, got {:?}", type_args[0]);
+        };
+        assert_eq!(function.params[0].annotations.len(), 1);
+        let invocation = parse_ok(&format!("{source}()"));
+        assert!(
+            matches!(invocation, Expr::Call { ref type_args, .. } if type_args.len() == 1),
+            "got {invocation:?}"
+        );
     }
 }
 
@@ -724,6 +749,50 @@ fn cascade_null_aware_selector_within_chain() {
             sections[0].ops
         ),
         other => panic!("expected Cascade, got {other:?}"),
+    }
+}
+
+#[test]
+fn cascade_null_assertions_continue_into_each_selector_kind() {
+    for source in [
+        "c..parent!.go(c)",
+        "c..parent![0]",
+        "c..callback!()",
+        "c..callback!<int>()",
+        "c..m()!.x",
+        "c..[0]!.x",
+        "c..parent!.x = 1",
+        "c..parent![0] = 1",
+    ] {
+        let Expr::Cascade { sections, .. } = parse_ok(source) else {
+            panic!("expected cascade");
+        };
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].ops.len(), 3);
+        assert!(matches!(sections[0].ops[1], CascadeOp::NullAssert { .. }));
+        match source {
+            "c..m()!.x" => {
+                assert!(matches!(sections[0].ops[0], CascadeOp::Call(..)));
+                assert!(matches!(sections[0].ops[2], CascadeOp::Field { .. }));
+            }
+            "c..[0]!.x" => {
+                assert!(matches!(sections[0].ops[0], CascadeOp::Index { .. }));
+                assert!(matches!(sections[0].ops[2], CascadeOp::Field { .. }));
+            }
+            "c..parent!.x = 1" => {
+                assert!(matches!(sections[0].ops[2], CascadeOp::Assign(..)));
+            }
+            "c..parent![0] = 1" => {
+                assert!(matches!(sections[0].ops[2], CascadeOp::IndexAssign(..)));
+            }
+            _ => {}
+        }
+    }
+    for source in [
+        "void f() { g(c..parent!.go(c)); }",
+        "void f() { var x = [c..parent!.go(c)]; }",
+    ] {
+        assert_eq!(errs(source), 0, "{source}");
     }
 }
 

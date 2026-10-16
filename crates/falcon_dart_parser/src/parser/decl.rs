@@ -754,7 +754,7 @@ impl<'src> Parser<'src> {
         // any formal (`set x(covariant final T v)`) and a trailing comma
         // (`set x(int a,)`), which method parameter lists already allow.
         let param_annotations = self.parse_annotations();
-        let _ = self.eat(TokenKind::Covariant);
+        let is_covariant = self.eat(TokenKind::Covariant).is_some();
         let _ = self.eat(TokenKind::Final);
         let _ = self.eat(TokenKind::Var);
         let mut param_type = if self.peek(1).kind != TokenKind::RParen {
@@ -786,6 +786,7 @@ impl<'src> Parser<'src> {
             is_static,
             is_abstract: is_abstract || (body.is_none() && !is_external),
             is_external,
+            is_covariant,
             param_type,
             param_annotations,
             name,
@@ -1530,6 +1531,7 @@ impl<'src> Parser<'src> {
             .params
             .iter()
             .map(|p| FunctionTypeParam {
+                annotations: p.annotations.clone(),
                 name: Some(p.name.clone()),
                 param_type: p
                     .param_type

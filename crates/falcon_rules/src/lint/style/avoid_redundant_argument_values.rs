@@ -10,8 +10,9 @@
 //! apply. Required parameters and `@required` ones are never reported.
 //!
 //! Defaults come from indexed callable declarations, local functions and
-//! function-valued locals. An optional parameter without a declared default
-//! defaults to `null`; a super formal inherits its super parameter's default.
+//! function-valued locals, and the `call` method of callable objects. An optional
+//! parameter without a declared default defaults to `null`; a super formal
+//! inherits its super parameter's default.
 //! Members of generic declarations whose function type mentions the owner's
 //! type parameters are skipped: the analyzer invokes them through a
 //! substituted type whose parameters carry no defaults. Values are evaluated
@@ -280,7 +281,10 @@ impl Targets<'_> {
         let segments = expression_segments(callee, true);
         if let Expr::Ident(identifier) = callee.unparenthesized() {
             if state.environment.is_bound(&identifier.name) {
-                return ControlFlow::Break(self.local_target(&identifier.name, state));
+                return ControlFlow::Break(
+                    self.local_target(&identifier.name, state)
+                        .or_else(|| self.instance_target(&state.infer(callee), "call", state)),
+                );
             }
             if let Some(receiver @ ResolvedType::Interface { identity, .. }) =
                 state.enclosing_type.as_ref()

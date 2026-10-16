@@ -154,10 +154,13 @@ pub(crate) fn decode_escapes(text: &str) -> std::borrow::Cow<'_, str> {
 
 /// The leading line Dart drops from a multiline literal when that line holds
 /// only whitespace (optionally backslash-escaped) before its line break.
-fn multiline_lead_len(content: &str) -> usize {
+pub(crate) fn multiline_lead_len(content: &str) -> usize {
     let bytes = content.as_bytes();
     let mut i = 0;
-    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\\') {
+    while matches!(
+        bytes.get(i..),
+        Some([b' ' | b'\t', ..] | [b'\\', b' ' | b'\t' | b'\r' | b'\n', ..])
+    ) {
         i += 1;
     }
     match bytes.get(i..) {

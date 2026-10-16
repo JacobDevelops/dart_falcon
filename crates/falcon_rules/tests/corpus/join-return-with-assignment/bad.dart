@@ -66,3 +66,26 @@ int parenthesizedReturn(int x) {
   x = 1; /* expect: join-return-with-assignment */
   return (x);
 }
+
+class StateBase {
+  int get state => 0;
+  set state(int value) {}
+}
+
+class InheritedState extends StateBase {}
+
+int pairedAccessors(InheritedState notifier) {
+  notifier.state = 1; /* expect: join-return-with-assignment */
+  return notifier.state;
+}
+
+int pairedAccessorChain(List<InheritedState> notifiers) {
+  notifiers.first.state = 1; /* expect: join-return-with-assignment */
+  return notifiers.first.state;
+}
+
+dynamic unresolvedMembers(dynamic receiver) {
+  // Unresolved dynamic properties have the same null canonical element in Dart.
+  receiver.first = 1; /* expect: join-return-with-assignment */
+  return receiver.second;
+}

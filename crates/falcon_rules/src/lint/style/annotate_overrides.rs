@@ -54,7 +54,7 @@ impl Rule for AnnotateOverrides {
                             report(
                                 &owner,
                                 &declarator.name.name,
-                                MemberKind::field(field),
+                                MemberKind::field(field, declarator),
                                 declarator.name.span,
                             );
                         }

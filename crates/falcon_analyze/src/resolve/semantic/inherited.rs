@@ -52,6 +52,7 @@ struct InheritedMember {
     call_parameters: Vec<TypeParameterId>,
     shape: OverrideShape,
     known: bool,
+    parameter_contracts: Option<Arc<[ParameterContract]>>,
 }
 
 #[derive(Default)]
@@ -77,6 +78,308 @@ impl SignatureIndex {
         } else {
             let (signature, substitutions) = self.resolved_member(receiver, name, model)?;
             Some(model.substitute(&signature.return_type, &substitutions))
+        }
+    }
+
+    /// Parameter declarations of the concrete implementation in receiver context.
+    /// An inherited implementation can acquire covariance from the receiver's
+    /// interfaces without changing the signature exposed by its interface map.
+    pub fn effective_parameter_contracts(
+        &self,
+        receiver: &ResolvedType,
+        name: &str,
+        write: bool,
+        model: &SemanticModel<'_>,
+    ) -> Option<Arc<[ParameterContract]>> {
+        self.parameter_contracts_through(
+            receiver,
+            name,
+            write,
+            false,
+            model,
+            &mut FxHashSet::default(),
+        )
+    }
+
+    fn parameter_contracts_through(
+        &self,
+        receiver: &ResolvedType,
+        name: &str,
+        write: bool,
+        concrete: bool,
+        model: &SemanticModel<'_>,
+        visiting: &mut FxHashSet<DeclarationIdentity>,
+    ) -> Option<Arc<[ParameterContract]>> {
+        let mut receiver = receiver;
+        while let ResolvedType::TypeParameter { bound, .. }
+        | ResolvedType::NonNullTypeParameter { bound, .. } = receiver
+        {
+            receiver = bound;
+        }
+        let ResolvedType::Interface { identity, .. } = receiver else {
+            return None;
+        };
+        let matches_access = |facts: &MemberFacts| {
+            if write {
+                facts.kind.has_setter()
+            } else {
+                matches!(facts.kind, MemberKind::Method | MemberKind::Operator)
+                    || facts.kind.has_getter()
+            }
+        };
+        let (facts, concrete_parent) = if concrete {
+            if let Some(facts) = self.declared_member(identity, identity, name, |facts| {
+                !facts.is_abstract && matches_access(facts)
+            }) {
+                (facts, None)
+            } else {
+                match self.concrete_member_in_chain(
+                    identity,
+                    identity,
+                    name,
+                    matches_access,
+                    &mut HashSet::from([identity.clone()]),
+                )? {
+                    Some((facts, parent)) => (facts, Some(parent)),
+                    None => (
+                        self.declared_member(
+                            identity,
+                            &DeclarationIdentity::OBJECT,
+                            name,
+                            |facts| !facts.is_abstract && matches_access(facts),
+                        )?,
+                        None,
+                    ),
+                }
+            }
+        } else {
+            let access = if write {
+                InstanceAccess::Write
+            } else {
+                InstanceAccess::Invoke
+            };
+            let owner = self.resolved_access_owner(receiver, name, access, model)?;
+            (
+                self.declared_member(identity, &owner, name, matches_access)?,
+                None,
+            )
+        };
+        if !write && !matches!(facts.kind, MemberKind::Method | MemberKind::Operator) {
+            return Some(empty_parameter_contracts());
+        }
+        let contracts = facts.parameter_contracts.as_ref()?;
+        if identity == &facts.declaring_type || contracts.is_empty() {
+            return Some(Arc::clone(contracts));
+        }
+        if !visiting.insert(identity.clone()) {
+            return None;
+        }
+        // Preserve contextual concrete copies across superclass levels, even
+        // when their covariance is absent from the superclass interface map.
+        let fallback;
+        let supertype = if let Some(parent) = concrete_parent {
+            parent
+        } else {
+            fallback = if write {
+                self.super_receiver_for_write(receiver, name, model)
+            } else {
+                self.super_receiver(receiver, name, model)
+            }?;
+            &fallback
+        };
+        let contracts =
+            self.parameter_contracts_through(supertype, name, write, concrete, model, visiting)?;
+        let candidates = self.inherited_candidates(
+            identity,
+            name,
+            write,
+            model,
+            &mut FxHashSet::from_iter([identity.clone()]),
+            &mut FxHashMap::default(),
+        );
+        Self::merge_parameter_covariance(&contracts, facts.kind, &candidates, true)
+    }
+
+    /// Contracts of `super.name`: a mixin uses its combined `on` interface,
+    /// whereas a class uses the superclass's contextual concrete copy.
+    pub fn super_parameter_contracts(
+        &self,
+        receiver: &ResolvedType,
+        name: &str,
+        write: bool,
+        model: &SemanticModel<'_>,
+    ) -> Option<Arc<[ParameterContract]>> {
+        let ResolvedType::Interface { identity, .. } = receiver else {
+            return None;
+        };
+        if self.type_kind(identity) == Some(TypeKind::Mixin) {
+            let (_, supertypes) = self.supertypes.get(identity)?;
+            let count = *self.mixin_constraint_counts.get(identity)?;
+            let mut candidates = Vec::with_capacity(count);
+            let mut visiting = FxHashSet::from_iter([identity.clone()]);
+            let mut memo = FxHashMap::default();
+            for constraint in &supertypes[..count] {
+                candidates.extend(self.interface_candidates(
+                    constraint,
+                    name,
+                    write,
+                    model,
+                    &mut visiting,
+                    &mut memo,
+                ));
+            }
+            return self
+                .combine_inherited(candidates, model)
+                .into_iter()
+                .next()?
+                .parameter_contracts;
+        }
+        let supertype = if write {
+            self.super_receiver_for_write(receiver, name, model)
+        } else {
+            self.super_receiver(receiver, name, model)
+        }?;
+        // Abstract redeclarations affect the interface, not the implementation
+        // reached by a class's super call.
+        self.parameter_contracts_through(
+            &supertype,
+            name,
+            write,
+            true,
+            model,
+            &mut FxHashSet::default(),
+        )
+    }
+
+    fn merge_parameter_covariance(
+        contracts: &Arc<[ParameterContract]>,
+        kind: MemberKind,
+        candidates: &[InheritedMember],
+        implementation_copy: bool,
+    ) -> Option<Arc<[ParameterContract]>> {
+        // Method/getter conflicts disable all covariance inference, not merely
+        // the incompatible candidate. Setter names occupy a separate namespace.
+        if candidates.iter().any(|candidate| {
+            candidate.kind != kind && !(candidate.kind.has_setter() && kind.has_setter())
+        }) {
+            return Some(Arc::clone(contracts));
+        }
+        // Analyzer recomputes every flag on a concrete inherited copy when
+        // any candidate contributes covariance. With no contribution, the
+        // previous superclass copy is retained instead.
+        let replace_covariance = implementation_copy
+            && candidates.iter().any(|candidate| {
+                candidate
+                    .parameter_contracts
+                    .as_ref()
+                    .is_some_and(|parameters| {
+                        parameters.iter().any(|parameter| parameter.is_covariant)
+                    })
+            });
+        if implementation_copy && !replace_covariance {
+            return candidates
+                .iter()
+                .all(|candidate| candidate.parameter_contracts.is_some())
+                .then(|| Arc::clone(contracts));
+        }
+        let mut effective: Option<Vec<ParameterContract>> = None;
+        for (index, parameter) in contracts.iter().enumerate() {
+            if parameter.is_covariant && !replace_covariance {
+                continue;
+            }
+            let mut covariant = false;
+            let mut unknown = false;
+            for candidate in candidates {
+                let Some(parameters) = candidate.parameter_contracts.as_ref() else {
+                    unknown = true;
+                    continue;
+                };
+                let corresponding = match parameter.kind {
+                    ParamKind::Named { .. } => parameters.iter().rfind(|other| {
+                        matches!(other.kind, ParamKind::Named { .. })
+                            && other.name == parameter.name
+                    }),
+                    _ => parameters
+                        .get(index)
+                        .filter(|other| !matches!(other.kind, ParamKind::Named { .. })),
+                };
+                covariant |= corresponding.is_some_and(|parameter| parameter.is_covariant);
+                if covariant {
+                    break;
+                }
+            }
+            if !covariant && unknown {
+                return None;
+            }
+            if covariant != parameter.is_covariant
+                || (replace_covariance && parameter.default_value_code.is_some())
+            {
+                let effective = &mut effective.get_or_insert_with(|| contracts.to_vec())[index];
+                effective.is_covariant = covariant;
+                if replace_covariance {
+                    effective.default_value_code = None;
+                }
+            }
+        }
+        Some(effective.map_or_else(|| Arc::clone(contracts), Arc::from))
+    }
+
+    /// Run only after every declaration and superinterface has been indexed.
+    pub(super) fn propagate_parameter_covariance(
+        &mut self,
+        program: &Program,
+        model: &SemanticModel<'_>,
+    ) {
+        for declaration in &program.declarations {
+            let name = match declaration {
+                TopLevelDecl::Class(node) => &node.name.name,
+                TopLevelDecl::MixinClass(node) => &node.name.name,
+                TopLevelDecl::Mixin(node) => &node.name.name,
+                TopLevelDecl::Enum(node) => &node.name.name,
+                TopLevelDecl::ExtensionType(node) => &node.name.name,
+                TopLevelDecl::ClassTypeAlias(node) => &node.name.name,
+                _ => continue,
+            };
+            let Some(owner) = model.resolve_name(name.as_str()) else {
+                continue;
+            };
+            let Some(entries) = self.member_entries.local.get(&owner) else {
+                continue;
+            };
+            let mut updates = Vec::with_capacity(entries.len());
+            for (name, entry) in entries {
+                for (fact_index, facts) in entry.facts.iter().enumerate() {
+                    let Some(contracts) = facts
+                        .parameter_contracts
+                        .as_ref()
+                        .filter(|contracts| !contracts.is_empty() && !facts.is_static)
+                    else {
+                        continue;
+                    };
+                    let candidates = self.inherited_candidates(
+                        &owner,
+                        name,
+                        facts.kind.has_setter(),
+                        model,
+                        &mut FxHashSet::from_iter([owner.clone()]),
+                        &mut FxHashMap::default(),
+                    );
+                    let effective =
+                        Self::merge_parameter_covariance(contracts, facts.kind, &candidates, false);
+                    if effective
+                        .as_ref()
+                        .is_none_or(|effective| !Arc::ptr_eq(contracts, effective))
+                    {
+                        updates.push((name.clone(), fact_index, effective));
+                    }
+                }
+            }
+            let entries = self.member_entries.get_mut(&owner).unwrap();
+            for (name, fact_index, contracts) in updates {
+                let entry = entries.get_mut(&name).unwrap();
+                let facts = &mut entry.facts[fact_index];
+                facts.parameter_contracts = contracts;
+            }
         }
     }
 
@@ -386,20 +689,26 @@ impl SignatureIndex {
         for (index, supertype) in supertypes.iter().enumerate() {
             let inherited =
                 self.interface_candidates(supertype, name, setter, model, visiting, memo);
-            // A declared mixin member replaces the superclass signature before
-            // implemented interfaces are combined (InheritanceManager3).
-            if self
+            // A mixin declaration replaces the superclass signature. A member
+            // inherited by the mixin instead combines with that signature before
+            // the next mixin or any implemented interfaces are considered.
+            let is_mixin = self
                 .mixin_applications
                 .get(identity)
-                .is_some_and(|range| range.contains(&index))
+                .is_some_and(|range| range.contains(&index));
+            if is_mixin
                 && inherited.iter().any(|member| {
                     matches!(supertype, ResolvedType::Interface { identity, .. }
-                        if member.declaring_type == *identity)
+                    if member.declaring_type == *identity)
                 })
             {
                 candidates.clear();
             }
+            let combine_mixin = is_mixin && !inherited.is_empty();
             candidates.extend(inherited);
+            if combine_mixin {
+                candidates = self.combine_inherited(candidates, model);
+            }
         }
         candidates
     }
@@ -495,6 +804,7 @@ impl SignatureIndex {
                         return_type,
                         call_parameters,
                         shape,
+                        parameter_contracts: fact.parameter_contracts.clone(),
                         known,
                     });
                 }
@@ -526,7 +836,22 @@ impl SignatureIndex {
                             call_parameters: Vec::new(),
                             shape: OverrideShape::default(),
                             known: false,
+                            parameter_contracts: None,
                         });
+                    }
+                }
+            }
+            if !members.is_empty() {
+                let inherited =
+                    self.inherited_candidates(identity, name, setter, model, visiting, memo);
+                for member in &mut members {
+                    if let Some(contracts) = &member.parameter_contracts {
+                        member.parameter_contracts = Self::merge_parameter_covariance(
+                            contracts,
+                            member.kind,
+                            &inherited,
+                            false,
+                        );
                     }
                 }
             }

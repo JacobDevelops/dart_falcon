@@ -60,6 +60,10 @@ Function(
                             },
                         ),
                     ],
+                    positional_names: [
+                        None,
+                        None,
+                    ],
                     named: [],
                     is_nullable: false,
                     span: Span {

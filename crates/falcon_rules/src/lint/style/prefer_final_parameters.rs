@@ -28,7 +28,7 @@ use falcon_syntax::visitor::{
     walk_stmt,
 };
 
-use crate::lint::lexical_usage::{find_word, local_writes};
+use crate::lint::lexical_usage::local_writes;
 
 const RULE: &str = "prefer-final-parameters";
 
@@ -47,6 +47,7 @@ impl Rule for PreferFinalParameters {
             .collect();
         let mut collector = Collector {
             ctx,
+            docs: ctx.syntax.doc_blocks(ctx.source).collect(),
             mutated,
             wildcards: version.supports(Feature::WildcardVariables),
             diagnostics: Vec::new(),
@@ -58,6 +59,7 @@ impl Rule for PreferFinalParameters {
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
+    docs: Vec<falcon_syntax::token::DocBlock<'ctx>>,
     mutated: HashSet<usize>,
     wildcards: bool,
     diagnostics: Vec<Diagnostic>,
@@ -68,6 +70,15 @@ impl Collector<'_, '_> {
         if (self.wildcards && name.name == "_") || self.mutated.contains(&name.span.start) {
             return;
         }
+        let doc = self
+            .docs
+            .binary_search_by_key(&span.start, |doc| doc.next_token)
+            .ok()
+            .map(|index| &self.docs[index]);
+        let span = doc.map_or(span, |doc| Span {
+            start: doc.start,
+            end: span.end,
+        });
         self.diagnostics.push(self.ctx.diagnostic(
             RULE,
             format!("The parameter '{}' should be final.", name.name),
@@ -99,17 +110,38 @@ impl Visitor for Collector<'_, '_> {
     }
 
     fn visit_setter_decl(&mut self, node: &SetterDecl) {
-        // The setter's single parameter carries no `final` flag in the AST; the
-        // keyword can only sit between the opening `(` and the name.
-        let open = self.ctx.source[..node.param.span.start]
-            .rfind('(')
+        let tokens = self.ctx.tokens();
+        let anchor = node
+            .param_annotations
+            .first()
+            .map(|annotation| annotation.span.start)
+            .or_else(|| node.param_type.as_ref().map(|ty| ty.span().start))
             .unwrap_or(node.param.span.start);
-        if find_word(self.ctx.source, open, node.param.span.start, "final").is_none() {
-            let span = node
-                .param_type
-                .as_ref()
-                .map_or(node.param.span, |ty| ty.span().merge(&node.param.span));
-            self.check_name(&node.param, span);
+        let before_anchor = tokens.partition_point(|token| token.offset() < anchor);
+        let before_name = tokens.partition_point(|token| token.offset() < node.param.span.start);
+        let open = tokens[..before_anchor]
+            .iter()
+            .rposition(|token| {
+                !token.is_trivia()
+                    && &self.ctx.source[token.offset()..token.offset() + token.len()] == "("
+            })
+            .map_or(before_anchor, |index| index + 1);
+        let parameter_tokens = &tokens[open..before_name];
+        if !parameter_tokens.iter().any(|token| {
+            !token.is_trivia()
+                && &self.ctx.source[token.offset()..token.offset() + token.len()] == "final"
+        }) {
+            let start = parameter_tokens
+                .iter()
+                .find(|token| !token.is_trivia())
+                .map_or(node.param.span.start, |token| token.offset());
+            self.check_name(
+                &node.param,
+                Span {
+                    start,
+                    end: node.param.span.end,
+                },
+            );
         }
         walk_setter_decl(self, node);
     }

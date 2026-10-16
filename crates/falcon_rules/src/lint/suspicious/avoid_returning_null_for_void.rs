@@ -1,5 +1,6 @@
-//! Flags `return null;` (and `=> null` bodies) in a function whose declared
-//! return type is `void` or `Future<void>`.
+//! Flags `return null;` (and `=> null` bodies) in synchronous `void`
+//! functions and asynchronous `Future<void>` functions. A nullable future
+//! permits a null result only in a synchronous body; `void async` is exempt.
 //!
 //! Returning an explicit `null` from a void function is contradictory: the
 //! signature promises no value, so the `null` is dead and usually reflects
@@ -49,7 +50,7 @@ impl Collector<'_> {
             return;
         }
         if let Some(FunctionBody::Arrow(expr, _)) = body
-            && matches!(expr.unparenthesized(), Expr::NullLit { .. })
+            && matches!(expr.as_ref(), Expr::NullLit { .. })
         {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-returning-null-for-void",
@@ -60,10 +61,10 @@ impl Collector<'_> {
     }
 }
 
-fn is_void_return(rt: &Option<DartType>) -> bool {
-    match rt {
-        Some(DartType::Void { .. }) => true,
-        Some(DartType::Named(n)) => {
+fn is_void_return(rt: &Option<DartType>, marker: AsyncMarker) -> bool {
+    match (rt, marker) {
+        (Some(DartType::Void { .. }), AsyncMarker::Sync) => true,
+        (Some(DartType::Named(n)), AsyncMarker::Async) => {
             n.segments.last().is_some_and(|s| s.name == "Future")
                 && n.type_args.len() == 1
                 && matches!(n.type_args[0], DartType::Void { .. })
@@ -73,8 +74,20 @@ fn is_void_return(rt: &Option<DartType>) -> bool {
 }
 
 impl Visitor for Collector<'_> {
+    fn visit_class_member(&mut self, node: &ClassMember) {
+        if let ClassMember::Operator(operator) = node {
+            let is_void = is_void_return(&operator.return_type, operator.async_marker);
+            self.check_arrow(operator.body.as_ref(), is_void);
+            self.void_stack.push(is_void);
+            falcon_syntax::visitor::walk_class_member(self, node);
+            self.void_stack.pop();
+        } else {
+            falcon_syntax::visitor::walk_class_member(self, node);
+        }
+    }
+
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
-        let is_void = is_void_return(&node.return_type);
+        let is_void = is_void_return(&node.return_type, node.async_marker);
         self.check_arrow(node.body.as_ref(), is_void);
         self.void_stack.push(is_void);
         walk_function_decl(self, node);
@@ -82,7 +95,7 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_method_decl(&mut self, node: &MethodDecl) {
-        let is_void = is_void_return(&node.return_type);
+        let is_void = is_void_return(&node.return_type, node.async_marker);
         self.check_arrow(node.body.as_ref(), is_void);
         self.void_stack.push(is_void);
         walk_method_decl(self, node);
@@ -90,7 +103,7 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_getter_decl(&mut self, node: &GetterDecl) {
-        let is_void = is_void_return(&node.return_type);
+        let is_void = is_void_return(&node.return_type, node.async_marker);
         self.check_arrow(node.body.as_ref(), is_void);
         self.void_stack.push(is_void);
         walk_getter_decl(self, node);
@@ -116,10 +129,7 @@ impl Visitor for Collector<'_> {
         match node {
             Stmt::Return(r) => {
                 if self.void_stack.last() == Some(&true)
-                    && matches!(
-                        r.value.as_ref().map(Expr::unparenthesized),
-                        Some(Expr::NullLit { .. })
-                    )
+                    && matches!(r.value.as_ref(), Some(Expr::NullLit { .. }))
                 {
                     self.diags.push(self.ctx.diagnostic(
                         "avoid-returning-null-for-void",
@@ -130,7 +140,7 @@ impl Visitor for Collector<'_> {
                 walk_stmt(self, node);
             }
             Stmt::LocalFunc(lf) => {
-                let is_void = is_void_return(&lf.return_type);
+                let is_void = is_void_return(&lf.return_type, lf.async_marker);
                 self.check_arrow(Some(&lf.body), is_void);
                 self.void_stack.push(is_void);
                 walk_stmt(self, node);

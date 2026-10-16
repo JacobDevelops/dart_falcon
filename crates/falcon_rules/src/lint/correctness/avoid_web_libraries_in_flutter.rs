@@ -1,12 +1,8 @@
 //! Disallow importing web-only `dart:` libraries from Flutter code.
 //!
-//! Flags any `import` of `dart:html`, `dart:js`, `dart:js_util`, or a
-//! `dart:js_interop*` library. These libraries exist only on the web platform,
-//! so code that depends on them fails to compile or run on Android, iOS,
-//! desktop, and embedded targets. A Flutter package that reaches for them
-//! silently forfeits portability across every platform Flutter otherwise
-//! supports. Use platform-neutral APIs, or isolate web-specific code behind a
-//! conditional import so non-web builds receive a compatible implementation.
+//! Applies only to packages depending on Flutter, excluding Flutter web plugins.
+//! The legacy `dart:html`, `dart:js`, and `dart:js_util` imports are checked;
+//! modern JS interop libraries are allowed by the upstream lint.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
@@ -17,6 +13,14 @@ pub struct AvoidWebLibrariesInFlutter;
 
 impl Rule for AvoidWebLibrariesInFlutter {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        if !program
+            .imports
+            .iter()
+            .any(|import| is_web_library(&import.uri.value))
+            || !checks_web_imports(ctx.file_path)
+        {
+            return Vec::new();
+        }
         let mut diags = Vec::new();
         for import in &program.imports {
             if is_web_library(&import.uri.value) {
@@ -27,8 +31,58 @@ impl Rule for AvoidWebLibrariesInFlutter {
     }
 }
 
-/// Web-only core libraries: `dart:html`, `dart:js`, `dart:js_util`, and any
-/// `dart:js_interop*` variant (`dart:js_interop`, `dart:js_interop_unsafe`).
 fn is_web_library(uri: &str) -> bool {
-    matches!(uri, "dart:html" | "dart:js" | "dart:js_util") || uri.starts_with("dart:js_interop")
+    matches!(uri, "dart:html" | "dart:js" | "dart:js_util")
+}
+
+fn checks_web_imports(path: &std::path::Path) -> bool {
+    let Some(manifest) = crate::cross_file::enclosing_pubspec(path) else {
+        return false;
+    };
+    let Some(yaml) = std::fs::read_to_string(manifest)
+        .ok()
+        .and_then(|source| serde_yaml::from_str::<serde_yaml::Value>(&source).ok())
+    else {
+        return false;
+    };
+    let flutter = &yaml["dependencies"]["flutter"];
+    !flutter.is_null() && yaml["flutter"]["plugin"]["platforms"]["web"].is_null()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::Path;
+
+    #[test]
+    fn project_fixtures_match_expectations() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/corpus/avoid-web-libraries-in-flutter");
+        for file in [
+            "bad.dart",
+            "good_interop.dart",
+            "non_flutter/good.dart",
+            "web_plugin/good.dart",
+        ] {
+            let path = root.join(file);
+            let source = std::fs::read_to_string(&path).unwrap();
+            let parsed = parse(&source);
+            let config = FalconConfig::default();
+            let ctx = AnalyzeContext::new(&path, &source, &config, &parsed.syntax);
+            let lines: Vec<_> = AvoidWebLibrariesInFlutter
+                .analyze(&parsed.program, &ctx)
+                .into_iter()
+                .map(|diagnostic| source[..diagnostic.span.start].matches('\n').count() + 1)
+                .collect();
+            let expected: Vec<_> = source
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| line.contains("/* expect: avoid-web-libraries-in-flutter */"))
+                .map(|(index, _)| index + 1)
+                .collect();
+            assert_eq!(lines, expected, "{file}");
+        }
+    }
 }

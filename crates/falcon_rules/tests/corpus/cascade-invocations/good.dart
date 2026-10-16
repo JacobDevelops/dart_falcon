@@ -138,3 +138,16 @@ void parenthesizedTargets(Point point) {
   (point).reset();
   (point).reset();
 }
+
+class ScopedReceiver {
+  void initialize(void Function(ScopedReceiver) callback) {}
+  void reset() {}
+}
+
+// A captured reference to the outer receiver still breaks the cascade.
+void capturedCallback(ScopedReceiver receiver) {
+  receiver.initialize((other) {
+    receiver.reset();
+  });
+  receiver.reset();
+}

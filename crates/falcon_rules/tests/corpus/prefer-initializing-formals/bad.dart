@@ -24,12 +24,28 @@ class E {
   E(int v) { this.v = v; } /* expect: prefer-initializing-formals */
 }
 
-class F {
-  int y;
-  F(int value) : y = value; /* expect: prefer-initializing-formals */
+
+class PrivateNamed {
+  int _value;
+  PrivateNamed({required int value}) : _value = value; /* expect: prefer-initializing-formals */
 }
 
-class G {
-  int z;
-  G(int input) { this.z = input; } /* expect: prefer-initializing-formals */
+class Primary(int value) { 
+  final int value;
+  this : value = value; /* expect: prefer-initializing-formals */
+}
+
+class ParenthesizedBody {
+  int value;
+  ParenthesizedBody(int value) { this.value = (value); } /* expect: prefer-initializing-formals */
+}
+
+class Subtype {
+  num value;
+  Subtype(int value) : value = value; /* expect: prefer-initializing-formals */
+}
+
+class Compound {
+  int value = 0;
+  Compound(int value) { this.value += value; } /* expect: prefer-initializing-formals */
 }

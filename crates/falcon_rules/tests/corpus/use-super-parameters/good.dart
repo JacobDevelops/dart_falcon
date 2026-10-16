@@ -28,3 +28,32 @@ class E extends Base {
     print(b);
   }
 }
+
+class PartialExpression extends Base {
+  PartialExpression(int a, int b) : super.two(a, b + 1);
+}
+class FieldBlocker extends Base {
+  final int field;
+  FieldBlocker(this.field, int a) : super(a);
+}
+class NamedToPositional extends Base {
+  NamedToPositional({required int a}) : super(a);
+}
+class WideBase {
+  WideBase({num? value});
+}
+class NarrowParameter extends WideBase {
+  NarrowParameter({int? value}) : super(value: value);
+}
+
+class NamedBase {
+  NamedBase({int? value});
+}
+
+class FinalDeclaringPrimary({final int? value}) extends NamedBase {
+  this : super(value: value);
+}
+
+class VarDeclaringPrimary({var int? value}) extends NamedBase {
+  this : super(value: value);
+}

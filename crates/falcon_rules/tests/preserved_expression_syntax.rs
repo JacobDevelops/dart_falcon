@@ -72,6 +72,13 @@ fn comments_do_not_hide_grouping_or_create_grouping() {
 }
 
 #[test]
+fn cascade_null_assertion_keeps_following_call_and_standalone_tearoffs_distinct() {
+    let source = "class C { C? parent; void clear() {} void go(C c) {} }\n\
+                  void f(C c) { c..clear()..parent!.go(c); c.go; c..go; }";
+    assert_eq!(reports(&UnnecessaryStatements, source), ["c.go", "..go"]);
+}
+
+#[test]
 fn legacy_cases_and_wildcard_patterns_retain_parentheses() {
     assert_eq!(
         reports(

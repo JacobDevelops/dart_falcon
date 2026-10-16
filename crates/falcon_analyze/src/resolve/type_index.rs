@@ -59,9 +59,13 @@ pub enum MemberKind {
 }
 
 impl MemberKind {
-    pub fn field(field: &FieldDecl) -> Self {
+    /// Includes the implicit setter of an uninitialized `late final` declarator.
+    pub fn field(field: &FieldDecl, declarator: &VarDeclarator) -> Self {
         Self::Field {
-            writable: field.keyword == VarKeyword::Var,
+            writable: field.keyword == VarKeyword::Var
+                || (field.is_late
+                    && field.keyword == VarKeyword::Final
+                    && declarator.initializer.is_none()),
             covariant: field.is_covariant,
         }
     }
@@ -983,7 +987,7 @@ fn collect_members(members: EffectiveMembers<'_>) -> HashMap<String, MemberKind>
         match member {
             ClassMember::Field(f) => {
                 for d in &f.declarators {
-                    map.insert(d.name.name.clone(), MemberKind::field(f));
+                    map.insert(d.name.name.clone(), MemberKind::field(f, d));
                 }
             }
             ClassMember::Method(m) => {

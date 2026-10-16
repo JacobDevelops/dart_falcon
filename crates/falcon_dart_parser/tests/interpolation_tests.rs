@@ -43,6 +43,18 @@ fn braced_binary_interpolation() {
 }
 
 #[test]
+fn braced_interpolation_retains_interior_trivia_but_expression_stays_precise() {
+    let (node, src) = string_lit("'${ /* before */ a + b /* after */ }'");
+    let interpolation = &node.interpolations[0];
+    assert_eq!(
+        span_text(&src, interpolation),
+        " /* before */ a + b /* after */ "
+    );
+    let span = interpolation.expr.span();
+    assert_eq!(&src[span.start..span.end], "a + b");
+}
+
+#[test]
 fn interpolation_amidst_text() {
     let (node, src) = string_lit("'x ${f(y)} z'");
     assert_eq!(node.interpolations.len(), 1);

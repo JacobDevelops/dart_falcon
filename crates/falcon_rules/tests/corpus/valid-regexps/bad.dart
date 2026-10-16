@@ -8,10 +8,17 @@ void examples() {
   final f = new RegExp('foo)'); /* expect: valid-regexps */
   final g = RegExp('*abc'); /* expect: valid-regexps */
   final h = RegExp('[z-a]'); /* expect: valid-regexps */
-  final i = RegExp(r'\xG0'); /* expect: valid-regexps */
+  final i = RegExp(r'\xG0', unicode: true); /* expect: valid-regexps */
   final j = RegExp('a{3,2}'); /* expect: valid-regexps */
   final k = RegExp(r'[z-a]'); /* expect: valid-regexps */
   final l = RegExp(r'\d{3,2}'); /* expect: valid-regexps */
   final adjacent = RegExp('(' r'\d'); /* expect: valid-regexps */
   print([a, b, c, d, e, f, g, h, i, j, k, l]);
+  RegExp('{', unicode: true); /* expect: valid-regexps */
+  RegExp(r'\q', unicode: true); /* expect: valid-regexps */
+  RegExp(r'(?invalid)'); /* expect: valid-regexps */
+  RegExp(r'(?<x>a)(?<x>b)'); /* expect: valid-regexps */
+  RegExp(r'(?<=a)+'); /* expect: valid-regexps */
+  RegExp('\\xG0', unicode: true); /* expect: valid-regexps */
+  RegExp('\\'); /* expect: valid-regexps */
 }

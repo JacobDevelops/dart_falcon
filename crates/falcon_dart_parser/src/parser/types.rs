@@ -137,6 +137,7 @@ impl<'src> Parser<'src> {
                     continue;
                 }
             }
+            let annotations = self.parse_annotations();
             let explicit_required = self.eat(TokenKind::Required).is_some();
             let is_required = explicit_required || (!in_named && !in_optional);
             let _ = self
@@ -145,6 +146,7 @@ impl<'src> Parser<'src> {
             let param_type = self.parse_type();
             let name = self.parse_ident();
             params.push(FunctionTypeParam {
+                annotations,
                 name,
                 param_type,
                 is_required,
@@ -166,6 +168,7 @@ impl<'src> Parser<'src> {
     fn parse_record_type(&mut self, start: usize) -> DartType {
         self.advance(); // (
         let mut positional = Vec::new();
+        let mut positional_names = Vec::new();
         let mut named = Vec::new();
 
         while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
@@ -188,12 +191,14 @@ impl<'src> Parser<'src> {
                     self.parse_annotations();
                 }
                 positional.push(self.parse_type());
-                // Skip optional name
-                if self.cur().kind.is_identifier_like()
+                let name = if self.cur().kind.is_identifier_like()
                     && matches!(self.peek(1).kind, TokenKind::Comma | TokenKind::RParen)
                 {
-                    self.advance();
-                }
+                    self.parse_ident()
+                } else {
+                    None
+                };
+                positional_names.push(name);
             }
             if self.eat(TokenKind::Comma).is_none() {
                 break;
@@ -203,6 +208,7 @@ impl<'src> Parser<'src> {
         let is_nullable = self.eat_type_qmark();
         let record = DartType::Record(RecordType {
             positional,
+            positional_names,
             named,
             is_nullable,
             span: self.span_from(start),

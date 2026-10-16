@@ -33,3 +33,9 @@ void outer() {
 
   inner();
 }
+
+void parenthesizedReturn() {
+  return (null);
+}
+
+void parenthesizedArrow() => (null);

@@ -22,6 +22,177 @@ fn with_model(source: &str, test: impl FnOnce(&SemanticModel<'_>)) {
 }
 
 #[test]
+fn exact_function_shapes_support_alpha_binders_and_named_variance() {
+    with_model(
+        "typedef F = T Function<T extends num>(T value);
+         typedef G = U Function<U extends num>(U value);
+         typedef H = U Function<U extends String>(U value);
+         typedef Two = T Function<T extends num, U>(T value);
+         typedef Plain = void Function();
+         typedef Optional = void Function({int value});
+         typedef Required = void Function({required int value});",
+        |model| {
+            let signatures = SignatureIndex::default();
+            let resolve = |name| model.resolve_type_name(&[name]).unwrap();
+            assert_eq!(
+                signatures.subtype(&resolve("F"), &resolve("G"), model),
+                Truth::Yes
+            );
+            assert_eq!(
+                signatures.subtype(&resolve("G"), &resolve("F"), model),
+                Truth::Yes
+            );
+            assert_eq!(
+                signatures.subtype(&resolve("F"), &resolve("H"), model),
+                Truth::No
+            );
+            assert_eq!(
+                signatures.subtype(&resolve("F"), &resolve("Two"), model),
+                Truth::No
+            );
+            assert_eq!(
+                signatures.subtype(&resolve("Optional"), &resolve("Plain"), model),
+                Truth::Yes
+            );
+            assert_eq!(
+                signatures.subtype(&resolve("Required"), &resolve("Plain"), model),
+                Truth::No
+            );
+            assert_eq!(
+                signatures.subtype(&resolve("Plain"), &resolve("Optional"), model),
+                Truth::No
+            );
+            let known = resolve("Plain");
+            let empty = FunctionTypeShape::empty();
+            assert!(Arc::ptr_eq(
+                &empty,
+                &FunctionTypeShape::new(Vec::new(), Vec::new())
+            ));
+            let mut unknown = known.clone();
+            let ResolvedType::Function { shape, .. } = &mut unknown else {
+                panic!("missing function")
+            };
+            *shape = None;
+            assert_ne!(known, unknown);
+            assert_ne!(
+                known.structural_hash(&mut FxHashMap::default()),
+                unknown.structural_hash(&mut FxHashMap::default())
+            );
+            assert_eq!(
+                signatures.subtype(&unknown, &unknown, model),
+                Truth::Unknown
+            );
+            let mut unknown_slot = resolve("Plain");
+            let ResolvedType::Function { return_type, .. } = &mut unknown_slot else {
+                panic!("missing function")
+            };
+            *return_type = Arc::new(ResolvedType::Unknown);
+            assert_eq!(
+                signatures.subtype(&unknown_slot, &unknown_slot, model),
+                Truth::Unknown
+            );
+        },
+    );
+}
+
+#[test]
+fn function_shapes_preserve_declared_binders_and_required_names() {
+    with_model(
+        "typedef F = void Function<T extends num, U>({required T item, U? other});",
+        |model| {
+            let ty = model.resolve_type_name(&["F"]).unwrap();
+            let ResolvedType::Function {
+                shape: Some(shape), ..
+            } = &ty
+            else {
+                panic!("missing exact function shape")
+            };
+            assert_eq!(shape.required_named.as_ref(), &["item"]);
+            assert_eq!(shape.type_parameters.len(), 2);
+            let ResolvedType::TypeParameter { id, bound, .. } = &shape.type_parameters[0] else {
+                panic!("missing declared binder")
+            };
+            assert_eq!(id.name.as_ref(), "T");
+            assert!(bound.interface("dart:core", "num"));
+            let ResolvedType::TypeParameter { id, .. } = &shape.type_parameters[1] else {
+                panic!("missing unused binder")
+            };
+            assert_eq!(id.name.as_ref(), "U");
+            let ResolvedType::Function {
+                shape: Some(nullable_shape),
+                ..
+            } = ty.with_nullable(true)
+            else {
+                panic!("lost nullable function shape")
+            };
+            assert!(Arc::ptr_eq(shape, &nullable_shape));
+        },
+    );
+}
+
+#[test]
+fn function_shape_bounds_substitute_without_replacing_declared_binders() {
+    with_model("", |model| {
+        let outer = TypeParameterId {
+            owner: ParameterOwner::Sdk("shape-outer"),
+            ordinal: 0,
+            name: "X".into(),
+        };
+        let binder = TypeParameterId {
+            owner: ParameterOwner::Sdk("shape-inner"),
+            ordinal: 0,
+            name: "T".into(),
+        };
+        let shape = FunctionTypeShape::new(
+            vec!["item".into()],
+            vec![ResolvedType::TypeParameter {
+                id: binder.clone(),
+                bound: Arc::new(ResolvedType::TypeParameter {
+                    id: outer.clone(),
+                    bound: Arc::new(ResolvedType::Dynamic),
+                    nullable: false,
+                }),
+                nullable: false,
+            }],
+        );
+        assert!(Arc::ptr_eq(&shape, &shape.map_bounds(Clone::clone)));
+        let function = ResolvedType::Function {
+            shape: Some(shape),
+            alias: Default::default(),
+            optional_positional: 0,
+            return_type: Arc::new(ResolvedType::Void),
+            positional: empty_type_arguments(),
+            named: empty_named_types(),
+            nullable: false,
+        };
+        let result = model.substitute(&function, &HashMap::from([(outer, ResolvedType::Void)]));
+        let ResolvedType::Function {
+            shape: Some(shape), ..
+        } = &result
+        else {
+            panic!("lost substituted shape")
+        };
+        assert_eq!(shape.required_named.as_ref(), &["item"]);
+        assert!(matches!(&shape.type_parameters[0],
+            ResolvedType::TypeParameter { id, bound, .. } if *id == binder && **bound == ResolvedType::Void));
+        let joined = inference_join(
+            &result,
+            &result.with_nullable(true),
+            &SignatureIndex::default(),
+            model,
+        );
+        let ResolvedType::Function {
+            shape: Some(joined_shape),
+            ..
+        } = joined
+        else {
+            panic!("lost joined shape")
+        };
+        assert_eq!(shape, &joined_shape);
+    });
+}
+
+#[test]
 fn deep_alias_fanout_shares_templates_without_a_depth_limit() {
     let mut source = String::with_capacity(2048);
     for level in 0..40 {
@@ -91,6 +262,7 @@ fn recursive_bounds_reverse_variance_in_function_parameters() {
             nullable: false,
         };
         let bound = ResolvedType::Function {
+            shape: Some(FunctionTypeShape::empty()),
             alias: Default::default(),
             optional_positional: 0,
             return_type: Arc::new(parameter.clone()),
@@ -338,6 +510,7 @@ fn mutually_recursive_bounds_replace_the_entire_component_by_variance() {
             (
                 b.clone(),
                 ResolvedType::Function {
+                    shape: Some(FunctionTypeShape::empty()),
                     alias: Default::default(),
                     optional_positional: 0,
                     return_type: Arc::new(ResolvedType::Void),
@@ -412,6 +585,7 @@ fn external_parameter_bounds_are_instantiated_in_their_own_variance() {
             (
                 b.clone(),
                 ResolvedType::Function {
+                    shape: Some(FunctionTypeShape::empty()),
                     alias: Default::default(),
                     optional_positional: 0,
                     return_type: Arc::new(ResolvedType::Void),

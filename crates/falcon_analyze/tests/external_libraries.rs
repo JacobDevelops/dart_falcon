@@ -250,6 +250,7 @@ fn indexes_sdk_and_dependency_declarations() {
     assert_eq!(
         callback,
         ResolvedType::Function {
+            shape: Some(falcon_analyze::resolve::FunctionTypeShape::empty()),
             alias: Default::default(),
             optional_positional: 0,
             return_type: Box::new(ResolvedType::Void).into(),

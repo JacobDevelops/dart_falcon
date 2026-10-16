@@ -1,0 +1,12 @@
+name: flutter_web_plugin
+environment:
+  sdk: ^3.13.0
+dependencies:
+  flutter:
+    sdk: flutter
+flutter:
+  plugin:
+    platforms:
+      web:
+        pluginClass: WebPlugin
+        fileName: plugin.dart

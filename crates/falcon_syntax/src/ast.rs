@@ -128,9 +128,9 @@ pub fn parse_string_delimiter(raw: &str) -> Option<StringDelimiter<'_>> {
 pub struct StringInterpolation {
     /// The parsed interpolated expression.
     pub expr: Expr,
-    /// Absolute byte range of the interpolated expression text in the original
-    /// source: for `${e}` the full interior of the braces, including trivia;
-    /// for `$ident` the range of `ident`.
+    /// Absolute byte range of the interpolation interior in the original
+    /// source: for `${e}` everything inside the braces, including surrounding
+    /// trivia; for `$ident` the range of `ident`. `expr.span()` stays precise.
     pub span: Span,
 }
 
@@ -579,6 +579,7 @@ pub struct SetterDecl {
     pub is_static: bool,
     pub is_abstract: bool,
     pub is_external: bool,
+    pub is_covariant: bool,
     pub param_type: Option<DartType>,
     pub param_annotations: Vec<Annotation>,
     pub name: Identifier,
@@ -830,6 +831,7 @@ pub struct FunctionType {
 
 #[derive(Debug, Clone)]
 pub struct FunctionTypeParam {
+    pub annotations: Vec<Annotation>,
     pub name: Option<Identifier>,
     pub param_type: DartType,
     /// True for required positional parameters and explicitly required named parameters.
@@ -840,6 +842,8 @@ pub struct FunctionTypeParam {
 #[derive(Debug, Clone)]
 pub struct RecordType {
     pub positional: Vec<DartType>,
+    /// Optional source names, one entry per positional field; not part of its type.
+    pub positional_names: Vec<Option<Identifier>>,
     pub named: Vec<NamedRecordField>,
     pub is_nullable: bool,
     pub span: Span,
@@ -1630,7 +1634,7 @@ pub enum CollectionElement {
     For {
         /// `await for (...)` — an asynchronous for-in element in an async context.
         is_await: bool,
-        header: ForHeader,
+        header: Box<ForHeader>,
         element: Box<CollectionElement>,
         span: Span,
     },

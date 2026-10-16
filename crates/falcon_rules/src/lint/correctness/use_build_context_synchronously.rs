@@ -630,7 +630,7 @@ impl Visitor for Tree {
         } = node
         {
             self.group(
-                Key(header as *const ForHeader as usize, 10),
+                Key(&**header as *const ForHeader as usize, 10),
                 collection(node),
                 Some(collection(element)),
             );

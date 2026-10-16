@@ -25,7 +25,7 @@ class Derived extends Base {
   void extraAnnotated() => superCall();
 
   @override
-  void baz([int x = 0]) => super.baz(x);
+  void baz([int x = 0]) => super.baz(x); /* expect: unnecessary-overrides */
 
   void notOverride() => helper();
 }

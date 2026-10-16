@@ -29,10 +29,11 @@
 //!
 //! A statement whose member names, arguments, or right-hand side depend on
 //! the receiver breaks the chain, since a cascade would evaluate them before
-//! the earlier member access: a reference to `v` itself, and for a field or
-//! top-level-variable receiver also a closure or a reference to any member
-//! declared in the same class as the field (respectively any top-level
-//! declaration of the same library). One diagnostic covers each run of
+//! the earlier member access: a reference to the same local declaration (not
+//! a shadowing closure parameter), and for a field or top-level-variable receiver
+//! also a closure or a reference to any member declared in the same class as
+//! the field (respectively any top-level declaration of the same library).
+//! One diagnostic covers each run of
 //! joinable statements, from the first statement that could be cascaded to
 //! the last one. Where falcon cannot resolve a referenced member's declaring
 //! class (for example through an external type), it assumes a dependency and
@@ -50,7 +51,7 @@ use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, for_each_stmt_list, walk_expr};
 
 use crate::lint::const_eval::mentions_type_parameter;
-use crate::lint::lexical_usage::locally_bound_identifiers;
+use crate::lint::lexical_usage::local_declarations;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 #[derive(Default)]
@@ -62,7 +63,7 @@ impl Rule for CascadeInvocations {
             return Vec::new();
         };
         let mut statements = Statements {
-            locals: locally_bound_identifiers(program),
+            locals: local_declarations(program),
             prefixes: program
                 .imports
                 .iter()
@@ -109,7 +110,7 @@ enum Owner {
 #[derive(Clone, PartialEq, Eq)]
 enum Element {
     /// A local variable or parameter.
-    Local(String),
+    Local(usize),
     /// A field or top-level variable, read through its getter.
     Property { name: String, owner: Owner },
     /// A type name, as in `Type.property`.
@@ -120,8 +121,8 @@ enum Element {
 /// its own receiver go.
 #[derive(Default)]
 struct Critical {
-    /// Unqualified identifiers, with whether each names a local.
-    names: Vec<(String, bool)>,
+    /// Unqualified identifiers, with their local declaration when applicable.
+    names: Vec<(String, Option<usize>)>,
     /// Whether a closure occurs; it may read any property.
     closure: bool,
     /// Whether a member or top-level declaration of the receiver's owner is
@@ -132,15 +133,12 @@ struct Critical {
 impl Critical {
     /// Whether these nodes depend on `element`.
     fn depends_on(&self, element: &Element) -> bool {
-        let (name, local) = match element {
-            Element::Local(name) => (name, true),
-            Element::Property { name, .. } | Element::Type(name) => (name, false),
-        };
-        if self
-            .names
-            .iter()
-            .any(|(other, other_local)| other == name && *other_local == local)
-        {
+        if self.names.iter().any(|(name, declaration)| match element {
+            Element::Local(target) => declaration == &Some(*target),
+            Element::Property { name: target, .. } | Element::Type(target) => {
+                declaration.is_none() && name == target
+            }
+        }) {
             return true;
         }
         matches!(element, Element::Property { .. }) && (self.closure || self.owner_referenced)
@@ -187,8 +185,8 @@ impl Cascadable {
 /// Cascade facts of every expression and declaration statement, keyed by the
 /// statement's start.
 struct Statements {
-    /// Starts of identifiers that name locals.
-    locals: HashSet<usize>,
+    /// Local declarations keyed by their identifier uses.
+    locals: HashMap<usize, usize>,
     /// Import prefixes of this file.
     prefixes: HashSet<String>,
     facts: HashMap<usize, Cascadable>,
@@ -213,13 +211,13 @@ impl SemanticRuleVisitor for Statements {
 /// Name resolution at one statement.
 struct Scope<'s, 'a> {
     state: &'s SemanticState<'a>,
-    locals: &'s HashSet<usize>,
+    locals: &'s HashMap<usize, usize>,
     prefixes: &'s HashSet<String>,
 }
 
 impl Scope<'_, '_> {
     fn is_local(&self, identifier: &Identifier) -> bool {
-        self.locals.contains(&identifier.span.start)
+        self.locals.contains_key(&identifier.span.start)
     }
 
     fn declaration(&self, declaration: &LocalVarDecl) -> Cascadable {
@@ -232,7 +230,7 @@ impl Scope<'_, '_> {
         }
         let initializer: Vec<&Expr> = declarator.initializer.iter().collect();
         Cascadable {
-            element: Some(Element::Local(declarator.name.name.clone())),
+            element: Some(Element::Local(declarator.name.span.start)),
             critical: self.critical(&initializer, None),
             can_receive: declaration.keyword != VarKeyword::Const,
             ..Cascadable::default()
@@ -247,7 +245,7 @@ impl Scope<'_, '_> {
                 // `v = e` receives a following cascade on a local `v`; for a
                 // field or top-level variable the analyzer sees the setter.
                 Expr::Ident(identifier) if self.is_local(identifier) => Cascadable {
-                    element: Some(Element::Local(identifier.name.clone())),
+                    element: Some(Element::Local(self.locals[&identifier.span.start])),
                     critical: self.critical(&[value], None),
                     can_receive: *op != AssignOp::NullCoalesceEq,
                     ..Cascadable::default()
@@ -360,7 +358,7 @@ impl Scope<'_, '_> {
         };
         let name = identifier.name.as_str();
         if self.is_local(identifier) {
-            return Some(Element::Local(name.to_owned()));
+            return Some(Element::Local(self.locals[&identifier.span.start]));
         }
         match self.enclosing_member_owner(name) {
             Some(Some(owner)) => {
@@ -626,10 +624,12 @@ impl Visitor for Finder<'_, '_, '_> {
     fn visit_expr(&mut self, node: &Expr) {
         match node {
             Expr::Ident(identifier) => {
-                let local = self.scope.is_local(identifier);
-                self.critical.names.push((identifier.name.clone(), local));
+                let declaration = self.scope.locals.get(&identifier.span.start).copied();
+                self.critical
+                    .names
+                    .push((identifier.name.clone(), declaration));
                 if let Some(owner) = self.owner
-                    && !local
+                    && declaration.is_none()
                 {
                     self.critical.owner_referenced |=
                         self.scope.unqualified_in_owner(&identifier.name, owner);

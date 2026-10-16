@@ -5,7 +5,7 @@ void examples(String dynamicPattern) {
   final c = RegExp('(foo|bar)');
   final d = RegExp('a(b(c)d)e'); // balanced nested groups
   final e = RegExp(r'\d{3}-\d{4}'); // raw string, balanced
-  final f = RegExp('\\d+'); // non-raw with escapes — pattern not resolved, skipped
+  final f = RegExp('\\d+'); // decoded non-raw pattern
   final g = RegExp(dynamicPattern); // not a literal, skipped
   final h = RegExp('prefix-${dynamicPattern}'); // interpolated, skipped
   final i = RegExp(r'(?=foo)foo'); // lookahead
@@ -18,4 +18,15 @@ void examples(String dynamicPattern) {
   final p = RegExp(r'''[a-z]+''');
   final adjacent = RegExp('(' r'\d' ')');
   print([a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]);
+  RegExp('{');
+  RegExp('a{not-a-quantifier}');
+  RegExp(r'\xG0');
+  RegExp(r'\uZZZZ');
+  RegExp(r'\q');
+  RegExp(r'(?<=a)b');
+  RegExp(r'(?<!a)b');
+  RegExp(r'(?<word>a)\k<word>');
+  RegExp(r'(?=a)+');
+  RegExp(r'\p{Letter}+', unicode: true);
+  RegExp(r'\u{1F600}', unicode: true);
 }

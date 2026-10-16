@@ -10,4 +10,11 @@ void examples() {
   final h = 'emoji \u{1F600}'; // \u is a unicode escape
   final i = 'plain text';
   print([a, b, c, d, e, f, g, h, i]);
+  print('''three\'\'\'quotes''');
+  print('''two''\'quotes''');
+  print('''closing\'''');
+  print("""closing\"""");
+  print('''escaped\\backslash\nnewline''');
+  print(r'''raw\q\'quotes''');
+  print('''${"nested"}''');
 }

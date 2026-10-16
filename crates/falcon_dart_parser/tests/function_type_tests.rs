@@ -135,6 +135,34 @@ fn is_function_type_restores_conditional_question_mark() {
 }
 
 #[test]
+fn positional_record_type_fields_preserve_optional_source_names() {
+    let aliased = typedef_aliased("typedef R = (int first, String, bool last);");
+    let DartType::Record(record) = aliased else {
+        panic!("expected record type");
+    };
+    assert_eq!(record.positional.len(), 3);
+    let names: Vec<_> = record
+        .positional_names
+        .iter()
+        .map(|name| name.as_ref().map(|name| name.name.as_str()))
+        .collect();
+    assert_eq!(names, [Some("first"), None, Some("last")]);
+}
+
+#[test]
+fn function_type_parameters_preserve_annotations() {
+    for source in [
+        "typedef F = void Function(@deprecated int value);",
+        "typedef void F(@deprecated int value);",
+    ] {
+        let aliased = typedef_aliased(source);
+        let function = as_function(&aliased);
+        assert_eq!(function.params[0].annotations.len(), 1);
+        assert_eq!(function.params[0].annotations[0].name[0].name, "deprecated");
+    }
+}
+
+#[test]
 fn dynamic_function_return_in_typedef() {
     let aliased = typedef_aliased("typedef F = dynamic Function(int);");
     let f = as_function(&aliased);

@@ -27,3 +27,10 @@ enum Shade {
 
 /// A typedef's scope is closed: [day] and [T] resolve, [missingName] does not. /* expect: comment-references */
 typedef DayPredicate<T> = bool Function(DateTime day, T value);
+
+extension type WorkerScope(int value) {
+  void onconnect() {}
+}
+
+/// The obsolete camel-case event [WorkerScope.onConnect] does not exist. /* expect: comment-references */
+void listenToWorker() {}

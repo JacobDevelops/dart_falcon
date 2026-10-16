@@ -89,6 +89,8 @@ pub fn sdk_project() -> tempfile::TempDir {
          class _Internal { const _Internal(); }\n\
          const Object visibleForTesting = _VisibleForTesting();\n\
          class _VisibleForTesting { const _VisibleForTesting(); }\n\
+         const Object protected = _Protected();\n\
+         class _Protected { const _Protected(); }\n\
          const Object awaitNotRequired = _AwaitNotRequired();\n\
          class _AwaitNotRequired { const _AwaitNotRequired(); }\n\
          const Immutable immutable = Immutable();\n\
@@ -112,6 +114,12 @@ pub fn sdk_project() -> tempfile::TempDir {
          @immutable\n\
          abstract class Widget extends DiagnosticableTree { const Widget({this.key}); final Key? key; }\n\
          class SizedBox extends Widget { const SizedBox({super.key, this.width, this.height, this.child}); final double? width; final double? height; final Widget? child; }\n\
+         class Text extends Widget { const Text(String data, {super.key}); }\n\
+         class Center extends Widget { const Center({super.key, this.child}); final Widget? child; }\n\
+         class Column extends Widget { const Column({super.key, this.children = const []}); final List<Widget> children; }\n\
+         class EdgeInsets { const EdgeInsets.all(double value); static const zero = EdgeInsets.all(0); }\n\
+         class Padding extends Widget { const Padding({super.key, required this.padding, required this.child}); final EdgeInsets padding; final Widget child; }\n\
+         class Container extends Widget { Container({super.key, this.child, this.width}); final Widget? child; final double? width; }\n\
          abstract class StatelessWidget extends Widget { const StatelessWidget({super.key}); }\n\
          abstract class StatefulWidget extends Widget { const StatefulWidget({super.key}); }\n\
          abstract class State<T extends StatefulWidget> with Diagnosticable { bool get mounted; T get widget; }\n\
@@ -126,12 +134,19 @@ pub fn sdk_project() -> tempfile::TempDir {
     fs::write(
         root.join("flutter/packages/flutter/lib/foundation.dart"),
         "export 'package:meta/meta.dart' show visibleForTesting;\n\
+         export 'src/foundation/constants.dart';\n\
          mixin Diagnosticable { void debugFillProperties(DiagnosticPropertiesBuilder properties) {} }\n\
          abstract class DiagnosticableTree with Diagnosticable { const DiagnosticableTree(); }\n\
          mixin DiagnosticableTreeMixin implements DiagnosticableTree {}\n\
          class DiagnosticPropertiesBuilder { void add(Object property) {} }\n\
          class DiagnosticsProperty<T> { DiagnosticsProperty(String name, T value); }\n\
          class IntProperty extends DiagnosticsProperty<int> { IntProperty(super.name, super.value); }\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("flutter/packages/flutter/lib/src/foundation")).unwrap();
+    fs::write(
+        root.join("flutter/packages/flutter/lib/src/foundation/constants.dart"),
+        "const bool kDebugMode = true;\n",
     )
     .unwrap();
     let mut flutter_root = String::from("file://");

@@ -84,3 +84,23 @@ void constructorTypeTests() {
   NullableValue<int>.ofNullable(null); /* expect: prefer-const-constructors */
   NullableValue<int?>.ofNullable(1); /* expect: prefer-const-constructors */
 }
+
+// A record field's unresolved context is not evidence of a type parameter.
+final recordValues = [
+  (name: Box('TV'), id: 1), /* expect: prefer-const-constructors */
+  (
+    name: Box('Phone'), /* expect: prefer-const-constructors */
+    id: 2,
+  ),
+];
+
+// Unresolved receiver chains likewise must not block constant RHS expressions.
+abstract class Provider<T> {
+  T read();
+}
+
+void unresolvedAssignment(Provider<dynamic> provider) {
+  final notifier = provider.read().notifier;
+  notifier.state = Box(42); /* expect: prefer-const-constructors */
+  notifier.state = AsyncLoading(); /* expect: prefer-const-constructors */
+}

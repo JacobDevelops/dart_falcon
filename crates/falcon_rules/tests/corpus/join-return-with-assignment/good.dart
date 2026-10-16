@@ -68,3 +68,34 @@ int callStatement(List<int> list) {
   list.add(1);
   return list.length;
 }
+
+class StateBase {
+  int get state => 0;
+  set state(int value) {}
+}
+
+class ReadOverride extends StateBase {
+  @override
+  int get state => super.state;
+}
+
+// The getter and setter canonicalize to variables on different declarations.
+int splitAccessors(ReadOverride notifier) {
+  notifier.state = 1;
+  return notifier.state;
+}
+
+int splitAccessorChain(List<ReadOverride> notifiers) {
+  notifiers.first.state = 1;
+  return notifiers.first.state;
+}
+
+int differentReceivers(StateBase first, StateBase second) {
+  first.state = 1;
+  return second.state;
+}
+
+int differentAccessSyntax(StateBase notifier) {
+  notifier.state = 1;
+  return (notifier).state;
+}

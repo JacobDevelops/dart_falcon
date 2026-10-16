@@ -44,7 +44,7 @@ struct Collector<'a> {
 }
 
 fn non_nullable_bool(expression: &Expr, state: &SemanticState<'_>) -> bool {
-    let ty = state.infer_invocation(expression);
+    let ty = state.infer(expression);
     ty.interface("dart:core", "bool") && !ty.nullable()
 }
 

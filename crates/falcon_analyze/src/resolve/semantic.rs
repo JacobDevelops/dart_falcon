@@ -25,6 +25,9 @@ use super::{
 };
 use crate::environment::ExternalLibraries;
 
+mod default_syntax;
+pub use default_syntax::DefaultSyntaxKey;
+
 mod inherited;
 mod queries;
 pub use queries::ResolvedInvocation;
@@ -295,6 +298,115 @@ impl PartialEq for FunctionTypeAlias {
     }
 }
 
+/// Exact declaration shape; `Function::shape == None` means unavailable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionTypeShape {
+    pub required_named: Arc<[String]>,
+    /// Declared binders (identity and bound), in declaration order.
+    pub type_parameters: Arc<[ResolvedType]>,
+}
+
+impl FunctionTypeShape {
+    pub fn empty() -> Arc<Self> {
+        static EMPTY: std::sync::LazyLock<Arc<FunctionTypeShape>> =
+            std::sync::LazyLock::new(|| {
+                Arc::new(FunctionTypeShape {
+                    required_named: Arc::from([]),
+                    type_parameters: empty_type_arguments(),
+                })
+            });
+        Arc::clone(&EMPTY)
+    }
+
+    pub fn new(mut required_named: Vec<String>, type_parameters: Vec<ResolvedType>) -> Arc<Self> {
+        if required_named.is_empty() && type_parameters.is_empty() {
+            return Self::empty();
+        }
+        required_named.sort_unstable();
+        Arc::new(Self {
+            required_named: if required_named.is_empty() {
+                Arc::clone(&Self::empty().required_named)
+            } else {
+                required_named.into()
+            },
+            type_parameters: if type_parameters.is_empty() {
+                empty_type_arguments()
+            } else {
+                type_parameters.into()
+            },
+        })
+    }
+    /// Transforms binder bounds without replacing their declaration identities.
+    /// Unchanged shapes retain their shared storage.
+    pub fn map_bounds<'a>(
+        self: &'a Arc<Self>,
+        mut map: impl FnMut(&'a ResolvedType) -> ResolvedType,
+    ) -> Arc<Self> {
+        let mut mapped = None;
+        for (index, parameter) in self.type_parameters.iter().enumerate() {
+            let ResolvedType::TypeParameter {
+                id,
+                bound,
+                nullable,
+            } = parameter
+            else {
+                continue;
+            };
+            let result = map(bound);
+            if result != **bound {
+                let parameters = mapped.get_or_insert_with(|| self.type_parameters.to_vec());
+                parameters[index] = ResolvedType::TypeParameter {
+                    id: id.clone(),
+                    bound: Arc::new(result),
+                    nullable: *nullable,
+                };
+            }
+        }
+        mapped.map_or_else(
+            || Arc::clone(self),
+            |parameters| {
+                Arc::new(Self {
+                    required_named: Arc::clone(&self.required_named),
+                    type_parameters: parameters.into(),
+                })
+            },
+        )
+    }
+
+    /// Instantiated binders cease to be generic; retained binders keep their
+    /// identities while substitutions apply to their bounds.
+    fn substitute<'a>(
+        self: &'a Arc<Self>,
+        substitutions: &HashMap<TypeParameterId, ResolvedType>,
+        map: impl FnMut(&'a ResolvedType) -> ResolvedType,
+    ) -> Arc<Self> {
+        let mapped = self.map_bounds(map);
+        if !self.type_parameters.iter().any(|parameter| {
+            matches!(parameter, ResolvedType::TypeParameter { id, .. } if substitutions.contains_key(id))
+        }) {
+            return mapped;
+        }
+        Self::new(
+            mapped.required_named.to_vec(),
+            mapped.type_parameters.iter().filter(|parameter| {
+                !matches!(parameter, ResolvedType::TypeParameter { id, .. } if substitutions.contains_key(id))
+            }).cloned().collect(),
+        )
+    }
+
+    fn from_scope(
+        required_named: Vec<String>,
+        parameters: &[TypeParam],
+        scope: &TypeParameterScope,
+    ) -> Option<Arc<Self>> {
+        let parameters = parameters
+            .iter()
+            .map(|parameter| scope.lookup(&parameter.name.name))
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self::new(required_named, parameters))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ResolvedType {
     Unknown,
@@ -320,6 +432,7 @@ pub enum ResolvedType {
         bound: Arc<ResolvedType>,
     },
     Function {
+        shape: Option<Arc<FunctionTypeShape>>,
         alias: FunctionTypeAlias,
         /// Optional positional arity, retained for function UP shape checks.
         optional_positional: usize,
@@ -393,6 +506,7 @@ enum SubstitutionSourceKey<'a> {
         usize,
         bool,
         Option<*const AliasProvenance>,
+        Option<*const FunctionTypeShape>,
     ),
     Record(
         *const ResolvedType,
@@ -428,6 +542,7 @@ impl<'a> SubstitutionSourceKey<'a> {
                 optional_positional,
                 nullable,
                 alias,
+                shape,
             } => Some(Self::Function(
                 Arc::as_ptr(return_type),
                 positional.as_ptr(),
@@ -437,6 +552,7 @@ impl<'a> SubstitutionSourceKey<'a> {
                 *optional_positional,
                 *nullable,
                 alias.0.as_ref().map(Arc::as_ptr),
+                shape.as_ref().map(Arc::as_ptr),
             )),
             ResolvedType::Record {
                 occurrence,
@@ -490,6 +606,7 @@ impl<'a> SubstitutionMemo<'a> {
                 return_type,
                 positional,
                 named,
+                shape,
                 ..
             } => {
                 self.is_relevant(return_type, substitutions, true)
@@ -499,6 +616,10 @@ impl<'a> SubstitutionMemo<'a> {
                     || named
                         .iter()
                         .any(|(_, ty)| self.is_relevant(ty, substitutions, true))
+                    || shape.as_ref().is_some_and(|shape| shape.type_parameters.iter().any(|ty| {
+                        matches!(ty, ResolvedType::TypeParameter { id, bound, .. }
+                            if substitutions.contains_key(id) || self.is_relevant(bound, substitutions, true))
+                    }))
             }
             ResolvedType::Record {
                 positional, named, ..
@@ -602,6 +723,7 @@ impl ResolvedType {
                     named: a,
                     nullable: an,
                     alias: a_alias,
+                    shape: a_shape,
                     ..
                 },
                 Self::Function {
@@ -611,6 +733,7 @@ impl ResolvedType {
                     named: b,
                     nullable: bn,
                     alias: b_alias,
+                    shape: b_shape,
                     ..
                 },
             ) => {
@@ -619,6 +742,9 @@ impl ResolvedType {
                     AliasComparison::Substitution => !a_alias.same_substitution_source(b_alias),
                     AliasComparison::Origin => !a_alias.same_origin(b_alias),
                 } {
+                    return false;
+                }
+                if a_shape != b_shape {
                     return false;
                 }
                 if ao != bo || an != bn || ap.len() != bp.len() || a.len() != b.len() {
@@ -783,10 +909,16 @@ impl ResolvedType {
                 positional,
                 named,
                 nullable,
+                shape,
                 ..
             } => {
                 optional_positional.hash(&mut state);
                 nullable.hash(&mut state);
+                shape.is_some().hash(&mut state);
+                if let Some(shape) = shape {
+                    shape.required_named.hash(&mut state);
+                    Self::hash_types(&shape.type_parameters, memo, &mut state);
+                }
                 return_type.structural_hash(memo).hash(&mut state);
                 Self::hash_types(positional, memo, &mut state);
                 Self::hash_named(named, memo, &mut state);
@@ -1081,6 +1213,7 @@ mod type_graph_tests {
         let integer = model.core_type("int", false);
         let sources = [
             ResolvedType::Function {
+                shape: Some(FunctionTypeShape::empty()),
                 alias: FunctionTypeAlias::default(),
                 return_type: Arc::new(integer.clone()),
                 positional: vec![integer.clone()].into(),
@@ -1152,6 +1285,7 @@ mod type_graph_tests {
     #[test]
     fn substitution_keys_preserve_distinct_function_origins() {
         let function = |offset| ResolvedType::Function {
+            shape: Some(FunctionTypeShape::empty()),
             optional_positional: 0,
             alias: FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
                 identity: DeclarationIdentity::OBJECT,
@@ -1215,6 +1349,7 @@ mod type_graph_tests {
             })))
         };
         let function = ResolvedType::Function {
+            shape: Some(FunctionTypeShape::empty()),
             alias: provenance(1),
             optional_positional: 0,
             return_type: Arc::new(parameter.clone()),
@@ -1363,6 +1498,7 @@ mod type_graph_tests {
             })))
         };
         let mut graph = ResolvedType::Function {
+            shape: Some(FunctionTypeShape::empty()),
             alias: provenance(1),
             return_type: Arc::new(ResolvedType::Void),
             positional: empty_type_arguments(),
@@ -1444,6 +1580,7 @@ mod type_graph_tests {
             origin: Some((None, 1)),
         })));
         let function = ResolvedType::Function {
+            shape: Some(FunctionTypeShape::empty()),
             alias: Default::default(),
             return_type: Arc::new(ResolvedType::Void),
             positional: empty_type_arguments(),
@@ -1483,6 +1620,7 @@ mod type_graph_tests {
             name: "T".into(),
         };
         let source = ResolvedType::Function {
+            shape: Some(FunctionTypeShape::empty()),
             alias: FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
                 identity: DeclarationIdentity::OBJECT,
                 origin: Some((None, 1)),
@@ -1591,6 +1729,7 @@ fn find_type_including_bounds<'a>(
             return_type,
             positional,
             named,
+            shape,
             ..
         } => find_type_including_bounds(return_type, predicate, seen, include_bounds)
             .or_else(|| {
@@ -1601,6 +1740,16 @@ fn find_type_including_bounds<'a>(
             .or_else(|| {
                 named.iter().find_map(|(_, ty)| {
                     find_type_including_bounds(ty, predicate, seen, include_bounds)
+                })
+            })
+            .or_else(|| {
+                shape.as_ref().and_then(|shape| {
+                    shape.type_parameters.iter().find_map(|parameter| {
+                        let ResolvedType::TypeParameter { bound, .. } = parameter else {
+                            return None;
+                        };
+                        find_type_including_bounds(bound, predicate, seen, include_bounds)
+                    })
                 })
             }),
         ResolvedType::Record {
@@ -1771,15 +1920,24 @@ fn instantiate_bound_type_memoized(
                         return_type: source_return,
                         positional: source_positional,
                         named: source_named,
+                        shape: source_shape,
                         ..
                     },
                     ResolvedType::Function {
                         return_type,
                         positional,
                         named,
+                        shape,
                         ..
                     },
                 ) => {
+                    *shape = source_shape.as_ref().map(|shape| {
+                        shape.map_bounds(|bound| {
+                            instantiate_bound_type_memoized(
+                                bound, bounds, visiting, covariant, memo,
+                            )
+                        })
+                    });
                     *return_type = Arc::new(instantiate_bound_type_memoized(
                         source_return,
                         bounds,
@@ -2160,8 +2318,10 @@ impl ResolvedType {
                 named,
                 alias,
                 optional_positional,
+                shape,
                 ..
             } => Self::Function {
+                shape: shape.clone(),
                 optional_positional: *optional_positional,
                 return_type: return_type.clone(),
                 positional: positional.clone(),
@@ -2429,6 +2589,15 @@ impl<'a> SemanticModel<'a> {
             .collect();
         named.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
         ResolvedType::Function {
+            shape: FunctionTypeShape::from_scope(
+                function_params
+                    .named()
+                    .filter(|param| matches!(param.kind, ParamKind::Named { required: true }))
+                    .map(|param| param.name.name.clone())
+                    .collect(),
+                &param.type_params,
+                parameters,
+            ),
             optional_positional: function_params
                 .positional()
                 .filter(|param| param.kind == ParamKind::OptionalPositional)
@@ -2656,6 +2825,16 @@ impl<'a> SemanticModel<'a> {
                     .collect();
                 named.sort_by(|left, right| left.0.cmp(&right.0));
                 ResolvedType::Function {
+                    shape: FunctionTypeShape::from_scope(
+                        function
+                            .params
+                            .iter()
+                            .filter(|param| param.is_named && param.is_required)
+                            .filter_map(|param| param.name.as_ref().map(|name| name.name.clone()))
+                            .collect(),
+                        &function.type_params,
+                        &function_parameters,
+                    ),
                     optional_positional: function
                         .params
                         .iter()
@@ -2983,8 +3162,14 @@ impl<'a> SemanticModel<'a> {
                 nullable,
                 alias,
                 optional_positional,
+                shape,
             } => {
                 let mut substituted = ResolvedType::Function {
+                    shape: shape.as_ref().map(|shape| {
+                        shape.substitute(substitutions, |bound| {
+                            self.substitute_memoized_inner(bound, substitutions, records, true)
+                        })
+                    }),
                     optional_positional: *optional_positional,
                     alias: FunctionTypeAlias::default(),
                     return_type: Arc::new(self.substitute_memoized_inner(
@@ -3278,11 +3463,58 @@ impl<'a> SemanticModel<'a> {
     }
 }
 
+/// Declaration spelling facts that are not part of a parameter's resolved type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParameterContract {
+    pub name: String,
+    pub kind: ParamKind,
+    pub is_covariant: bool,
+    /// Span- and trivia-independent syntax of an explicit default; absent for implicit null.
+    pub default_value_code: Option<DefaultSyntaxKey>,
+}
+
+fn empty_parameter_contracts() -> Arc<[ParameterContract]> {
+    static EMPTY: std::sync::LazyLock<Arc<[ParameterContract]>> =
+        std::sync::LazyLock::new(|| Arc::from([]));
+    Arc::clone(&EMPTY)
+}
+
+fn setter_parameter_contracts(name: &str, is_covariant: bool) -> Arc<[ParameterContract]> {
+    Arc::from([ParameterContract {
+        name: name.to_string(),
+        kind: ParamKind::Positional,
+        is_covariant,
+        default_value_code: None,
+    }])
+}
+
+fn parameter_contracts(params: &FormalParamList) -> Arc<[ParameterContract]> {
+    if params.params.is_empty() {
+        return empty_parameter_contracts();
+    }
+    params
+        .params
+        .iter()
+        .map(|param| ParameterContract {
+            name: param.name.name.clone(),
+            kind: param.kind,
+            is_covariant: param.is_covariant,
+            default_value_code: param
+                .default_value
+                .as_ref()
+                .map(default_syntax::default_syntax_key),
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedSignature {
     pub owner_parameters: Vec<TypeParameterId>,
     pub call_parameters: Vec<TypeParameterId>,
+    /// Exact required names and declared binders, or `None` when unavailable.
+    pub shape: Option<Arc<FunctionTypeShape>>,
     pub positional: Vec<ResolvedType>,
+    pub optional_positional: usize,
     /// The default value of each parameter that has one, keyed by parameter
     /// name (positional and named).
     pub defaults: HashMap<String, ParameterDefault>,
@@ -3300,6 +3532,8 @@ impl ResolvedSignature {
         Self {
             owner_parameters: Vec::new(),
             call_parameters: Vec::new(),
+            shape: None,
+            optional_positional: 0,
             defaults: HashMap::new(),
             positional_parameter_names: Vec::new(),
             non_optional_defaults: HashSet::new(),
@@ -3318,21 +3552,29 @@ impl ResolvedSignature {
             .collect();
         named.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
         ResolvedType::Function {
-            optional_positional: self
-                .positional_parameter_names
-                .iter()
-                .filter(|name| !name.is_empty())
-                .count(),
+            optional_positional: self.optional_positional,
             alias: FunctionTypeAlias::default(),
             return_type: Arc::new(self.return_type.clone()),
             positional: self.positional.clone().into(),
             named: named.into(),
+            shape: self.shape.clone(),
             nullable: false,
         }
     }
 
     /// Recover a local callable's own parameters, excluding enclosing lexical parameters.
     pub fn bind_local_type_parameters(&mut self, scope: &TypeParameterScope) {
+        if let Some(shape) = &self.shape {
+            self.call_parameters = shape
+                .type_parameters
+                .iter()
+                .filter_map(|ty| match ty {
+                    ResolvedType::TypeParameter { id, .. } => Some(id.clone()),
+                    _ => None,
+                })
+                .collect();
+            return;
+        }
         collect_parameter_ids(&self.return_type, &mut self.call_parameters);
         for ty in &self.positional {
             collect_parameter_ids(ty, &mut self.call_parameters);
@@ -3345,6 +3587,19 @@ impl ResolvedSignature {
             Some(ResolvedType::TypeParameter { id: scoped, .. }) if scoped == *id)
         });
         self.call_parameters.sort_by_key(|id| id.ordinal);
+    }
+
+    /// Preserve declared shape while instantiating supplied call or owner parameters.
+    pub fn substituted_shape(
+        &self,
+        model: &SemanticModel<'_>,
+        substitutions: &HashMap<TypeParameterId, ResolvedType>,
+    ) -> Option<Arc<FunctionTypeShape>> {
+        self.shape.as_ref().map(|shape| {
+            shape.substitute(substitutions, |bound| {
+                model.substitute(bound, substitutions)
+            })
+        })
     }
 
     /// The signature of a local function or function literal declared with
@@ -3368,6 +3623,11 @@ impl ResolvedSignature {
                     .positional
                     .iter()
                     .chain(self.named.values())
+                    .chain(
+                        self.shape
+                            .iter()
+                            .flat_map(|shape| shape.type_parameters.iter()),
+                    )
                     .any(|ty| mentions_any(ty, &self.owner_parameters)))
     }
 }
@@ -3434,6 +3694,8 @@ pub struct MemberFacts {
     pub is_static: bool,
     pub is_abstract: bool,
     pub positional_parameter_names: Vec<String>,
+    /// Accessor-specific declaration facts; `None` is unavailable, not empty.
+    pub parameter_contracts: Option<Arc<[ParameterContract]>>,
     /// The resolved external (SDK or package) annotations on this declaration,
     /// such as `meta`'s `awaitNotRequired`.
     pub annotations: Vec<DeclarationIdentity>,
@@ -4409,6 +4671,9 @@ impl SignatureIndex {
             self.value_types.extend(pending_values.drain());
             retry_partial = false;
         }
+        for (program, model) in programs {
+            self.propagate_parameter_covariance(program, model);
+        }
     }
 
     /// Propagate callable headers before initializers and revisit dependencies
@@ -5328,6 +5593,16 @@ impl SignatureIndex {
                     );
                 }
                 TopLevelDecl::Extension(extension) => {
+                    if let Some(name) = &extension.name {
+                        self.add_type(
+                            &name.name,
+                            &extension.type_params,
+                            Vec::new(),
+                            Vec::new(),
+                            &EffectiveMembers::declared(&extension.members),
+                            model,
+                        );
+                    }
                     let mut parameters = TypeParameterScope::default();
                     parameters.push(&extension.type_params, model);
                     let owner_parameters = parameter_ids(&parameters, &extension.type_params);
@@ -5588,6 +5863,7 @@ impl SignatureIndex {
                             is_static: true,
                             is_abstract: false,
                             positional_parameter_names: Vec::new(),
+                            parameter_contracts: Some(empty_parameter_contracts()),
                             annotations: Vec::new(),
                         });
                         self.enum_values.insert(
@@ -6340,6 +6616,7 @@ impl SignatureIndex {
             entry.is_instance_method = true;
             entry.signature = Some(ResolvedSignature {
                 owner_parameters: parameters,
+                shape: Some(FunctionTypeShape::empty()),
                 positional,
                 ..ResolvedSignature::returning(return_type)
             });
@@ -6372,6 +6649,19 @@ impl SignatureIndex {
                     kind,
                     is_static: false,
                     is_abstract: false,
+                    parameter_contracts: Some(if parameters.is_empty() {
+                        empty_parameter_contracts()
+                    } else {
+                        parameters
+                            .iter()
+                            .map(|name| ParameterContract {
+                                name: name.clone(),
+                                kind: ParamKind::Positional,
+                                is_covariant: false,
+                                default_value_code: None,
+                            })
+                            .collect()
+                    }),
                     positional_parameter_names: parameters,
                     annotations: Vec::new(),
                 });
@@ -6462,7 +6752,9 @@ impl SignatureIndex {
         entry.signature = Some(ResolvedSignature {
             owner_parameters: vec![sdk_parameter("Iterable", 0)],
             call_parameters: vec![map_parameter],
+            shape: Some(FunctionTypeShape::new(Vec::new(), vec![map_type.clone()])),
             positional: vec![ResolvedType::Function {
+                shape: Some(FunctionTypeShape::empty()),
                 alias: FunctionTypeAlias::default(),
                 optional_positional: 0,
                 return_type: Arc::new(map_type.clone()),
@@ -6586,6 +6878,7 @@ impl SignatureIndex {
         listen.signature = Some(ResolvedSignature {
             owner_parameters: vec![sdk_parameter("Stream", 0)],
             positional: vec![ResolvedType::Function {
+                shape: Some(FunctionTypeShape::empty()),
                 alias: FunctionTypeAlias::default(),
                 optional_positional: 0,
                 return_type: Arc::new(ResolvedType::Void),
@@ -6632,7 +6925,9 @@ impl SignatureIndex {
         members: &EffectiveMembers<'_>,
         model: &SemanticModel<'_>,
     ) {
-        let Some(identity) = model.resolve_name(name) else {
+        let type_identity = model.resolve_name(name);
+        let is_extension = type_identity.is_none();
+        let Some(identity) = type_identity.or_else(|| model.resolve_extension(name)) else {
             return;
         };
         let mut scope = TypeParameterScope::default();
@@ -6694,7 +6989,8 @@ impl SignatureIndex {
             .collect();
         // Extension types retain only their declared superinterfaces: their
         // representation may admit null, so an implicit Object edge is unsound.
-        let inherits_object = identity != DeclarationIdentity::OBJECT
+        let inherits_object = !is_extension
+            && identity != DeclarationIdentity::OBJECT
             && self.type_kind(&identity) != Some(TypeKind::ExtensionType);
         if inherits_object {
             resolved_supertypes.push(model.core_type("Object", false));
@@ -6717,15 +7013,6 @@ impl SignatureIndex {
             match member {
                 ClassMember::Method(method) => {
                     let entry = entries.entry(method.name.name.clone()).or_default();
-                    entry.facts.push(MemberFacts {
-                        declaring_type: identity.clone(),
-                        kind: MemberKind::Method,
-                        is_static: method.is_static,
-                        // An `external` method has no body but is concrete.
-                        is_abstract: method.is_abstract && !method.is_external,
-                        positional_parameter_names: positional_parameter_names(&method.params),
-                        annotations: resolve_annotations(&method.annotations, model),
-                    });
                     scope.push(&method.type_params, model);
                     record_bound_declarations(
                         &mut self.bound_declared,
@@ -6747,6 +7034,16 @@ impl SignatureIndex {
                         None,
                         model,
                     ));
+                    entry.facts.push(MemberFacts {
+                        declaring_type: identity.clone(),
+                        kind: MemberKind::Method,
+                        is_static: method.is_static,
+                        // An `external` method has no body but is concrete.
+                        is_abstract: method.is_abstract && !method.is_external,
+                        positional_parameter_names: positional_parameter_names(&method.params),
+                        annotations: resolve_annotations(&method.annotations, model),
+                        parameter_contracts: Some(parameter_contracts(&method.params)),
+                    });
                     scope.pop();
                 }
                 ClassMember::Constructor(constructor) => {
@@ -6777,6 +7074,7 @@ impl SignatureIndex {
                         .map(|ty| model.resolve_type_in(ty, &scope))
                         .unwrap_or(ResolvedType::Unknown);
                     for declarator in &field.declarators {
+                        let kind = MemberKind::field(field, declarator);
                         let entry = entries.entry(declarator.name.name.clone()).or_default();
                         entry.promotable_field = declarator.name.name.starts_with('_')
                             && !field.is_static
@@ -6785,16 +7083,30 @@ impl SignatureIndex {
                             && matches!(field.keyword, VarKeyword::Final | VarKeyword::Const);
                         entry.facts.push(MemberFacts {
                             declaring_type: identity.clone(),
-                            kind: MemberKind::field(field),
+                            kind,
                             is_static: field.is_static,
                             is_abstract: field.is_abstract,
                             positional_parameter_names: Vec::new(),
+                            parameter_contracts: Some(if kind.has_setter() {
+                                setter_parameter_contracts(
+                                    "value",
+                                    matches!(
+                                        kind,
+                                        MemberKind::Field {
+                                            covariant: true,
+                                            ..
+                                        }
+                                    ),
+                                )
+                            } else {
+                                empty_parameter_contracts()
+                            }),
                             annotations: resolve_annotations(&field.annotations, model),
                         });
                         entry.field = Some((owner_parameters.clone(), field_type.clone()));
                         if !field.is_static {
                             entry.read = Some(field_type.clone());
-                            if field.keyword == VarKeyword::Var {
+                            if kind.has_setter() {
                                 entry.write = Some(field_type.clone());
                             }
                         }
@@ -6808,6 +7120,7 @@ impl SignatureIndex {
                         is_static: getter.is_static,
                         is_abstract: getter.is_abstract,
                         positional_parameter_names: Vec::new(),
+                        parameter_contracts: Some(empty_parameter_contracts()),
                         annotations: resolve_annotations(&getter.annotations, model),
                     });
                     let return_type = getter
@@ -6829,6 +7142,10 @@ impl SignatureIndex {
                         is_static: setter.is_static,
                         is_abstract: setter.is_abstract,
                         positional_parameter_names: vec![setter.param.name.clone()],
+                        parameter_contracts: Some(setter_parameter_contracts(
+                            &setter.param.name,
+                            setter.is_covariant,
+                        )),
                         annotations: resolve_annotations(&setter.annotations, model),
                     });
                     let parameter_type = setter
@@ -6847,14 +7164,6 @@ impl SignatureIndex {
                     let entry = entries
                         .entry(operator.lookup_name().to_owned())
                         .or_default();
-                    entry.facts.push(MemberFacts {
-                        declaring_type: identity.clone(),
-                        kind: MemberKind::Operator,
-                        is_static: false,
-                        is_abstract: operator.body.is_none() && !operator.is_external,
-                        positional_parameter_names: positional_parameter_names(&operator.params),
-                        annotations: resolve_annotations(&operator.annotations, model),
-                    });
                     entry.is_instance_method = true;
                     entry.override_shape =
                         Some(inherited::OverrideShape::new(&operator.params, &[], &scope));
@@ -6867,6 +7176,15 @@ impl SignatureIndex {
                         None,
                         model,
                     ));
+                    entry.facts.push(MemberFacts {
+                        declaring_type: identity.clone(),
+                        kind: MemberKind::Operator,
+                        is_static: false,
+                        is_abstract: operator.body.is_none() && !operator.is_external,
+                        positional_parameter_names: positional_parameter_names(&operator.params),
+                        annotations: resolve_annotations(&operator.annotations, model),
+                        parameter_contracts: Some(parameter_contracts(&operator.params)),
+                    });
                 }
                 // Indexed through the constructor it completes (`element_members`).
                 ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
@@ -6886,6 +7204,11 @@ impl SignatureIndex {
                 is_static: false,
                 is_abstract: false,
                 positional_parameter_names: Vec::new(),
+                parameter_contracts: Some(if is_final {
+                    empty_parameter_contracts()
+                } else {
+                    setter_parameter_contracts("value", parameter.is_covariant)
+                }),
                 annotations: resolve_annotations(&parameter.annotations, model),
             });
             entry.field = Some((owner_parameters.clone(), field_type.clone()));
@@ -6895,6 +7218,56 @@ impl SignatureIndex {
             }
         }
         if let Some(primary) = members.primary {
+            let mut primary_signature = signature(
+                &scope,
+                &owner_parameters,
+                &[],
+                Some(&primary.params),
+                None,
+                Some(&field_types),
+                model,
+            );
+            for parameter in primary.params.named().filter(|parameter| {
+                (parameter.is_final || parameter.is_var || members.representation)
+                    && parameter.name.name.starts_with('_')
+            }) {
+                let name = &parameter.name.name;
+                let label = name.trim_start_matches('_');
+                if let Some(ty) = primary_signature.named.remove(name) {
+                    primary_signature.named.insert(label.to_string(), ty);
+                }
+                if let Some(default) = primary_signature.defaults.remove(name) {
+                    primary_signature
+                        .defaults
+                        .insert(label.to_string(), default);
+                }
+                if primary_signature.non_optional_defaults.remove(name) {
+                    primary_signature
+                        .non_optional_defaults
+                        .insert(label.to_string());
+                }
+            }
+            if let Some(shape) = &primary_signature.shape {
+                primary_signature.shape = Some(FunctionTypeShape::new(
+                    shape
+                        .required_named
+                        .iter()
+                        .map(|name| {
+                            if primary.params.named().any(|parameter| {
+                                parameter.name.name == *name
+                                    && (parameter.is_final
+                                        || parameter.is_var
+                                        || members.representation)
+                            }) {
+                                name.trim_start_matches('_').to_string()
+                            } else {
+                                name.clone()
+                            }
+                        })
+                        .collect(),
+                    shape.type_parameters.to_vec(),
+                ));
+            }
             self.constructors
                 .entry(identity.clone())
                 .or_default()
@@ -6903,18 +7276,12 @@ impl SignatureIndex {
                         .constructor_name
                         .as_ref()
                         .map_or_else(|| "new".to_string(), |name| name.name.clone()),
-                    signature(
-                        &scope,
-                        &owner_parameters,
-                        &[],
-                        Some(&primary.params),
-                        None,
-                        Some(&field_types),
-                        model,
-                    ),
+                    primary_signature,
                 );
         }
-        if let DeclarationIdentity::Project { library, .. } = identity {
+        if let DeclarationIdentity::Project { library, .. } = identity
+            && !is_extension
+        {
             for (name, entry) in entries {
                 if name.starts_with('_')
                     && !entry.promotable_field
@@ -7356,6 +7723,7 @@ impl SignatureIndex {
                                 .map(|&parameter| parameter.to_owned())
                                 .collect(),
                             annotations: Vec::new(),
+                            parameter_contracts: None,
                         },
                     ),
                 ),
@@ -7649,14 +8017,18 @@ impl SignatureIndex {
         name: &str,
     ) -> Option<Option<&MemberFacts>> {
         let mut visited = HashSet::from([identity.clone()]);
-        if let Some(found) =
-            self.concrete_member_in_chain(identity, identity, name, &mut visited)?
-        {
+        if let Some((found, _)) = self.concrete_member_in_chain(
+            identity,
+            identity,
+            name,
+            |fact| fact.kind != MemberKind::Setter,
+            &mut visited,
+        )? {
             return Some(Some(found));
         }
         Some(
             self.declared_member(identity, &DeclarationIdentity::OBJECT, name, |fact| {
-                !fact.is_abstract
+                !fact.is_abstract && fact.kind != MemberKind::Setter
             }),
         )
     }
@@ -7666,8 +8038,9 @@ impl SignatureIndex {
         owner: &DeclarationIdentity,
         identity: &DeclarationIdentity,
         name: &str,
+        filter: impl Fn(&MemberFacts) -> bool + Copy,
         visited: &mut HashSet<DeclarationIdentity>,
-    ) -> Option<Option<&MemberFacts>> {
+    ) -> Option<Option<(&MemberFacts, &ResolvedType)>> {
         for supertype in self.member_supertypes.get(identity)? {
             let ResolvedType::Interface { identity: next, .. } = supertype else {
                 return None;
@@ -7680,11 +8053,15 @@ impl SignatureIndex {
             if matches!(next, DeclarationIdentity::Sdk { .. }) && !self.kinds.contains_key(next) {
                 return None;
             }
-            if let Some(found) = self.declared_member(owner, next, name, |fact| !fact.is_abstract) {
-                return Some(Some(found));
+            if let Some(found) =
+                self.declared_member(owner, next, name, |fact| !fact.is_abstract && filter(fact))
+            {
+                return Some(Some((found, supertype)));
             }
-            if let Some(found) = self.concrete_member_in_chain(owner, next, name, visited)? {
-                return Some(Some(found));
+            if let Some((found, _)) =
+                self.concrete_member_in_chain(owner, next, name, filter, visited)?
+            {
+                return Some(Some((found, supertype)));
             }
         }
         Some(None)
@@ -7722,7 +8099,9 @@ impl SignatureIndex {
         {
             return None;
         }
-        if let Some(found) = self.declared_member(owner, identity, name, |_| true) {
+        if let Some(found) = self.declared_member(owner, identity, name, |fact| {
+            fact.kind != MemberKind::Setter
+        }) {
             return Some(Some(found));
         }
         if is_object {
@@ -7740,8 +8119,8 @@ impl SignatureIndex {
         Some(None)
     }
 
-    /// `identity`'s own non-static, non-setter declaration of `name` matching
-    /// `filter`, if visible from `owner` (private names are library-scoped).
+    /// `identity`'s own non-static declaration of `name` matching `filter`,
+    /// if visible from `owner` (private names are library-scoped).
     fn declared_member(
         &self,
         owner: &DeclarationIdentity,
@@ -7755,12 +8134,7 @@ impl SignatureIndex {
         self.member_entry(identity, name)?
             .facts
             .iter()
-            .find(|fact| {
-                !fact.is_static
-                    && fact.kind != MemberKind::Setter
-                    && fact.declaring_type == *identity
-                    && filter(fact)
-            })
+            .find(|fact| !fact.is_static && fact.declaring_type == *identity && filter(fact))
     }
 
     pub fn unrelated(
@@ -7960,7 +8334,11 @@ impl SignatureIndex {
                 named,
                 nullable,
                 optional_positional,
+                shape,
             } => ResolvedType::Function {
+                shape: shape
+                    .as_ref()
+                    .map(|shape| shape.map_bounds(|bound| self.instantiate_to_bounds(bound))),
                 optional_positional: *optional_positional,
                 alias: alias.clone(),
                 return_type: Arc::new(self.instantiate_to_bounds(return_type)),
@@ -8318,7 +8696,24 @@ impl SignatureIndex {
             return Truth::No;
         }
         let Some((_, supertypes)) = self.supertypes.get(identity) else {
-            return Truth::Unknown;
+            return SDK_HIERARCHY
+                .iter()
+                .find(|(library, name, _, _)| identity.is_sdk(library, name))
+                .map_or(Truth::Unknown, |(_, _, _, supertypes)| {
+                    let mut result = Truth::No;
+                    for (library, name) in *supertypes {
+                        match self.identity_implements(
+                            &DeclarationIdentity::sdk(library, name),
+                            is_target,
+                            visited,
+                        ) {
+                            Truth::Yes => return Truth::Yes,
+                            Truth::Unknown => result = Truth::Unknown,
+                            Truth::No => {}
+                        }
+                    }
+                    result
+                });
         };
         let mut result = Truth::No;
         for supertype in supertypes {
@@ -9117,6 +9512,31 @@ impl SignatureIndex {
         name: &str,
         model: &SemanticModel<'_>,
     ) -> Option<ResolvedType> {
+        self.super_receiver_accesses(
+            this_type,
+            name,
+            &[InstanceAccess::Read, InstanceAccess::Invoke],
+            model,
+        )
+    }
+
+    /// The supertype through which a `super.name` assignment resolves.
+    pub fn super_receiver_for_write(
+        &self,
+        this_type: &ResolvedType,
+        name: &str,
+        model: &SemanticModel<'_>,
+    ) -> Option<ResolvedType> {
+        self.super_receiver_accesses(this_type, name, &[InstanceAccess::Write], model)
+    }
+
+    fn super_receiver_accesses(
+        &self,
+        this_type: &ResolvedType,
+        name: &str,
+        accesses: &[InstanceAccess],
+        model: &SemanticModel<'_>,
+    ) -> Option<ResolvedType> {
         let ResolvedType::Interface {
             occurrence,
             identity,
@@ -9137,19 +9557,18 @@ impl SignatureIndex {
             .iter()
             .map(|supertype| model.substitute(supertype, &substitutions))
             .collect();
-        let accesses = [InstanceAccess::Read, InstanceAccess::Invoke];
         // Every candidate's implementation chain precedes any interface.
         let position = supertypes
             .iter()
             .position(|supertype| {
-                accesses.into_iter().any(|access| {
+                accesses.iter().copied().any(|access| {
                     self.resolved_owner_through(supertype, name, access, false, model)
                         .is_some()
                 })
             })
             .or_else(|| {
                 supertypes.iter().position(|supertype| {
-                    accesses.into_iter().any(|access| {
+                    accesses.iter().copied().any(|access| {
                         self.resolved_instance_owner(supertype, name, access, model)
                             .is_some()
                     })
@@ -9604,8 +10023,23 @@ fn signature(
     };
     let has_default = |param: &FormalParam| param.default_value.is_some() || optional(param);
     ResolvedSignature {
+        optional_positional: params
+            .into_iter()
+            .flat_map(|params| params.positional())
+            .filter(|param| param.kind == ParamKind::OptionalPositional)
+            .count(),
         owner_parameters: owner_parameters.to_vec(),
         call_parameters: parameter_ids(scope, call_parameters),
+        shape: FunctionTypeShape::from_scope(
+            params
+                .into_iter()
+                .flat_map(|params| params.named())
+                .filter(|param| matches!(param.kind, ParamKind::Named { required: true }))
+                .map(|param| param.name.name.clone())
+                .collect(),
+            call_parameters,
+            scope,
+        ),
         positional_parameter_names: params
             .filter(|params| params.positional().any(has_default))
             .map_or_else(Vec::new, |params| {
@@ -10634,7 +11068,9 @@ impl TypeEnvironment {
         {
             return signatures.value_type(&identity).cloned();
         }
-        let identity = model.resolve_dotted(&segments)?;
+        let identity = model
+            .resolve_dotted(&segments)
+            .or_else(|| model.resolve_extension(QualifiedName::from_segments(&segments)?))?;
         if signatures.is_enum_value(&identity, name) {
             return Some(ResolvedType::interface_identity(identity));
         }
@@ -10778,7 +11214,12 @@ impl TypeEnvironment {
             return None;
         }
         let signature = ResolvedSignature {
+            shape: constructor.map_or_else(
+                || Some(FunctionTypeShape::empty()),
+                |signature| signature.substituted_shape(context.model, &owner),
+            ),
             call_parameters: parameters,
+            optional_positional: constructor.map_or(0, |signature| signature.optional_positional),
             positional: constructor.map_or_else(Vec::new, |signature| {
                 signature
                     .positional
@@ -11895,6 +12336,16 @@ impl TypeEnvironment {
             }
         };
         ResolvedType::Function {
+            shape: FunctionTypeShape::from_scope(
+                function
+                    .params
+                    .named()
+                    .filter(|param| matches!(param.kind, ParamKind::Named { required: true }))
+                    .map(|param| param.name.name.clone())
+                    .collect(),
+                function.type_params,
+                &function_parameters,
+            ),
             optional_positional: function
                 .params
                 .positional()
@@ -13126,73 +13577,6 @@ fn top_rank(ty: &ResolvedType) -> Option<u8> {
     }
 }
 
-/// Function variance for inference, restricted to the parameter shapes this
-/// model represents. Unrelated-type checks deliberately erase function types.
-fn inference_subtype(
-    sub: &ResolvedType,
-    sup: &ResolvedType,
-    signatures: &SignatureIndex,
-    model: &SemanticModel<'_>,
-) -> Truth {
-    if sub == sup {
-        return Truth::Yes;
-    }
-    let (
-        ResolvedType::Function {
-            return_type: sub_return,
-            positional: sub_positional,
-            named: sub_named,
-            optional_positional: sub_optional,
-            ..
-        },
-        ResolvedType::Function {
-            return_type: sup_return,
-            positional: sup_positional,
-            named: sup_named,
-            optional_positional: sup_optional,
-            ..
-        },
-    ) = (sub, sup)
-    else {
-        return signatures.subtype(sub, sup, model);
-    };
-    if sub.nullable() && !sup.nullable() {
-        return Truth::No;
-    }
-    if sub_positional.len().saturating_sub(*sub_optional)
-        > sup_positional.len().saturating_sub(*sup_optional)
-        || sub_positional.len() < sup_positional.len()
-    {
-        return Truth::No;
-    }
-    if sub_named.len() != sup_named.len()
-        || !sub_named
-            .iter()
-            .all(|(name, _)| sup_named.iter().any(|(other, _)| name == other))
-    {
-        return Truth::Unknown;
-    }
-    let mut result = inference_subtype(sub_return, sup_return, signatures, model);
-    for (sub, sup) in
-        sub_positional
-            .iter()
-            .zip(sup_positional.iter())
-            .chain(sub_named.iter().filter_map(|(name, sub)| {
-                sup_named
-                    .iter()
-                    .find(|(other, _)| name == other)
-                    .map(|(_, sup)| (sub, sup))
-            }))
-    {
-        match inference_subtype(sup, sub, signatures, model) {
-            Truth::No => return Truth::No,
-            Truth::Unknown if result != Truth::No => result = Truth::Unknown,
-            _ => {}
-        }
-    }
-    result
-}
-
 /// Cached left operand, right operand, and their joined result.
 type InferenceJoinEntry = (ResolvedType, ResolvedType, ResolvedType);
 
@@ -13278,6 +13662,9 @@ fn inference_join_impl(
     model: &SemanticModel<'_>,
     memo: &mut InferenceJoinMemo,
 ) -> ResolvedType {
+    let left = signatures.normalized_raw_type(Cow::Borrowed(left));
+    let right = signatures.normalized_raw_type(Cow::Borrowed(right));
+    let (left, right) = (left.as_ref(), right.as_ref());
     if matches!(right, ResolvedType::Never) {
         return left.clone();
     }
@@ -13345,6 +13732,7 @@ fn inference_join_impl(
                 named,
                 nullable,
                 optional_positional,
+                shape,
             },
             ResolvedType::Function {
                 alias: other,
@@ -13359,6 +13747,7 @@ fn inference_join_impl(
             // UP synthesizes a structural function type unless both operands
             // retain the same aliased type instance.
             return ResolvedType::Function {
+                shape: shape.clone(),
                 optional_positional: *optional_positional,
                 alias: FunctionTypeAlias::default(),
                 return_type: Arc::new(inference_join_memoized(
@@ -13441,6 +13830,7 @@ fn inference_join_impl(
             positional: left_positional,
             named: left_named,
             optional_positional: left_optional,
+            shape: left_shape,
             ..
         },
         ResolvedType::Function {
@@ -13449,6 +13839,7 @@ fn inference_join_impl(
             positional: right_positional,
             named: right_named,
             optional_positional: right_optional,
+            shape: right_shape,
             ..
         },
     ) = (left, right)
@@ -13460,13 +13851,6 @@ fn inference_join_impl(
         if left_required != right_required {
             return model.core_type("Function", nullable);
         }
-        if left_named.len() != right_named.len()
-            || !left_named
-                .iter()
-                .all(|(name, _)| right_named.iter().any(|(other, _)| name == other))
-        {
-            return ResolvedType::Unknown;
-        }
         let mut meet = |left: &ResolvedType, right: &ResolvedType| {
             let left = memo.project(left, left_alias);
             let right = memo.project(right, right_alias);
@@ -13476,11 +13860,11 @@ fn inference_join_impl(
                     left, right, signatures, model, memo,
                 ));
             }
-            let left_to_right = inference_subtype(left, right, signatures, model);
+            let left_to_right = signatures.subtype(left, right, model);
             if left_to_right == Truth::Yes {
                 return Some(left.clone());
             }
-            match inference_subtype(right, left, signatures, model) {
+            match signatures.subtype(right, left, model) {
                 Truth::Yes => Some(right.clone()),
                 Truth::No if left_to_right == Truth::No => Some(ResolvedType::Never),
                 _ => None,
@@ -13496,9 +13880,9 @@ fn inference_join_impl(
         };
         let Some(mut named) = left_named
             .iter()
-            .map(|(name, left)| {
+            .filter_map(|(name, left)| {
                 let (_, right) = right_named.iter().find(|(other, _)| name == other)?;
-                meet(left, right).map(|ty| (name.clone(), ty))
+                Some(meet(left, right).map(|ty| (name.clone(), ty)))
             })
             .collect::<Option<Vec<_>>>()
         else {
@@ -13506,6 +13890,23 @@ fn inference_join_impl(
         };
         named.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
         return ResolvedType::Function {
+            shape: match (left_shape, right_shape) {
+                (Some(left), Some(right)) if left == right => Some(Arc::clone(left)),
+                (Some(left), Some(right)) if left.type_parameters == right.type_parameters => {
+                    Some(FunctionTypeShape::new(
+                        named
+                            .iter()
+                            .filter(|(name, _)| {
+                                left.required_named.contains(name)
+                                    || right.required_named.contains(name)
+                            })
+                            .map(|(name, _)| name.clone())
+                            .collect(),
+                        left.type_parameters.to_vec(),
+                    ))
+                }
+                _ => None,
+            },
             optional_positional: (*left_optional).min(*right_optional),
             alias: FunctionTypeAlias::default(),
             return_type: Arc::new(inference_join_memoized(
@@ -13679,16 +14080,16 @@ fn contextual_join(
         && matches!(context, ResolvedType::Function { .. })
         && types
             .iter()
-            .all(|ty| inference_subtype(ty, context, signatures, model) == Truth::Yes)
+            .all(|ty| signatures.subtype(ty, context, model) == Truth::Yes)
     {
         return context.clone();
     }
-    match inference_subtype(&join, context, signatures, model) {
+    match signatures.subtype(&join, context, model) {
         Truth::Yes => join,
         Truth::No
             if types
                 .iter()
-                .all(|ty| inference_subtype(ty, context, signatures, model) == Truth::Yes) =>
+                .all(|ty| signatures.subtype(ty, context, model) == Truth::Yes) =>
         {
             context.clone()
         }
@@ -14524,6 +14925,7 @@ final partial = [first, unresolved];
                         }
                     } else if function.name.name.starts_with("contra") {
                         ResolvedType::Function {
+                            shape: None,
                             alias: FunctionTypeAlias::default(),
                             optional_positional: 0,
                             return_type: Arc::new(ResolvedType::Void),
@@ -14985,6 +15387,370 @@ final nullableIndex = holder?.items[0].size;
         });
     }
 
+    #[test]
+    fn member_parameter_covariance_includes_overridden_interfaces() {
+        with_model(
+            r#"
+class Leaf extends Middle {
+  void run(Object renamed, [Object? extra]) {}
+}
+class Middle implements Contract {
+  void run(Object different, [Object? extra]) {}
+}
+abstract class Contract {
+  void run(covariant Object value, [Object? extra]);
+  void named({covariant Object? selected, Object? untouched});
+}
+class Named implements Contract {
+  void run(Object value, [Object? extra]) {}
+  void named({Object? untouched, Object? selected, Object? added}) {}
+}
+mixin Mixed {
+  void apply(covariant Object value) {}
+}
+class Applied with Mixed {
+  void apply(Object renamed) {}
+}
+class Generic<T> {
+  void accept(T value) {}
+}
+class GenericChild extends Generic<int> {
+  void accept(int value) {}
+}
+class StaticBase {
+  static void accept(covariant Object value) {}
+}
+class StaticChild extends StaticBase {
+  void accept(Object value) {}
+}
+class Explicit {
+  void accept(covariant Object value) {}
+}
+"#,
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                for (owner, name, expected) in [
+                    ("Leaf", "run", vec![true, false]),
+                    ("Middle", "run", vec![true, false]),
+                    ("Named", "named", vec![false, true, false]),
+                    ("Applied", "apply", vec![true]),
+                    ("GenericChild", "accept", vec![false]),
+                    ("StaticChild", "accept", vec![false]),
+                    ("Explicit", "accept", vec![true]),
+                ] {
+                    let identity = model.resolve_name(owner).unwrap();
+                    let facts = &signatures.declared_member_facts(&identity, name)[0];
+                    let contracts = facts.parameter_contracts.as_ref().unwrap();
+                    assert_eq!(
+                        contracts
+                            .iter()
+                            .map(|parameter| parameter.is_covariant)
+                            .collect::<Vec<_>>(),
+                        expected,
+                        "{owner}.{name}",
+                    );
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn setter_parameter_covariance_stays_accessor_specific() {
+        with_model(
+            r#"
+abstract class Setters {
+  set value(covariant Object input);
+  covariant Object field = 0;
+}
+class Override implements Setters {
+  Object get value => 0;
+  set value(Object renamed) {}
+  set field(Object renamed) {}
+}
+class FieldOverride implements Setters {
+  Object value = 0;
+  Object field = 0;
+}
+class Plain {
+  set value(Object input) {}
+}
+class Explicit {
+  set value(covariant Object input) {}
+}
+class OtherKind {
+  void value(covariant Object input) {}
+}
+class DifferentKind extends OtherKind {
+  set value(Object input) {}
+}
+"#,
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                for (owner, name, expected) in [
+                    ("Override", "value", true),
+                    ("Override", "field", true),
+                    ("FieldOverride", "value", true),
+                    ("FieldOverride", "field", true),
+                    ("Plain", "value", false),
+                    ("Explicit", "value", true),
+                    ("DifferentKind", "value", false),
+                ] {
+                    let identity = model.resolve_name(owner).unwrap();
+                    let facts = signatures.declared_member_facts(&identity, name);
+                    let setter = facts.iter().find(|facts| facts.kind.has_setter()).unwrap();
+                    assert_eq!(
+                        setter.parameter_contracts.as_ref().unwrap()[0].is_covariant,
+                        expected,
+                        "{owner}.{name}",
+                    );
+                    for getter in facts
+                        .iter()
+                        .filter(|facts| facts.kind == MemberKind::Getter)
+                    {
+                        assert!(getter.parameter_contracts.as_ref().unwrap().is_empty());
+                    }
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn covariance_distinguishes_interface_signatures_from_contextual_implementations() {
+        with_model(
+            r#"
+class CovariantBase {
+  void run(covariant num value) {}
+}
+mixin PlainMixin {
+  void run(num value) {}
+}
+class Shadowed extends CovariantBase with PlainMixin {
+  void run(num value) {}
+}
+abstract class CovariantInterface {
+  void run(covariant num value);
+  set value(covariant num input);
+}
+abstract class PlainInterface {
+  void run(num value);
+}
+abstract class PlainFirst implements PlainInterface, CovariantInterface {}
+abstract class CovariantFirst implements CovariantInterface, PlainInterface {}
+class PlainChild extends PlainFirst {
+  void run(num value) {}
+}
+class CovariantChild extends CovariantFirst {
+  void run(num value) {}
+}
+class Concrete {
+  void run(num value) {}
+  set value(num input) {}
+}
+class Inherited extends Concrete implements CovariantInterface {}
+class Deeper extends Inherited {}
+mixin ConstraintMixin on Inherited {
+  void run(num value) => super.run(value);
+}
+class PairBase {
+  void pair(num left, num right) {}
+}
+abstract class LeftCovariance {
+  void pair(covariant num left, num right);
+}
+abstract class RightCovariance {
+  void pair(num left, covariant num right);
+}
+class FirstPair extends PairBase implements LeftCovariance {}
+class ThroughPair extends FirstPair {}
+class ChangedPair extends ThroughPair implements RightCovariance {}
+class ContractBase {
+  void defaults([int value = 2]) {}
+  void covariance(num value) {}
+}
+abstract class AbstractContract extends ContractBase {
+  void defaults([int value = 1]);
+  void covariance(covariant num value);
+}
+class ConcreteContract extends AbstractContract {
+  void defaults([int value = 1]) => super.defaults(value);
+  void covariance(covariant num value) => super.covariance(value);
+}
+class ContextWithUnknown extends Concrete implements PlainInterface, CovariantInterface {}
+class UnknownOnly extends Concrete implements PlainInterface {}
+mixin InheritedMixin implements CovariantInterface {}
+class InheritedMixinChild extends Concrete with InheritedMixin {
+  void run(num value) {}
+}
+class Redeclared extends Inherited {
+  void run(num value) {}
+  set value(num input) {}
+}
+class Conflict implements CovariantInterface {
+  num get run => 0;
+}
+class ConflictChild extends Conflict {
+  void run(num value) {}
+}
+"#,
+            |program, model| {
+                let mut signatures = SignatureIndex::from_program(program, model);
+                for (owner, expected) in [
+                    ("Shadowed", false),
+                    ("PlainChild", false),
+                    ("CovariantChild", true),
+                    ("Concrete", false),
+                    ("Redeclared", false),
+                    ("InheritedMixinChild", false),
+                    ("ConflictChild", false),
+                ] {
+                    let identity = model.resolve_name(owner).unwrap();
+                    let contracts = signatures
+                        .declared_member_facts(&identity, "run")
+                        .iter()
+                        .find(|facts| facts.kind == MemberKind::Method)
+                        .unwrap()
+                        .parameter_contracts
+                        .as_ref()
+                        .unwrap();
+                    assert_eq!(contracts[0].is_covariant, expected, "{owner}.run");
+                }
+                for (owner, name, write, expected) in [
+                    ("Concrete", "run", false, false),
+                    ("Inherited", "run", false, true),
+                    ("Deeper", "run", false, true),
+                    ("Concrete", "value", true, false),
+                    ("Inherited", "value", true, true),
+                    ("Deeper", "value", true, true),
+                    ("Redeclared", "value", true, false),
+                ] {
+                    let receiver =
+                        ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
+                    let contracts = signatures
+                        .effective_parameter_contracts(&receiver, name, write, model)
+                        .unwrap();
+                    assert_eq!(contracts[0].is_covariant, expected, "{owner}.{name}");
+                }
+                for (owner, expected) in [("Redeclared", true), ("ConstraintMixin", false)] {
+                    let receiver =
+                        ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
+                    let contracts = signatures
+                        .super_parameter_contracts(&receiver, "run", false, model)
+                        .unwrap();
+                    assert_eq!(contracts[0].is_covariant, expected, "{owner}.super.run");
+                }
+                for (owner, expected) in [
+                    ("FirstPair", [true, false]),
+                    ("ThroughPair", [true, false]),
+                    ("ChangedPair", [false, true]),
+                ] {
+                    let receiver =
+                        ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
+                    let contracts = signatures
+                        .effective_parameter_contracts(&receiver, "pair", false, model)
+                        .unwrap();
+                    assert_eq!(
+                        [contracts[0].is_covariant, contracts[1].is_covariant],
+                        expected,
+                        "{owner}.pair",
+                    );
+                }
+                let receiver = ResolvedType::interface_identity(
+                    model.resolve_name("ConcreteContract").unwrap(),
+                );
+                for name in ["defaults", "covariance"] {
+                    let own = signatures
+                        .effective_parameter_contracts(&receiver, name, false, model)
+                        .unwrap();
+                    let inherited = signatures
+                        .super_parameter_contracts(&receiver, name, false, model)
+                        .unwrap();
+                    let base = signatures
+                        .declared_member_facts(&model.resolve_name("ContractBase").unwrap(), name)
+                        [0]
+                    .parameter_contracts
+                    .as_ref()
+                    .unwrap();
+                    assert_eq!(&inherited, base, "{name} concrete super");
+                    assert_ne!(own, inherited, "{name} abstract redeclaration");
+                }
+                let plain = model.resolve_name("PlainInterface").unwrap();
+                signatures
+                    .member_entries
+                    .get_mut(&plain)
+                    .unwrap()
+                    .get_mut("run")
+                    .unwrap()
+                    .facts[0]
+                    .parameter_contracts = None;
+                for (owner, expected) in [("ContextWithUnknown", Some(true)), ("UnknownOnly", None)]
+                {
+                    let receiver =
+                        ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
+                    let contracts =
+                        signatures.effective_parameter_contracts(&receiver, "run", false, model);
+                    assert_eq!(
+                        contracts
+                            .as_ref()
+                            .map(|parameters| parameters[0].is_covariant),
+                        expected,
+                        "{owner}.run",
+                    );
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn super_contracts_skip_abstract_mixin_declarations() {
+        with_model(
+            r#"
+class ConstraintBase { void run([int value = 1]) {} }
+class ActualBase extends ConstraintBase { void run([int value = 2]) {} }
+mixin AbstractConstraint on ConstraintBase { void run([int value = 1]); }
+class ConstraintApplication extends ActualBase with AbstractConstraint {}
+class ConstraintChild extends ConstraintApplication {
+  void run([int value = 1]) => super.run(value);
+}
+abstract class Interface { void run([int value = 2]); }
+mixin AbstractInterface implements Interface { void run([int value = 2]); }
+class InterfaceApplication extends ActualBase with AbstractInterface {}
+class InterfaceChild extends InterfaceApplication {
+  void run([int value = 2]) => super.run(value);
+}
+class SetterBase { set value(num input) {} }
+mixin AbstractSetter { set value(num input); }
+class SetterApplication extends SetterBase with AbstractSetter {}
+class SetterChild extends SetterApplication {
+  set value(num input) => super.value = input;
+}
+"#,
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                for (owner, base, name, write, equal) in [
+                    ("ConstraintChild", "ActualBase", "run", false, false),
+                    ("InterfaceChild", "ActualBase", "run", false, true),
+                    ("SetterChild", "SetterBase", "value", true, true),
+                ] {
+                    let receiver =
+                        ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
+                    let inherited = signatures
+                        .super_parameter_contracts(&receiver, name, write, model)
+                        .unwrap();
+                    let base = signatures
+                        .declared_member_facts(&model.resolve_name(base).unwrap(), name)[0]
+                        .parameter_contracts
+                        .as_ref()
+                        .unwrap();
+                    assert_eq!(&inherited, base, "{owner} concrete super");
+                    let own = signatures
+                        .effective_parameter_contracts(&receiver, name, write, model)
+                        .unwrap();
+                    assert_eq!(own == inherited, equal, "{owner} forwarding contract");
+                }
+            },
+        );
+    }
+
     fn with_model(source: &str, test: impl FnOnce(&Program, &SemanticModel<'_>)) {
         let path = PathBuf::from("/project/lib/main.dart");
         let falcon_dart_parser::ParseResult {
@@ -15000,6 +15766,95 @@ final nullableIndex = holder?.items[0].size;
         let types = TypeIndex::from_program(&program);
         let model = SemanticModel::new(&path, &identities, Some(&types));
         test(&program, &model);
+    }
+
+    #[test]
+    fn substitution_removes_instantiated_function_binders_and_maps_retained_bounds() {
+        with_model(
+            "T f<T, U extends T>(T input, {required int value}) => throw 0;",
+            |program, model| {
+                let TopLevelDecl::Function(function) = &program.declarations[0] else {
+                    panic!("expected function")
+                };
+                let mut scope = TypeParameterScope::default();
+                scope.push(&function.type_params[..1], model);
+                assert!(
+                    FunctionTypeShape::from_scope(Vec::new(), &function.type_params, &scope,)
+                        .is_none()
+                );
+                scope.push(&function.type_params, model);
+                let shape = FunctionTypeShape::from_scope(
+                    vec!["value".to_owned()],
+                    &function.type_params,
+                    &scope,
+                )
+                .unwrap();
+                assert_eq!(shape.type_parameters.len(), 2);
+                let ResolvedType::TypeParameter { id, .. } = &shape.type_parameters[0] else {
+                    panic!("expected binder")
+                };
+                let substitutions = HashMap::from([(id.clone(), ResolvedType::Void)]);
+                let signatures = SignatureIndex::from_program(program, model);
+                let source = signatures
+                    .function(&model.resolve_value("f").unwrap())
+                    .unwrap()
+                    .function_type();
+                let result = model.substitute(&source, &substitutions);
+                let ResolvedType::Function {
+                    shape: Some(shape),
+                    return_type,
+                    positional,
+                    ..
+                } = &result
+                else {
+                    panic!("expected exact function shape")
+                };
+                assert_eq!(**return_type, ResolvedType::Void);
+                assert_eq!(positional.as_ref(), &[ResolvedType::Void]);
+                assert_eq!(shape.required_named.as_ref(), &["value".to_owned()]);
+                assert_eq!(shape.type_parameters.len(), 1);
+                let ResolvedType::TypeParameter { id, bound, .. } = &shape.type_parameters[0]
+                else {
+                    panic!("expected retained binder")
+                };
+                assert_eq!(id.name.as_ref(), "U");
+                assert_eq!(**bound, ResolvedType::Void);
+                let substitutions = HashMap::from([(id.clone(), ResolvedType::Dynamic)]);
+                // An unused binder still changes the generic arity when supplied.
+                let ResolvedType::Function {
+                    shape: Some(shape), ..
+                } = model.substitute(&result, &substitutions)
+                else {
+                    panic!("expected instantiated function")
+                };
+                assert!(shape.type_parameters.is_empty());
+            },
+        );
+    }
+
+    #[test]
+    fn extension_erasure_distinguishes_nested_arguments_from_representation_cycles() {
+        with_model(
+            "extension type Id<T>(T value) {} \
+             extension type Cycle<T>(Cycle<T> value) {} \
+             Id<Id<int>> nested() => throw 0; \
+             Cycle<int> cyclic() => throw 0;",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                for declaration in &program.declarations[2..] {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        panic!("expected function")
+                    };
+                    let ty = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let erased = signatures.extension_type_erasure(&ty, model);
+                    if function.name.name == "nested" {
+                        assert_eq!(erased, Some(model.core_type("int", false)));
+                    } else {
+                        assert_eq!(erased, None);
+                    }
+                }
+            },
+        );
     }
 
     #[test]
@@ -16267,6 +17122,73 @@ final integer = integers.first;
     }
 
     #[test]
+    fn conditional_callable_and_raw_interface_joins_preserve_inference() {
+        with_model(
+            "class S<T> { final T data; S(this.data); } class E {} \
+             String encode(String value, {int encoding = 0}) => value; \
+             String Function(String) callback(bool flag) => flag ? encode : (e) => e; \
+             S<dynamic> choose(dynamic value) => value is S ? value : S(E());",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let scope = TypeParameterScope::default();
+                for declaration in &program.declarations {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        continue;
+                    };
+                    if function.name.name == "encode" {
+                        continue;
+                    }
+                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                        panic!()
+                    };
+                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let mut environment = TypeEnvironment::new();
+                    environment.bind_params(function.params().unwrap(), model, &scope);
+                    assert_eq!(
+                        environment.infer_with_context(
+                            expression,
+                            model,
+                            &signatures,
+                            &scope,
+                            Some(&expected),
+                            &|_| None,
+                        ),
+                        expected,
+                        "{}",
+                        function.name.name,
+                    );
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn primary_private_fields_expose_public_named_signature_labels() {
+        with_model(
+            "class C({required final double _progress, final int _count = 0});",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let identity = model.resolve_name("C").unwrap();
+                let signature = signatures.constructor(&identity, "new").unwrap();
+                assert_eq!(
+                    signature.named.get("progress"),
+                    Some(&model.core_type("double", false))
+                );
+                assert_eq!(
+                    signature.named.get("count"),
+                    Some(&model.core_type("int", false))
+                );
+                assert!(!signature.named.contains_key("_progress"));
+                assert!(signature.defaults.contains_key("count"));
+                assert_eq!(
+                    signature.shape.as_ref().unwrap().required_named.as_ref(),
+                    &["progress"]
+                );
+            },
+        );
+    }
+
+    #[test]
     fn generic_calls_infer_from_arguments_and_result_context() {
         with_model(
             concat!(
@@ -17508,6 +18430,40 @@ final integer = integers.first;
     }
 
     #[test]
+    fn named_extension_static_members_retain_declaration_facts_and_types() {
+        with_model(
+            "extension Tools on Object { static int value = 0; static int get count => 1; static int read() => value; } int field() => Tools.value; int getter() => Tools.count; int method() => Tools.read();",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let owner = model.resolve_extension("Tools").unwrap();
+                for name in ["value", "count", "read"] {
+                    let facts = signatures.declared_member_facts(&owner, name);
+                    assert_eq!(facts.len(), 1);
+                    assert!(facts[0].is_static);
+                    assert_eq!(facts[0].declaring_type, owner);
+                }
+                for declaration in &program.declarations[1..] {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        panic!()
+                    };
+                    let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                        panic!()
+                    };
+                    assert_eq!(
+                        TypeEnvironment::new().infer_with_signatures(
+                            body,
+                            model,
+                            &signatures,
+                            &TypeParameterScope::default(),
+                        ),
+                        model.core_type("int", false),
+                    );
+                }
+            },
+        );
+    }
+
+    #[test]
     fn never_returning_calls_are_acceptable_in_void_contexts() {
         with_model(
             "Never stop() => throw 0; void use() => stop();",
@@ -17775,6 +18731,108 @@ final integer = integers.first;
                 assert!(
                     matches!(arguments.first(), Some(ResolvedType::TypeParameter { id, .. }) if id.name.as_ref() == "U")
                 );
+            },
+        );
+    }
+
+    #[test]
+    fn signature_shapes_preserve_required_names_and_unused_declared_binders() {
+        with_model(
+            "void accept<T extends num, U extends T>({required int z, int a = 0}) {}",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let signature = signatures
+                    .function(&model.resolve_value("accept").unwrap())
+                    .unwrap();
+                let shape = signature.shape.as_ref().unwrap();
+                assert_eq!(shape.required_named.as_ref(), &["z".to_string()]);
+                assert_eq!(shape.type_parameters.len(), 2);
+                let ResolvedType::TypeParameter { id, bound, .. } = &shape.type_parameters[0]
+                else {
+                    panic!("missing declared binder");
+                };
+                assert_eq!(bound.as_ref(), &model.core_type("num", false));
+                assert!(matches!(
+                    &shape.type_parameters[1],
+                    ResolvedType::TypeParameter { bound, .. }
+                        if matches!(bound.as_ref(), ResolvedType::TypeParameter { id: dependency, .. } if dependency == id)
+                ));
+                let ResolvedType::Function {
+                    shape: Some(forwarded),
+                    ..
+                } = signature.function_type()
+                else {
+                    panic!("missing function shape");
+                };
+                assert!(Arc::ptr_eq(shape, &forwarded));
+                let mut local = signature.clone();
+                local.call_parameters.clear();
+                local.bind_local_type_parameters(&TypeParameterScope::default());
+                assert_eq!(local.call_parameters, signature.call_parameters);
+                let substitutions = HashMap::from([(id.clone(), model.core_type("int", false))]);
+                let instantiated = signature.substituted_shape(model, &substitutions).unwrap();
+                assert_eq!(instantiated.required_named, shape.required_named);
+                assert!(matches!(
+                    instantiated.type_parameters.as_ref(),
+                    [ResolvedType::TypeParameter { bound, .. }]
+                        if bound.as_ref() == &model.core_type("int", false)
+                ));
+            },
+        );
+    }
+
+    #[test]
+    fn declaration_contracts_preserve_names_kinds_defaults_and_optional_arity() {
+        with_model(
+            "class A { void m(covariant int first, [int second]) {} \
+             void n({required int named, int optional = 1 + 1}) {} \
+             int get value => 0; set value(covariant int incoming) {} }",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let identity = model.resolve_name("A").unwrap();
+                let method = signatures.member(&identity, "m").unwrap();
+                assert_eq!(method.optional_positional, 1);
+                assert!(matches!(
+                    method.function_type(),
+                    ResolvedType::Function {
+                        optional_positional: 1,
+                        ..
+                    }
+                ));
+                let facts = &signatures.declared_member_facts(&identity, "m")[0];
+                let contracts = facts.parameter_contracts.as_ref().unwrap();
+                assert_eq!(contracts[0].name, "first");
+                assert_eq!(contracts[0].kind, ParamKind::Positional);
+                assert!(contracts[0].is_covariant);
+                assert_eq!(contracts[1].name, "second");
+                assert_eq!(contracts[1].kind, ParamKind::OptionalPositional);
+                assert!(contracts[1].default_value_code.is_none());
+                let cloned_facts = facts.clone();
+                assert!(Arc::ptr_eq(
+                    contracts,
+                    cloned_facts.parameter_contracts.as_ref().unwrap(),
+                ));
+                let contracts = signatures.declared_member_facts(&identity, "n")[0]
+                    .parameter_contracts
+                    .as_ref()
+                    .unwrap();
+                assert_eq!(contracts[0].name, "named");
+                assert_eq!(contracts[0].kind, ParamKind::Named { required: true });
+                assert_eq!(contracts[1].name, "optional");
+                assert!(contracts[1].default_value_code.is_some());
+                let accessors = &signatures.member_entry(&identity, "value").unwrap().facts;
+                let getter = accessors
+                    .iter()
+                    .find(|facts| facts.kind == MemberKind::Getter)
+                    .unwrap();
+                assert!(getter.parameter_contracts.as_ref().unwrap().is_empty());
+                let setter = accessors
+                    .iter()
+                    .find(|facts| facts.kind == MemberKind::Setter)
+                    .unwrap();
+                let contract = &setter.parameter_contracts.as_ref().unwrap()[0];
+                assert_eq!(contract.name, "incoming");
+                assert!(contract.is_covariant);
             },
         );
     }
@@ -18219,6 +19277,55 @@ final integer = integers.first;
                 );
             });
         }
+    }
+
+    #[test]
+    fn only_uninitialized_late_final_fields_have_writable_owners() {
+        with_model(
+            "class Value {} class Base { late final Value pending, initialized = Value(); final Value ordinary = Value(); } class Child extends Base {} abstract class View implements Base {} mixin Init on Base {}",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let base = model.resolve_name("Base").unwrap();
+                for owner in ["Child", "View", "Init"] {
+                    let child = ResolvedType::Interface {
+                        occurrence: Default::default(),
+                        identity: model.resolve_name(owner).unwrap(),
+                        arguments: Vec::new().into(),
+                        nullable: false,
+                        extension_type: false,
+                    };
+                    assert_eq!(
+                        signatures.resolved_writable_member_owner(&child, "pending", model),
+                        Some(base.clone())
+                    );
+                    let (ty, substitutions) = signatures
+                        .resolved_writable_field(&child, "pending", model)
+                        .unwrap();
+                    let ResolvedType::Interface { identity, .. } =
+                        model.substitute(&ty, &substitutions)
+                    else {
+                        panic!("late-final setter should retain its declared field type");
+                    };
+                    assert_eq!(Some(identity), model.resolve_name("Value"));
+                    for name in ["initialized", "ordinary"] {
+                        assert_eq!(
+                            signatures.resolved_readable_member_owner(&child, name, model),
+                            Some(base.clone())
+                        );
+                        assert!(
+                            signatures
+                                .resolved_writable_member_owner(&child, name, model)
+                                .is_none()
+                        );
+                        assert!(
+                            signatures
+                                .resolved_writable_field(&child, name, model)
+                                .is_none()
+                        );
+                    }
+                }
+            },
+        );
     }
 
     #[test]

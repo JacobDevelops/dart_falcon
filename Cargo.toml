@@ -36,6 +36,7 @@ strsim = "0.10"
 
 # Regex (format-comment rule: ignored_patterns option)
 regex = "1"
+regress = "0.11"
 
 # Tracing & observability
 tracing            = "0.1"

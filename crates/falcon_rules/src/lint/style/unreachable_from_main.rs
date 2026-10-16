@@ -11,7 +11,8 @@
 //! supertypes named in a class's `extends`/`with`/`implements` clause or an
 //! extension type's `implements` clause, implicit super-constructor calls,
 //! typedef and extension-type names, type literals, type arguments, and the
-//! types of `external` members. A plain type annotation is not a reference, and
+//! types of `external` members. Type parameters shadow same-named library
+//! declarations. A plain type annotation is not a reference, and
 //! constructor invocations inside constant patterns do not count. Instance
 //! `toJson` methods are reachable with their container, because `dart:convert`
 //! calls them dynamically.
@@ -1095,6 +1096,8 @@ struct RefWalker<'t, 'a> {
     stack: Vec<DeclId>,
     container: Option<ContainerId>,
     type_argument_depth: usize,
+    /// Names of lexically visible type parameters, as spans in this unit.
+    type_parameters: Vec<Span>,
     external_depth: usize,
     constant_pattern_depth: usize,
     semantic: Option<(
@@ -1120,10 +1123,18 @@ impl<'t, 'a> RefWalker<'t, 'a> {
             stack: Vec::new(),
             container: None,
             type_argument_depth: 0,
+            type_parameters: Vec::new(),
             external_depth: 0,
             constant_pattern_depth: 0,
             semantic: None,
         }
+    }
+
+    fn push_type_parameters(&mut self, parameters: &[TypeParam]) -> usize {
+        let depth = self.type_parameters.len();
+        self.type_parameters
+            .extend(parameters.iter().map(|parameter| parameter.name.span));
+        depth
     }
 
     fn id_at(&self, start: usize) -> Option<DeclId> {
@@ -1137,6 +1148,13 @@ impl<'t, 'a> RefWalker<'t, 'a> {
     }
 
     fn mark_top(&mut self, name: &str) {
+        if self
+            .type_parameters
+            .iter()
+            .any(|span| self.source.get(span.start..span.end) == Some(name))
+        {
+            return;
+        }
         let tables = self.tables;
         for &id in tables.top.get(name).into_iter().flatten() {
             self.mark(id);
@@ -1676,6 +1694,19 @@ impl Visitor for RefWalker<'_, '_> {
             );
             return;
         }
+        let parameters = match node {
+            TopLevelDecl::Class(x) => x.type_params.as_slice(),
+            TopLevelDecl::ClassTypeAlias(x) => x.type_params.as_slice(),
+            TopLevelDecl::Mixin(x) => x.type_params.as_slice(),
+            TopLevelDecl::MixinClass(x) => x.type_params.as_slice(),
+            TopLevelDecl::Enum(x) => x.type_params.as_slice(),
+            TopLevelDecl::Extension(x) => x.type_params.as_slice(),
+            TopLevelDecl::ExtensionType(x) => x.type_params.as_slice(),
+            TopLevelDecl::Function(x) => x.type_params.as_slice(),
+            TopLevelDecl::TypeAlias(x) => x.type_params.as_slice(),
+            TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => &[],
+        };
+        let parameter_depth = self.push_type_parameters(parameters);
         let start = node.span().start;
         let id = self.id_at(start);
         let container = self.tables.container_at.get(&(self.unit, start)).copied();
@@ -1685,12 +1716,17 @@ impl Visitor for RefWalker<'_, '_> {
             self.container_references(node, container);
         }
         walk_top_level_decl(self, node);
+        self.type_parameters.truncate(parameter_depth);
         self.container = None;
         self.stack.clear();
     }
 
     fn visit_class_member(&mut self, node: &ClassMember) {
         let depth = self.stack.len();
+        let parameter_depth = match node {
+            ClassMember::Method(method) => self.push_type_parameters(&method.type_params),
+            _ => self.type_parameters.len(),
+        };
         match node {
             ClassMember::Field(field) => {
                 self.visit_declarators(
@@ -1722,6 +1758,7 @@ impl Visitor for RefWalker<'_, '_> {
         }
         walk_class_member(self, node);
         self.stack.truncate(depth);
+        self.type_parameters.truncate(parameter_depth);
     }
 
     fn visit_annotation(&mut self, node: &Annotation) {
@@ -1754,7 +1791,12 @@ impl Visitor for RefWalker<'_, '_> {
 
     fn visit_dart_type(&mut self, node: &DartType) {
         let DartType::Named(named) = node else {
+            let depth = match node {
+                DartType::Function(function) => self.push_type_parameters(&function.type_params),
+                _ => self.type_parameters.len(),
+            };
             walk_dart_type(self, node);
+            self.type_parameters.truncate(depth);
             return;
         };
         if let [segment] = named.segments.as_slice() {
@@ -1777,6 +1819,10 @@ impl Visitor for RefWalker<'_, '_> {
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {
+        let parameter_depth = match node {
+            Stmt::LocalFunc(function) => self.push_type_parameters(&function.type_params),
+            _ => self.type_parameters.len(),
+        };
         if let Stmt::For(statement) = node
             && let Some(ForInit::ForIn {
                 declares_variable: false,
@@ -1787,9 +1833,14 @@ impl Visitor for RefWalker<'_, '_> {
             self.reference(&name.name);
         }
         walk_stmt(self, node);
+        self.type_parameters.truncate(parameter_depth);
     }
 
     fn visit_expr(&mut self, node: &Expr) {
+        let parameter_depth = match node {
+            Expr::FuncExpr { type_params, .. } => self.push_type_parameters(type_params),
+            _ => self.type_parameters.len(),
+        };
         match node {
             Expr::Ident(identifier) if !self.bound.contains(&identifier.span.start) => {
                 self.reference(&identifier.name);
@@ -1903,6 +1954,7 @@ impl Visitor for RefWalker<'_, '_> {
             _ => {}
         }
         walk_expr(self, node);
+        self.type_parameters.truncate(parameter_depth);
     }
 
     fn visit_pattern(&mut self, node: &Pattern) {

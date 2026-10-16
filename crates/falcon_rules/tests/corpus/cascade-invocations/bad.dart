@@ -99,3 +99,17 @@ void dynamicObjectMethods(dynamic receiver) {
   receiver.toString();
   receiver.toString(); /* expect: cascade-invocations */
 }
+
+class ScopedReceiver {
+  void initialize(void Function(ScopedReceiver) callback) {}
+  void reset() {}
+}
+
+// The callback parameter is not a dependency on the outer receiver.
+void shadowedCallback() {
+  final receiver = ScopedReceiver();
+  receiver.initialize((receiver) { /* expect: cascade-invocations */
+    receiver.reset();
+  });
+  receiver.reset();
+}

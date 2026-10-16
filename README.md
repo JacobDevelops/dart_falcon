@@ -20,6 +20,10 @@ sit on a minimal type-resolution layer and are now reliable enough to be **on by
 default**.
 
 Resolver-backed rules share the analyzer's member and invocation queries rather than maintaining a separate semantic resolver.
+Constructor-forwarding and override rules use resolved parameter identities and
+inherited contracts, including covariance and default-expression syntax.
+`valid-regexps` checks decoded Dart string literals with ECMAScript regular-expression
+syntax.
 
 Configuration is a single biome-shaped `falcon.json`: grouped rules, per-rule
 severities and options, per-path overrides, a `flutter` domain, and a separate

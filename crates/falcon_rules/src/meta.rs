@@ -160,21 +160,21 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::Lints("avoid_unnecessary_containers"),
     ),
-    RuleMeta::file::<lint::complexity::unnecessary_overrides::UnnecessaryOverrides>(
+    RuleMeta::resolved::<lint::complexity::unnecessary_overrides::UnnecessaryOverrides>(
         "unnecessary-overrides",
         RuleGroup::Complexity,
         NONE,
         true,
         RuleSource::Lints("unnecessary_overrides"),
     ),
-    RuleMeta::file::<lint::complexity::avoid_function_literals_in_foreach_calls::AvoidFunctionLiteralsInForeachCalls>(
+    RuleMeta::resolved::<lint::complexity::avoid_function_literals_in_foreach_calls::AvoidFunctionLiteralsInForeachCalls>(
         "avoid-function-literals-in-foreach-calls",
         RuleGroup::Complexity,
         NONE,
         false,
         RuleSource::Lints("avoid_function_literals_in_foreach_calls"),
     ),
-    RuleMeta::file::<lint::complexity::prefer_conditional_assignment::PreferConditionalAssignment>(
+    RuleMeta::resolved::<lint::complexity::prefer_conditional_assignment::PreferConditionalAssignment>(
         "prefer-conditional-assignment",
         RuleGroup::Complexity,
         NONE,
@@ -503,7 +503,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::PyramidLint("prefer_declaring_const_constructor"),
     ),
-    RuleMeta::file::<lint::style::sort_child_properties_last::SortChildPropertiesLast>(
+    RuleMeta::resolved::<lint::style::sort_child_properties_last::SortChildPropertiesLast>(
         "sort-child-properties-last",
         RuleGroup::Style,
         FLUTTER,
@@ -692,7 +692,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::Lints("prefer_function_declarations_over_variables"),
     ),
-    RuleMeta::file::<lint::style::prefer_initializing_formals::PreferInitializingFormals>(
+    RuleMeta::resolved::<lint::style::prefer_initializing_formals::PreferInitializingFormals>(
         "prefer-initializing-formals",
         RuleGroup::Style,
         NONE,
@@ -804,7 +804,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::Lints("use_function_type_syntax_for_parameters"),
     ),
-    RuleMeta::file::<lint::style::use_super_parameters::UseSuperParameters>(
+    RuleMeta::resolved::<lint::style::use_super_parameters::UseSuperParameters>(
         "use-super-parameters",
         RuleGroup::Style,
         NONE,
@@ -1700,7 +1700,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("parameter_assignments"),
     ),
-    RuleMeta::file::<lint::complexity::join_return_with_assignment::JoinReturnWithAssignment>(
+    RuleMeta::resolved::<lint::complexity::join_return_with_assignment::JoinReturnWithAssignment>(
         "join-return-with-assignment",
         RuleGroup::Complexity,
         NONE,

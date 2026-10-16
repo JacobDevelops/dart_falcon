@@ -12,6 +12,7 @@
 //! might be related.
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use super::{DeclarationIdentity, MemberFacts, ResolvedType, SemanticModel, SignatureIndex, Truth};
@@ -356,7 +357,15 @@ impl SignatureIndex {
             ) if *identity == DeclarationIdentity::OBJECT => {
                 return Truth::Yes;
             }
-            (T::Dynamic | T::Void, _) => return Truth::No,
+            (T::Dynamic | T::Void, _) => {
+                return self.subtype_memoized(
+                    &model.core_type("Object", true),
+                    sup,
+                    model,
+                    prove_unknown_top,
+                    memo,
+                );
+            }
             (T::Null, _) => return accepts_null(sup),
             _ => {}
         }
@@ -398,7 +407,9 @@ impl SignatureIndex {
                 Truth::Yes
             }
             (_, T::TypeParameter { .. } | T::NonNullTypeParameter { .. }) => Truth::No,
-            (T::Function { .. }, T::Function { .. }) => Truth::Unknown,
+            (T::Function { .. }, T::Function { .. }) => {
+                self.function_subtype(&sub, &sup, model, prove_unknown_top, memo)
+            }
             (T::Function { .. }, T::Interface { identity, .. }) => {
                 identity.is_sdk("dart:core", "Function").into()
             }
@@ -476,6 +487,136 @@ impl SignatureIndex {
         }
     }
 
+    /// Function subtyping preserves invocation shape, is covariant in the
+    /// result, and contravariant in every accepted argument.
+    fn function_subtype(
+        &self,
+        sub: &ResolvedType,
+        sup: &ResolvedType,
+        model: &SemanticModel<'_>,
+        prove_unknown_top: bool,
+        memo: &mut RelationMemo,
+    ) -> Truth {
+        let (
+            ResolvedType::Function {
+                return_type: sub_return,
+                positional: sub_positional,
+                named: sub_named,
+                optional_positional: sub_optional,
+                shape: Some(sub_shape),
+                ..
+            },
+            ResolvedType::Function {
+                return_type: sup_return,
+                positional: sup_positional,
+                named: sup_named,
+                optional_positional: sup_optional,
+                shape: Some(sup_shape),
+                ..
+            },
+        ) = (sub, sup)
+        else {
+            return Truth::Unknown;
+        };
+        if sub_positional.len().saturating_sub(*sub_optional)
+            > sup_positional.len().saturating_sub(*sup_optional)
+            || sub_positional.len() < sup_positional.len()
+            || sub_shape.type_parameters.len() != sup_shape.type_parameters.len()
+            || sub_shape
+                .required_named
+                .iter()
+                .any(|name| !sup_shape.required_named.contains(name))
+            || sup_named
+                .iter()
+                .any(|(name, _)| !sub_named.iter().any(|(other, _)| name == other))
+        {
+            return Truth::No;
+        }
+
+        // Generic functions are compared after alpha-renaming the target's
+        // binders to the source's binders; their bounds must then be equivalent.
+        let mut substitutions = HashMap::new();
+        for (sub, sup) in sub_shape
+            .type_parameters
+            .iter()
+            .zip(sup_shape.type_parameters.iter())
+        {
+            let (
+                ResolvedType::TypeParameter { id: sub_id, .. },
+                ResolvedType::TypeParameter { id: sup_id, .. },
+            ) = (sub, sup)
+            else {
+                return Truth::Unknown;
+            };
+            if sub_id != sup_id {
+                substitutions.insert(sup_id.clone(), sub.clone());
+            }
+        }
+        let substitute = |ty| {
+            if substitutions.is_empty() {
+                Cow::Borrowed(ty)
+            } else {
+                Cow::Owned(model.substitute(ty, &substitutions))
+            }
+        };
+        let mut result = Truth::Yes;
+        for (sub, sup) in sub_shape
+            .type_parameters
+            .iter()
+            .zip(sup_shape.type_parameters.iter())
+        {
+            let (
+                ResolvedType::TypeParameter {
+                    bound: sub_bound, ..
+                },
+                ResolvedType::TypeParameter {
+                    bound: sup_bound, ..
+                },
+            ) = (sub, sup)
+            else {
+                return Truth::Unknown;
+            };
+            let sup_bound = substitute(sup_bound.as_ref());
+            result = all([
+                result,
+                self.subtype_memoized(sub_bound, &sup_bound, model, prove_unknown_top, memo),
+                self.subtype_memoized(&sup_bound, sub_bound, model, prove_unknown_top, memo),
+            ]);
+            if result == Truth::No {
+                return result;
+            }
+        }
+        let sup_return = substitute(sup_return.as_ref());
+        result = all([
+            result,
+            self.subtype_memoized(sub_return, &sup_return, model, prove_unknown_top, memo),
+        ]);
+        if result == Truth::No {
+            return result;
+        }
+        for (sub, sup) in
+            sub_positional
+                .iter()
+                .zip(sup_positional.iter())
+                .chain(sup_named.iter().filter_map(|(name, sup)| {
+                    sub_named
+                        .iter()
+                        .find(|(other, _)| name == other)
+                        .map(|(_, sub)| (sub, sup))
+                }))
+        {
+            let sup = substitute(sup);
+            result = all([
+                result,
+                self.subtype_memoized(&sup, sub, model, prove_unknown_top, memo),
+            ]);
+            if result == Truth::No {
+                return result;
+            }
+        }
+        result
+    }
+
     /// The analyzer's `extensionTypeErasure`; `None` when a representation
     /// type is unknown.
     fn erase(&self, ty: &ResolvedType, model: &SemanticModel<'_>) -> Option<ResolvedType> {
@@ -525,6 +666,13 @@ impl SignatureIndex {
                 extension_type: true,
                 ..
             } => {
+                // A repeated declaration in a finite argument (E<E<int>>)
+                // is not a representation cycle. Erase supplied arguments
+                // before marking this declaration's representation active.
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.erase_memoized(argument, model, memo, active))
+                    .collect::<Option<Vec<_>>>()?;
                 if !active.insert(identity.clone()) {
                     return None;
                 }
@@ -534,11 +682,8 @@ impl SignatureIndex {
                         .extension_representation
                         .as_ref()?;
                     let (parameters, _) = self.supertypes.get(identity)?;
-                    let substitutions: HashMap<_, _> = parameters
-                        .iter()
-                        .cloned()
-                        .zip(arguments.iter().cloned())
-                        .collect();
+                    let substitutions: HashMap<_, _> =
+                        parameters.iter().cloned().zip(arguments).collect();
                     let representation = model.substitute(representation, &substitutions);
                     // This substituted graph is temporary: do not retain its
                     // addresses in the caller's memo after it is dropped.
@@ -596,8 +741,31 @@ impl SignatureIndex {
                 nullable,
                 alias,
                 optional_positional,
+                shape,
             } => Some(ResolvedType::Function {
                 optional_positional: *optional_positional,
+                shape: match shape {
+                    Some(shape) => {
+                        let mut parameters = None;
+                        for (index, parameter) in shape.type_parameters.iter().enumerate() {
+                            let erased = self.erase_memoized(parameter, model, memo, active)?;
+                            if erased != *parameter {
+                                parameters.get_or_insert_with(|| shape.type_parameters.to_vec())
+                                    [index] = erased;
+                            }
+                        }
+                        match parameters {
+                            Some(parameters) => {
+                                Some(std::sync::Arc::new(super::FunctionTypeShape {
+                                    required_named: shape.required_named.clone(),
+                                    type_parameters: parameters.into(),
+                                }))
+                            }
+                            None => Some(shape.clone()),
+                        }
+                    }
+                    None => None,
+                },
                 alias: alias.clone(),
                 return_type: std::sync::Arc::new(self.erase_memoized(
                     return_type,
@@ -750,4 +918,89 @@ fn all(results: impl IntoIterator<Item = Truth>) -> Truth {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resolve::{IdentityIndex, IdentitySource};
+    use std::path::Path;
+
+    #[test]
+    fn future_or_top_subtyping_preserves_inherited_signatures() {
+        let source = "import 'dart:async';
+            abstract class Base { FutureOr<void> onLoad(); }
+            mixin M on Base {}
+            class Child extends Base with M {
+              @override
+              Future<void> onLoad() async {}
+            }";
+        let falcon_dart_parser::ParseResult {
+            program, errors, ..
+        } = falcon_dart_parser::parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let path = Path::new("/project/future_or.dart");
+        let identities = IdentityIndex::build(
+            &[IdentitySource {
+                path,
+                program: &program,
+                has_parse_errors: false,
+            }],
+            &[source],
+            &[],
+            None,
+        );
+        let model = SemanticModel::new(path, &identities, None);
+        let signatures = SignatureIndex::from_program(&program, &model);
+        let base = ResolvedType::interface_identity(model.resolve_name("Base").unwrap());
+        let future_or_void = signatures
+            .instantiated_override_return(&base, "onLoad", false, &model)
+            .unwrap();
+        let future_void = future_of(&ResolvedType::Void);
+        let int = model.core_type("int", false);
+        let string = model.core_type("String", false);
+        let future_int = future_of(&int);
+        let future_or_int = ResolvedType::Interface {
+            occurrence: Default::default(),
+            identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
+            arguments: vec![int.clone()].into(),
+            nullable: false,
+            extension_type: false,
+        };
+        let object = model.core_type("Object", false);
+        let nullable_object = model.core_type("Object", true);
+        for (sub, sup, expected) in [
+            (&future_or_void, &future_or_void, Truth::Yes),
+            (&ResolvedType::Void, &future_or_void, Truth::Yes),
+            (&ResolvedType::Dynamic, &future_or_void, Truth::Yes),
+            (&nullable_object, &future_or_void, Truth::Yes),
+            (&future_or_void, &nullable_object, Truth::Yes),
+            (&future_void, &future_or_void, Truth::Yes),
+            (&future_or_void, &future_void, Truth::No),
+            (&future_or_void, &object, Truth::No),
+            (&future_or_void, &int, Truth::No),
+            (&int, &future_or_void, Truth::Yes),
+            (&future_int, &future_void, Truth::Yes),
+            (&future_or_int, &future_or_int, Truth::Yes),
+            (&future_int, &future_or_int, Truth::Yes),
+            (&int, &future_or_int, Truth::Yes),
+            (&ResolvedType::Void, &future_or_int, Truth::No),
+            (&ResolvedType::Dynamic, &future_or_int, Truth::No),
+            (&future_void, &future_or_int, Truth::No),
+            (&future_or_int, &string, Truth::No),
+            (&string, &future_or_int, Truth::No),
+        ] {
+            assert_eq!(
+                signatures.subtype(sub, sup, &model),
+                expected,
+                "{sub:?} <: {sup:?}"
+            );
+        }
+        let child = model.resolve_name("Child").unwrap();
+        let mut lookup = super::super::inherited::OverrideInferenceLookup::default();
+        let (_, _, inherited_return) = signatures
+            .override_inference_signature(&child, "onLoad", false, &model, &mut lookup)
+            .unwrap();
+        assert_eq!(inherited_return, future_or_void);
+    }
 }

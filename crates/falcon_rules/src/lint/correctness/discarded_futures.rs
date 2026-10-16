@@ -148,7 +148,7 @@ impl Collector<'_> {
         {
             return;
         }
-        if let Some(message) = self.message(&state.infer_invocation(expr), state) {
+        if let Some(message) = self.message(&state.infer(expr), state) {
             self.report(message, report_span(expr, state));
         }
     }
@@ -161,7 +161,7 @@ impl Collector<'_> {
         {
             return;
         }
-        if let Some(message) = self.message(&state.infer_invocation(expr), state) {
+        if let Some(message) = self.message(&state.infer(expr), state) {
             self.report(message, report_span(expr, state));
         }
     }

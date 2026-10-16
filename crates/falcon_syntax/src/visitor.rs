@@ -1609,6 +1609,9 @@ pub fn walk_function_type<V: Visitor>(v: &mut V, node: &FunctionType) {
 }
 
 pub fn walk_function_type_param<V: Visitor>(v: &mut V, node: &FunctionTypeParam) {
+    for annotation in &node.annotations {
+        v.visit_annotation(annotation);
+    }
     v.visit_dart_type(&node.param_type);
     if let Some(name) = &node.name {
         v.visit_name(name);
@@ -1618,6 +1621,9 @@ pub fn walk_function_type_param<V: Visitor>(v: &mut V, node: &FunctionTypeParam)
 pub fn walk_record_type<V: Visitor>(v: &mut V, node: &RecordType) {
     for ty in &node.positional {
         v.visit_dart_type(ty);
+    }
+    for name in node.positional_names.iter().flatten() {
+        v.visit_name(name);
     }
     for field in &node.named {
         v.visit_named_record_field(field);

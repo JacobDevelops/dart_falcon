@@ -27,6 +27,7 @@ TypeAlias(
                 type_params: [],
                 params: [
                     FunctionTypeParam {
+                        annotations: [],
                         name: None,
                         param_type: Named(
                             NamedType {

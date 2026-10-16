@@ -1,4 +1,6 @@
-void bad() {
+void bad(List<int> items, List<int> list, List<int> names, List<int> values,
+    List<int> data, void Function(int) save, void Function(int) sink,
+    void Function(int) process, void Function(int) log) {
   items.forEach((e) { print(e); }); /* expect: avoid-function-literals-in-foreach-calls */
   list.forEach((x) => print(x)); /* expect: avoid-function-literals-in-foreach-calls */
   names.forEach((name) { save(name); }); /* expect: avoid-function-literals-in-foreach-calls */

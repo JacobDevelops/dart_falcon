@@ -154,9 +154,13 @@ impl Collector<'_> {
                 named,
                 alias,
                 optional_positional,
+                shape,
                 ..
             } => Normalized {
                 ty: ResolvedType::Function {
+                    shape: shape.as_ref().map(|shape| {
+                        shape.map_bounds(|bound| self.normalize_inner(bound, visiting).ty)
+                    }),
                     optional_positional: *optional_positional,
                     alias: alias.clone(),
                     return_type: std::sync::Arc::new(

@@ -10,8 +10,8 @@
 //! when an argument cannot be proven constant, for `Object()` (often used to create
 //! unique identity tokens), for constructors of deferred-imported classes, and
 //! for a generic class invoked without type arguments whose approximate context
-//! contains type parameters, or whose context cannot be resolved. As in the
-//! analyzer, assignments use their result type rather than their target type.
+//! contains type parameters. As in the analyzer, assignments use their result
+//! type rather than their target type.
 //!
 //! ```dart
 //! class A {
@@ -159,9 +159,6 @@ impl Collector<'_> {
             .is_some_and(|signature| !signature.owner_parameters.is_empty());
         if !generic {
             return false;
-        }
-        if state.expected_unknown() {
-            return true;
         }
         let assignment_type;
         let context = if self.assignment_values.contains(node.span()) {

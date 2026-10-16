@@ -1,0 +1,6 @@
+name: web_import_fixture
+environment:
+  sdk: ^3.13.0
+dependencies:
+  flutter:
+    sdk: flutter

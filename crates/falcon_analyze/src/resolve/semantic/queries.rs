@@ -69,6 +69,21 @@ impl TypeEnvironment {
             receiver
         }
     }
+    pub fn named_extension(
+        &self,
+        expression: &Expr,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+    ) -> Option<DeclarationIdentity> {
+        if !self.invocation_unshadowed(expression, context) {
+            return None;
+        }
+        context
+            .model
+            .resolve_extension(QualifiedName::from_segments(&expression_segments(
+                expression, true,
+            )?)?)
+    }
+
     pub(super) fn invocation_unshadowed(
         &self,
         expression: &Expr,
@@ -134,30 +149,25 @@ impl TypeEnvironment {
                         } => (target.as_ref(), type_args.as_slice()),
                         callee => (callee, type_args.as_slice()),
                     };
-                    expression_segments(callee, true)
-                        .filter(|_| self.invocation_unshadowed(callee, context))
-                        .and_then(|segments| {
-                            model.resolve_extension(QualifiedName::from_segments(&segments)?)
-                        })
-                        .and_then(|identity| {
-                            let receiver = self.infer_invocation(receiver, context, None);
-                            let receiver = if *is_null_safe {
-                                receiver.non_null()
-                            } else {
-                                receiver
-                            };
-                            let arguments: Vec<_> = type_args
-                                .iter()
-                                .map(|ty| model.resolve_type_in(ty, context.type_parameters))
-                                .collect();
-                            signatures.resolved_extension_override_method(
-                                &identity,
-                                &receiver,
-                                &arguments,
-                                &field.name,
-                                model,
-                            )
-                        })
+                    self.named_extension(callee, context).and_then(|identity| {
+                        let receiver = self.infer_invocation(receiver, context, None);
+                        let receiver = if *is_null_safe {
+                            receiver.non_null()
+                        } else {
+                            receiver
+                        };
+                        let arguments: Vec<_> = type_args
+                            .iter()
+                            .map(|ty| model.resolve_type_in(ty, context.type_parameters))
+                            .collect();
+                        signatures.resolved_extension_override_method(
+                            &identity,
+                            &receiver,
+                            &arguments,
+                            &field.name,
+                            model,
+                        )
+                    })
                 } else {
                     None
                 };
@@ -198,8 +208,10 @@ impl TypeEnvironment {
                             if !self.invocation_unshadowed(object, context) {
                                 return None;
                             }
-                            let identity =
-                                model.resolve_dotted(&expression_segments(object, true)?)?;
+                            let segments = expression_segments(object, true)?;
+                            let identity = model.resolve_dotted(&segments).or_else(|| {
+                                model.resolve_extension(QualifiedName::from_segments(&segments)?)
+                            })?;
                             Some((signatures.member(&identity, &field.name)?, HashMap::new()))
                         })
                 })
@@ -286,7 +298,11 @@ impl TypeEnvironment {
                 self.infer_unshorted(target, context_copy(context), None, reached_receiver.take())
             });
             if let ResolvedType::Function {
-                positional, named, ..
+                positional,
+                named,
+                shape,
+                optional_positional,
+                ..
             } = &receiver
             {
                 let return_type = receiver
@@ -299,6 +315,18 @@ impl TypeEnvironment {
                     return Err(return_type);
                 }
                 let mut signature = ResolvedSignature {
+                    call_parameters: shape.as_ref().map_or_else(Vec::new, |shape| {
+                        shape
+                            .type_parameters
+                            .iter()
+                            .filter_map(|ty| match ty {
+                                ResolvedType::TypeParameter { id, .. } => Some(id.clone()),
+                                _ => None,
+                            })
+                            .collect()
+                    }),
+                    shape: shape.clone(),
+                    optional_positional: *optional_positional,
                     positional: positional.to_vec(),
                     named: named.iter().cloned().collect(),
                     ..ResolvedSignature::returning(return_type)

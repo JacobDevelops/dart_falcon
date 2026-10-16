@@ -9,14 +9,14 @@
 //! requires the interpolation to span the whole content, whether a bare
 //! `$identifier` or a full `${...}` expression; a string with any surrounding
 //! text, or two adjacent interpolations like `'$a$b'`, is left alone. Adjacent
-//! literal segments are checked independently; raw segments are never flagged.
+//! literal segments and raw literals are never flagged.
 //! Use the interpolated expression on its own.
 //!
 //! Canonical receiver and signature facts must prove a non-nullable `String`.
 //! Nullable or unknown values and null-aware accesses are left alone.
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
-use crate::lint::string_lit::{interpolated_literals, is_simple_identifier, matching_brace};
+use crate::lint::string_lit::{interpolated_literals, multiline_lead_len};
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -45,17 +45,30 @@ impl SemanticRuleVisitor for Collector<'_> {
         let Expr::StringLit(node) = node else {
             return;
         };
+        let [interpolation] = node.interpolations.as_slice() else {
+            return;
+        };
+        if node.is_adjacent {
+            return;
+        }
         for (lit, span) in interpolated_literals(node) {
-            if !is_whole_interpolation(lit.content) {
-                continue;
-            }
-            let mut interpolations = node.interpolations.iter().filter(|interpolation| {
-                interpolation.span.start >= span.start && interpolation.span.end <= span.end
-            });
-            let Some(interpolation) = interpolations.next() else {
+            let trim = if lit.triple {
+                multiline_lead_len(lit.content)
+            } else {
+                0
+            };
+            let content = &lit.content[trim..];
+            let start = span.start + lit.content_offset + trim;
+            let (prefix, suffix) = if content.starts_with("${") && content.ends_with('}') {
+                (2, 1)
+            } else if content.starts_with('$') {
+                (1, 0)
+            } else {
                 continue;
             };
-            if interpolations.next().is_some() {
+            if interpolation.span.start != start + prefix
+                || interpolation.span.end != start + content.len() - suffix
+            {
                 continue;
             }
             let ty = state.infer(&interpolation.expr);
@@ -67,18 +80,6 @@ impl SemanticRuleVisitor for Collector<'_> {
                 ));
             }
         }
-    }
-}
-
-fn is_whole_interpolation(content: &str) -> bool {
-    let bytes = content.as_bytes();
-    if bytes.len() < 2 || bytes[0] != b'$' {
-        return false;
-    }
-    if bytes[1] == b'{' {
-        matching_brace(bytes, 1).is_some_and(|close| close == bytes.len() - 1 && close > 2)
-    } else {
-        is_simple_identifier(&content[1..])
     }
 }
 
@@ -177,6 +178,26 @@ mod tests {
                     UnnecessaryStringInterpolations.analyze(program, ctx).len(),
                     3
                 )
+            },
+        );
+    }
+
+    #[test]
+    fn interpolation_boundaries_use_parsed_expression_spans() {
+        resolving(
+            r#"void f(String text) {
+                print('${"}"}');
+                print('${text /* } */}');
+                print(''' 
+$text''');
+                print('x$text'); print('$text '); print('$text$text');
+                print(r'$text'); print('$text' '');
+            }"#,
+            |program, ctx| {
+                assert_eq!(
+                    UnnecessaryStringInterpolations.analyze(program, ctx).len(),
+                    3
+                );
             },
         );
     }

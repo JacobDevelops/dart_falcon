@@ -59,7 +59,7 @@ pub(super) fn collect(program: &Program, ctx: &AnalyzeContext<'_>) -> Semantics 
                         declarator
                             .initializer
                             .as_ref()
-                            .map(|value| state.infer_invocation(value))
+                            .map(|value| state.infer(value))
                     }) {
                         collector.globals.insert(declarator.name.name.as_str(), ty);
                     }
@@ -165,7 +165,7 @@ fn context_kind(
                         {
                             return None;
                         }
-                        context_type_kind(&state.infer_invocation(expression), true, state)
+                        context_type_kind(&state.infer(expression), true, state)
                     })
             }
         }
@@ -466,7 +466,7 @@ impl SemanticRuleVisitor for Collector<'_> {
         if matches!(
             expression,
             Expr::Ident(_) | Expr::Field { .. } | Expr::Call { .. }
-        ) && state.infer_invocation(expression) == ResolvedType::Never
+        ) && state.infer(expression) == ResolvedType::Never
         {
             self.semantics.never.insert(key(expression));
         }
@@ -529,6 +529,9 @@ impl SemanticRuleVisitor for Collector<'_> {
                     let mut receiver = Cow::Borrowed(&base);
                     for (index, operation) in section.ops.iter().enumerate() {
                         match operation {
+                            CascadeOp::NullAssert { .. } => {
+                                receiver = Cow::Owned(receiver.non_null());
+                            }
                             CascadeOp::Call(name, _, args) => {
                                 self.arguments(args, state);
                                 self.instance_callbacks(&receiver, &name.name, args);
@@ -588,9 +591,6 @@ impl SemanticRuleVisitor for Collector<'_> {
                                         })
                                         .unwrap_or(ResolvedType::Unknown),
                                 );
-                            }
-                            CascadeOp::NullAssert { .. } => {
-                                receiver = Cow::Owned(receiver.non_null());
                             }
                             CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => {}
                         }

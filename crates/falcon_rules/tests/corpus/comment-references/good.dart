@@ -62,3 +62,13 @@ extension type Wrapper(int value) {}
 extension type Named._(int value) {
   Named(int value) : this._(value);
 }
+
+/// Extension-type constructors and declared members resolve:
+/// [WorkerScope.new], [NamedScope.internal], [WorkerScope.onconnect].
+void listenToWorker() {}
+
+extension type WorkerScope(int value) {
+  void onconnect() {}
+}
+
+extension type NamedScope.internal(int value) {}

@@ -120,7 +120,7 @@ impl Collector<'_> {
         // including generic constructor calls such as `Future.value(value)`.
         let contextual = state.infer_with_context(value, Some(expected));
         let actual = if contextual == ResolvedType::Unknown {
-            state.infer_invocation(value)
+            state.infer(value)
         } else {
             contextual
         };

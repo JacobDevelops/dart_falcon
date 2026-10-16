@@ -1,6 +1,8 @@
 // Declaration-only SDK excerpt for SDK-free semantic tests and corpus tools.
 library dart.core;
 export 'dart:async' show Future, FutureOr;
+const Object override = _Override();
+class _Override { const _Override(); }
 class Object {
   external const Object();
   external String toString();
@@ -74,6 +76,7 @@ abstract class Iterable<E> {
   bool any(bool test(E element));
   Iterable<E> where(bool test(E element));
   Iterable<T> map<T>(T toElement(E element));
+  void forEach(void action(E element));
   List<E> toList({bool growable = true});
   E get first;
   E get last;
@@ -81,6 +84,7 @@ abstract class Iterable<E> {
   E firstWhere(bool test(E element), {E orElse()?});
 }
 abstract class List<E> implements Iterable<E> {
+  external factory List.of(Iterable<E> elements, {bool growable = true});
   E operator [](int index);
   int indexOf(E element, [int start = 0]);
   bool remove(Object? value);

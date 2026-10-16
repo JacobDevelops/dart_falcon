@@ -216,7 +216,7 @@ pub(crate) fn api_declarations<'a>(
                             n.span.start,
                             &n.annotations,
                             Some(&name.name),
-                            Some(MemberKind::field(n)),
+                            Some(MemberKind::field(n, v)),
                             n.is_static,
                         ));
                     }

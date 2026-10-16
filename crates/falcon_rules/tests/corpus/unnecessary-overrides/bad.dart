@@ -12,7 +12,7 @@ class Derived extends Base {
   void foo() => super.foo(); /* expect: unnecessary-overrides */
 
   @override
-  void bar(int x) { /* expect: unnecessary-overrides */
+  /* expect: unnecessary-overrides */ void bar(int x) {
     super.bar(x);
   }
 
@@ -23,12 +23,12 @@ class Derived extends Base {
   set name(String s) => super.name = s; /* expect: unnecessary-overrides */
 
   @override
-  int baz(int a, int b) { /* expect: unnecessary-overrides */
+  /* expect: unnecessary-overrides */ int baz(int a, int b) {
     return super.baz(a, b);
   }
 
   @override
-  void qux() { /* expect: unnecessary-overrides */
+  /* expect: unnecessary-overrides */ void qux() {
     super.qux();
   }
 }

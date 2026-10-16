@@ -1,0 +1,3 @@
+name: ordinary_web_package
+environment:
+  sdk: ^3.13.0

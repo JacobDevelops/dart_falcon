@@ -10,7 +10,8 @@
 //! type or extension declares, the library scope, then the `@docImport`s) and
 //! then as a member of the enclosing type; `Type.name` finds an instance
 //! member (inherited ones too) or a declared static member or constructor;
-//! `prefix.Type.name` only declared members.
+//! `prefix.Type.name` only declared members. Extension-type representation
+//! constructors are indexed too, so missing declared members remain absent.
 //!
 //! Primary constructor headers provide constructor parameter scopes; their
 //! declaring parameters also contribute instance members. A `this` body is
@@ -1145,9 +1146,9 @@ impl<'r, 'a> DocResolver<'r, 'a> {
     /// A member `owner` itself declares: a method, getter, setter (static or
     /// not) or constructor.
     fn declared_member<'s>(&self, owner: &DeclarationIdentity, name: &'s str) -> DocLookup<'s> {
-        let Some(kind) = self.signatures.type_kind(owner) else {
+        if self.signatures.type_kind(owner).is_none() {
             return DocLookup::Unknown;
-        };
+        }
         if let Some(fact) = self.signatures.declared_member_facts(owner, name).first() {
             return DocLookup::Found(member_element(owner.clone(), name, fact));
         }
@@ -1160,12 +1161,7 @@ impl<'r, 'a> DocResolver<'r, 'a> {
                 selector: MemberSelector::new(MemberSelectorKind::Constructor, false, name).into(),
             });
         }
-        // The representation constructor of an extension type is not indexed.
-        if kind == TypeKind::ExtensionType {
-            DocLookup::Unknown
-        } else {
-            DocLookup::Absent
-        }
+        DocLookup::Absent
     }
 
     /// A member a named extension declares; only this file's are known.
