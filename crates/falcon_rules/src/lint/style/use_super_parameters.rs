@@ -186,13 +186,6 @@ impl SemanticRuleVisitor for Collector {
                 previous = index + 1;
             }
         }
-        if let Some(body) = ctor.body {
-            for parameter in &ctor.params.params {
-                self.references
-                    .entry(parameter.name.span)
-                    .or_insert((*body.span(), false));
-            }
-        }
         for parameter in ctor.params.named() {
             if parameter.initializing == Some(InitializingFormal::This)
                 || (ctor.is_primary && (parameter.is_final || parameter.is_var))
@@ -216,6 +209,21 @@ impl SemanticRuleVisitor for Collector {
                     == Truth::Yes
             {
                 conversion.named.push(parameter.name.span);
+            }
+        }
+        if let Some(body) = ctor.body {
+            for parameter in conversion
+                .positional
+                .iter()
+                .filter_map(|check| match check {
+                    PositionalCheck::Reference(parameter) => Some(*parameter),
+                    _ => None,
+                })
+                .chain(conversion.named.iter().copied())
+            {
+                self.references
+                    .entry(parameter)
+                    .or_insert((*body.span(), false));
             }
         }
         self.constructors.push(conversion);

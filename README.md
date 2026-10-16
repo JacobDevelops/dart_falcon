@@ -21,7 +21,8 @@ default**.
 
 Resolver-backed rules share the analyzer's member and invocation queries rather than maintaining a separate semantic resolver.
 Constructor-forwarding and override rules use resolved parameter identities and
-inherited contracts, including covariance and default-expression syntax.
+inherited contracts, including covariance and default-expression syntax. Effective
+covariance is resolved when a rule requests a contract, not during type inference.
 `valid-regexps` checks decoded Dart string literals with ECMAScript regular-expression
 syntax.
 Syntax-sensitive rules use retained lexer tokens and AST spans, so keywords,

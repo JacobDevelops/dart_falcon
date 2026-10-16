@@ -168,8 +168,19 @@ impl SignatureIndex {
             return Some(empty_parameter_contracts());
         }
         let contracts = facts.parameter_contracts.as_ref()?;
-        if identity == &facts.declaring_type || contracts.is_empty() {
+        if contracts.is_empty() {
             return Some(Arc::clone(contracts));
+        }
+        if identity == &facts.declaring_type {
+            let candidates = self.inherited_candidates::<true>(
+                identity,
+                name,
+                write,
+                model,
+                &mut FxHashSet::from_iter([identity.clone()]),
+                &mut FxHashMap::default(),
+            );
+            return Self::merge_parameter_covariance(contracts, facts.kind, &candidates, false);
         }
         if !visiting.insert(identity.clone()) {
             return None;
@@ -189,7 +200,7 @@ impl SignatureIndex {
         };
         let contracts =
             self.parameter_contracts_through(supertype, name, write, concrete, model, visiting)?;
-        let candidates = self.inherited_candidates(
+        let candidates = self.inherited_candidates::<true>(
             identity,
             name,
             write,
@@ -219,7 +230,7 @@ impl SignatureIndex {
             let mut visiting = FxHashSet::from_iter([identity.clone()]);
             let mut memo = FxHashMap::default();
             for constraint in &supertypes[..count] {
-                candidates.extend(self.interface_candidates(
+                candidates.extend(self.interface_candidates::<true>(
                     constraint,
                     name,
                     write,
@@ -324,65 +335,6 @@ impl SignatureIndex {
         Some(effective.map_or_else(|| Arc::clone(contracts), Arc::from))
     }
 
-    /// Run only after every declaration and superinterface has been indexed.
-    pub(super) fn propagate_parameter_covariance(
-        &mut self,
-        program: &Program,
-        model: &SemanticModel<'_>,
-    ) {
-        for declaration in &program.declarations {
-            let name = match declaration {
-                TopLevelDecl::Class(node) => &node.name.name,
-                TopLevelDecl::MixinClass(node) => &node.name.name,
-                TopLevelDecl::Mixin(node) => &node.name.name,
-                TopLevelDecl::Enum(node) => &node.name.name,
-                TopLevelDecl::ExtensionType(node) => &node.name.name,
-                TopLevelDecl::ClassTypeAlias(node) => &node.name.name,
-                _ => continue,
-            };
-            let Some(owner) = model.resolve_name(name.as_str()) else {
-                continue;
-            };
-            let Some(entries) = self.member_entries.local.get(&owner) else {
-                continue;
-            };
-            let mut updates = Vec::with_capacity(entries.len());
-            for (name, entry) in entries {
-                for (fact_index, facts) in entry.facts.iter().enumerate() {
-                    let Some(contracts) = facts
-                        .parameter_contracts
-                        .as_ref()
-                        .filter(|contracts| !contracts.is_empty() && !facts.is_static)
-                    else {
-                        continue;
-                    };
-                    let candidates = self.inherited_candidates(
-                        &owner,
-                        name,
-                        facts.kind.has_setter(),
-                        model,
-                        &mut FxHashSet::from_iter([owner.clone()]),
-                        &mut FxHashMap::default(),
-                    );
-                    let effective =
-                        Self::merge_parameter_covariance(contracts, facts.kind, &candidates, false);
-                    if effective
-                        .as_ref()
-                        .is_none_or(|effective| !Arc::ptr_eq(contracts, effective))
-                    {
-                        updates.push((name.clone(), fact_index, effective));
-                    }
-                }
-            }
-            let entries = self.member_entries.get_mut(&owner).unwrap();
-            for (name, fact_index, contracts) in updates {
-                let entry = entries.get_mut(&name).unwrap();
-                let facts = &mut entry.facts[fact_index];
-                facts.parameter_contracts = contracts;
-            }
-        }
-    }
-
     /// Select the same combined interface signature used by override
     /// inference, then recover its declaring type's canonical instantiation.
     pub(super) fn combined_instance_owner(
@@ -407,7 +359,7 @@ impl SignatureIndex {
         else {
             return None;
         };
-        let candidates = self.inherited_candidates(
+        let candidates = self.inherited_candidates::<false>(
             identity,
             name,
             matches!(access, InstanceAccess::Write),
@@ -523,7 +475,7 @@ impl SignatureIndex {
         lookup.visiting.clear();
         lookup.memo.clear();
         lookup.visiting.insert(identity.clone());
-        let candidates = self.inherited_candidates(
+        let candidates = self.inherited_candidates::<false>(
             identity,
             name,
             setter,
@@ -534,7 +486,7 @@ impl SignatureIndex {
         let getter = setter && candidates.is_empty();
         let candidates = if getter {
             lookup.memo.clear();
-            self.inherited_candidates(
+            self.inherited_candidates::<false>(
                 identity,
                 name,
                 false,
@@ -641,8 +593,14 @@ impl SignatureIndex {
         // Name, setter mode, and library visibility are fixed for this lookup.
         // Cache before owner substitution so distinct generic paths stay distinct.
         let mut memo = FxHashMap::default();
-        let candidates =
-            self.inherited_candidates(identity, name, setter, model, &mut visiting, &mut memo);
+        let candidates = self.inherited_candidates::<false>(
+            identity,
+            name,
+            setter,
+            model,
+            &mut visiting,
+            &mut memo,
+        );
         self.combine_inherited(candidates, model)
             .iter()
             .any(|member| match kind {
@@ -652,7 +610,7 @@ impl SignatureIndex {
             })
     }
 
-    fn inherited_candidates(
+    fn inherited_candidates<const CONTRACTS: bool>(
         &self,
         identity: &DeclarationIdentity,
         name: &str,
@@ -675,9 +633,9 @@ impl SignatureIndex {
             if let Some(&inherited_object) = self.inherited_object.get(identity) {
                 let (object, explicit) = supertypes.split_last().expect("implicit Object edge");
                 if inherited_object {
-                    candidates.extend(
-                        self.interface_candidates(object, name, setter, model, visiting, memo),
-                    );
+                    candidates.extend(self.interface_candidates::<CONTRACTS>(
+                        object, name, setter, model, visiting, memo,
+                    ));
                 }
                 explicit
             } else {
@@ -687,8 +645,8 @@ impl SignatureIndex {
             supertypes.as_slice()
         };
         for (index, supertype) in supertypes.iter().enumerate() {
-            let inherited =
-                self.interface_candidates(supertype, name, setter, model, visiting, memo);
+            let inherited = self
+                .interface_candidates::<CONTRACTS>(supertype, name, setter, model, visiting, memo);
             // A mixin declaration replaces the superclass signature. A member
             // inherited by the mixin instead combines with that signature before
             // the next mixin or any implemented interfaces are considered.
@@ -713,7 +671,7 @@ impl SignatureIndex {
         candidates
     }
 
-    fn interface_candidates(
+    fn interface_candidates<const CONTRACTS: bool>(
         &self,
         ty: &ResolvedType,
         name: &str,
@@ -804,7 +762,11 @@ impl SignatureIndex {
                         return_type,
                         call_parameters,
                         shape,
-                        parameter_contracts: fact.parameter_contracts.clone(),
+                        parameter_contracts: if CONTRACTS {
+                            fact.parameter_contracts.clone()
+                        } else {
+                            None
+                        },
                         known,
                     });
                 }
@@ -841,9 +803,10 @@ impl SignatureIndex {
                     }
                 }
             }
-            if !members.is_empty() {
-                let inherited =
-                    self.inherited_candidates(identity, name, setter, model, visiting, memo);
+            if CONTRACTS && !members.is_empty() {
+                let inherited = self.inherited_candidates::<CONTRACTS>(
+                    identity, name, setter, model, visiting, memo,
+                );
                 for member in &mut members {
                     if let Some(contracts) = &member.parameter_contracts {
                         member.parameter_contracts = Self::merge_parameter_covariance(
@@ -857,8 +820,8 @@ impl SignatureIndex {
             }
         }
         if members.is_empty() {
-            let inherited =
-                self.inherited_candidates(identity, name, setter, model, visiting, memo);
+            let inherited = self
+                .inherited_candidates::<CONTRACTS>(identity, name, setter, model, visiting, memo);
             members = self.combine_inherited(inherited, model);
         }
         visiting.remove(identity);
@@ -1393,7 +1356,7 @@ mod tests {
             };
             let mut visiting = FxHashSet::default();
             let mut memo = FxHashMap::default();
-            let members = index.interface_candidates(
+            let members = index.interface_candidates::<false>(
                 &p,
                 "compareTo",
                 false,
@@ -1460,8 +1423,14 @@ mod tests {
         };
         let mut visiting = FxHashSet::default();
         let mut memo = FxHashMap::default();
-        let members =
-            index.interface_candidates(&leaf, "make", false, &model, &mut visiting, &mut memo);
+        let members = index.interface_candidates::<false>(
+            &leaf,
+            "make",
+            false,
+            &model,
+            &mut visiting,
+            &mut memo,
+        );
         assert_eq!(members.len(), 1);
         assert!(members[0].return_type.interface("dart:core", "int"));
         assert!(memo.values().all(|members| members.len() <= 1));
@@ -1478,8 +1447,14 @@ mod tests {
             nullable: false,
             extension_type: false,
         };
-        let members =
-            index.interface_candidates(&second, "make", false, &model, &mut visiting, &mut memo);
+        let members = index.interface_candidates::<false>(
+            &second,
+            "make",
+            false,
+            &model,
+            &mut visiting,
+            &mut memo,
+        );
         assert_eq!(members.len(), 1);
         assert!(members[0].return_type.interface("dart:core", "String"));
         assert_eq!(memo.len(), cached);
@@ -1488,7 +1463,14 @@ mod tests {
         memo.clear();
         assert!(
             index
-                .interface_candidates(&leaf, "absent", false, &model, &mut visiting, &mut memo)
+                .interface_candidates::<false>(
+                    &leaf,
+                    "absent",
+                    false,
+                    &model,
+                    &mut visiting,
+                    &mut memo
+                )
                 .is_empty()
         );
         assert!(memo.values().all(Vec::is_empty));

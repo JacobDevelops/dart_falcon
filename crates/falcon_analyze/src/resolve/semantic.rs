@@ -4671,9 +4671,6 @@ impl SignatureIndex {
             self.value_types.extend(pending_values.drain());
             retry_partial = false;
         }
-        for (program, model) in programs {
-            self.propagate_parameter_covariance(program, model);
-        }
     }
 
     /// Propagate callable headers before initializers and revisit dependencies
@@ -15445,8 +15442,10 @@ class Explicit {
                     ("Explicit", "accept", vec![true]),
                 ] {
                     let identity = model.resolve_name(owner).unwrap();
-                    let facts = &signatures.declared_member_facts(&identity, name)[0];
-                    let contracts = facts.parameter_contracts.as_ref().unwrap();
+                    let receiver = ResolvedType::interface_identity(identity);
+                    let contracts = signatures
+                        .effective_parameter_contracts(&receiver, name, false, model)
+                        .unwrap();
                     assert_eq!(
                         contracts
                             .iter()
@@ -15455,6 +15454,18 @@ class Explicit {
                         expected,
                         "{owner}.{name}",
                     );
+                    if owner == "Leaf" {
+                        let inherited = signatures
+                            .super_parameter_contracts(&receiver, name, false, model)
+                            .unwrap();
+                        assert_eq!(
+                            inherited
+                                .iter()
+                                .map(|parameter| parameter.is_covariant)
+                                .collect::<Vec<_>>(),
+                            expected,
+                        );
+                    }
                 }
             },
         );
@@ -15503,12 +15514,11 @@ class DifferentKind extends OtherKind {
                 ] {
                     let identity = model.resolve_name(owner).unwrap();
                     let facts = signatures.declared_member_facts(&identity, name);
-                    let setter = facts.iter().find(|facts| facts.kind.has_setter()).unwrap();
-                    assert_eq!(
-                        setter.parameter_contracts.as_ref().unwrap()[0].is_covariant,
-                        expected,
-                        "{owner}.{name}",
-                    );
+                    let receiver = ResolvedType::interface_identity(identity);
+                    let contracts = signatures
+                        .effective_parameter_contracts(&receiver, name, true, model)
+                        .unwrap();
+                    assert_eq!(contracts[0].is_covariant, expected, "{owner}.{name}",);
                     for getter in facts
                         .iter()
                         .filter(|facts| facts.kind == MemberKind::Getter)
@@ -15610,13 +15620,9 @@ class ConflictChild extends Conflict {
                     ("ConflictChild", false),
                 ] {
                     let identity = model.resolve_name(owner).unwrap();
+                    let receiver = ResolvedType::interface_identity(identity);
                     let contracts = signatures
-                        .declared_member_facts(&identity, "run")
-                        .iter()
-                        .find(|facts| facts.kind == MemberKind::Method)
-                        .unwrap()
-                        .parameter_contracts
-                        .as_ref()
+                        .effective_parameter_contracts(&receiver, "run", false, model)
                         .unwrap();
                     assert_eq!(contracts[0].is_covariant, expected, "{owner}.run");
                 }

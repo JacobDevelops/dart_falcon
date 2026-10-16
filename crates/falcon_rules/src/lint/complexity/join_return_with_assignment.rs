@@ -20,7 +20,6 @@
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr};
 
 use crate::lint::semantic_scope::{self, SemanticRuleVisitor, SemanticState};
 
@@ -102,102 +101,68 @@ fn assignment_target(stmt: &Stmt) -> Option<(&Expr, bool)> {
 /// to their declaring variable, except instantiated members retain their own
 /// occurrence identity rather than canonicalizing to the generic declaration.
 pub(super) fn same_element(
-    left: &Expr,
-    left_write: bool,
-    right: &Expr,
-    right_write: bool,
+    mut left: &Expr,
+    mut left_write: bool,
+    mut right: &Expr,
+    mut right_write: bool,
     state: &SemanticState<'_>,
 ) -> bool {
-    struct SameElement<'a, 's> {
-        right: &'a Expr,
-        left_write: bool,
-        right_write: bool,
-        state: &'a SemanticState<'s>,
-        equal: bool,
-    }
-    impl Visitor for SameElement<'_, '_> {
-        fn visit_expr(&mut self, node: &Expr) {
-            if !self.equal {
-                return;
+    loop {
+        match (left.unparenthesized(), right.unparenthesized()) {
+            (Expr::Ident(left), Expr::Ident(right)) => {
+                return identifier_element(left, left_write, state)
+                    == identifier_element(right, right_write, state);
             }
-            match (node.unparenthesized(), self.right.unparenthesized()) {
-                (Expr::Ident(left), Expr::Ident(right)) => {
-                    self.equal = identifier_element(left, self.left_write, self.state)
-                        == identifier_element(right, self.right_write, self.state);
+            (
+                Expr::Field {
+                    object: left_object,
+                    field: left_field,
+                    is_null_safe: left_safe,
+                    ..
+                },
+                Expr::Field {
+                    object: right_object,
+                    field: right_field,
+                    is_null_safe: right_safe,
+                    ..
+                },
+            ) => {
+                let left_prefixed = matches!(left_object.as_ref(), Expr::Ident(_)) && !left_safe;
+                let right_prefixed = matches!(right_object.as_ref(), Expr::Ident(_)) && !right_safe;
+                if left_prefixed != right_prefixed {
+                    return false;
                 }
-                (
-                    Expr::Field {
-                        object: left_object,
-                        field: left,
-                        is_null_safe: left_safe,
-                        ..
-                    },
-                    Expr::Field {
-                        object: right_object,
-                        field: right,
-                        is_null_safe: right_safe,
-                        ..
-                    },
-                ) => {
-                    let left_prefixed =
-                        matches!(left_object.as_ref(), Expr::Ident(_)) && !left_safe;
-                    let right_prefixed =
-                        matches!(right_object.as_ref(), Expr::Ident(_)) && !right_safe;
-                    self.equal = left_prefixed == right_prefixed
-                        && match (
-                            member_element(
-                                left_object,
-                                left,
-                                *left_safe,
-                                self.left_write,
-                                self.state,
-                            ),
-                            member_element(
+                let equal = match (
+                    member_element(left_object, left_field, *left_safe, left_write, state),
+                    member_element(right_object, right_field, *right_safe, right_write, state),
+                ) {
+                    (Some(left), Some(right)) => left == right,
+                    (None, None) => {
+                        matches!(
+                            state.infer_access_receiver(left_object, &left_field.name, *left_safe),
+                            falcon_analyze::ResolvedType::Dynamic
+                        ) && matches!(
+                            state.infer_access_receiver(
                                 right_object,
-                                right,
-                                *right_safe,
-                                self.right_write,
-                                self.state,
+                                &right_field.name,
+                                *right_safe
                             ),
-                        ) {
-                            (Some(left), Some(right)) => left == right,
-                            (None, None) => {
-                                matches!(
-                                    self.state.infer_access_receiver(
-                                        left_object,
-                                        &left.name,
-                                        *left_safe
-                                    ),
-                                    falcon_analyze::ResolvedType::Dynamic
-                                ) && matches!(
-                                    self.state.infer_access_receiver(
-                                        right_object,
-                                        &right.name,
-                                        *right_safe
-                                    ),
-                                    falcon_analyze::ResolvedType::Dynamic
-                                )
-                            }
-                            _ => false,
-                        };
-                    self.right = right_object;
-                    self.left_write = false;
-                    self.right_write = false;
-                    walk_expr(self, node.unparenthesized());
+                            falcon_analyze::ResolvedType::Dynamic
+                        )
+                    }
+                    _ => false,
+                };
+                if !equal {
+                    return false;
                 }
-                _ => self.equal = false,
+                left = left_object;
+                right = right_object;
+                left_write = false;
+                right_write = false;
             }
+            _ => return false,
         }
     }
-    let mut comparison = SameElement {
-        right,
-        left_write,
-        right_write,
-        state,
-        equal: true,
-    };
-    comparison.visit_expr(left);
-    comparison.equal
 }
 
 #[derive(PartialEq, Eq)]

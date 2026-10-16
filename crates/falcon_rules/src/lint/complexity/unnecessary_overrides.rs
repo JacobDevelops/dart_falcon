@@ -57,14 +57,14 @@ fn check_member(
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    let (annotations, name, name_span, span, write, unnecessary) = match member {
+    let (annotations, name, name_span, span, write, body) = match member {
         ClassMember::Method(m) if !m.is_static => (
             &m.annotations,
             m.name.name.as_str(),
             m.name.span,
             m.span,
             false,
-            method_forwards(m, ctx),
+            &m.body,
         ),
         ClassMember::Getter(g) if !g.is_static => (
             &g.annotations,
@@ -72,7 +72,7 @@ fn check_member(
             g.name.span,
             g.span,
             false,
-            getter_forwards(g, ctx),
+            &g.body,
         ),
         ClassMember::Setter(s) if !s.is_static => (
             &s.annotations,
@@ -80,7 +80,7 @@ fn check_member(
             s.name.span,
             s.span,
             true,
-            setter_forwards(s, ctx),
+            &s.body,
         ),
         ClassMember::Operator(o) => (
             &o.annotations,
@@ -88,11 +88,11 @@ fn check_member(
             crate::lint::declarations::operator_token_span(o, ctx.syntax),
             o.span,
             false,
-            operator_forwards(o, ctx),
+            &o.body,
         ),
         _ => return,
     };
-    if !unnecessary {
+    if !single_expr(body, ctx).is_some_and(|expr| forwards(member, expr.unparenthesized(), ctx)) {
         return;
     }
     let first_doc = docs.partition_point(|doc| doc.next_token < span.start);
@@ -238,28 +238,24 @@ fn same_parameters(
 }
 
 fn args_match_params(args: &ArgList, params: &FormalParamList) -> bool {
-    if args.positional.len() != params.positional().count() {
-        return false;
-    }
-    for (arg, expected) in args.positional.iter().zip(params.positional()) {
-        match arg.unparenthesized() {
-            Expr::Ident(id) if id.name == expected.name.name => {}
-            _ => return false,
-        }
-    }
-    if args.named.len() != params.named().count() {
-        return false;
-    }
-    for np in params.named() {
-        let Some(na) = args.named.iter().find(|na| na.name.name == np.name.name) else {
-            return false;
-        };
-        match na.value.unparenthesized() {
-            Expr::Ident(id) if id.name == np.name.name => {}
-            _ => return false,
-        }
-    }
-    true
+    args.positional.len() == params.positional().count()
+        && args.named.len() == params.named().count()
+        && args
+            .positional
+            .iter()
+            .zip(params.positional())
+            .all(|(arg, parameter)| {
+                matches!(arg.unparenthesized(), Expr::Ident(id) if id.name == parameter.name.name)
+            })
+        && params.named().all(|parameter| {
+            args.named
+                .iter()
+                .find(|arg| arg.name.name == parameter.name.name)
+                .is_some_and(|arg| {
+                    matches!(arg.value.unparenthesized(), Expr::Ident(id)
+                        if id.name == parameter.name.name)
+                })
+        })
 }
 
 fn has_preceding_comment(offset: usize, ctx: &AnalyzeContext) -> bool {
@@ -291,64 +287,35 @@ fn single_expr<'a>(body: &'a Option<FunctionBody>, ctx: &AnalyzeContext) -> Opti
     }
 }
 
-fn method_forwards(m: &MethodDecl, ctx: &AnalyzeContext) -> bool {
-    let Some(expr) = single_expr(&m.body, ctx) else {
-        return false;
-    };
-    match expr.unparenthesized() {
-        Expr::Call { callee, args, .. } => match callee.unparenthesized() {
-            Expr::Field { object, field, .. } => {
-                is_super(object, ctx)
-                    && field.name == m.name.name
-                    && args_match_params(args, &m.params)
-            }
-            _ => false,
-        },
-        _ => false,
-    }
-}
-
-fn getter_forwards(g: &GetterDecl, ctx: &AnalyzeContext) -> bool {
-    let Some(expr) = single_expr(&g.body, ctx) else {
-        return false;
-    };
-    match expr.unparenthesized() {
-        Expr::Field { object, field, .. } => is_super(object, ctx) && field.name == g.name.name,
-        _ => false,
-    }
-}
-
-fn setter_forwards(s: &SetterDecl, ctx: &AnalyzeContext) -> bool {
-    let Some(expr) = single_expr(&s.body, ctx) else {
-        return false;
-    };
-    match expr.unparenthesized() {
-        Expr::Assign {
-            target,
-            op: AssignOp::Eq,
-            value,
-            ..
-        } => {
-            let target_ok = matches!(
-                target.unparenthesized(),
-                Expr::Field { object, field, .. } if is_super(object, ctx) && field.name == s.name.name
-            );
-            let value_ok =
-                matches!(value.unparenthesized(), Expr::Ident(id) if id.name == s.param.name);
-            target_ok && value_ok
+fn forwards(member: &ClassMember, expr: &Expr, ctx: &AnalyzeContext) -> bool {
+    match (member, expr) {
+        (ClassMember::Method(method), Expr::Call { callee, args, .. }) => {
+            matches!(callee.unparenthesized(), Expr::Field { object, field, .. }
+                if is_super(object, ctx) && field.name == method.name.name)
+                && args_match_params(args, &method.params)
         }
-        _ => false,
-    }
-}
-
-fn operator_forwards(operator: &OperatorDecl, ctx: &AnalyzeContext) -> bool {
-    let Some(expr) = single_expr(&operator.body, ctx) else {
-        return false;
-    };
-    match expr.unparenthesized() {
-        Expr::Binary {
-            left, op, right, ..
-        } => {
+        (ClassMember::Getter(getter), Expr::Field { object, field, .. }) => {
+            is_super(object, ctx) && field.name == getter.name.name
+        }
+        (
+            ClassMember::Setter(setter),
+            Expr::Assign {
+                target,
+                op: AssignOp::Eq,
+                value,
+                ..
+            },
+        ) => {
+            matches!(target.unparenthesized(), Expr::Field { object, field, .. }
+                if is_super(object, ctx) && field.name == setter.name.name)
+                && matches!(value.unparenthesized(), Expr::Ident(id) if id.name == setter.param.name)
+        }
+        (
+            ClassMember::Operator(operator),
+            Expr::Binary {
+                left, op, right, ..
+            },
+        ) => {
             *op != BinaryOp::NotEq
                 && op.method_name() == Some(operator.op.as_str())
                 && matches!(operator.params.params.as_slice(), [parameter]
@@ -356,7 +323,7 @@ fn operator_forwards(operator: &OperatorDecl, ctx: &AnalyzeContext) -> bool {
                         if id.name == parameter.name.name))
                 && is_super(left, ctx)
         }
-        Expr::Unary { op, operand, .. } => {
+        (ClassMember::Operator(operator), Expr::Unary { op, operand, .. }) => {
             operator.params.params.is_empty()
                 && matches!(
                     (op, operator.op.as_str()),

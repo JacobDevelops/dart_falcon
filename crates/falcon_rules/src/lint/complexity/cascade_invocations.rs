@@ -244,12 +244,17 @@ impl Scope<'_, '_> {
             } => match target.as_ref() {
                 // `v = e` receives a following cascade on a local `v`; for a
                 // field or top-level variable the analyzer sees the setter.
-                Expr::Ident(identifier) if self.is_local(identifier) => Cascadable {
-                    element: Some(Element::Local(self.locals[&identifier.span.start])),
-                    critical: self.critical(&[value], None),
-                    can_receive: *op != AssignOp::NullCoalesceEq,
-                    ..Cascadable::default()
-                },
+                Expr::Ident(identifier) => {
+                    let Some(&declaration) = self.locals.get(&identifier.span.start) else {
+                        return Cascadable::default();
+                    };
+                    Cascadable {
+                        element: Some(Element::Local(declaration)),
+                        critical: self.critical(&[value], None),
+                        can_receive: *op != AssignOp::NullCoalesceEq,
+                        ..Cascadable::default()
+                    }
+                }
                 // `v.p = e` sets a property on `v`; only a local `v` is a
                 // variable element that can receive.
                 Expr::Field {
@@ -357,8 +362,8 @@ impl Scope<'_, '_> {
             return None;
         };
         let name = identifier.name.as_str();
-        if self.is_local(identifier) {
-            return Some(Element::Local(self.locals[&identifier.span.start]));
+        if let Some(&declaration) = self.locals.get(&identifier.span.start) {
+            return Some(Element::Local(declaration));
         }
         match self.enclosing_member_owner(name) {
             Some(Some(owner)) => {

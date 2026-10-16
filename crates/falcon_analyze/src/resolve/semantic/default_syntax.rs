@@ -38,7 +38,7 @@ enum Token {
     Type(Discriminant<DartType>),
     Element(Discriminant<CollectionElement>),
     MapElement(Discriminant<MapElement>),
-    Text(String),
+    Text(Box<str>),
     Count(usize),
     Flag(bool),
     Unary(UnaryOp),
@@ -67,7 +67,7 @@ struct SyntaxCollector {
 
 impl SyntaxCollector {
     fn text(&mut self, text: &str) {
-        self.tokens.push(Token::Text(text.to_owned()));
+        self.tokens.push(Token::Text(text.into()));
     }
 
     fn count(&mut self, count: usize) {
