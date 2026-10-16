@@ -18,8 +18,8 @@ Everything here must be resolved before falcon 1.0. Engine items are checked off
 - **post-1.0**: explicitly out of 1.0 scope (experimental, hyper-niche, or
   needs config/schema design that is itself post-1.0 work).
 
-**Falcon groups** are `complexity | correctness | performance | style |
-suspicious`.
+**Falcon groups** are `a11y | complexity | correctness | performance | security |
+style | suspicious`.
 
 **Analysis types** (what a rule needs from the engine):
 
@@ -44,9 +44,9 @@ Six DCM rows were deduplicated against shipped official lints and the cross-file
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
 Analysis legend: **S** syntax-only, **LT** needs-local-type-inference, **FT**
-needs-full-type-resolution, **X** needs-cross-file/project. Domain-rule falcon
-groups (flutter/test/bloc/riverpod/provider/flutter_hooks/equatable) are
-assigned here for the catalog and should be confirmed at implementation time.
+needs-full-type-resolution, **X** needs-cross-file/project. Falcon group assignments
+for domain rules (flutter/test/bloc/riverpod/provider/flutter_hooks/equatable) are
+provisional and should be confirmed at implementation time.
 
 ### 2a. core: correctness
 
@@ -62,7 +62,7 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `avoid-contradictory-expressions` | correctness | LT | paid | `a && !a` style always-false/true conditions. | must-have |
 | `avoid-unmodified-loop-condition` | correctness | LT | paid | Loop variable never changes → infinite loop. | must-have |
 | `avoid-uncaught-future-errors` | correctness | FT | paid | Future error path with no catch. | must-have |
-| `avoid-weak-cryptographic-algorithms` | correctness | FT | paid | MD5/SHA1/weak cipher usage. | must-have |
+| `avoid-weak-cryptographic-algorithms` | security | FT | paid | MD5/SHA1/weak cipher usage. | must-have |
 | `avoid-duplicate-cascades` | correctness | S | paid? | Same cascade section invoked twice. | nice-to-have |
 | `avoid-duplicate-exports` | correctness | S | paid | Duplicate export directive. | nice-to-have |
 | `avoid-duplicate-named-imports` | correctness | S | paid | Duplicate named import. | nice-to-have |
@@ -83,8 +83,8 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `avoid-nested-futures` | correctness | FT | paid | `Future<Future<T>>` nesting mistake. | nice-to-have |
 | `avoid-nested-streams-and-futures` | correctness | FT | paid | Nested stream/future type mistake. | nice-to-have |
 | `avoid-missing-completer-stack-trace` | correctness | FT | paid | `Completer.completeError` without stack trace. | nice-to-have |
-| `prefer-random-secure` | correctness | FT | paid | `Random()` where `Random.secure()` intended. | nice-to-have |
-| `avoid-sensitive-query-params` | suspicious | S | paid | Secrets/tokens in URL query params. | nice-to-have |
+| `prefer-random-secure` | security | FT | paid | `Random()` where `Random.secure()` intended. | nice-to-have |
+| `avoid-sensitive-query-params` | security | S | paid | Secrets/tokens in URL query params. | nice-to-have |
 | `avoid-assigning-to-static-field` | correctness | LT | paid | Mutating static state. | nice-to-have |
 | `match-getter-setter-field-names` | correctness | LT | paid | Getter/setter names disagree with backing field. | nice-to-have |
 | `prefer-correct-json-casts` | correctness | FT | paid | Unsafe casts decoding JSON maps. | nice-to-have |
@@ -237,7 +237,7 @@ not re-added.
 | `prefer-transform-over-container` | style | LT | paid | Container used only for transform → Transform. | must-have |
 | `prefer-container` | style | LT | paid | Collapse stacked layout widgets into one Container. | must-have |
 | `prefer-for-loop-in-children` | style | S | paid | `.map().toList()` in children → collection-for. | must-have |
-| `prefer-action-button-tooltip` | style | LT | paid | IconButton/action lacking a tooltip (a11y). | must-have |
+| `prefer-action-button-tooltip` | a11y | LT | paid | IconButton/action lacking a tooltip (a11y). | must-have |
 | `avoid-unnecessary-stateful-widgets` | correctness | FT | paid | StatefulWidget with no state → Stateless. | must-have |
 | `avoid-mounted-in-setstate` | correctness | FT | paid | `mounted` check misuse around setState. | nice-to-have |
 | `prefer-single-setstate` | performance | FT | paid | Multiple setState calls collapsible. | nice-to-have |
@@ -246,7 +246,7 @@ not re-added.
 | `always-pass-global-key` | correctness | LT | paid | GlobalKey should be passed, not created inline. | nice-to-have |
 | `avoid-border-all` | performance | S | paid | `Border.all` → const-friendly alternative. | nice-to-have |
 | `avoid-incorrect-image-opacity` | correctness | S | paid | Opacity widget wrapping Image (use color/opacity). | nice-to-have |
-| `avoid-missing-image-alt` | style | S | paid | Image without a semantic label (a11y). | nice-to-have |
+| `avoid-missing-image-alt` | a11y | S | paid | Image without a semantic label (a11y). | nice-to-have |
 | `avoid-wrapping-in-padding` | style | LT | paid | Padding widget where Container padding suffices. | nice-to-have |
 | `prefer-sized-box-square` | style | S | paid | `SizedBox(w:x,h:x)` → `SizedBox.square`. | nice-to-have |
 | `prefer-using-list-view` | performance | LT | paid | Column + SingleChildScrollView → ListView. | nice-to-have |

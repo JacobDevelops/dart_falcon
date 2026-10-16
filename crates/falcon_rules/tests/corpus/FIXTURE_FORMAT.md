@@ -52,7 +52,7 @@ the in-process harness loads it with `falcon_config::load_config`):
 ```
 
 Rules live under `linter.rules.<group>` (group is the rule's category —
-`complexity`, `correctness`, `performance`, `style`, or `suspicious`). A rule
+`a11y`, `complexity`, `correctness`, `performance`, `security`, `style`, or `suspicious`). A rule
 value is either a level string (`"off"`, `"on"`, `"info"`, `"warn"`, `"error"`)
 or an object `{ "level": ..., "options": { ... } }`.
 

@@ -189,6 +189,7 @@ fn codegen(group: String, rule_id: String) {
     }
 
     let struct_name = pascal_case(&module);
+    fs::create_dir_all(rule_file.parent().expect("rule directory")).expect("create rule directory");
     fs::write(&rule_file, rule_stub(&struct_name)).expect("write rule stub");
 
     fs::create_dir_all(&corpus_dir).expect("create corpus dir");
@@ -214,6 +215,12 @@ fn codegen(group: String, rule_id: String) {
     println!("  {}", good.display());
     println!();
     println!("next steps:");
+    let group_module = root.join(format!("crates/falcon_rules/src/lint/{group}.rs"));
+    if !group_module.exists() {
+        println!(
+            "  create crates/falcon_rules/src/lint/{group}.rs and add `pub mod {group};` to crates/falcon_rules/src/lint.rs"
+        );
+    }
     println!(
         "  1. add `pub mod {};` to crates/falcon_rules/src/lint/{}.rs",
         module, group

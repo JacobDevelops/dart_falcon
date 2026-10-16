@@ -4,9 +4,11 @@ import domainsJson from '../data/domains.json'
 export const REPO_URL = 'https://github.com/JacobDevelops/dart_falcon'
 
 export type RuleGroup =
+  | 'a11y'
   | 'complexity'
   | 'correctness'
   | 'performance'
+  | 'security'
   | 'style'
   | 'suspicious'
 
@@ -66,14 +68,9 @@ export interface GroupMeta {
 
 export const GROUPS: GroupMeta[] = [
   {
-    id: 'correctness',
-    label: 'Correctness',
-    blurb: 'Code that is outright wrong or will not behave as intended.',
-  },
-  {
-    id: 'suspicious',
-    label: 'Suspicious',
-    blurb: 'Patterns that are probably a mistake or a latent bug.',
+    id: 'a11y',
+    label: 'Accessibility',
+    blurb: 'Patterns that make applications harder to use with assistive technology.',
   },
   {
     id: 'complexity',
@@ -81,14 +78,29 @@ export const GROUPS: GroupMeta[] = [
     blurb: 'Needlessly complex code that is harder to read and maintain.',
   },
   {
+    id: 'correctness',
+    label: 'Correctness',
+    blurb: 'Code that is outright wrong or will not behave as intended.',
+  },
+  {
     id: 'performance',
     label: 'Performance',
     blurb: 'Patterns with avoidable runtime or build cost.',
   },
   {
+    id: 'security',
+    label: 'Security',
+    blurb: 'Patterns that expose applications or their users to security risks.',
+  },
+  {
     id: 'style',
     label: 'Style',
     blurb: 'Idiomatic, consistent Dart and Flutter style.',
+  },
+  {
+    id: 'suspicious',
+    label: 'Suspicious',
+    blurb: 'Patterns that are probably a mistake or a latent bug.',
   },
 ]
 
@@ -111,7 +123,7 @@ export const groupedRules: GroupedRules[] = GROUPS.map((g) => ({
   rules: rules
     .filter((r) => r.group === g.id && !r.crossFile)
     .sort((a, b) => a.name.localeCompare(b.name)),
-})).filter((g) => g.rules.length > 0)
+}))
 
 export const crossFileRules: Rule[] = rules
   .filter((r) => r.crossFile)

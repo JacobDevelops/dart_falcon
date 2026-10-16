@@ -32,6 +32,91 @@ fn domain_metadata_preserves_configuration_names() {
 }
 
 #[test]
+fn rule_groups_have_stable_order_and_configuration_names() {
+    use falcon_rules::meta::RuleGroup;
+
+    let groups: Vec<_> = RuleGroup::ALL.iter().map(|group| group.as_str()).collect();
+    assert_eq!(
+        groups,
+        [
+            "a11y",
+            "complexity",
+            "correctness",
+            "performance",
+            "security",
+            "style",
+            "suspicious",
+        ]
+    );
+}
+
+#[test]
+fn schema_exposes_all_groups_in_both_sections_including_empty_groups() {
+    use falcon_rules::meta::RuleGroup;
+
+    let schema = falcon_rules::schema::config_schema();
+    for section in ["linter", "cross-file"] {
+        let rules = &schema["properties"][section]["properties"]["rules"];
+        assert_eq!(rules["additionalProperties"], false);
+        assert_eq!(
+            rules["properties"].as_object().unwrap().len(),
+            RuleGroup::ALL.len() + 1,
+            "all groups plus the recommended toggle in {section}"
+        );
+        for group in RuleGroup::ALL {
+            let group_schema = &rules["properties"][group.as_str()];
+            assert_eq!(group_schema["type"], "object");
+            assert_eq!(group_schema["additionalProperties"], false);
+            assert!(group_schema["properties"].is_object());
+            assert!(group_schema.get("required").is_none());
+            assert!(group_schema.get("minProperties").is_none());
+        }
+        assert!(
+            rules["properties"]["a11y"]["properties"]
+                .as_object()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    assert!(
+        schema["properties"]["linter"]["properties"]["rules"]["properties"]["security"]
+            ["properties"]
+            .as_object()
+            .unwrap()
+            .is_empty()
+    );
+
+    let _: falcon_config::FalconConfig = serde_json::from_value(serde_json::json!({
+        "linter": { "rules": { "a11y": {}, "security": {} } },
+        "cross-file": { "rules": { "a11y": {}, "security": {} } }
+    }))
+    .expect("empty reserved groups are valid configuration");
+}
+
+#[test]
+fn secure_pubspec_urls_is_only_exposed_under_cross_file_security() {
+    use falcon_rules::meta::RuleGroup;
+
+    let meta = meta_for("secure-pubspec-urls").unwrap();
+    assert_eq!(meta.group, RuleGroup::Security);
+    assert!(meta.is_cross_file());
+
+    let schema = falcon_rules::schema::config_schema();
+    for section in ["linter", "cross-file"] {
+        for group in RuleGroup::ALL {
+            let properties = &schema["properties"][section]["properties"]["rules"]["properties"]
+                [group.as_str()]["properties"];
+            assert_eq!(
+                properties.get(meta.name).is_some(),
+                section == "cross-file" && *group == RuleGroup::Security,
+                "{section}.rules.{}",
+                group.as_str()
+            );
+        }
+    }
+}
+
+#[test]
 fn committed_schema_matches_generator() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),

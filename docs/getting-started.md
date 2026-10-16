@@ -62,8 +62,8 @@ There is no `init` command; create the file yourself:
 
 > Point `$schema` at the published schema for rule-name autocomplete and validation. Rule ids and structural config keys use kebab-case (`max-lines-for-file`, `cross-file`, `max-errors`); names inside rule `options` use snake_case.
 
-Rules live under groups (`complexity`, `correctness`, `performance`, `style`,
-`suspicious`); each entry is a level string (`off`/`on`/`info`/`warn`/`error`) or
+Rules live under groups (`a11y`, `complexity`, `correctness`, `performance`,
+`security`, `style`, `suspicious`); each entry is a level string (`off`/`on`/`info`/`warn`/`error`) or
 a `{ "level", "options" }` object. Whole-project checks such as `unused-files`
 live in the separate top-level [`cross-file`](./configuration.md#cross-file-cross-file-rules)
 section, not under `linter`. See [configuration.md](./configuration.md) for the

@@ -31,6 +31,28 @@ dart_code_linter:
 }
 
 #[test]
+fn secure_pubspec_urls_migrates_to_cross_file_security() {
+    let (value, unrecognized, count) = parse("linter:\n  rules:\n    - secure_pubspec_urls\n");
+    assert!(unrecognized.is_empty());
+    assert_eq!(count, 1);
+    assert_eq!(
+        value["cross-file"]["rules"]["security"]["secure-pubspec-urls"],
+        Value::String("warn".into())
+    );
+    assert!(
+        value["cross-file"]["rules"]["suspicious"]
+            .get("secure-pubspec-urls")
+            .is_none()
+    );
+    assert!(
+        value["linter"]["rules"]["security"]
+            .get("secure-pubspec-urls")
+            .is_none()
+    );
+    let _: falcon_config::FalconConfig = serde_json::from_value(value).unwrap();
+}
+
+#[test]
 fn pyramid_rule_with_options_maps_to_level_and_options() {
     let yaml = "\
 custom_lint:

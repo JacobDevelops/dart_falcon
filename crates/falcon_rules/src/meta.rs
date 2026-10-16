@@ -25,9 +25,11 @@ macro_rules! metadata_enum {
 }
 
 metadata_enum!(RuleGroup {
+    A11y => "a11y",
     Complexity => "complexity",
     Correctness => "correctness",
     Performance => "performance",
+    Security => "security",
     Style => "style",
     Suspicious => "suspicious",
 });
@@ -1359,7 +1361,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
     ),
     RuleMeta::cross_file::<cross_file::secure_pubspec_urls::SecurePubspecUrls>(
         "secure-pubspec-urls",
-        RuleGroup::Suspicious,
+        RuleGroup::Security,
         NONE,
         false,
         RuleSource::Lints("secure_pubspec_urls"),

@@ -8,7 +8,7 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::meta::{Domain, RULE_METADATA};
+use crate::meta::{Domain, RULE_METADATA, RuleGroup};
 
 /// Canonical published location of the schema — the value users point `$schema`
 /// at, and the schema's own `$id`. Served raw from the default branch so it
@@ -19,30 +19,30 @@ pub const SCHEMA_URL: &str =
 /// The `rules` sub-schema for one section: `recommended` plus one object per
 /// group listing exactly that section's rules (file rules unless `cross_file`).
 fn section_rules(cross_file: bool) -> Value {
-    let mut groups: Map<String, Value> = Map::new();
+    let mut groups: Map<String, Value> = RuleGroup::ALL
+        .iter()
+        .map(|group| {
+            (
+                group.as_str().to_string(),
+                json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {},
+                    "description": format!(
+                        "Per-rule severity levels for the `{}` group.",
+                        group.as_str()
+                    ),
+                }),
+            )
+        })
+        .collect();
     for meta in RULE_METADATA {
         if meta.is_cross_file() != cross_file {
             continue;
         }
         let entry = groups
-            .entry(meta.group.as_str().to_string())
-            .or_insert_with(|| {
-                json!({
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {},
-                })
-            });
-        if entry.get("description").is_none() {
-            let desc = format!(
-                "Per-rule severity levels for the `{}` group.",
-                meta.group.as_str()
-            );
-            entry
-                .as_object_mut()
-                .expect("group object")
-                .insert("description".into(), json!(desc));
-        }
+            .get_mut(meta.group.as_str())
+            .expect("registered rule group");
         entry["properties"]
             .as_object_mut()
             .expect("properties object")

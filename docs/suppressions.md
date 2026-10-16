@@ -19,8 +19,8 @@ non-empty reason after the colon:
 - **`<section>`**: `lint` for a normal per-file rule, `cross-file` for a
   whole-project rule. The pre-1.0 spelling `project` is still accepted as a
   deprecated alias for `cross-file`.
-- **`<group>`**: the rule's category: `complexity`, `correctness`,
-  `performance`, `style`, or `suspicious`.
+- **`<group>`**: the rule's category: `a11y`, `complexity`, `correctness`,
+  `performance`, `security`, `style`, or `suspicious`.
 - **`<rule>`**: the rule id, kebab-case (e.g. `avoid-dynamic`). Registered legacy
   `snake_case` ids still resolve as aliases.
 

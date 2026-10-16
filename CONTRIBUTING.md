@@ -80,7 +80,7 @@ notes, is in
 1. **Scaffold** the implementation and fixture stubs:
 
    ```sh
-   cargo xtask codegen rule --group <complexity|correctness|performance|style|suspicious> --name <rule-id>
+   cargo xtask codegen rule --group <a11y|complexity|correctness|performance|security|style|suspicious> --name <rule-id>
    ```
 
    This writes the rule module and empty `bad.dart` / `good.dart` fixtures, then

@@ -111,7 +111,7 @@ Out-of-workspace dependency watches need editor support for LSP 3.17 relative pa
 ### `linter.rules`
 
 - `recommended` (default `true`): whether the recommended preset is active.
-- Every other key is a **group** (`complexity`, `correctness`, `performance`, `style`, or `suspicious`) mapping rule names to a configuration.
+- Every other key is a **group** (`a11y`, `complexity`, `correctness`, `performance`, `security`, `style`, or `suspicious`) mapping rule names to a configuration.
 
 > **Rule ids are kebab-case**, for example `max-lines-for-file` and `no-magic-number`. Registered legacy `snake_case` aliases still work in config and suppression comments. Run `falcon migrate --input falcon.json --write` to rewrite them to canonical ids (see [Migrating](#migrating-from-dart_code_linter--pyramid_lint)).
 
@@ -387,7 +387,7 @@ effect.
 | `unnecessary-nullable`   | correctness  | yes         | `check-unnecessary-nullable`  |
 | `depend-on-referenced-packages` | correctness | no | |
 | `package-names`          | style        | no          |                              |
-| `secure-pubspec-urls`    | suspicious   | no          |                              |
+| `secure-pubspec-urls`    | security     | no          |                              |
 | `sort-pub-dependencies`  | correctness  | no          |                              |
 
 Notes:
@@ -455,5 +455,5 @@ ignoring it. Migrate as follows:
 | `"exclude_patterns": ["**/gen/**"]`                | `"files": { "includes": ["**", "!**/gen/**"] }`                |
 | `"max_errors": 100`                                | `"max-errors": 100`                                            |
 
-The group for a rule is its category (`complexity`, `correctness`,
-`performance`, `style`, `suspicious`); see `crates/falcon_rules/src/meta.rs`.
+The group for a rule is its category (`a11y`, `complexity`, `correctness`,
+`performance`, `security`, `style`, `suspicious`); see `crates/falcon_rules/src/meta.rs`.

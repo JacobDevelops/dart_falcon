@@ -15,6 +15,18 @@
           "additionalProperties": false,
           "description": "Rule severity levels grouped by category, plus the `recommended` preset toggle.",
           "properties": {
+            "a11y": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `a11y` group.",
+              "properties": {},
+              "type": "object"
+            },
+            "complexity": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `complexity` group.",
+              "properties": {},
+              "type": "object"
+            },
             "correctness": {
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
@@ -37,10 +49,26 @@
               },
               "type": "object"
             },
+            "performance": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `performance` group.",
+              "properties": {},
+              "type": "object"
+            },
             "recommended": {
               "default": true,
               "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
               "type": "boolean"
+            },
+            "security": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `security` group.",
+              "properties": {
+                "secure-pubspec-urls": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
             },
             "style": {
               "additionalProperties": false,
@@ -55,11 +83,7 @@
             "suspicious": {
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `suspicious` group.",
-              "properties": {
-                "secure-pubspec-urls": {
-                  "$ref": "#/definitions/ruleConfig"
-                }
-              },
+              "properties": {},
               "type": "object"
             }
           },
@@ -80,6 +104,12 @@
           "additionalProperties": false,
           "description": "Rule severity levels grouped by category, plus the `recommended` preset toggle.",
           "properties": {
+            "a11y": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `a11y` group.",
+              "properties": {},
+              "type": "object"
+            },
             "complexity": {
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `complexity` group.",
@@ -390,6 +420,12 @@
               "default": true,
               "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
               "type": "boolean"
+            },
+            "security": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `security` group.",
+              "properties": {},
+              "type": "object"
             },
             "style": {
               "additionalProperties": false,
@@ -1029,6 +1065,18 @@
           "additionalProperties": false,
           "description": "Rule severity levels grouped by category, plus the `recommended` preset toggle.",
           "properties": {
+            "a11y": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `a11y` group.",
+              "properties": {},
+              "type": "object"
+            },
+            "complexity": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `complexity` group.",
+              "properties": {},
+              "type": "object"
+            },
             "correctness": {
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `correctness` group.",
@@ -1051,10 +1099,26 @@
               },
               "type": "object"
             },
+            "performance": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `performance` group.",
+              "properties": {},
+              "type": "object"
+            },
             "recommended": {
               "default": true,
               "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
               "type": "boolean"
+            },
+            "security": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `security` group.",
+              "properties": {
+                "secure-pubspec-urls": {
+                  "$ref": "#/definitions/ruleConfig"
+                }
+              },
+              "type": "object"
             },
             "style": {
               "additionalProperties": false,
@@ -1069,11 +1133,7 @@
             "suspicious": {
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `suspicious` group.",
-              "properties": {
-                "secure-pubspec-urls": {
-                  "$ref": "#/definitions/ruleConfig"
-                }
-              },
+              "properties": {},
               "type": "object"
             }
           },
@@ -1124,6 +1184,12 @@
           "additionalProperties": false,
           "description": "Rule severity levels grouped by category, plus the `recommended` preset toggle.",
           "properties": {
+            "a11y": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `a11y` group.",
+              "properties": {},
+              "type": "object"
+            },
             "complexity": {
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `complexity` group.",
@@ -1434,6 +1500,12 @@
               "default": true,
               "description": "Enable the recommended preset for this section. When on, every rule in the preset reports at its default severity unless individually overridden. Defaults to true.",
               "type": "boolean"
+            },
+            "security": {
+              "additionalProperties": false,
+              "description": "Per-rule severity levels for the `security` group.",
+              "properties": {},
+              "type": "object"
             },
             "style": {
               "additionalProperties": false,

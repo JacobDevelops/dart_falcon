@@ -1,7 +1,7 @@
 //! Falcon's lint rules.
 //!
 //! Rules are organized biome-style by group under `lint/<group>/<rule>.rs`
-//! (complexity, correctness, performance, style, suspicious). Each rule is a
+//! (a11y, complexity, correctness, performance, security, style, suspicious). Each rule is a
 //! zero-sized struct implementing `Rule`. The metadata table supplies constructors,
 //! execution identities, configuration defaults, and upstream provenance.
 //! Cross-file rules implement `CrossFileRule` and live under `cross_file/`.
@@ -354,6 +354,25 @@ mod tests {
             "overrides[1] wrong-group warning missing: {warnings:?}"
         );
         assert_eq!(warnings.len(), 3, "unexpected warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn config_warnings_use_security_group_for_secure_pubspec_urls() {
+        let config = |group: &str| {
+            serde_json::from_value::<FalconConfig>(serde_json::json!({
+                "linter": { "rules": { "a11y": {} } },
+                "cross-file": { "rules": {
+                    "a11y": {},
+                    group: { "secure-pubspec-urls": "error" }
+                } }
+            }))
+            .expect("valid config")
+        };
+        assert!(config_warnings(&config("security")).is_empty());
+        let warnings = config_warnings(&config("suspicious"));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("`secure-pubspec-urls`"));
+        assert!(warnings[0].contains("belongs to `security`"));
     }
 
     #[test]

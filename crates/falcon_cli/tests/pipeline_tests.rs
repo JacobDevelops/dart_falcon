@@ -41,6 +41,52 @@ fn oversized_sources_abort_before_partial_workspace_analysis() {
     }
 }
 
+#[test]
+fn secure_pubspec_urls_uses_security_configuration_and_ignores_old_group() {
+    let temp = tempdir().unwrap();
+    fs::write(
+        temp.path().join("pubspec.yaml"),
+        "name: insecure_package\nhomepage: http://example.com\n",
+    )
+    .unwrap();
+    let config_path = temp.path().join("falcon.json");
+    for (group, level, expected_severity) in [
+        (
+            "security",
+            "error",
+            Some(falcon_diagnostics::Severity::Error),
+        ),
+        ("security", "off", None),
+        ("suspicious", "error", None),
+    ] {
+        let config = serde_json::json!({
+            "linter": { "rules": { "recommended": false } },
+            "cross-file": {
+                "rules": {
+                    "recommended": false,
+                    (group): { "secure-pubspec-urls": level }
+                }
+            }
+        });
+        fs::write(&config_path, config.to_string()).unwrap();
+        let output = collect_check(&options_for(temp.path(), Some(config_path.clone()))).unwrap();
+        match expected_severity {
+            Some(severity) => {
+                assert_eq!(output.diagnostics.len(), 1, "{group}: {level}");
+                let diagnostic = &output.diagnostics[0];
+                assert_eq!(diagnostic.rule, "secure-pubspec-urls");
+                assert_eq!(diagnostic.severity, severity);
+                assert!(diagnostic.file_path.ends_with("pubspec.yaml"));
+                assert_eq!(output.exit_code, 1);
+            }
+            None => {
+                assert!(output.diagnostics.is_empty(), "{group}: {level}");
+                assert_eq!(output.exit_code, 0);
+            }
+        }
+    }
+}
+
 /// Test 1: No files found returns zero exit code
 #[test]
 fn test_run_check_no_files_returns_zero() {

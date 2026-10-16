@@ -318,11 +318,11 @@
         "depend-on-referenced-packages": "off",
         "sort-pub-dependencies": "off"
       },
+      "security": {
+        "secure-pubspec-urls": "off"
+      },
       "style": {
         "package-names": "off"
-      },
-      "suspicious": {
-        "secure-pubspec-urls": "off"
       }
     }
   },

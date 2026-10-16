@@ -107,20 +107,8 @@
   },
   {
     "crossFile": false,
-    "description": "Flags a function literal passed to `forEach`, e.g.",
+    "description": "Flags a function literal passed to an Iterable's `forEach`.",
     "diagnostics": [
-      {
-        "column": 9,
-        "file": null,
-        "line": 2,
-        "message": "Avoid using a function literal in a 'forEach' call; use a for-in loop instead."
-      },
-      {
-        "column": 8,
-        "file": null,
-        "line": 3,
-        "message": "Avoid using a function literal in a 'forEach' call; use a for-in loop instead."
-      },
       {
         "column": 9,
         "file": null,
@@ -128,24 +116,36 @@
         "message": "Avoid using a function literal in a 'forEach' call; use a for-in loop instead."
       },
       {
-        "column": 10,
+        "column": 8,
         "file": null,
         "line": 5,
         "message": "Avoid using a function literal in a 'forEach' call; use a for-in loop instead."
       },
       {
-        "column": 8,
+        "column": 9,
         "file": null,
         "line": 6,
         "message": "Avoid using a function literal in a 'forEach' call; use a for-in loop instead."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 7,
+        "message": "Avoid using a function literal in a 'forEach' call; use a for-in loop instead."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 8,
+        "message": "Avoid using a function literal in a 'forEach' call; use a for-in loop instead."
       }
     ],
-    "docs": "Flags a function literal passed to `forEach`, e.g. `xs.forEach((e) { ... })`.\n\nA `for`-in loop reads more clearly than `forEach` with a closure, and unlike\nthe closure it can `await`, `break`, and `continue`, and it allocates no\nper-call function object. The rule fires only for single-parameter\nfunction-literal callbacks, so `Map.forEach` (which takes two parameters) is\nleft alone, as are tear-offs like `xs.forEach(print)` and null-aware\n`xs?.forEach(...)`.",
+    "docs": "Flags a function literal passed to an Iterable's `forEach`.\n\nA `for`-in loop reads more clearly than `forEach` with a closure, and unlike\nthe closure it can `await`, `break`, and `continue`. Stream and Map receivers,\ntear-offs, null-aware chains, and receivers reached through method calls are\nleft alone, matching the SDK lint.",
     "domains": [],
     "examples": {
-      "bad": "void bad() {\n  items.forEach((e) { print(e); });\n  list.forEach((x) => print(x));\n  names.forEach((name) { save(name); });\n  values.forEach((v) => sink(v));\n  data.forEach((item) { process(item); log(item); });\n}",
+      "bad": "void bad(List<int> items, List<int> list, List<int> names, List<int> values,\n    List<int> data, void Function(int) save, void Function(int) sink,\n    void Function(int) process, void Function(int) log) {\n  items.forEach((e) { print(e); });\n  list.forEach((x) => print(x));\n  names.forEach((name) { save(name); });\n  values.forEach((v) => sink(v));\n  data.forEach((item) { process(item); log(item); });\n}",
       "crossFile": null,
-      "good": "void good() {\n  items.forEach(print);\n  list?.forEach((e) => print(e));\n  map.forEach((k, v) => print('$k$v'));\n  for (final e in items) {\n    print(e);\n  }\n  numbers.map((e) => e * 2);\n}"
+      "good": "void good(List<int> items, List<int>? list, Map<int, int> map, List<int> numbers) {\n  items.forEach(print);\n  list?.forEach((e) => print(e));\n  map.forEach((k, v) => print('$k$v'));\n  for (final e in items) {\n    print(e);\n  }\n  numbers.map((e) => e * 2);\n}"
     },
     "group": "complexity",
     "name": "avoid-function-literals-in-foreach-calls",
@@ -868,14 +868,20 @@
         "file": null,
         "line": 100,
         "message": "Unnecessary duplication of receiver."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 111,
+        "message": "Unnecessary duplication of receiver."
       }
     ],
-    "docs": "Flags consecutive statements that invoke members on the same variable.\n\n```dart\nfinal list = <int>[];   // bad\nlist.add(1);\nlist.add(2);\n\nfinal list = <int>[]    // good\n  ..add(1)\n  ..add(2);\n```\n\nWithin one block (or `switch` case body) the rule follows the official\nlint's cascade model. A statement that calls an instance method on, reads\na property of, sets a property of, or cascades on a simple identifier `v`\ncan join the preceding statement when that one targeted the same `v` and\ncan receive: a declaration of the local `v` (not `const`), an assignment\nto the local `v` (not `??=`), a property set on a local `v` (not `??=`),\nor a method call, property read, or cascade on `v`. Assignments to fields\nand top-level variables never receive (the analyzer sees their setter, not\nthe variable), nor do property sets through them. Null-aware accesses\n(`v?.m()`) and calls of static methods never join.\nMethod calls require a resolved non-static method: dynamic invocations and\nfunction `call` invocations do not qualify. Parenthesized receivers are not\nsimple identifiers, while property assignments still accept dynamic locals.\nReceiver types come from shared resolution, including imported top-level\ngetters/variables and implicit method calls used as cascade initializers;\ngenuinely unresolved receivers stay silent rather than guessing a method.\n\nA statement whose member names, arguments, or right-hand side depend on\nthe receiver breaks the chain, since a cascade would evaluate them before\nthe earlier member access: a reference to `v` itself, and for a field or\ntop-level-variable receiver also a closure or a reference to any member\ndeclared in the same class as the field (respectively any top-level\ndeclaration of the same library). One diagnostic covers each run of\njoinable statements, from the first statement that could be cascaded to\nthe last one. Where falcon cannot resolve a referenced member's declaring\nclass (for example through an external type), it assumes a dependency and\nstays silent.",
+    "docs": "Flags consecutive statements that invoke members on the same variable.\n\n```dart\nfinal list = <int>[];   // bad\nlist.add(1);\nlist.add(2);\n\nfinal list = <int>[]    // good\n  ..add(1)\n  ..add(2);\n```\n\nWithin one block (or `switch` case body) the rule follows the official\nlint's cascade model. A statement that calls an instance method on, reads\na property of, sets a property of, or cascades on a simple identifier `v`\ncan join the preceding statement when that one targeted the same `v` and\ncan receive: a declaration of the local `v` (not `const`), an assignment\nto the local `v` (not `??=`), a property set on a local `v` (not `??=`),\nor a method call, property read, or cascade on `v`. Assignments to fields\nand top-level variables never receive (the analyzer sees their setter, not\nthe variable), nor do property sets through them. Null-aware accesses\n(`v?.m()`) and calls of static methods never join.\nMethod calls require a resolved non-static method: dynamic invocations and\nfunction `call` invocations do not qualify. Parenthesized receivers are not\nsimple identifiers, while property assignments still accept dynamic locals.\nReceiver types come from shared resolution, including imported top-level\ngetters/variables and implicit method calls used as cascade initializers;\ngenuinely unresolved receivers stay silent rather than guessing a method.\n\nA statement whose member names, arguments, or right-hand side depend on\nthe receiver breaks the chain, since a cascade would evaluate them before\nthe earlier member access: a reference to the same local declaration (not\na shadowing closure parameter), and for a field or top-level-variable receiver\nalso a closure or a reference to any member declared in the same class as\nthe field (respectively any top-level declaration of the same library).\nOne diagnostic covers each run of\njoinable statements, from the first statement that could be cascaded to\nthe last one. Where falcon cannot resolve a referenced member's declaring\nclass (for example through an external type), it assumes a dependency and\nstays silent.",
     "domains": [],
     "examples": {
-      "bad": "class Point {\n  int x = 0;\n  int y = 0;\n  void reset() {}\n  void move(int dx) {}\n}\n\nclass Holder {\n  final List<int> items = [];\n\n  void fill() {\n    items.add(1);\n    items.add(2);\n  }\n}\n\nvoid declared() {\n  final list = <int>[];\n  list.add(1);\n  list.add(2);\n}\n\nvoid parameter(Point p) {\n  p.reset();\n  p.move(1);\n}\n\nvoid setters(Point p) {\n  p.x = 1;\n  p.y = 2;\n}\n\nvoid assigned(Point p) {\n  p = Point();\n  p.reset();\n}\n\n// Source-defined contract keeps cascade resolution independent of SDK indexes.\nclass Buffer {\n  void write(Object value) {}\n}\n\nvoid cascades(Buffer buffer) {\n  buffer..write('a')..write('b');\n  buffer.write('c');\n}\n\nvoid inSwitch(int value, List<int> list) {\n  switch (value) {\n    case 1:\n      list.clear();\n      list.add(value);\n  }\n}\n\nvoid broken(List<int> list, List<int> other) {\n  list.add(1);\n  list.add(2);\n  other.add(3);\n  list.add(4);\n}\n\n// Members of another class than the receiver field's are no dependency.\nclass Out {\n  void write(Object value) {}\n}\n\nclass Writer {\n  final Out buffer = Out();\n}\n\nclass PrettyWriter extends Writer {\n  final String indent = '  ';\n\n  void write() {\n    buffer.write('a');\n    buffer.write(indent);\n  }\n}\n\n// A field receiver may take `this` or other objects' members as arguments.\nclass Field {\n  final Point point = Point();\n\n  void run(Point other) {\n    point.reset();\n    point.move(other.x);\n    print(this);\n  }\n}\n\n// Assignment eligibility uses the receiver variable, not the setter element.\nvoid dynamicSetters(dynamic receiver) {\n  receiver.x = 1;\n  receiver.y = 2;\n}\n\nvoid dynamicObjectMethods(dynamic receiver) {\n  receiver.toString();\n  receiver.toString();\n}",
+      "bad": "class Point {\n  int x = 0;\n  int y = 0;\n  void reset() {}\n  void move(int dx) {}\n}\n\nclass Holder {\n  final List<int> items = [];\n\n  void fill() {\n    items.add(1);\n    items.add(2);\n  }\n}\n\nvoid declared() {\n  final list = <int>[];\n  list.add(1);\n  list.add(2);\n}\n\nvoid parameter(Point p) {\n  p.reset();\n  p.move(1);\n}\n\nvoid setters(Point p) {\n  p.x = 1;\n  p.y = 2;\n}\n\nvoid assigned(Point p) {\n  p = Point();\n  p.reset();\n}\n\n// Source-defined contract keeps cascade resolution independent of SDK indexes.\nclass Buffer {\n  void write(Object value) {}\n}\n\nvoid cascades(Buffer buffer) {\n  buffer..write('a')..write('b');\n  buffer.write('c');\n}\n\nvoid inSwitch(int value, List<int> list) {\n  switch (value) {\n    case 1:\n      list.clear();\n      list.add(value);\n  }\n}\n\nvoid broken(List<int> list, List<int> other) {\n  list.add(1);\n  list.add(2);\n  other.add(3);\n  list.add(4);\n}\n\n// Members of another class than the receiver field's are no dependency.\nclass Out {\n  void write(Object value) {}\n}\n\nclass Writer {\n  final Out buffer = Out();\n}\n\nclass PrettyWriter extends Writer {\n  final String indent = '  ';\n\n  void write() {\n    buffer.write('a');\n    buffer.write(indent);\n  }\n}\n\n// A field receiver may take `this` or other objects' members as arguments.\nclass Field {\n  final Point point = Point();\n\n  void run(Point other) {\n    point.reset();\n    point.move(other.x);\n    print(this);\n  }\n}\n\n// Assignment eligibility uses the receiver variable, not the setter element.\nvoid dynamicSetters(dynamic receiver) {\n  receiver.x = 1;\n  receiver.y = 2;\n}\n\nvoid dynamicObjectMethods(dynamic receiver) {\n  receiver.toString();\n  receiver.toString();\n}\n\nclass ScopedReceiver {\n  void initialize(void Function(ScopedReceiver) callback) {}\n  void reset() {}\n}\n\n// The callback parameter is not a dependency on the outer receiver.\nvoid shadowedCallback() {\n  final receiver = ScopedReceiver();\n  receiver.initialize((receiver) {\n    receiver.reset();\n  });\n  receiver.reset();\n}",
       "crossFile": null,
-      "good": "class Point {\n  int x = 0;\n  void reset() {}\n  static void create() {}\n  static void destroy() {}\n}\n\nvoid cascaded() {\n  final list = <int>[]\n    ..add(1)\n    ..add(2);\n  print(list);\n}\n\nvoid different(List<int> a, List<int> b) {\n  a.add(1);\n  b.add(2);\n}\n\nvoid nullAware(List<int>? list) {\n  list?.add(1);\n  list?.add(2);\n}\n\nvoid staticCalls() {\n  Point.create();\n  Point.destroy();\n}\n\nvoid dependency(List<int> list) {\n  list.add(1);\n  list.add(list.length);\n}\n\nvoid awaited() async {\n  final values = await Future.value(<int>[]);\n  values.add(1);\n}\n\nvoid constDeclaration() {\n  const list = <int>[];\n  list.length;\n}\n\nvoid ifNull(List<int>? list) {\n  list ??= [];\n  list.add(1);\n}\n\nvoid single(List<int> list) {\n  list.add(1);\n}\n\nvoid separated(List<int> list) {\n  list.add(1);\n  print('x');\n  list.add(2);\n}\n\nvoid chained(Map<String, List<int>> map) {\n  map['a']!.add(1);\n  map['a']!.add(2);\n}\n\nclass Listener {\n  void addListener(void Function() f) {}\n  void removeListener(void Function() f) {}\n  void layout() {}\n  int width = 0;\n}\n\nclass Owner<T> {\n  final Listener first = Listener();\n  final Listener second = Listener();\n  final List<T> generic = [];\n  void _onChange() {}\n\n  // A tear-off of the field's own class may observe the field.\n  void listen() {\n    first.addListener(_onChange);\n    first.removeListener(_onChange);\n  }\n\n  // So may another field of the same class.\n  void fields() {\n    first.layout();\n    first.addListener(second.layout);\n  }\n\n  // Property sets through a field never receive a cascade.\n  void sets() {\n    first.width = 1;\n    first.layout();\n  }\n\n  Listener third = Listener();\n\n  // Assigning a field writes its setter, a different element than the getter.\n  void assigns() {\n    third = Listener();\n    third.layout();\n  }\n\n  // A field typed with the class's type parameters is a fresh member per use.\n  void typed(T value) {\n    generic.add(value);\n    generic.add(value);\n  }\n}\n\nclass Callbacks {\n  final void Function() callback = () {};\n}\n\n// Calling a function-typed field is no method invocation.\nvoid invokeTwice(Callbacks callbacks) {\n  callbacks.callback();\n  callbacks.callback();\n}\n\n// Dynamic calls have no resolved method element.\nvoid dynamicMethods(dynamic receiver) {\n  receiver.first();\n  receiver.second();\n}\n\nvoid functionCalls(Function callback) {\n  callback.call();\n  callback.call();\n}\n\nvoid typedFunctionCalls(void Function() callback) {\n  callback.call();\n  callback.call();\n}\n\nvoid parenthesizedTargets(Point point) {\n  (point).reset();\n  (point).reset();\n}"
+      "good": "class Point {\n  int x = 0;\n  void reset() {}\n  static void create() {}\n  static void destroy() {}\n}\n\nvoid cascaded() {\n  final list = <int>[]\n    ..add(1)\n    ..add(2);\n  print(list);\n}\n\nvoid different(List<int> a, List<int> b) {\n  a.add(1);\n  b.add(2);\n}\n\nvoid nullAware(List<int>? list) {\n  list?.add(1);\n  list?.add(2);\n}\n\nvoid staticCalls() {\n  Point.create();\n  Point.destroy();\n}\n\nvoid dependency(List<int> list) {\n  list.add(1);\n  list.add(list.length);\n}\n\nvoid awaited() async {\n  final values = await Future.value(<int>[]);\n  values.add(1);\n}\n\nvoid constDeclaration() {\n  const list = <int>[];\n  list.length;\n}\n\nvoid ifNull(List<int>? list) {\n  list ??= [];\n  list.add(1);\n}\n\nvoid single(List<int> list) {\n  list.add(1);\n}\n\nvoid separated(List<int> list) {\n  list.add(1);\n  print('x');\n  list.add(2);\n}\n\nvoid chained(Map<String, List<int>> map) {\n  map['a']!.add(1);\n  map['a']!.add(2);\n}\n\nclass Listener {\n  void addListener(void Function() f) {}\n  void removeListener(void Function() f) {}\n  void layout() {}\n  int width = 0;\n}\n\nclass Owner<T> {\n  final Listener first = Listener();\n  final Listener second = Listener();\n  final List<T> generic = [];\n  void _onChange() {}\n\n  // A tear-off of the field's own class may observe the field.\n  void listen() {\n    first.addListener(_onChange);\n    first.removeListener(_onChange);\n  }\n\n  // So may another field of the same class.\n  void fields() {\n    first.layout();\n    first.addListener(second.layout);\n  }\n\n  // Property sets through a field never receive a cascade.\n  void sets() {\n    first.width = 1;\n    first.layout();\n  }\n\n  Listener third = Listener();\n\n  // Assigning a field writes its setter, a different element than the getter.\n  void assigns() {\n    third = Listener();\n    third.layout();\n  }\n\n  // A field typed with the class's type parameters is a fresh member per use.\n  void typed(T value) {\n    generic.add(value);\n    generic.add(value);\n  }\n}\n\nclass Callbacks {\n  final void Function() callback = () {};\n}\n\n// Calling a function-typed field is no method invocation.\nvoid invokeTwice(Callbacks callbacks) {\n  callbacks.callback();\n  callbacks.callback();\n}\n\n// Dynamic calls have no resolved method element.\nvoid dynamicMethods(dynamic receiver) {\n  receiver.first();\n  receiver.second();\n}\n\nvoid functionCalls(Function callback) {\n  callback.call();\n  callback.call();\n}\n\nvoid typedFunctionCalls(void Function() callback) {\n  callback.call();\n  callback.call();\n}\n\nvoid parenthesizedTargets(Point point) {\n  (point).reset();\n  (point).reset();\n}\n\nclass ScopedReceiver {\n  void initialize(void Function(ScopedReceiver) callback) {}\n  void reset() {}\n}\n\n// A captured reference to the outer receiver still breaks the cascade.\nvoid capturedCallback(ScopedReceiver receiver) {\n  receiver.initialize((other) {\n    receiver.reset();\n  });\n  receiver.reset();\n}"
     },
     "group": "complexity",
     "name": "cascade-invocations",
@@ -1020,14 +1026,26 @@
         "file": null,
         "line": 66,
         "message": "Assignment could be inlined in 'return' statement."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 78,
+        "message": "Assignment could be inlined in 'return' statement."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 89,
+        "message": "Assignment could be inlined in 'return' statement."
       }
     ],
-    "docs": "Flags an assignment immediately followed by `return` of the same variable.\n\nWhen a block ends with `x = e; return x;` the two statements can be joined\ninto `return x = e;` (or simply `return e;` for a local). The rule looks at\nthe last two statements of every block: the second-to-last must be an\nassignment (any operator), increment, decrement, or other prefix/postfix\nexpression on the same variable or property chain that the final `return`\nyields. A run of assignments to that same target (`x = a; x += b; return\nx;`) is left alone, as are switch-case statement lists, which are not blocks.\n\n```dart\nint f(int a) {\n  a += 1; // flagged\n  return a;\n}\n```",
+    "docs": "Flags an assignment immediately followed by `return` of the same variable.\n\nWhen a block ends with `x = e; return x;` the two statements can be joined\ninto `return x = e;` (or simply `return e;` for a local). The rule looks at\nthe last two statements of every block: the second-to-last must be an\nassignment (any operator), increment, decrement, or other prefix/postfix\nexpression on the same variable or property chain that the final `return`\nyields. A run of assignments to that same target (`x = a; x += b; return\nx;`) is left alone, as are switch-case statement lists, which are not blocks.\nDiagnostics cover the expression statement, including its semicolon.\n\n```dart\nint f(int a) {\n  a += 1; // flagged\n  return a;\n}\n```",
     "domains": [],
     "examples": {
-      "bad": "class A {\n  int _a = 0;\n  int b = 0;\n  late A next;\n\n  int incrementA() {\n    _a++;\n    return _a;\n  }\n\n  int plusEquals(int value) {\n    _a += value;\n    return _a;\n  }\n\n  int assignB(int value) {\n    b = value;\n    return b;\n  }\n\n  int? chained(A other) {\n    other.b = 3;\n    return other.b;\n  }\n\n  int? propertyChain(A other) {\n    print('x');\n    other.next.b = 4;\n    return other.next.b;\n  }\n}\n\nint prefix(int x) {\n  ++x;\n  return x;\n}\n\nint afterOtherStatement(int x, int y) {\n  y = 2;\n  x = y + 1;\n  return x;\n}\n\nint nested(bool c, int x) {\n  if (c) {\n    x *= 2;\n    return x;\n  }\n  return 0;\n}\n\nint? nullable(int? x) {\n  x ??= 1;\n  return x;\n}\n\nint Function() closure(int x) {\n  return () {\n    x--;\n    return x;\n  };\n}\n\n// Parentheses around the returned name do not matter.\nint parenthesizedReturn(int x) {\n  x = 1;\n  return (x);\n}",
+      "bad": "class A {\n  int _a = 0;\n  int b = 0;\n  late A next;\n\n  int incrementA() {\n    _a++;\n    return _a;\n  }\n\n  int plusEquals(int value) {\n    _a += value;\n    return _a;\n  }\n\n  int assignB(int value) {\n    b = value;\n    return b;\n  }\n\n  int? chained(A other) {\n    other.b = 3;\n    return other.b;\n  }\n\n  int? propertyChain(A other) {\n    print('x');\n    other.next.b = 4;\n    return other.next.b;\n  }\n}\n\nint prefix(int x) {\n  ++x;\n  return x;\n}\n\nint afterOtherStatement(int x, int y) {\n  y = 2;\n  x = y + 1;\n  return x;\n}\n\nint nested(bool c, int x) {\n  if (c) {\n    x *= 2;\n    return x;\n  }\n  return 0;\n}\n\nint? nullable(int? x) {\n  x ??= 1;\n  return x;\n}\n\nint Function() closure(int x) {\n  return () {\n    x--;\n    return x;\n  };\n}\n\n// Parentheses around the returned name do not matter.\nint parenthesizedReturn(int x) {\n  x = 1;\n  return (x);\n}\n\nclass StateBase {\n  int get state => 0;\n  set state(int value) {}\n}\n\nclass InheritedState extends StateBase {}\n\nint pairedAccessors(InheritedState notifier) {\n  notifier.state = 1;\n  return notifier.state;\n}\n\nint pairedAccessorChain(List<InheritedState> notifiers) {\n  notifiers.first.state = 1;\n  return notifiers.first.state;\n}\n\ndynamic unresolvedMembers(dynamic receiver) {\n  // Unresolved dynamic properties have the same null canonical element in Dart.\n  receiver.first = 1;\n  return receiver.second;\n}",
       "crossFile": null,
-      "good": "class A {\n  int _a = 0;\n  int b = 0;\n  A? next;\n\n  int joined() {\n    return ++_a;\n  }\n\n  // `this.b` is not an identifier chain, matching the analyzer.\n  int viaThis(int value) {\n    this.b = value;\n    return this.b;\n  }\n\n  // Mixing `b` and `this.b` is not provably the same element.\n  int mixed(int value) {\n    b = value;\n    return this.b;\n  }\n\n  int? nullAsserted(A other) {\n    other.next!.b = 4;\n    return other.next!.b;\n  }\n}\n\n// A preceding assignment to the same variable keeps the pair apart.\nint runOfAssignments(int x) {\n  x = 1;\n  x += 2;\n  return x;\n}\n\nint differentVariable(int x, int y) {\n  x = 2;\n  return y;\n}\n\nint notLast(int x) {\n  x = 1;\n  print(x);\n  return x;\n}\n\nint indexed(List<int> list) {\n  list[0] = 1;\n  return list[0];\n}\n\nvoid noValue(int x) {\n  x = 1;\n  return;\n}\n\n// Switch-case statement lists are not blocks.\nint inSwitch(int kind, int x) {\n  switch (kind) {\n    case 1:\n      x = 3;\n      return x;\n    default:\n      return 0;\n  }\n}\n\nint callStatement(List<int> list) {\n  list.add(1);\n  return list.length;\n}"
+      "good": "class A {\n  int _a = 0;\n  int b = 0;\n  A? next;\n\n  int joined() {\n    return ++_a;\n  }\n\n  // `this.b` is not an identifier chain, matching the analyzer.\n  int viaThis(int value) {\n    this.b = value;\n    return this.b;\n  }\n\n  // Mixing `b` and `this.b` is not provably the same element.\n  int mixed(int value) {\n    b = value;\n    return this.b;\n  }\n\n  int? nullAsserted(A other) {\n    other.next!.b = 4;\n    return other.next!.b;\n  }\n}\n\n// A preceding assignment to the same variable keeps the pair apart.\nint runOfAssignments(int x) {\n  x = 1;\n  x += 2;\n  return x;\n}\n\nint differentVariable(int x, int y) {\n  x = 2;\n  return y;\n}\n\nint notLast(int x) {\n  x = 1;\n  print(x);\n  return x;\n}\n\nint indexed(List<int> list) {\n  list[0] = 1;\n  return list[0];\n}\n\nvoid noValue(int x) {\n  x = 1;\n  return;\n}\n\n// Switch-case statement lists are not blocks.\nint inSwitch(int kind, int x) {\n  switch (kind) {\n    case 1:\n      x = 3;\n      return x;\n    default:\n      return 0;\n  }\n}\n\nint callStatement(List<int> list) {\n  list.add(1);\n  return list.length;\n}\n\nclass StateBase {\n  int get state => 0;\n  set state(int value) {}\n}\n\nclass ReadOverride extends StateBase {\n  @override\n  int get state => super.state;\n}\n\n// The getter and setter canonicalize to variables on different declarations.\nint splitAccessors(ReadOverride notifier) {\n  notifier.state = 1;\n  return notifier.state;\n}\n\nint splitAccessorChain(List<ReadOverride> notifiers) {\n  notifiers.first.state = 1;\n  return notifiers.first.state;\n}\n\nint differentReceivers(StateBase first, StateBase second) {\n  first.state = 1;\n  return second.state;\n}\n\nint differentAccessSyntax(StateBase notifier) {\n  notifier.state = 1;\n  return (notifier).state;\n}"
     },
     "group": "complexity",
     "name": "join-return-with-assignment",
@@ -1460,14 +1478,38 @@
         "file": null,
         "line": 6,
         "message": "Prefer using a conditional assignment '??='."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 22,
+        "message": "Prefer using a conditional assignment '??='."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 24,
+        "message": "Prefer using a conditional assignment '??='."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 25,
+        "message": "Prefer using a conditional assignment '??='."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 30,
+        "message": "Prefer using a conditional assignment '??='."
       }
     ],
-    "docs": "Flags `if (x == null) { x = y; }` with no else branch.\n\nA null-guarded assignment like this is exactly what the `??=` compound\noperator expresses: `x ??= y`. The shorter form removes a branch and states\nthe intent — assign only when currently null — directly. The rule matches an\n`if` with no `else` whose condition is an `== null` check and whose single\nthen-statement assigns to that same operand.",
+    "docs": "Flags `if (x == null) { x = y; }` with no else branch.\n\nA null-guarded assignment like this is exactly what the `??=` compound\noperator expresses: `x ??= y`. The shorter form removes a branch and states\nthe intent — assign only when currently null — directly. The rule matches an\n`if` with no `else` whose condition is an `== null` check and whose single\nthen-statement assigns to the same canonical identifier/property chain.\nIndexed targets are not identifiers; inherited accessor halves must belong\nto the same declaring variable.",
     "domains": [],
     "examples": {
-      "bad": "void f(int? a, C obj) {\n  if (a == null) { a = 0; }\n  if (a == null) a = 1;\n  if (null == a) { a = 2; }\n  if (obj.field == null) { obj.field = 3; }\n  if (obj.field == null) obj.field = 4;\n  print('$a ${obj.field}');\n}\n\nclass C {\n  int? field;\n}",
+      "bad": "void f(int? a, C obj) {\n  if (a == null) { a = 0; }\n  if (a == null) a = 1;\n  if (null == a) { a = 2; }\n  if (obj.field == null) { obj.field = 3; }\n  if (obj.field == null) obj.field = 4;\n  print('$a ${obj.field}');\n}\n\nclass C {\n  int? field;\n}\n\nclass StateBase {\n  int? get state => null;\n  set state(int? value) {}\n}\n\nclass InheritedState extends StateBase {}\n\nvoid pairedAccessors(InheritedState notifier, List<InheritedState> notifiers, int? value) {\n  if (notifier.state == null) notifier.state = 1;\n  if (notifiers.first.state == null) notifiers.first.state = 1;\n  if (value == null) { { value = 1; } }\n  if (value == null) value ??= 1;\n}\n\nvoid unresolvedMembers(dynamic receiver) {\n  // Unresolved dynamic properties have the same null canonical element in Dart.\n  if (receiver.first == null) receiver.second = 1;\n}",
       "crossFile": null,
-      "good": "void f(int? a, int? b, C obj) {\n  if (a == null) {\n    a = 0;\n  } else {\n    a = 1;\n  }\n  if (a == null) {\n    b = 2;\n  }\n  if (a != null) {\n    a = 3;\n  }\n  if (a == null) {\n    print(a);\n  }\n  if (a == null) {\n    a = 0;\n    b = 1;\n  }\n  a ??= 5;\n  print('$a $b ${obj.field}');\n}\n\nclass C {\n  int? field;\n}"
+      "good": "void f(int? a, int? b, C obj) {\n  if (a == null) {\n    a = 0;\n  } else {\n    a = 1;\n  }\n  if (a == null) {\n    b = 2;\n  }\n  if (a != null) {\n    a = 3;\n  }\n  if (a == null) {\n    print(a);\n  }\n  if (a == null) {\n    a = 0;\n    b = 1;\n  }\n  a ??= 5;\n  print('$a $b ${obj.field}');\n}\n\nclass C {\n  int? field;\n}\n\nclass StateBase {\n  int? get state => null;\n  set state(int? value) {}\n}\n\nclass ReadOverride extends StateBase {\n  @override\n  int? get state => super.state;\n}\n\nvoid distinctTargets(\n  ReadOverride notifier,\n  StateBase first,\n  StateBase second,\n  List<int?> values,\n  Map<String, int?> entries,\n) {\n  if (notifier.state == null) notifier.state = 1;\n  if (first.state == null) second.state = 1;\n  if (values[0] == null) values[0] = 1;\n  if (entries['key'] == null) entries['key'] = 1;\n}\n\nvoid differentAccessSyntax(StateBase notifier) {\n  if (notifier.state == null) (notifier).state = 1;\n  if (notifier.state == null) (notifier.state = 1);\n}"
     },
     "group": "complexity",
     "name": "prefer-conditional-assignment",
@@ -1554,7 +1596,7 @@
         "message": "Unnecessary use of a block function body."
       },
       {
-        "column": 28,
+        "column": 22,
         "file": null,
         "line": 19,
         "message": "Unnecessary use of a block function body."
@@ -1572,7 +1614,7 @@
         "message": "Unnecessary use of a block function body."
       }
     ],
-    "docs": "Flags block function bodies that consist of a single `return` of a value.\n\nA body like `{ return expr; }` reads better as `=> expr`. Every function\nbody is checked: top-level functions, methods, getters, operators, local\nfunctions, and closures.\n\n```dart\nint get width { return _width; } // flagged\nint get width => _width;         // ok\n```",
+    "docs": "Flags block function bodies that consist of a single `return` of a value.\n\nA body like `{ return expr; }` reads better as `=> expr`. Every function\nbody is checked: top-level functions, methods, getters, operators, local\nfunctions, and closures. Diagnostic ranges include an `async`/generator modifier.\n\n```dart\nint get width { return _width; } // flagged\nint get width => _width;         // ok\n```",
     "domains": [],
     "examples": {
       "bad": "int twiceOf(int x) {\n  return x * 2;\n}\n\nclass Box {\n  int _value = 0;\n  int get value {\n    return _value;\n  }\n\n  int twice() {\n    return _value * 2;\n  }\n\n  Box operator +(Box other) {\n    return Box();\n  }\n\n  Future<int> load() async {\n    return _value;\n  }\n}\n\nvoid main() {\n  int local(int x) {\n    return x + 1;\n  }\n\n  final f = (int x) {\n    return x;\n  };\n  print(local(f(1)));\n}",
@@ -2486,7 +2528,7 @@
         "message": "Closure should be a tearoff."
       }
     ],
-    "docs": "Flags a closure that only forwards its parameters to a function a tear-off could name.\n\n`names.forEach((name) { print(name); })` allocates a closure whose whole job\nis to call `print`; `names.forEach(print)` says the same thing. The rule\nfires on an anonymous, synchronous closure whose body is a single\ninvocation — `=> f(a, b)`, `{ f(a, b); }`, or `{ return f(a, b); }` —\npassing exactly the closure's positional parameters in order and named\nparameters under the same names, and on `(a) => C(a)` constructor calls a\n`C.new` tear-off could replace. Like the analyzer, this does not compare\noptional parameter defaults. The invoked function must stay the same object\nbetween calls:\n\n- a top-level, local, static, or instance method, or a `final`, non-`late`\n  variable or field holding a function (the analyzer does not count a\n  `const` variable, field, or enum value as final);\n- reached through a receiver that is a class name, an import prefix, or a\n  `final` variable or field, never through `this`, a parameter of the\n  closure, or a null-aware access (`a?.b`). A member falcon cannot resolve\n  on a stable receiver is taken to be a method, as the analyzer treats any\n  member that is not a getter.\n\nA function or method is itself a stable receiver, including `p.call(x)`.\nOptional constructor parameters do not prevent a tear-off from replacing\na required-parameter closure when the constructor accepts those arguments.\nAn optional closure parameter must stay optional on the target; legacy\n`@required` annotations do not change that shape. Constructor invocations\nwith named arguments are excluded, matching the analyzer.\nOptional positional super formals retain their optional shape even when\ntheir inherited default value is unavailable.\n\nGeneric method invocations with explicit type arguments, calls through\ndeferred imports, and `const` constructor calls are skipped. A constructor\ncall only counts in an arrow body, and the constructor tear-off must fit the\nclosure's type, so every closure parameter's type must be known (written or\nsupplied by the context). When the closure is a named argument or a variable\ninitializer, a method tear-off must also fit the closure's type: the\nparameter types must be known, and a block body that discards the call must\nbe in a `void`-returning context (otherwise the closure returns `Null`).\n\nfalcon stays silent when it cannot resolve the invoked function or receiver.\nConstructor calls are only checked when constructor tear-offs are enabled\n(language version 2.15 or later); before that, `(a) => C(a)` is silent.",
+    "docs": "Flags a closure that only forwards its parameters to a function a tear-off could name.\n\n`names.forEach((name) { print(name); })` allocates a closure whose whole job\nis to call `print`; `names.forEach(print)` says the same thing. The rule\nfires on an anonymous, synchronous closure whose body is a single\ninvocation — `=> f(a, b)`, `{ f(a, b); }`, or `{ return f(a, b); }` —\npassing exactly the closure's positional parameters in order and named\nparameters under the same names, and on `(a) => C(a)` constructor calls a\n`C.new` tear-off could replace. Like the analyzer, this does not compare\noptional parameter defaults. The invoked function must stay the same object\nbetween calls:\n\n- a top-level, local, static, or instance method, or a `final`, non-`late`\n  variable or field holding a function (the analyzer does not count a\n  `const` variable, field, or enum value as final);\n- reached through a receiver that is a class name, an import prefix, or a\n  `final` variable or field (including immutable record fields), never\n  through `this`, a parameter of the closure, or a null-aware access (`a?.b`).\n  A member falcon cannot resolve\n  on a stable receiver is taken to be a method, as the analyzer treats any\n  member that is not a getter.\n\nA function or method is itself a stable receiver, including `p.call(x)`.\nOptional constructor parameters do not prevent a tear-off from replacing\na required-parameter closure when the constructor accepts those arguments.\nAn optional closure parameter must stay optional on the target; legacy\n`@required` annotations do not change that shape. Constructor invocations\nwith named arguments are excluded, matching the analyzer.\nOptional positional super formals retain their optional shape even when\ntheir inherited default value is unavailable.\n\nGeneric method invocations with explicit type arguments, calls through\ndeferred imports, and `const` constructor calls are skipped. A constructor\ncall only counts in an arrow body, and the constructor tear-off must fit the\nclosure's type, so every closure parameter's type must be known (written or\nsupplied by the context). When the closure is a named argument or a variable\ninitializer, a method tear-off must also fit the closure's type: the\nparameter types must be known, and a block body that discards the call must\nbe in a `void`-returning context (otherwise the closure returns `Null`).\n\nfalcon stays silent when it cannot resolve the invoked function or receiver.\nConstructor calls are only checked when constructor tear-offs are enabled\n(language version 2.15 or later); before that, `(a) => C(a)` is silent.",
     "domains": [],
     "examples": {
       "bad": "void log(Object? value) {}\n\nclass Point {\n  Point(this.x);\n  final int x;\n}\n\nclass Logger {\n  void write(Object? value) {}\n  static void shared(Object? value) {}\n}\n\nclass Screen {\n  final Logger logger = Logger();\n  final List<int> values = [];\n\n  void show(List<String> names) {\n    names.forEach((name) => logger.write(name));\n    names.forEach((name) => describe(name));\n  }\n\n  void describe(String name) {}\n}\n\nvoid main(List<String> names, List<int> numbers) {\n  names.forEach((name) {\n    print(name);\n  });\n  names.forEach((name) => log(name));\n  names.forEach((name) {\n    return Logger.shared(name);\n  });\n  final logger = Logger();\n  names.forEach((name) => logger.write(name));\n  final points = numbers.map((x) => Point(x));\n  final sink = <int>[];\n  numbers.forEach((n) => sink.add(n));\n  void local(int value) {}\n  numbers.forEach((n) => local(n));\n  print(points);\n}\n\nclass Implicit {}\n\nclass Gen<T> {\n  Gen();\n}\n\nclass Queue2 {\n  final List<int> items = [];\n  final StringBuffer buffer = StringBuffer();\n\n  void run(void Function() f) {}\n  void named({void Function()? onTap}) {}\n\n  void calls() {\n    run(() {\n      items.clear();\n    });\n    // A member falcon does not index on a stable receiver is a method.\n    run(() => buffer.clear());\n    // A block body discarding the call in a `void`-returning named context.\n    named(onTap: () {\n      items.clear();\n    });\n  }\n}\n\nvoid constructors() {\n  final implicit = () => Implicit();\n  final generic = () => Gen<int>();\n  final identity = () => Set<int>.identity();\n  print([implicit, generic, identity]);\n}\n\n// A `final` loop variable is stable even when its name is reused elsewhere.\nvoid loops(List<Logger> loggers, List<String> names) {\n  for (final logger in loggers) {\n    names.forEach((name) => logger.write(name));\n  }\n}\n\nvoid reused(List<String> names) {\n  var logger = Logger();\n  logger = Logger();\n  names.forEach(logger.write);\n}\n\n// A list literal's element type is the closure's context.\nList<Point Function(int)> builders() => [(x) => Point(x)];\n\nvoid p(int value) {}\n\nclass OptionalConstructor {\n  OptionalConstructor([String value = '']);\n}\n\n// Matches StringBuffer's optional Object constructor without loading SDK sources.\nclass Buffer {\n  Buffer([Object content = '']);\n}\n\nvoid functionCallAndOptionalConstructors(List<int> numbers, List<String> names) {\n  numbers.forEach((value) => log.call(value));\n  numbers.forEach((value) => p.call(value));\n  names.map((value) => Buffer(value));\n  names.map((value) => Exception(value));\n  names.map((value) => OptionalConstructor(value));\n  names.map((String value) => OptionalConstructor(value));\n}",
@@ -2505,7 +2547,7 @@
   },
   {
     "crossFile": false,
-    "description": "Flags an `@override` member that does nothing but forward to `super` with the same arguments.",
+    "description": "Flags a member that does nothing but forward to `super` with the same arguments and resolved contract.",
     "diagnostics": [
       {
         "column": 8,
@@ -2514,7 +2556,7 @@
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
       },
       {
-        "column": 8,
+        "column": 44,
         "file": null,
         "line": 15,
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
@@ -2532,22 +2574,22 @@
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
       },
       {
-        "column": 7,
+        "column": 43,
         "file": null,
         "line": 26,
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
       },
       {
-        "column": 8,
+        "column": 44,
         "file": null,
         "line": 31,
         "message": "Unnecessary override — this member only forwards to `super` unchanged"
       }
     ],
-    "docs": "Flags an `@override` member that does nothing but forward to `super` with\nthe same arguments.\n\nSuch an override adds visual noise and a maintenance burden without changing\nbehavior — delete it and the inherited implementation stays in force. The\nrule is deliberately conservative: it only considers members annotated\n`@override` (the annotation stands in for real override resolution), and it\nleaves an override alone when it carries an extra annotation. Methods with\nparameter defaults or `covariant` are also exempt, since those signal an\nintentional contract change. Forwarding methods (`super.m(args)`), getters\n(`super.x`), and setters (`super.x = v`) are checked; operators are not.",
+    "docs": "Flags a member that does nothing but forward to `super` with\nthe same arguments and resolved contract.\n\nSuch an override adds visual noise and a maintenance burden without changing\nbehavior — delete it and the inherited implementation stays in force.\nResolved inherited metadata and signatures preserve meaningful overrides,\nincluding documentation, body comments, narrower contracts, and visibility changes.",
     "domains": [],
     "examples": {
-      "bad": "class Base {\n  void foo() {}\n  void bar(int x) {}\n  int get val => 0;\n  set name(String s) {}\n  int baz(int a, int b) => 0;\n  void qux() {}\n}\n\nclass Derived extends Base {\n  @override\n  void foo() => super.foo();\n\n  @override\n  void bar(int x) {\n    super.bar(x);\n  }\n\n  @override\n  int get val => super.val;\n\n  @override\n  set name(String s) => super.name = s;\n\n  @override\n  int baz(int a, int b) {\n    return super.baz(a, b);\n  }\n\n  @override\n  void qux() {\n    super.qux();\n  }\n}",
+      "bad": "class Base {\n  void foo() {}\n  void bar(int x) {}\n  int get val => 0;\n  set name(String s) {}\n  int baz(int a, int b) => 0;\n  void qux() {}\n}\n\nclass Derived extends Base {\n  @override\n  void foo() => super.foo();\n\n  @override\n   void bar(int x) {\n    super.bar(x);\n  }\n\n  @override\n  int get val => super.val;\n\n  @override\n  set name(String s) => super.name = s;\n\n  @override\n   int baz(int a, int b) {\n    return super.baz(a, b);\n  }\n\n  @override\n   void qux() {\n    super.qux();\n  }\n}",
       "crossFile": null,
       "good": "class Base {\n  void foo() {}\n  void bar(int x) {}\n  int get val => 0;\n  void baz([int x = 0]) {}\n}\n\nconst protected = 'protected';\n\nclass Derived extends Base {\n  @override\n  void foo() {\n    print('extra');\n    super.foo();\n  }\n\n  @override\n  int get val => super.val + 1;\n\n  @override\n  void bar(int x) => super.bar(x + 1);\n\n  @override\n  @protected\n  void extraAnnotated() => superCall();\n\n  @override\n  void baz([int x = 0]) => super.baz(x);\n\n  void notOverride() => helper();\n}"
     },
@@ -3179,26 +3221,14 @@
         "file": null,
         "line": 4,
         "message": "Avoid using web-only libraries in Flutter code; they are not portable across platforms."
-      },
-      {
-        "column": 1,
-        "file": null,
-        "line": 5,
-        "message": "Avoid using web-only libraries in Flutter code; they are not portable across platforms."
-      },
-      {
-        "column": 1,
-        "file": null,
-        "line": 6,
-        "message": "Avoid using web-only libraries in Flutter code; they are not portable across platforms."
       }
     ],
-    "docs": "Disallow importing web-only `dart:` libraries from Flutter code.\n\nFlags any `import` of `dart:html`, `dart:js`, `dart:js_util`, or a\n`dart:js_interop*` library. These libraries exist only on the web platform,\nso code that depends on them fails to compile or run on Android, iOS,\ndesktop, and embedded targets. A Flutter package that reaches for them\nsilently forfeits portability across every platform Flutter otherwise\nsupports. Use platform-neutral APIs, or isolate web-specific code behind a\nconditional import so non-web builds receive a compatible implementation.",
+    "docs": "Disallow importing web-only `dart:` libraries from Flutter code.\n\nApplies only to packages depending on Flutter, excluding Flutter web plugins.\nThe legacy `dart:html`, `dart:js`, and `dart:js_util` imports are checked;\nmodern JS interop libraries are allowed by the upstream lint.",
     "domains": [
       "flutter"
     ],
     "examples": {
-      "bad": "// Bad: imports of web-only dart libraries.\nimport 'dart:html';\nimport 'dart:js';\nimport 'dart:js_util';\nimport 'dart:js_interop';\nimport 'dart:js_interop_unsafe';\n\nvoid main() {}",
+      "bad": "// Bad: imports of web-only dart libraries.\nimport 'dart:html';\nimport 'dart:js';\nimport 'dart:js_util';\n\nvoid main() {}",
       "crossFile": null,
       "good": "// Good: portable imports with no web-only libraries.\nimport 'dart:async';\nimport 'dart:convert';\nimport 'dart:math';\nimport 'dart:io';\nimport 'package:flutter/material.dart';\nimport 'package:http/http.dart';\n\nvoid main() {}"
     },
@@ -3271,7 +3301,7 @@
         "message": "Await only futures or other future-like values."
       }
     ],
-    "docs": "Await only values assignable to futures; `FutureOr`, dynamic, bottom types\nand extension types are accepted like the analyzer. A type parameter is\nassignable only through a bound that is a `Future` subtype, so its bound\ngets no `FutureOr` or extension-type exemption.",
+    "docs": "Await only values assignable to futures; `FutureOr`, dynamic, bottom types\nand extension types are accepted like the analyzer. A type parameter is\nassignable only through a bound that is a `Future` subtype, so its bound\ngets no `FutureOr` or extension-type exemption. Diagnostics underline only `await`.",
     "domains": [],
     "examples": {
       "bad": "import 'dart:async';\n\nint syncValue() => 1;\n\nFuture<void> bad(int count, String label, Object value) async {\n  await count;\n  await label;\n  await value;\n  await true;\n  await syncValue();\n}\n\nFuture<void> oldStyleFormal(Future<int> callback()) async {\n  await callback;\n}\n\nFuture<void> scoped(Future<int> future, List<int> values) async {\n  {\n    final future = 1;\n    await future;\n  }\n  await future;\n\n  for (final value in values) {\n    await value;\n  }\n\n  await (() async {\n    await 1;\n  })();\n}",
@@ -3867,14 +3897,20 @@
         "file": null,
         "line": 28,
         "message": "The referenced name 'missingName' isn't visible in scope."
+      },
+      {
+        "column": 36,
+        "file": null,
+        "line": 35,
+        "message": "The referenced name 'WorkerScope.onConnect' isn't visible in scope."
       }
     ],
     "docs": "Flags doc-comment references `[name]` that resolve to nothing in scope.\n\ndartdoc links a bracketed name to the declaration it denotes, so a\nmisspelled or stale `[name]` renders as plain text and the link silently\nbreaks. References are parsed and resolved as the analyzer's doc-comment\nparser and `CommentReferenceResolver` do (see `crate::lint::doc_comments`):\n`[name]`, `[Type.member]`, `[prefix.name]` and `[prefix.Type.member]`\n(including operators) are reported when the last name resolves to\nnothing; `[this]`, `[null]`, `[true]` and `[false]` are always reported.\nReferences defined as Markdown link references (`/// [name]: https://...`),\nMarkdown link text and code spans and blocks are not references. Names\nfalcon cannot prove absent (an unindexed import or supertype) are not\nreported.",
     "domains": [],
     "examples": {
-      "bad": "/// Returns [valeu] doubled.\nint twice(int value) => value * 2;\n\n/// Wraps a [Strng] for display.\nclass Label {\n  Label(this.text);\n\n  /// The text; never [null].\n  final String text;\n\n  /// Renders [text] with [prefx].\n  String render(String prefix) => '$prefix$text';\n\n  /// See [Label.missing] for details.\n  void describe() {}\n}\n\n/// Use [Unknown] instead, or [this].\nvoid legacy() {}\n\n/// Shades of [Colour].\nenum Shade {\n  /// Brighter than [dakr].\n  light,\n  dark,\n}\n\n/// A typedef's scope is closed: [day] and [T] resolve, [missingName] does not.\ntypedef DayPredicate<T> = bool Function(DateTime day, T value);",
+      "bad": "/// Returns [valeu] doubled.\nint twice(int value) => value * 2;\n\n/// Wraps a [Strng] for display.\nclass Label {\n  Label(this.text);\n\n  /// The text; never [null].\n  final String text;\n\n  /// Renders [text] with [prefx].\n  String render(String prefix) => '$prefix$text';\n\n  /// See [Label.missing] for details.\n  void describe() {}\n}\n\n/// Use [Unknown] instead, or [this].\nvoid legacy() {}\n\n/// Shades of [Colour].\nenum Shade {\n  /// Brighter than [dakr].\n  light,\n  dark,\n}\n\n/// A typedef's scope is closed: [day] and [T] resolve, [missingName] does not.\ntypedef DayPredicate<T> = bool Function(DateTime day, T value);\n\nextension type WorkerScope(int value) {\n  void onconnect() {}\n}\n\n/// The obsolete camel-case event [WorkerScope.onConnect] does not exist.\nvoid listenToWorker() {}",
       "crossFile": null,
-      "good": "/// Returns [value] doubled, see [Label] and [print].\nint twice(int value) => value * 2;\n\n/// A label holding [text]; compare with [Label.render] and [Object].\n///\n/// Code is not checked: `[notAReference]` and\n///\n/// ```dart\n/// final list = [missing];\n/// ```\n///\n/// Links are not references: [the docs](https://dart.dev) and [guide][].\n///\n/// [guide]: https://dart.dev/guides\nclass Label<T> {\n  Label(this.text);\n\n  /// The text, typed [T]; equal [hashCode] values for equal [text].\n  final String text;\n\n  /// Renders [text] after [prefix] using [twice] and [Shade.dark].\n  String render(String prefix) => '$prefix$text';\n}\n\n/// Mentions [Shade.values], [index], [light], and [toString].\nenum Shade {\n  /// Unlike [dark].\n  light,\n  dark,\n}\n\n/// A [FancyLabel] inherits [render] and [text] from [Label].\nclass FancyLabel extends Label<int> {\n  FancyLabel(super.text);\n}\n\n/// [List] of [int] values in a [Map], with [Duration] and [identical].\nconst values = <int>[];\n\n/// Built by [Point.new], [Implicit.new], [Factory.new], [Tone.new],\n/// [Wrapper.new], [AbstractBase.new], and [Named.new].\nclass Point {\n  Point(this.x);\n\n  final int x;\n}\n\nclass Implicit {}\n\nabstract class AbstractBase {}\n\nclass Factory {\n  Factory._();\n\n  factory Factory.new() => Factory._();\n}\n\nenum Tone { low, high }\n\nextension type Wrapper(int value) {}\n\nextension type Named._(int value) {\n  Named(int value) : this._(value);\n}"
+      "good": "/// Returns [value] doubled, see [Label] and [print].\nint twice(int value) => value * 2;\n\n/// A label holding [text]; compare with [Label.render] and [Object].\n///\n/// Code is not checked: `[notAReference]` and\n///\n/// ```dart\n/// final list = [missing];\n/// ```\n///\n/// Links are not references: [the docs](https://dart.dev) and [guide][].\n///\n/// [guide]: https://dart.dev/guides\nclass Label<T> {\n  Label(this.text);\n\n  /// The text, typed [T]; equal [hashCode] values for equal [text].\n  final String text;\n\n  /// Renders [text] after [prefix] using [twice] and [Shade.dark].\n  String render(String prefix) => '$prefix$text';\n}\n\n/// Mentions [Shade.values], [index], [light], and [toString].\nenum Shade {\n  /// Unlike [dark].\n  light,\n  dark,\n}\n\n/// A [FancyLabel] inherits [render] and [text] from [Label].\nclass FancyLabel extends Label<int> {\n  FancyLabel(super.text);\n}\n\n/// [List] of [int] values in a [Map], with [Duration] and [identical].\nconst values = <int>[];\n\n/// Built by [Point.new], [Implicit.new], [Factory.new], [Tone.new],\n/// [Wrapper.new], [AbstractBase.new], and [Named.new].\nclass Point {\n  Point(this.x);\n\n  final int x;\n}\n\nclass Implicit {}\n\nabstract class AbstractBase {}\n\nclass Factory {\n  Factory._();\n\n  factory Factory.new() => Factory._();\n}\n\nenum Tone { low, high }\n\nextension type Wrapper(int value) {}\n\nextension type Named._(int value) {\n  Named(int value) : this._(value);\n}\n\n/// Extension-type constructors and declared members resolve:\n/// [WorkerScope.new], [NamedScope.internal], [WorkerScope.onconnect].\nvoid listenToWorker() {}\n\nextension type WorkerScope(int value) {\n  void onconnect() {}\n}\n\nextension type NamedScope.internal(int value) {}"
     },
     "group": "correctness",
     "name": "comment-references",
@@ -4088,10 +4124,10 @@
         "message": "'Legacy' is deprecated and shouldn't be used. Use NewType!"
       },
       {
-        "column": 7,
+        "column": 3,
         "file": null,
         "line": 19,
-        "message": "'old' is deprecated and shouldn't be used."
+        "message": "'Api.old' is deprecated and shouldn't be used."
       },
       {
         "column": 9,
@@ -4142,7 +4178,7 @@
         "message": "'old' is deprecated and shouldn't be used."
       }
     ],
-    "docs": "Reports uses of deprecated declarations from their own package.\n\nCanonical project identities and lexical scopes prove code and documentation\nreferences; unknown receivers and ambiguous imports remain silent. Deprecated\ndeclarations and libraries form a usage frontier, so their bodies, documentation,\nand metadata are exempt, including part files of deprecated libraries. Library\ndirective messages use canonical package URIs, and local functions stay within\ntheir lexical block, switch case, or unbraced statement body. Deprecation messages\nare trimmed and punctuated like the analyzer's messages. Membership is cached per source.\nCascade diagnostics consume shared semantic traversal callbacks, including\nreceiver inference and indexed-assignment classification.\nExtension owners honor inferred arguments and bounds; `super` owners follow\nconcrete mixin constraints before interface contracts. Optional parameter\ndeprecations are checked even when the enclosing member is not deprecated.\nExplicit construction resolves dotted constructor selectors separately from\nimport prefixes; generic class qualifiers retain their constructor metadata.\nConstructor aliases resolve to the underlying declaration before constructor\nand deprecated-parameter metadata is inspected. Compound assignments and\nincrements inspect both accessors, while simple assignments inspect only setters.\nLocal metadata follows binding declaration identities, including loop variables;\nlocal function metadata also applies to references before its lexical declaration.\nEnum constants do not name deprecated constructors; implicit extension operators\nuse the same applicable-extension lookup as ordinary members.\nMember and parameter selectors borrow names and keep declaration kind, access,\nand static dispatch distinct; retained metadata owns names only during indexing.\nGrouped references are visited, but grouped callees do not expose declaration\nparameter metadata as direct invocations do.\nNull-shortened receiver chains recover reached declaration types until parentheses,\npreserving declared nullable members and applicable nullable extensions.",
+    "docs": "Reports uses of deprecated declarations from their own package.\n\nCanonical project identities and lexical scopes prove code and documentation\nreferences; unknown receivers and ambiguous imports remain silent. Deprecated\ndeclarations and libraries form a usage frontier, so their bodies, documentation,\nand metadata are exempt, including part files of deprecated libraries. Library\ndirective messages use canonical package URIs, and local functions stay within\ntheir lexical block, switch case, or unbraced statement body. Deprecation messages\nare trimmed and punctuated like the analyzer's messages. Membership is cached per source.\nCascade diagnostics consume shared semantic traversal callbacks, including\nreceiver inference and indexed-assignment classification.\nExtension owners honor inferred arguments and bounds; `super` owners follow\nconcrete mixin constraints before interface contracts. Optional parameter\ndeprecations are checked even when the enclosing member is not deprecated.\nExplicit construction resolves dotted constructor selectors separately from\nimport prefixes; generic class qualifiers retain their constructor metadata.\nConstructor aliases resolve to the underlying declaration before constructor\nand deprecated-parameter metadata is inspected. Compound assignments and\nincrements inspect both accessors, while simple assignments inspect only setters.\nLocal metadata follows binding declaration identities, including loop variables;\nlocal function metadata also applies to references before its lexical declaration.\nEnum constants do not name deprecated constructors; implicit extension operators\nuse the same applicable-extension lookup as ordinary members.\nMember and parameter selectors borrow names and keep declaration kind, access,\nand static dispatch distinct; retained metadata owns names only during indexing.\nGrouped references are visited, but grouped callees do not expose declaration\nparameter metadata as direct invocations do.\nNull-shortened receiver chains recover reached declaration types until parentheses,\npreserving declared nullable members and applicable nullable extensions.\nNamed constructor uses cover their full qualifier; implicit super uses cover\nthe complete constructor declaration that makes the implicit call.",
     "domains": [],
     "examples": {
       "bad": "@deprecated\nvoid oldFunction() {}\n@Deprecated('Use newValue')\nint oldValue = 1;\n@Deprecated('Use NewType!')\nclass Legacy {}\nclass Api {\n  Api();\n  @deprecated\n  Api.old();\n  @deprecated\n  void oldMethod() {}\n}\nvoid use(Api value) {\n  oldFunction();\n  print(oldValue);\n  oldValue = 2;\n  Legacy? variable;\n  Api.old();\n  value.oldMethod();\n}\n\nclass Properties {\n  @deprecated\n  int oldField = 0;\n  @deprecated\n  int get oldGetter => 0;\n  @deprecated\n  set oldSetter(int value) {}\n}\nclass InheritedProperties extends Properties {}\nvoid propertyUses(InheritedProperties value) {\n  print(value.oldField);\n  print(value.oldGetter);\n}\nclass GlobalUses {\n  void call() {\n    oldFunction();\n  }\n}\n/// [oldFunction]\nvoid linkedFunction() {}\n/// [Properties.oldGetter]\nvoid linkedGetter() {}\nclass LinkedProperties extends Properties {\n  /// [oldField]\n  void linkedMember() {}\n}\nenum OldChoice {\n  @deprecated\n  old,\n  current;\n}\nvoid patternUse(OldChoice value) {\n  switch (value) {\n    case OldChoice.old:\n      break;\n    case OldChoice.current:\n      break;\n  }\n}",
@@ -4302,7 +4338,7 @@
         "message": "Asynchronous function invoked in a non-'async' function."
       }
     ],
-    "docs": "Don't discard `Future`s returned by calls in synchronous functions.\n\nA `Future` created inside a non-`async` function and then dropped can't be\nawaited, so its errors and completion are lost:\n\n```dart\nvoid save() {\n  writeFile(); // BAD\n}\n\nFuture<void> save() async {\n  await writeFile(); // GOOD\n}\n```\n\nExpression statements, cascade sections, and string interpolations whose\nresolved type is `Future` (or a subtype) or `FutureOr` are reported inside\nsynchronous bodies. Assignments, `Future.delayed(duration, computation)`,\n`Map.putIfAbsent`, and members annotated `@awaitNotRequired`, including\ninherited, extension, and local functions, are exempt; local annotations\nfollow the visible declaration rather than a reusable name. Function typedef\nannotations follow the invoked value's immediate alias through inferred\nvariables, fields, records, and collections, but not explicit `.call` or an\nunannotated alias of that typedef. Member calls, including null-aware\naccesses, use the reached receiver branch for annotation lookup, as do\nbounded type parameters and flow-promoted `FutureOr` values. Unresolved\ntypes stay silent.",
+    "docs": "Don't discard `Future`s returned by calls in synchronous functions.\n\nA `Future` created inside a non-`async` function and then dropped can't be\nawaited, so its errors and completion are lost:\n\n```dart\nvoid save() {\n  writeFile(); // BAD\n}\n\nFuture<void> save() async {\n  await writeFile(); // GOOD\n}\n```\n\nExpression statements, cascade sections, and string interpolations whose\nresolved type is `Future` (or a subtype) or `FutureOr` are reported inside\nsynchronous bodies. Assignments, `Future.delayed(duration, computation)`,\n`Map.putIfAbsent`, and members annotated `@awaitNotRequired`, including\ninherited, extension, and local functions, are exempt; local annotations\nfollow the visible declaration rather than a reusable name. Function typedef\nannotations follow the invoked value's immediate alias through inferred\nvariables, fields, records, and collections, but not explicit `.call` or an\nunannotated alias of that typedef. Member calls, including null-aware\naccesses, use the reached receiver branch for annotation lookup, as do\nbounded type parameters and flow-promoted `FutureOr` values. Unresolved\ntypes stay silent. Calls through getters underline the complete callee expression,\nwhile method invocations underline only the method name.",
     "domains": [],
     "examples": {
       "bad": "import 'dart:async';\n\nFuture<int> fetch() async => 1;\n\nFutureOr<int> maybeFetch() => 1;\n\nclass Api {\n  Future<void> save() async {}\n\n  Future<int> get pending async => 1;\n}\n\nvoid callsFunction() {\n  fetch();\n}\n\nvoid callsMethod(Api api) {\n  api.save();\n}\n\nvoid readsGetter(Api api) {\n  api.pending;\n}\n\nvoid callsFutureOr() {\n  maybeFetch();\n}\n\nvoid cascade(Api api) {\n  api..save();\n}\n\nvoid interpolates() {\n  print('${fetch()}');\n}\n\nvoid inClosure() {\n  final callback = () {\n    fetch();\n  };\n  callback();\n}\n\nclass Widget {\n  void initState() {\n    fetch();\n  }\n}",
@@ -4649,7 +4685,7 @@
         "message": "Runtime type checks involving JS interop types are platform-dependent."
       },
       {
-        "column": 5,
+        "column": 8,
         "file": null,
         "line": 23,
         "message": "JS interop types cannot be used as catch types."
@@ -4661,13 +4697,13 @@
         "message": "Runtime type checks involving JS interop types are platform-dependent."
       },
       {
-        "column": 5,
+        "column": 8,
         "file": null,
         "line": 34,
         "message": "JS interop types cannot be used as catch types."
       },
       {
-        "column": 5,
+        "column": 8,
         "file": null,
         "line": 36,
         "message": "JS interop types cannot be used as catch types."
@@ -4879,13 +4915,13 @@
         "message": "The Boolean expression has a constant value."
       },
       {
-        "column": 17,
+        "column": 12,
         "file": null,
         "line": 12,
         "message": "The Boolean expression has a constant value."
       },
       {
-        "column": 12,
+        "column": 7,
         "file": null,
         "line": 17,
         "message": "The Boolean expression has a constant value."
@@ -4909,7 +4945,7 @@
         "message": "The Boolean expression has a constant value."
       }
     ],
-    "docs": "Flags conditions built only from literals, whose value never changes.\n\nAn `if`, `while`, `do`-`while`, or `for` condition (or a pattern `when`\nguard) made solely of literals combined with operators always evaluates the\nsame way, so the branch is either dead or unconditional. `while (true)` is\nallowed as the idiomatic infinite loop.\n\n```dart\nif (1 > 2) {}          // flagged\nwhile (true && false) {} // flagged\nwhile (true) {}        // ok\nif (x > 2) {}          // ok\n```",
+    "docs": "Flags conditions built only from literals, whose value never changes.\n\nAn `if`, `while`, `do`-`while`, or `for` condition (or a pattern `when`\nguard) made solely of literals combined with operators always evaluates the\nsame way, so the branch is either dead or unconditional. `while (true)` is\nallowed as the idiomatic infinite loop. Guard diagnostics include the `when` keyword.\n\n```dart\nif (1 > 2) {}          // flagged\nwhile (true && false) {} // flagged\nwhile (true) {}        // ok\nif (x > 2) {}          // ok\n```",
     "domains": [],
     "examples": {
       "bad": "void bad(int x) {\n  if (true) {}\n  if (1 > 2) {}\n  if (!false) {}\n  if ('a' == 'b' || null == null) {}\n  while (true && false) {}\n  do {} while (false);\n  for (var i = 0; 1 < 2; i++) {}\n  if (1 is int) {}\n  if (null ?? x > 1) {}\n  switch (x) {\n    case 1 when true:\n      print(x);\n    default:\n  }\n  final y = switch (x) {\n    1 when 2 > 1 => 'a',\n    _ => 'b',\n  };\n  print(y);\n}\n\nvoid constantInterpolation() {\n  const a = 20;\n  if ('$a' == '20') {}\n  if ('${1 + 2}' == '3') {}\n  const flag = true;\n  if ('${flag ? a : 0}' == '20') {}\n}",
@@ -5484,7 +5520,7 @@
         "message": "Unnecessary use of the type 'Null'."
       }
     ],
-    "docs": "Flags uses of the `Null` type where `void` is meant.\n\n`Null` and `void` both describe \"no useful value\", but `void` says the value\nmust not be used while `Null` admits only `null` and is a subtype of every\nnullable type. Writing `Future<Null>` or a `Null` return type usually means\n`void`, and only `void` lets implementations return whatever they like.\n\n```dart\nNull f() {}                   // flagged\nFuture<Null> g() async {}     // flagged\nvoid h() {}                   // preferred\n```\n\nFollowing the official lint, `Null` is accepted where `void` cannot replace\nit: casts (`as Null`, cast patterns), local and top-level variable types,\nthe return and parameter types written directly in a function type, type\narguments of empty collection literals (`<Null>[]`), `extension on Null`,\nextension type representations, and return types of members overriding a\nmember that does not return `void`.\nOverrides whose external declarations are unavailable are conservatively\nexempt; an unresolved source superclass is not evidence of an override.",
+    "docs": "Flags uses of the `Null` type where `void` is meant.\n\n`Null` and `void` both describe \"no useful value\", but `void` says the value\nmust not be used while `Null` admits only `null` and is a subtype of every\nnullable type. Writing `Future<Null>` or a `Null` return type usually means\n`void`, and only `void` lets implementations return whatever they like.\n\n```dart\nNull f() {}                   // flagged\nFuture<Null> g() async {}     // flagged\nvoid h() {}                   // preferred\n```\n\nFollowing the official lint, `Null` is accepted where `void` cannot replace\nit: casts (`as Null`, cast patterns), local and top-level variable types,\nthe return and parameter types written directly in a function type, type\narguments of empty collection literals (`<Null>[]`), `extension on Null`,\nextension type representations, and return types of members overriding a\nmember that does not return `void` after substituting inherited type arguments.\nOverrides whose external declarations are unavailable are conservatively\nexempt; an unresolved source superclass is not evidence of an override.",
     "domains": [],
     "examples": {
       "bad": "Null f() {}\n\nFuture<Null> g() async {}\n\nvoid h(Null x) {}\n\nclass A {\n  Null field;\n\n  Null method() => null;\n\n  Stream<Null> get events => const Stream.empty();\n}\n\nvoid main() {\n  final List<Null> items = <Null>[null];\n  print(items);\n}\n\nclass Base {\n  void run() {}\n}\n\nclass Sub extends Base {\n  @override\n  Null run() => null;\n}\n\nMap<String, Null> lookup() => {};\n\nclass Remote extends SomeUnknownBase {\n  Null fetch() => null;\n}",
@@ -7096,14 +7132,56 @@
         "file": null,
         "line": 15,
         "message": "Invalid regular expression."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 17,
+        "message": "Invalid regular expression."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 18,
+        "message": "Invalid regular expression."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 19,
+        "message": "Invalid regular expression."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 20,
+        "message": "Invalid regular expression."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 21,
+        "message": "Invalid regular expression."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 22,
+        "message": "Invalid regular expression."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 23,
+        "message": "Invalid regular expression."
       }
     ],
-    "docs": "Disallow statically known invalid `dart:core` regular expressions.",
+    "docs": "Disallow statically known invalid `dart:core` regular expressions.\n\nValidate decoded literal patterns with an ECMAScript parser, including the\nconstructor's literal `unicode: true` flag, matching the SDK lint.",
     "domains": [],
     "examples": {
-      "bad": "// Bad: literal patterns that are structurally invalid regular expressions.\nvoid examples() {\n  final a = RegExp('(');\n  final b = RegExp(')');\n  final c = RegExp('[a-z');\n  final d = RegExp('(abc');\n  final e = RegExp('a(b(c)');\n  final f = new RegExp('foo)');\n  final g = RegExp('*abc');\n  final h = RegExp('[z-a]');\n  final i = RegExp(r'\\xG0');\n  final j = RegExp('a{3,2}');\n  final k = RegExp(r'[z-a]');\n  final l = RegExp(r'\\d{3,2}');\n  final adjacent = RegExp('(' r'\\d');\n  print([a, b, c, d, e, f, g, h, i, j, k, l]);\n}",
+      "bad": "// Bad: literal patterns that are structurally invalid regular expressions.\nvoid examples() {\n  final a = RegExp('(');\n  final b = RegExp(')');\n  final c = RegExp('[a-z');\n  final d = RegExp('(abc');\n  final e = RegExp('a(b(c)');\n  final f = new RegExp('foo)');\n  final g = RegExp('*abc');\n  final h = RegExp('[z-a]');\n  final i = RegExp(r'\\xG0', unicode: true);\n  final j = RegExp('a{3,2}');\n  final k = RegExp(r'[z-a]');\n  final l = RegExp(r'\\d{3,2}');\n  final adjacent = RegExp('(' r'\\d');\n  print([a, b, c, d, e, f, g, h, i, j, k, l]);\n  RegExp('{', unicode: true);\n  RegExp(r'\\q', unicode: true);\n  RegExp(r'(?invalid)');\n  RegExp(r'(?<x>a)(?<x>b)');\n  RegExp(r'(?<=a)+');\n  RegExp('\\\\xG0', unicode: true);\n  RegExp('\\\\');\n}",
       "crossFile": null,
-      "good": "// Good: valid patterns, or patterns that are not statically checkable literals.\nvoid examples(String dynamicPattern) {\n  final a = RegExp('abc');\n  final b = RegExp('[a-z]+');\n  final c = RegExp('(foo|bar)');\n  final d = RegExp('a(b(c)d)e'); // balanced nested groups\n  final e = RegExp(r'\\d{3}-\\d{4}'); // raw string, balanced\n  final f = RegExp('\\\\d+'); // non-raw with escapes — pattern not resolved, skipped\n  final g = RegExp(dynamicPattern); // not a literal, skipped\n  final h = RegExp('prefix-${dynamicPattern}'); // interpolated, skipped\n  final i = RegExp(r'(?=foo)foo'); // lookahead\n  final j = RegExp(r'(?:foo)*?'); // non-capturing group and lazy quantifier\n  final k = RegExp('[]'); // ECMAScript empty character class\n  final l = RegExp('[a-]'); // trailing hyphen is a literal, not a range\n  final m = RegExp(r'[a-' r'z]');\n  final n = RegExp(r'\\d{1,' r'3}');\n  final o = RegExp('[a-' 'z]');\n  final p = RegExp(r'''[a-z]+''');\n  final adjacent = RegExp('(' r'\\d' ')');\n  print([a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]);\n}"
+      "good": "// Good: valid patterns, or patterns that are not statically checkable literals.\nvoid examples(String dynamicPattern) {\n  final a = RegExp('abc');\n  final b = RegExp('[a-z]+');\n  final c = RegExp('(foo|bar)');\n  final d = RegExp('a(b(c)d)e'); // balanced nested groups\n  final e = RegExp(r'\\d{3}-\\d{4}'); // raw string, balanced\n  final f = RegExp('\\\\d+'); // decoded non-raw pattern\n  final g = RegExp(dynamicPattern); // not a literal, skipped\n  final h = RegExp('prefix-${dynamicPattern}'); // interpolated, skipped\n  final i = RegExp(r'(?=foo)foo'); // lookahead\n  final j = RegExp(r'(?:foo)*?'); // non-capturing group and lazy quantifier\n  final k = RegExp('[]'); // ECMAScript empty character class\n  final l = RegExp('[a-]'); // trailing hyphen is a literal, not a range\n  final m = RegExp(r'[a-' r'z]');\n  final n = RegExp(r'\\d{1,' r'3}');\n  final o = RegExp('[a-' 'z]');\n  final p = RegExp(r'''[a-z]+''');\n  final adjacent = RegExp('(' r'\\d' ')');\n  print([a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]);\n  RegExp('{');\n  RegExp('a{not-a-quantifier}');\n  RegExp(r'\\xG0');\n  RegExp(r'\\uZZZZ');\n  RegExp(r'\\q');\n  RegExp(r'(?<=a)b');\n  RegExp(r'(?<!a)b');\n  RegExp(r'(?<word>a)\\k<word>');\n  RegExp(r'(?=a)+');\n  RegExp(r'\\p{Letter}+', unicode: true);\n  RegExp(r'\\u{1F600}', unicode: true);\n}"
     },
     "group": "correctness",
     "name": "valid-regexps",
@@ -8040,7 +8118,7 @@
         "message": "Use a SizedBox to add whitespace to a layout instead of a Container."
       }
     ],
-    "docs": "Flags a `Container` used only to add fixed `width`/`height` whitespace.\n\nA `Container` sized only by `width`/`height` (optionally with a `child` or\n`key`) does nothing a `SizedBox` cannot, and `SizedBox` has a const\nconstructor, so it is cheaper and clearer for spacing. The rule fires when a\n`Container` has no positional arguments, at least one of `width`/`height`,\nand no named arguments other than `width`, `height`, `child`, or `key`.",
+    "docs": "Flags a `Container` used only to add fixed `width`/`height` whitespace.\n\nA `Container` sized only by `width`/`height` (optionally with a `child` or\n`key`) does nothing a `SizedBox` cannot, and `SizedBox` has a const\nconstructor, so it is cheaper and clearer for spacing. The rule fires when a\n`Container` has no positional arguments, at least one of `width`/`height`,\nand no named arguments other than `width`, `height`, `child`, or `key`.\nThe diagnostic covers the constructor name, excluding `new` and arguments.",
     "domains": [
       "flutter"
     ],
@@ -8270,6 +8348,103 @@
     }
   },
   {
+    "crossFile": true,
+    "description": "Disallow insecure URL schemes in `pubspec.yaml` string values.",
+    "diagnostics": [
+      {
+        "column": 11,
+        "file": "bad-nested/pubspec.yaml",
+        "line": 3,
+        "message": "The 'http' protocol shouldn't be used because it isn't secure."
+      },
+      {
+        "column": 16,
+        "file": "bad-nested/pubspec.yaml",
+        "line": 5,
+        "message": "The 'http' protocol shouldn't be used because it isn't secure."
+      },
+      {
+        "column": 13,
+        "file": "bad-nested/pubspec.yaml",
+        "line": 6,
+        "message": "The 'git' protocol shouldn't be used because it isn't secure."
+      },
+      {
+        "column": 16,
+        "file": "bad-nested/pubspec.yaml",
+        "line": 9,
+        "message": "The 'git' protocol shouldn't be used because it isn't secure."
+      },
+      {
+        "column": 40,
+        "file": "bad-nested/pubspec.yaml",
+        "line": 10,
+        "message": "The 'git' protocol shouldn't be used because it isn't secure."
+      },
+      {
+        "column": 12,
+        "file": "bad-nested/pubspec.yaml",
+        "line": 14,
+        "message": "The 'http' protocol shouldn't be used because it isn't secure."
+      },
+      {
+        "column": 11,
+        "file": "bad-pubspec-only/pubspec.yaml",
+        "line": 2,
+        "message": "The 'http' protocol shouldn't be used because it isn't secure."
+      }
+    ],
+    "docs": "Disallow insecure URL schemes in `pubspec.yaml` string values.",
+    "domains": [],
+    "examples": {
+      "bad": null,
+      "crossFile": [
+        {
+          "content": "void main() {}",
+          "path": "bad-nested/lib/main.dart"
+        },
+        {
+          "content": "name: secure_fixture\n# homepage: http://example.com/comment-only\nhomepage: | #\n  http://example.com\ndocumentation: \"http:\\/\\/example.com/docs\" #\nrepository: > #\n  git:example.com/\n  repository.git\nissue_tracker: git:example.com/issues #\ndependencies: {nested_git: {git: {url: git://example.com/repository.git}}} #\ndev_dependencies:\n  nested_hosted:\n    hosted:\n      url: \"http:\\/\\/packages.example.com\" #\n  direct: http://direct.example\n  ignored:\n    host: http://host.example\nfunding:\n  - http://example.com/fund\ndescription: http://example.com/ignored\narchive_urls: [git://example.com/ignored]",
+          "path": "bad-nested/pubspec.yaml"
+        },
+        {
+          "content": "name: pubspec_only\nhomepage: http://example.com #",
+          "path": "bad-pubspec-only/pubspec.yaml"
+        },
+        {
+          "content": "void main() {}",
+          "path": "good-malformed/lib/main.dart"
+        },
+        {
+          "content": "homepage: [http://example.com",
+          "path": "good-malformed/pubspec.yaml"
+        },
+        {
+          "content": "void main() {}",
+          "path": "good-missing-manifest/lib/main.dart"
+        },
+        {
+          "content": "void main() {}",
+          "path": "good-secure/lib/main.dart"
+        },
+        {
+          "content": "name: secure_fixture\nhomepage: https://example.com\ndependencies:\n  nested_git:\n    git:\n      url: https://example.com/repository.git\n  ssh_git:\n    git: git@github.com:example/repository.git",
+          "path": "good-secure/pubspec.yaml"
+        }
+      ],
+      "good": null
+    },
+    "group": "security",
+    "name": "secure-pubspec-urls",
+    "recommended": false,
+    "source": {
+      "kind": "Lints",
+      "label": "Dart lints",
+      "upstreamId": "secure_pubspec_urls",
+      "upstreamUrl": "https://dart.dev/tools/linter-rules/secure_pubspec_urls"
+    }
+  },
+  {
     "crossFile": false,
     "description": "Flags functions and methods declared without a return type.",
     "diagnostics": [
@@ -8310,7 +8485,7 @@
         "message": "The method 'size' should have a return type but doesn't."
       },
       {
-        "column": 3,
+        "column": 12,
         "file": null,
         "line": 11,
         "message": "The method '+' should have a return type but doesn't."
@@ -8328,7 +8503,7 @@
         "message": "The method 'doubled' should have a return type but doesn't."
       }
     ],
-    "docs": "Flags functions and methods declared without a return type.\n\nWithout an explicit return type, a function returns `dynamic` (or an\ninferred override type), which hides its contract from readers and callers.\nTop-level and local functions, getters, methods, operators, and legacy\n`typedef F(...)` aliases are checked. Setters and `operator []=` never\ndeclare a return type and are skipped, as are `test_*`/`solo_test_*`\nmethods in a package-root test directory (reflective test runners).\n\n```dart\nmain() {}      // flagged\nvoid main() {} // ok\n```",
+    "docs": "Flags functions and methods declared without a return type.\n\nWithout an explicit return type, a function returns `dynamic` (or an\ninferred override type), which hides its contract from readers and callers.\nTop-level and local functions, getters, methods, operators, and legacy\n`typedef F(...)` aliases are checked. Setters and `operator []=` never\ndeclare a return type and are skipped, as are `test_*`/`solo_test_*`\nmethods in a package-root test directory (reflective test runners).\nOperator diagnostics highlight only the operator name, not `operator`.\n\n```dart\nmain() {}      // flagged\nvoid main() {} // ok\n```",
     "domains": [],
     "examples": {
       "bad": "main() {}\n\nget answer => 42;\n\ntypedef Handler(int x);\n\nclass Foo {\n  bar() => 1;\n  static make() => Foo();\n  get size => 0;\n  operator +(Foo other) => this;\n}\n\nvoid outer() {\n  inner() {}\n  inner();\n}\n\nextension on int {\n  doubled() => this * 2;\n}",
@@ -8580,7 +8755,7 @@
         "message": "Missing type annotation."
       },
       {
-        "column": 12,
+        "column": 8,
         "file": null,
         "line": 22,
         "message": "Missing type annotation."
@@ -8628,7 +8803,7 @@
         "message": "Missing type annotation."
       }
     ],
-    "docs": "Requires explicit type annotations everywhere a type could be inferred.\n\nThis is the opposite of `omit-local-variable-types`: every variable,\nloop variable, pattern variable, and parameter needs a declared type;\ncollection literals need explicit type arguments; and generic types need\ntheir type arguments spelled out instead of defaulting to `dynamic`.\n\n```dart\nvar count = 0;           // flagged\nfinal names = [];        // flagged (twice: declaration and literal)\nList items = <int>[];    // flagged: raw generic type\nint count = 0;           // ok\n```\n\nRaw generic interface types (classes, mixins, enums, extension types, and\n`FutureOr`) and their generic typedefs need explicit arguments in\nannotations, inheritance clauses, casts, object patterns (also in pattern\nassignments), constructor invocations, and type literals (`print(Box)`,\n`'$Box'`, `case Box:`). `is` checks, constructor tear-offs, static member\naccesses, and declarations with `@optionalTypeArgs` are exempt. Loaded\ndeclaration metadata supplies generic arity; SDK-free analysis retains the\nexisting identity fallback.",
+    "docs": "Requires explicit type annotations everywhere a type could be inferred.\n\nThis is the opposite of `omit-local-variable-types`: every variable,\nloop variable, pattern variable, and parameter needs a declared type;\ncollection literals need explicit type arguments; and generic types need\ntheir type arguments spelled out instead of defaulting to `dynamic`.\n\n```dart\nvar count = 0;           // flagged\nfinal names = [];        // flagged (twice: declaration and literal)\nList items = <int>[];    // flagged: raw generic type\nint count = 0;           // ok\n```\n\nRaw generic interface types (classes, mixins, enums, extension types, and\n`FutureOr`) and their generic typedefs need explicit arguments in\nannotations, inheritance clauses, casts, object patterns (also in pattern\nassignments), constructor invocations, and type literals (`print(Box)`,\n`'$Box'`, `case Box:`). `is` checks, constructor tear-offs, static member\naccesses, and declarations with `@optionalTypeArgs` are exempt. Loaded\ndeclaration metadata supplies generic arity; SDK-free analysis retains the\nexisting identity fallback.\n\nDiagnostic ranges follow the analyzer's syntax anchors: collection literals\nand variable patterns highlight their first token, while unmodified untyped\nparameters highlight the entire parameter (including attached documentation,\nmetadata, and defaults).",
     "domains": [],
     "examples": {
       "bad": "var count = 0;\nfinal String name = 'x';\nconst limit = 3;\nList raw = <int>[];\n\nclass Box<T> {\n  final T value;\n  Box(this.value);\n}\n\nclass Holder {\n  final items = <int>[];\n  Map lookup = <String, int>{};\n  Box box = Box<int>(1);\n}\n\nvoid f(x, int y) {\n  var local = 1;\n  final List<int> list = [];\n  final Set<int> set = {};\n  final Map<String, int> map = {};\n  for (var i = 0; i < 2; i++) {}\n  for (final e in list) {}\n  final Box<int> b = Box(1);\n  final (int a, String s) = (1, '');\n  final (int c, d) = (1, 2);\n  if (y case final z) {}\n  final g = (v) => v;\n}\n\nset value(v) {}",
@@ -9176,7 +9351,7 @@
         "message": "The method '==' should not be overridden in classes not annotated with '@immutable'."
       }
     ],
-    "docs": "Flags `==` and `hashCode` overrides in classes not marked `@immutable`.\n\nA value-based `==` and `hashCode` on a mutable object is a trap: once the\nobject is stored in a `Set` or used as a `Map` key, mutating it changes its\nhash code and the collection silently loses track of it. Only classes that\nare (transitively) annotated with package:meta's `@immutable` should\noverride them.\n\n```dart\nclass Point {                 // not @immutable\n  int x;\n  Point(this.x);\n  @override\n  bool operator ==(Object other) => other is Point && other.x == x; // flagged\n  @override\n  int get hashCode => x.hashCode; // flagged\n}\n```\n\nThe annotation may sit on the class itself or on any supertype (superclass,\nmixin, or interface). Unresolved supertypes leave immutability unknown.",
+    "docs": "Flags `==` and `hashCode` overrides in classes not marked `@immutable`.\n\nA value-based `==` and `hashCode` on a mutable object is a trap: once the\nobject is stored in a `Set` or used as a `Map` key, mutating it changes its\nhash code and the collection silently loses track of it. Only classes that\nare (transitively) annotated with package:meta's `@immutable` should\noverride them.\nThe diagnostic covers the first declaration token after metadata.\n\n```dart\nclass Point {                 // not @immutable\n  int x;\n  Point(this.x);\n  @override\n  bool operator ==(Object other) => other is Point && other.x == x; // flagged\n  @override\n  int get hashCode => x.hashCode; // flagged\n}\n```\n\nThe annotation may sit on the class itself or on any supertype (superclass,\nmixin, or interface). Unresolved supertypes leave immutability unknown.",
     "domains": [],
     "examples": {
       "bad": "import 'package:meta/meta.dart';\n\nclass Point {\n  int x;\n  Point(this.x);\n\n  @override\n  bool operator ==(Object other) => other is Point && other.x == x;\n\n  @override\n  int get hashCode => x.hashCode;\n}\n\nclass Name {\n  final String value;\n  Name(this.value);\n\n  @override\n  bool operator ==(Object other) => other is Name && other.value == value;\n}\n\nclass Id {\n  final int id;\n  Id(this.id);\n\n  @override\n  int get hashCode => id;\n}\n\n// A non-immutable superclass does not make the subclass immutable.\nclass Base {}\n\nclass Derived extends Base {\n  @override\n  bool operator ==(Object other) => identical(this, other);\n}\n\nmixin class Tagged {\n  @override\n  int get hashCode => 7;\n}\n\n// `@immutable` on an unrelated declaration does not apply.\n@immutable\nclass Frozen {\n  const Frozen();\n}\n\nclass Unrelated {\n  @override\n  bool operator ==(Object other) => other is Unrelated;\n}\n\n// SDK supertypes never carry `@immutable`.\nclass Ordered implements Comparable<Ordered> {\n  int value = 0;\n  @override\n  int compareTo(Ordered other) => 0;\n  @override\n  bool operator ==(Object other) => other is Ordered && other.value == value;\n}",
@@ -10480,7 +10655,7 @@
         "message": "The value of the argument is redundant because it matches the default value."
       }
     ],
-    "docs": "Flags arguments that pass exactly the parameter's default value.\n\nAn optional parameter's default already applies when the argument is\nomitted, so `f(flag: false)` against `void f({bool flag = false})` is noise.\nThe rule compares each constant argument with the constant default of the\noptional parameter it binds to and reports matches. Arguments are visited\nfrom last to first, stopping after the first optional positional parameter:\nan earlier positional argument may be needed to reach a later one. For a\nredirecting factory constructor the defaults of the final redirect target\napply. Required parameters and `@required` ones are never reported.\n\nDefaults come from indexed callable declarations, local functions and\nfunction-valued locals. An optional parameter without a declared default\ndefaults to `null`; a super formal inherits its super parameter's default.\nMembers of generic declarations whose function type mentions the owner's\ntype parameters are skipped: the analyzer invokes them through a\nsubstituted type whose parameters carry no defaults. Values are evaluated\nin the default's declaring library (including external named extensions)\nand captured local constant scope, and the caller's lexical context separately.\nValues that cannot be folded are skipped; the analyzer's unknown web\nenvironment booleans remain unknown even with an explicit fallback.",
+    "docs": "Flags arguments that pass exactly the parameter's default value.\n\nAn optional parameter's default already applies when the argument is\nomitted, so `f(flag: false)` against `void f({bool flag = false})` is noise.\nThe rule compares each constant argument with the constant default of the\noptional parameter it binds to and reports matches. Arguments are visited\nfrom last to first, stopping after the first optional positional parameter:\nan earlier positional argument may be needed to reach a later one. For a\nredirecting factory constructor the defaults of the final redirect target\napply. Required parameters and `@required` ones are never reported.\n\nDefaults come from indexed callable declarations, local functions and\nfunction-valued locals, and the `call` method of callable objects. An optional\nparameter without a declared default defaults to `null`; a super formal\ninherits its super parameter's default.\nMembers of generic declarations whose function type mentions the owner's\ntype parameters are skipped: the analyzer invokes them through a\nsubstituted type whose parameters carry no defaults. Values are evaluated\nin the default's declaring library (including external named extensions)\nand captured local constant scope, and the caller's lexical context separately.\nValues that cannot be folded are skipped; the analyzer's unknown web\nenvironment booleans remain unknown even with an explicit fallback.",
     "domains": [],
     "examples": {
       "bad": "void configure({bool verbose = false, int retries = 3, String mode = 'fast'}) {}\n\nvoid positional(int a, [int b = 1, int c = 2]) {}\n\nconst defaultLimit = 10;\nvoid limited({int limit = defaultLimit}) {}\n\nclass Widget {\n  const Widget({this.size = 1.0, this.label = ''});\n  Widget.named({int count = 0}) : size = 0, label = '';\n  factory Widget.redirect({double size}) = Widget;\n  final double size;\n  final String label;\n\n  static const zero = 0;\n  void resize({int by = zero, bool animate = true}) {}\n\n  void selfCall() {\n    resize(animate: true);\n  }\n}\n\nenum Level {\n  low(weight: 1),\n  high(weight: 5);\n\n  const Level({this.weight = 1});\n  final int weight;\n}\n\nclass Marker {\n  const Marker([this.value = 'x']);\n  final String value;\n}\n\n@Marker('x')\nvoid annotated() {}\n\nvoid main() {\n  configure(verbose: false);\n  configure(retries: 3);\n  configure(mode: 'fast', verbose: true);\n  positional(0, 5, 2);\n  positional(0, 1);\n  limited(limit: 10);\n  Widget(size: 1.0);\n  Widget(size: 1);\n  Widget.named(count: 0);\n  Widget.redirect(size: 1.0);\n  const Widget(label: '');\n  final w = Widget();\n  w.resize(by: 0);\n  w.resize(animate: !false);\n}\n\nvoid nullable({String? name}) {}\n\nclass Box<E> {\n  void fill(E value, [int start = 0]) {}\n  void clear([int start = 0]) {}\n}\n\nvoid more(Box<int> box) {\n  nullable(name: null);\n  box.clear(0);\n  void local({int x = 1}) {}\n  local(x: 1);\n  final closure = (int x, {int y = 0}) => x + y;\n  closure(1, y: 0);\n}\n\nconst lexicalDefault = 2;\nvoid capturedLocalDefault() {\n  const lexicalDefault = 1;\n  void local([int value = lexicalDefault]) {}\n  final alias = local;\n  local(1);\n  alias(1);\n  {\n    const lexicalDefault = 3;\n    local(1);\n    alias(1);\n  }\n}\n\nconst anonymousLimit = 1;\nclass AnonymousReceiver {}\nextension on AnonymousReceiver {\n  void method([int value = anonymousLimit]) {}\n}\nclass AnonymousCaller {\n  static const anonymousLimit = 2;\n  void run(AnonymousReceiver receiver) {\n    receiver.method(1);\n  }\n}\n\nvoid transitiveLocalScope() {\n  const x = 1;\n  const y = x;\n  {\n    const x = 2;\n    void local([int value = y]) {}\n    local(1);\n  }\n}\n\nclass ScopeReceiver { static const limit = 2; }\nconst limit = 1;\nextension on ScopeReceiver {\n  void run() {\n    void local([int value = limit]) {}\n    local(1);\n  }\n}\n\nclass DefaultBase {\n  void method([int value = 4]) {}\n}\nclass DefaultDerived extends DefaultBase {\n  void run() {\n    super.method(4);\n  }\n}\nclass DefaultReceiver {}\nextension DefaultExtension on DefaultReceiver {\n  void method([int value = 5]) {}\n}\nvoid alternateDefaultCalls(DefaultReceiver receiver) {\n  void local([int value = 1]) {}\n  local.call(1);\n  receiver..method(5);\n  DefaultExtension(receiver).method(5);\n}\n\nconst double contextualTopOne = 1;\nconst double contextualTopZero = -0;\nclass ContextualDefaults {\n  static const double one = 1;\n  static const double zero = -0;\n}\nvoid contextualOne([num value = 1.0]) {}\nvoid contextualZero([num value = -0.0]) {}\nvoid contextualConstants() {\n  const double localOne = 1;\n  const double localZero = -0;\n  contextualOne(contextualTopOne);\n  contextualOne(ContextualDefaults.one);\n  contextualOne(localOne);\n  contextualZero(contextualTopZero);\n  contextualZero(ContextualDefaults.zero);\n  contextualZero(localZero);\n}",
@@ -11093,7 +11268,7 @@
         "message": "Unnecessary type annotation on a function expression parameter."
       }
     ],
-    "docs": "Flags type annotations on closure parameters whose types come from context.\n\nWhen a function expression is passed where a function type is expected,\nits parameter types are inferred from that type, so annotating them is\nredundant. Closures without a known function-typed context are left alone\nbecause their annotations carry information. Like the official lint, a\nclosure that is an operand, an `await` operand, a switch expression arm,\na record literal field, or a direct collection literal element/key/value\n(including collection `if`/`for`) has no context here. This does not suppress\nindependently contextualized callbacks nested inside those expressions.\nA returned closure has context only in an `async` body returning `Future<F>`\nfor a function type `F`. A conditional branch or assignment RHS takes its\nenclosing expression's own static type as its context, including function\ntypes obtained by joining variant signatures. Joins retain the shared\noptional positional prefix when required arity agrees. Different required\narities join to general `Function`, unless a concrete downward function\ncontext provides a shared signature.\n\n```dart\nnames.map((String name) => name.length); // flagged\nnames.map((name) => name.length);        // ok\n```",
+    "docs": "Flags type annotations on closure parameters whose types come from context.\n\nWhen a function expression is passed where a function type is expected,\nits parameter types are inferred from that type, so annotating them is\nredundant. Closures without a known function-typed context are left alone\nbecause their annotations carry information. Like the official lint, a\nclosure that is an operand, an `await` operand, a switch expression arm,\na record literal field, or a direct collection literal element/key/value\n(including collection `if`/`for`) has no context here. This does not suppress\nindependently contextualized callbacks nested inside those expressions.\nParenthesizing an operand (including the fallback of `??`) does not add context.\nA returned closure has context only in an `async` body returning `Future<F>`\nfor a function type `F`. A conditional branch or assignment RHS takes its\nenclosing expression's own static type as its context, including function\ntypes obtained by joining variant signatures. Joins retain the shared\noptional positional prefix when required arity agrees. Different required\narities join to general `Function`, unless a concrete downward function\ncontext provides a shared signature.\n\n```dart\nnames.map((String name) => name.length); // flagged\nnames.map((name) => name.length);        // ok\n```",
     "domains": [],
     "examples": {
       "bad": "int apply(int Function(int) fn) => fn(1);\n\nvoid each(List<String> names, void Function(String name) action) {}\n\nvoid entries(void Function(String key, int value) action) {}\n\nvoid typed(void Function(void Function() inner) action) {}\n\nvoid f(List<String> names) {\n  apply((int x) => x + 1);\n  each(names, (String name) {\n    print(name);\n  });\n  entries((String key, int value) {});\n  entries((key, int value) {});\n  typed((void inner()) {});\n  final int Function(int) inc = (int x) => x + 1;\n  print(inc);\n}\n\n// An `async` body returning `Future<F>` gives a returned closure context `F`.\nFuture<int Function(int)> later() async {\n  return (int x) => x;\n}\n\nfinal Future<int Function(int)> Function() deferred = () async {\n  return (int x) => x;\n};\n\nvoid sink(Object value) {}\n\n// A conditional branch's context is the conditional's own static type.\nvoid conditional(bool b) {\n  sink(b ? (int x) => x : (int x) => -x);\n}\n\nclass CallbackBox {\n  const CallbackBox.named(this.callback);\n  final void Function(int) callback;\n}\n\nvoid contravariantAndFieldFormal() {\n  // The annotation need not equal the context's parameter type.\n  new CallbackBox.named((Object value) {});\n}",
@@ -12063,12 +12238,18 @@
         "file": null,
         "line": 42,
         "message": "Use curly braces around the body of this flow-control statement"
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 49,
+        "message": "Use curly braces around the body of this flow-control statement"
       }
     ],
     "docs": "Requires curly braces around the bodies of flow-control statements.\n\nA brace-less body invites the \"goto fail\" class of bug, where a later edit\nadds a second statement that silently falls outside the branch. Requiring\nblocks around `for`, `while`, `do`, and `if`/`else` bodies keeps the scope\nexplicit and edits safe. Two carve-outs match the official lint: an `if`\nwith no `else` whose body sits on the same line as its condition may omit\nbraces, and an `else if` chain need not wrap the intermediate `if` in a\nblock.",
     "domains": [],
     "examples": {
-      "bad": "void f1(bool x) {\n  while (x) doThing();\n}\n\nvoid f2() {\n  for (var i = 0; i < 3; i++) doThing();\n}\n\nvoid f3(bool x) {\n  do doThing();\n  while (x);\n}\n\nvoid f4(bool a) {\n  if (a)\n    doThing();\n}\n\nvoid f5(bool a) {\n  if (a)\n    doThing();\n  else\n    doOther();\n}\n\nvoid f6(bool a, List<int> xs) {\n  for (final x in xs) print(x);\n}\n\n// Closure argument of a constructor invocation (`Expr::New`).\nWidget f7(bool x) {\n  return new ElevatedButton(onPressed: () {\n    while (x) doThing();\n  });\n}\n\n// Closure nested inside a collection literal.\nList<VoidCallback> f8(bool x) {\n  return [\n    () {\n      if (x)\n        doThing();\n    },\n  ];\n}",
+      "bad": "void f1(bool x) {\n  while (x) doThing();\n}\n\nvoid f2() {\n  for (var i = 0; i < 3; i++) doThing();\n}\n\nvoid f3(bool x) {\n  do doThing();\n  while (x);\n}\n\nvoid f4(bool a) {\n  if (a)\n    doThing();\n}\n\nvoid f5(bool a) {\n  if (a)\n    doThing();\n  else\n    doOther();\n}\n\nvoid f6(bool a, List<int> xs) {\n  for (final x in xs) print(x);\n}\n\n// Closure argument of a constructor invocation (`Expr::New`).\nWidget f7(bool x) {\n  return new ElevatedButton(onPressed: () {\n    while (x) doThing();\n  });\n}\n\n// Closure nested inside a collection literal.\nList<VoidCallback> f8(bool x) {\n  return [\n    () {\n      if (x)\n        doThing();\n    },\n  ];\n}\n\nvoid commentDelimiter(bool x) {\n  if (x)\n    /* ) */ doThing();\n}",
       "crossFile": null,
       "good": "void g1(bool x) {\n  while (x) {\n    doThing();\n  }\n}\n\nvoid g2() {\n  for (var i = 0; i < 3; i++) {\n    doThing();\n  }\n}\n\nvoid g3(bool x) {\n  do {\n    doThing();\n  } while (x);\n}\n\nvoid g4(bool a) {\n  if (a) doThing();\n}\n\nvoid g5(bool a, bool b) {\n  if (a) {\n    doThing();\n  } else if (b) {\n    doOther();\n  } else {\n    doThird();\n  }\n}\n\nvoid g6(List<int> xs) {\n  for (final x in xs) {\n    print(x);\n  }\n}"
     },
@@ -13786,7 +13967,7 @@
         "message": "Invalid use of 'default' member in a switch."
       }
     ],
-    "docs": "Flags `default:` in switch statements over enums and enum-like classes.\n\nA `default` case hides newly added enum values: the switch keeps compiling\nand silently routes them to the fallback. Listing every value explicitly\nlets the compiler (or `exhaustive-cases`) point at the switch when the type\ngrows. Only switch statements whose subject is provably an enum or an\nenum-like class (private non-factory constructors, at least two static\nconstants of its own type, no subclasses in its library) are checked.\n\n```dart\nswitch (color) {\n  case Color.red: paint();\n  default: skip(); // flagged\n}\n```",
+    "docs": "Flags `default:` in switch statements over enums and enum-like classes.\n\nA `default` case hides newly added enum values: the switch keeps compiling\nand silently routes them to the fallback. Listing every value explicitly\nlets the compiler (or `exhaustive-cases`) point at the switch when the type\ngrows. Only switch statements whose subject is provably an enum or an\nenum-like class (private non-factory constructors, at least two static\nconstants of its own type, no subclasses in its library) are checked.\nThe diagnostic covers the default member including its statement body.\n\n```dart\nswitch (color) {\n  case Color.red: paint();\n  default: skip(); // flagged\n}\n```",
     "domains": [],
     "examples": {
       "bad": "enum Color { red, green, blue }\n\nColor pick() => Color.red;\n\nclass Status {\n  final int code;\n  const Status._(this.code);\n  static const ok = Status._(0);\n  static const failed = Status._(1);\n}\n\nvoid f(Color color, Status status, Color? maybe) {\n  switch (color) {\n    case Color.red:\n      print('red');\n    default:\n      print('other');\n  }\n  switch (status) {\n    case Status.ok:\n      print('ok');\n    default:\n      print('failed');\n  }\n  switch (color) {\n    case Color.green:\n    default:\n      print('green or other');\n  }\n  switch (maybe) {\n    case Color.blue:\n      print('blue');\n    default:\n      print('other');\n  }\n  switch (pick()) {\n    case Color.red:\n      break;\n    default:\n      break;\n  }\n}",
@@ -15249,7 +15430,7 @@
         "message": "Use 'const' with the constructor to improve performance."
       }
     ],
-    "docs": "Prefers `const` when invoking a `const` constructor with constant arguments.\n\nWhen a constructor is declared `const` and the invocation would be a valid\nconstant expression (constant arguments the constructor accepts, set\nelements and map keys with primitive equality, no type parameters in type\narguments), invoking it with `const` produces a canonicalized instance\ninstead of allocating a new one. The rule flags such invocations outside a\nconstant context (where `const` is already implied). It stays silent when\nthe constructor cannot be resolved to a declaration known to be `const`,\nwhen an argument cannot be proven constant, for `Object()` (often used to create\nunique identity tokens), for constructors of deferred-imported classes, and\nfor a generic class invoked without type arguments whose approximate context\ncontains type parameters, or whose context cannot be resolved. As in the\nanalyzer, assignments use their result type rather than their target type.\n\n```dart\nclass A {\n  const A();\n}\n\nfinal a = A();       // BAD\nfinal b = const A(); // GOOD\n```",
+    "docs": "Prefers `const` when invoking a `const` constructor with constant arguments.\n\nWhen a constructor is declared `const` and the invocation would be a valid\nconstant expression (constant arguments the constructor accepts, set\nelements and map keys with primitive equality, no type parameters in type\narguments), invoking it with `const` produces a canonicalized instance\ninstead of allocating a new one. The rule flags such invocations outside a\nconstant context (where `const` is already implied). It stays silent when\nthe constructor cannot be resolved to a declaration known to be `const`,\nwhen an argument cannot be proven constant, for `Object()` (often used to create\nunique identity tokens), for constructors of deferred-imported classes, and\nfor a generic class invoked without type arguments whose approximate context\ncontains type parameters. As in the analyzer, assignments use their result\ntype rather than their target type.\n\n```dart\nclass A {\n  const A();\n}\n\nfinal a = A();       // BAD\nfinal b = const A(); // GOOD\n```",
     "domains": [],
     "examples": {
       "bad": "class Point {\n  const Point(this.x, this.y);\n  const Point.origin()\n      : x = 0,\n        y = 0;\n\n  final int x;\n  final int y;\n}\n\nclass Label {\n  const Label(this.text, {this.point = const Point.origin()});\n\n  final String text;\n  final Point point;\n}\n\nclass Box<T> {\n  const Box(this.value);\n\n  final T value;\n}\n\nconst int limit = 10;\n\nvoid use(Object value) {}\n\nvoid constructors() {\n  final a = Point(1, 2);\n  final b = Point.origin();\n  final c = new Point(3, 4);\n  final d = new Point.origin();\n  final e = Box<int>(limit);\n  final f = Label('title', point: const Point(0, 1));\n  use(Point(limit, -1));\n  final List<Point> points = [Point(5, 6)];\n  final Point g = .origin();\n  print([a, b, c, d, e, f, points, g]);\n}\n\nenum Shade { dark, light }\n\nclass Swatch {\n  const Swatch(this.value, {this.shade});\n  const Swatch.named(this.value) : shade = null;\n  const factory Swatch.redirect(Object? value) = Swatch;\n  static const int base = 1;\n  final Object? value;\n  final Shade? shade;\n}\n\nclass Generic<T> {\n  const Generic(this.value);\n  const Generic.named(this.value);\n  final T value;\n}\n\nint top() => 0;\n\nvoid evaluatedArguments() {\n  const local = 2;\n  print(Swatch(Shade.dark));\n  print(Swatch(Swatch.base));\n  print(Swatch(local));\n  print(Generic<int>.named(1));\n  print(Swatch.redirect(1));\n  print(Swatch('a' 'b'));\n  print(Swatch(#symbol));\n  print(Swatch(int));\n  print(Swatch(top));\n  print(Swatch(Swatch.named));\n  print(Swatch(Shade.values));\n  print(Swatch(identical(1, 2)));\n  print(Swatch([if (true) 1]));\n  print(Swatch({Swatch(1): 1}));\n  final generic = Generic(1);\n  print(generic);\n}\n\n// The context type `Box<List<T>>` has no type parameter as a type argument\n// of `Box` itself, so making it `const` changes nothing.\nBox<List<T>> emptyBox<T>() => Box([]);",
@@ -15439,7 +15620,7 @@
         "message": "Declare a const constructor in an immutable class."
       }
     ],
-    "docs": "Prefers `const` constructors in immutable classes and extension types.\n\nClasses and mixin classes are checked only when they have no `with` clause;\nmixin declarations and classes applying mixins are skipped. The declaration\nmust be annotated `@immutable` or inherit it through `extends` only, not\nthrough `implements` or applied mixins. Extension types are also checked\nwhen annotated `@immutable`.\n\nA non-const, non-primary constructor whose body is `;` is reported when:\n\n- it is a redirecting factory to a `const` constructor; or\n- it is generative, delegates to a `const` constructor, has no non-final\n  instance fields on its superclass/mixin chain, and every field initializer,\n  initializer-list expression, assert, and `super`/`this` argument is\n  potentially constant.\n\nDelegation follows an explicit `super` or `this` call, otherwise the\nsuperclass's unnamed constructor (or an extension type's representation\nconstructor). Implicit default constructors are not `const`.\n\nAnalyzer 3.13 class and mixin-class primary constructors use the same body,\ndelegation and field-finality checks, but do not reject nonconstant\ninitializer expressions. Immutable extension-type primary constructors need\nonly lack `const` and a block or expression body; even an empty block\ndisqualifies them, but delegation and field finality are not checked.",
+    "docs": "Prefers `const` constructors in immutable classes and extension types.\n\nClasses and mixin classes are checked only when they have no `with` clause;\nmixin declarations and classes applying mixins are skipped. The declaration\nmust be annotated `@immutable` or inherit it through `extends` only, not\nthrough `implements` or applied mixins. Extension types are also checked\nwhen annotated `@immutable`.\n\nA non-const, non-primary constructor whose body is `;` is reported when:\n\n- it is a redirecting factory to a `const` constructor; or\n- it is generative, delegates to a `const` constructor, has no non-final\n  instance fields on its superclass/mixin chain, and every field initializer,\n  initializer-list expression, assert, and `super`/`this` argument is\n  potentially constant.\n\nDelegation follows an explicit `super` or `this` call, otherwise the\nsuperclass's unnamed constructor (or an extension type's representation\nconstructor). Implicit default constructors are not `const`.\nOrdinary constructor diagnostics cover their first token after metadata.\n\nAnalyzer 3.13 class and mixin-class primary constructors use the same body,\ndelegation and field-finality checks, but do not reject nonconstant\ninitializer expressions. Immutable extension-type primary constructors need\nonly lack `const` and a block or expression body; even an empty block\ndisqualifies them, but delegation and field finality are not checked.",
     "domains": [
       "flutter"
     ],
@@ -15695,7 +15876,7 @@
         "message": "Use 'const' literals as arguments to constructors of '@immutable' classes."
       },
       {
-        "column": 16,
+        "column": 17,
         "file": null,
         "line": 33,
         "message": "Use 'const' literals as arguments to constructors of '@immutable' classes."
@@ -15761,7 +15942,7 @@
         "message": "Use 'const' literals as arguments to constructors of '@immutable' classes."
       }
     ],
-    "docs": "Prefers `const` list, set, and map literals as arguments to constructors of `@immutable` classes.\n\nAn instance of an `@immutable` class should not hold a mutable collection.\nA non-const collection literal passed\ndirectly to such a constructor — or nested only inside other collection\nliterals in that argument — is flagged when it could be `const`: every\nelement is a provable constant and set elements and map keys have primitive\nequality. A class is immutable when it or a class on its `extends` chain is\nannotated `@immutable` or `@Immutable(...)` from `package:meta`.\nLiterals already in a constant context are implicitly const and are left\nalone, as are arguments to classes whose immutability cannot be established.\n\n```dart\n@immutable\nclass A {\n  A(this.values);\n  final List<int> values;\n}\n\nfinal a = A([1]);       // BAD\nfinal b = A(const [1]); // GOOD\n```",
+    "docs": "Prefers `const` list, set, and map literals as arguments to constructors of `@immutable` classes.\n\nAn instance of an `@immutable` class should not hold a mutable collection.\nA non-const collection literal passed\ndirectly to such a constructor — or nested only inside other collection\nliterals in that argument — is flagged when it could be `const`: every\nelement is a provable constant and set elements and map keys have primitive\nequality. A class is immutable when it or a class on its `extends` chain is\nannotated `@immutable` or `@Immutable(...)` from `package:meta`.\nLiterals already in a constant context are implicitly const and are left\nalone, as are arguments to classes whose immutability cannot be established.\nDiagnostic ranges exclude parentheses surrounding the collection literal.\n\n```dart\n@immutable\nclass A {\n  A(this.values);\n  final List<int> values;\n}\n\nfinal a = A([1]);       // BAD\nfinal b = A(const [1]); // GOOD\n```",
     "domains": [],
     "examples": {
       "bad": "import 'package:flutter/widgets.dart';\nimport 'package:meta/meta.dart';\nimport 'package:meta/meta.dart' as meta;\n\n@immutable\nclass Config {\n  const Config(this.values, {this.names = const {}, this.lookup = const {}});\n\n  final Object values;\n  final Object names;\n  final Object lookup;\n}\n\nclass Special extends Config {\n  const Special(super.values);\n}\n\nclass Tags extends StatelessWidget {\n  const Tags({super.key, required this.tags});\n\n  final List<String> tags;\n\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nconst int base = 3;\n\nvoid literals() {\n  print(Config([1, 2, base]));\n  print(Config(const [], names: {'a', 'b'}));\n  print(Config(const [], lookup: {'a': 1}));\n  print(Config(([1])));\n  print(Config(<int>[]));\n  print(Config([[1], const [2]]));\n  print(Tags(tags: ['x', 'y']));\n  print(Special([1]));\n}\n\n@immutable\nabstract mixin class Base {\n  const Base();\n}\n\nclass Derived extends Base {\n  const Derived(this.data);\n  final Object data;\n}\n\nvoid inherited() {\n  const local = 1;\n  print(Derived({'a': local}));\n  print(Derived(<String>{'x'}));\n}\n\n// Constructor-form meta annotations have the same immutable identity.\n@Immutable('')\nclass ReasonedImmutable {\n  const ReasonedImmutable(this.values);\n  final List<Object> values;\n}\n\nvoid constructorAnnotation() {\n  print(ReasonedImmutable([]));\n}\n\n@Immutable('Collection arguments must remain immutable')\nclass ReasonedBase {\n  const ReasonedBase(this.values);\n  final Object values;\n}\n\nclass ReasonedChild extends ReasonedBase {\n  const ReasonedChild(super.values);\n}\n\nvoid inheritedConstructorAnnotation() {\n  print(ReasonedChild([1]));\n}\n\n@meta.Immutable('')\nclass PrefixedImmutable {\n  const PrefixedImmutable(this.values);\n  final Object values;\n}\n\nvoid prefixedConstructorAnnotation() {\n  print(PrefixedImmutable({'key': 1}));\n}",
@@ -16801,7 +16982,7 @@
         "message": "Use the generic function type syntax in typedefs."
       }
     ],
-    "docs": "Flags old-style function typedefs written with inline parameter syntax.\n\nDart's original typedef form, `typedef int F(int x);`, predates generic\nfunction types and cannot express a function type in every position the\nmodern syntax can. Rewriting it as `typedef F = int Function(int);` is more\nuniform, composes with generics, and reads consistently with other type\naliases. Detection scans raw source rather than the AST: a `typedef` whose\ndeclaration reaches an opening `(` before any `=`, `;`, or `{` is the old,\nnon-generic form. The scan skips comments and string literals so the keyword\nappearing in text is not mistaken for a declaration.",
+    "docs": "Flags old-style function typedefs written with inline parameter syntax.\n\nDart's original typedef form, `typedef int F(int x);`, predates generic\nfunction types and cannot express a function type in every position the\nmodern syntax can. Rewriting it as `typedef F = int Function(int);` is more\nuniform, composes with generics, and reads consistently with other type\naliases. Legacy declarations retain their written formal parameter list in\nthe AST, distinguishing them from modern aliases.",
     "domains": [],
     "examples": {
       "bad": "// Old-style (non-generic) function typedefs.\ntypedef int Compare(int a, int b);\ntypedef void Callback(String msg);\ntypedef bool Predicate(Object o);\ntypedef String Formatter(int value);\ntypedef num Reducer(num a, num b);\ntypedef void Handler();",
@@ -16820,7 +17001,7 @@
   },
   {
     "crossFile": false,
-    "description": "Flags a constructor that copies a plain parameter straight into a field (`prefer-initializing-formals`, adopted from package:lints).",
+    "description": "Prefer initializing formals when a parameter is copied directly into its field.",
     "diagnostics": [
       {
         "column": 14,
@@ -16829,7 +17010,7 @@
         "message": "Use an initializing formal to assign a parameter to a field."
       },
       {
-        "column": 19,
+        "column": 14,
         "file": null,
         "line": 9,
         "message": "Use an initializing formal to assign a parameter to a field."
@@ -16853,30 +17034,48 @@
         "message": "Use an initializing formal to assign a parameter to a field."
       },
       {
-        "column": 19,
+        "column": 14,
         "file": null,
         "line": 24,
         "message": "Use an initializing formal to assign a parameter to a field."
       },
       {
-        "column": 18,
+        "column": 40,
         "file": null,
-        "line": 29,
+        "line": 30,
         "message": "Use an initializing formal to assign a parameter to a field."
       },
       {
-        "column": 23,
+        "column": 10,
         "file": null,
-        "line": 34,
+        "line": 35,
+        "message": "Use an initializing formal to assign a parameter to a field."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 40,
+        "message": "Use an initializing formal to assign a parameter to a field."
+      },
+      {
+        "column": 24,
+        "file": null,
+        "line": 45,
+        "message": "Use an initializing formal to assign a parameter to a field."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 50,
         "message": "Use an initializing formal to assign a parameter to a field."
       }
     ],
-    "docs": "Flags a constructor that copies a plain parameter straight into a field\n(`prefer-initializing-formals`, adopted from package:lints).\n\nDart's initializing formals (`this.x`) declare the parameter and assign the\nfield in one step, so the manual copy — whether an initializer-list entry\n`: x = x` or a body statement `this.x = x;` — is redundant boilerplate. The\nrule is intentionally narrow: it matches only an exact `field = param` /\n`this.field = param` copy of a plain constructor parameter, never an existing\ninitializing (`this.`) or super (`super.`) formal, so cases that already use\nthe idiom or that transform the value are left untouched.\n\nA *named* parameter must already carry the field's name — renaming it would\nbreak callers — while a *positional* one may be named anything, since\npromoting it to `this.field` does not change the call-site API. A parameter\ncopied into more than one field is skipped: it cannot become an initializing\nformal.",
+    "docs": "Prefer initializing formals when a parameter is copied directly into its field.\n\nAn initializing formal makes field initialization explicit in the constructor\nsignature: replace `Example(int value) : value = value;` with\n`Example(this.value);`. The rule also recognizes direct assignments in a\nconstructor body, including primary constructors.\n\nSuggestions preserve the parameter's name and require its type to be a subtype\nof the field's type. Inherited fields, setters, static fields, and parameters\nreferenced elsewhere in the constructor are excluded. Private fields are\nsuggested only for named parameters when private named parameters are available.",
     "domains": [],
     "examples": {
-      "bad": "// Parameters copied verbatim into same-named fields.\nclass A {\n  int x;\n  A(int x) : x = x;\n}\n\nclass B {\n  int y;\n  B(int y) { this.y = y; }\n}\n\nclass C {\n  int a, b;\n  C(int a, int b) : a = a, b = b;\n}\n\nclass D {\n  String name;\n  D(String name) : name = name;\n}\n\nclass E {\n  int v;\n  E(int v) { this.v = v; }\n}\n\nclass F {\n  int y;\n  F(int value) : y = value;\n}\n\nclass G {\n  int z;\n  G(int input) { this.z = input; }\n}",
+      "bad": "// Parameters copied verbatim into same-named fields.\nclass A {\n  int x;\n  A(int x) : x = x;\n}\n\nclass B {\n  int y;\n  B(int y) { this.y = y; }\n}\n\nclass C {\n  int a, b;\n  C(int a, int b) : a = a, b = b;\n}\n\nclass D {\n  String name;\n  D(String name) : name = name;\n}\n\nclass E {\n  int v;\n  E(int v) { this.v = v; }\n}\n\n\nclass PrivateNamed {\n  int _value;\n  PrivateNamed({required int value}) : _value = value;\n}\n\nclass Primary(int value) {\n  final int value;\n  this : value = value;\n}\n\nclass ParenthesizedBody {\n  int value;\n  ParenthesizedBody(int value) { this.value = (value); }\n}\n\nclass Subtype {\n  num value;\n  Subtype(int value) : value = value;\n}\n\nclass Compound {\n  int value = 0;\n  Compound(int value) { this.value += value; }\n}",
       "crossFile": null,
-      "good": "// Uses initializing formals, or assignments that cannot become one.\nclass A {\n  int x;\n  A(this.x);\n}\n\nclass C {\n  int a;\n  C(int a) : a = a + 1; // not a verbatim copy\n}\n\nclass D {\n  int v;\n  D(this.v);\n}\n\nclass G {\n  int p, q;\n  G(int v) : p = v, q = v; // one parameter, two fields — no initializing formal\n}\n\nclass H {\n  int r;\n  H({required int value}) : r = value; // renaming a named parameter breaks callers\n}\n\nclass F {\n  int z;\n  F(this.z) { print(z); }\n}"
+      "good": "// Uses initializing formals, or assignments that cannot become one.\nclass A {\n  int x;\n  A(this.x);\n}\n\nclass C {\n  int a;\n  C(int a) : a = a + 1; // not a verbatim copy\n}\n\nclass D {\n  int v;\n  D(this.v);\n}\n\nclass G {\n  int p, q;\n  G(int v) : p = v, q = v; // one parameter, two fields — no initializing formal\n}\n\nclass H {\n  int r;\n  H({required int value}) : r = value; // renaming a named parameter breaks callers\n}\n\nclass F {\n  int z;\n  F(this.z) { print(z); }\n}\n\nclass DifferentName {\n  int value;\n  DifferentName(int input) : value = input;\n}\n\nclass PrivatePositional {\n  int _value;\n  PrivatePositional(int value) : _value = value;\n}\n\nclass Parent {\n  int value = 0;\n}\nclass Inherited extends Parent {\n  Inherited(int value) { this.value = value; }\n}\nclass Setter {\n  set value(int value) {}\n  Setter(int value) { this.value = value; }\n}\nclass Reused {\n  int value;\n  Reused(int value) : value = value { print(value); }\n}\nclass DynamicCopy {\n  int value;\n  DynamicCopy(dynamic value) : value = value;\n}\n\nclass StaticField {\n  static int value = 0;\n  StaticField(int value) { StaticField.value = value; }\n}\nclass ParenthesizedInitializer {\n  int value;\n  ParenthesizedInitializer(int value) : value = (value);\n}\n\nclass InitializerReuse {\n  int value;\n  int other;\n  InitializerReuse(int value) : value = value, other = value;\n}\n\nclass ShadowedParameter {\n  late int value;\n  ShadowedParameter(int value) : assert(value > 0) {\n    final value = 0;\n    this.value = value;\n  }\n}\n\nclass DeclaringPrimary(var int value) {\n  int other;\n  this : other = value {\n    this.value = value;\n  }\n}"
     },
     "group": "style",
     "name": "prefer-initializing-formals",
@@ -17123,12 +17322,24 @@
         "file": null,
         "line": 77,
         "message": "Unnecessary use of a 'double' literal."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 92,
+        "message": "Unnecessary use of a 'double' literal."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 93,
+        "message": "Unnecessary use of a 'double' literal."
       }
     ],
     "docs": "Flags a whole-number double literal, such as `1.0`, where the context type is\n`double` so the int literal `1` means the same value.\n\nSince Dart 2.1 an int literal in a `double` context is a double constant,\nso the `.0` is noise:\n\n```dart\nconst double myDouble = 8.0;  // flagged\nfinal anotherDouble = myDouble + 7.0e2; // fine: no `double` context\nmain() { someMethod(6.0); }   // flagged when the parameter is `double`\n```\n\nThe literal (optionally negated) is checked only where the replacement\nkeeps its meaning: the initializer of a variable, field, or top-level\ndeclared `double`; an element of a `<double>[...]` list; a value returned\nfrom a function, method, getter, or operator declared to return `double`;\nand an argument whose parameter resolves to `double`, including `super`\nand `this` constructor initializers with instantiated superclass parameters.\nParenthesized literals and values outside the 64-bit integer range are left alone.",
     "domains": [],
     "examples": {
-      "bad": "const double myDouble = 8.0;\ndouble? maybe = 1.0;\n\nclass Box {\n  final double width = 2.0;\n  Box(double size);\n  Box.named({required double size});\n  double get area => 3.0;\n  double scale() {\n    return 4.0;\n  }\n  double operator +(Box other) => 5.0;\n}\n\nvoid takesDouble(double value, {double named = 0}) {}\n\ndouble negative() => -6.0;\n\nvoid main() {\n  double local = 7.0;\n  var list = <double>[1.0, 2.5];\n  takesDouble(9.0);\n  takesDouble(1, named: 10.0);\n  Box(11.0);\n  Box.named(size: 12.0);\n  double inner() {\n    return 1e3;\n  }\n  for (double i = 0.0; i < 1; i++) {}\n  print([local, list, inner]);\n}\n\n// Field formals resolve even when their fields follow a named constructor.\nclass Insets {\n  const Insets.fromSTEB(this.start, this.top, this.end, this.bottom);\n  final double start, top, end, bottom;\n}\n\nclass Matrix {\n  void setEntry(int row, int column, double value) {}\n}\n\nvoid constructorAndCascadeArguments(Matrix matrix) {\n  const Insets.fromSTEB(12.0, 4.0, 12.0, 4.0);\n  matrix\n    ..setEntry(3, 2, -1.0)\n    ..setEntry(0, 0, 2.0);\n}\n\n// Super/redirect initializer arguments use the same resolved contexts as calls.\nclass NumericBase {\n  final double pressure, elevation;\n  const NumericBase({required this.pressure, this.elevation = 0});\n  const NumericBase.named(this.pressure, {this.elevation = 0});\n}\n\nclass NumericChild extends NumericBase {\n  const NumericChild() : super(pressure: 0.0, elevation: 8.0);\n  const NumericChild.named() : super.named(-2.0, elevation: 4.0);\n  const NumericChild.value(double value) : super(pressure: value);\n  const NumericChild.redirect() : this.value(9.0);\n}\n\nclass GenericNumericBase<T> {\n  final T value;\n  const GenericNumericBase(this.value);\n  const GenericNumericBase.named({required this.value});\n}\n\nclass GenericNumericChild extends GenericNumericBase<double> {\n  const GenericNumericChild() : super(5.0);\n  const GenericNumericChild.named() : super.named(value: 6.0);\n}\n\nclass InitializedNumericChild extends NumericBase {\n  final int marker;\n  const InitializedNumericChild() : marker = 0, super(pressure: 10.0);\n}",
+      "bad": "const double myDouble = 8.0;\ndouble? maybe = 1.0;\n\nclass Box {\n  final double width = 2.0;\n  Box(double size);\n  Box.named({required double size});\n  double get area => 3.0;\n  double scale() {\n    return 4.0;\n  }\n  double operator +(Box other) => 5.0;\n}\n\nvoid takesDouble(double value, {double named = 0}) {}\n\ndouble negative() => -6.0;\n\nvoid main() {\n  double local = 7.0;\n  var list = <double>[1.0, 2.5];\n  takesDouble(9.0);\n  takesDouble(1, named: 10.0);\n  Box(11.0);\n  Box.named(size: 12.0);\n  double inner() {\n    return 1e3;\n  }\n  for (double i = 0.0; i < 1; i++) {}\n  print([local, list, inner]);\n}\n\n// Field formals resolve even when their fields follow a named constructor.\nclass Insets {\n  const Insets.fromSTEB(this.start, this.top, this.end, this.bottom);\n  final double start, top, end, bottom;\n}\n\nclass Matrix {\n  void setEntry(int row, int column, double value) {}\n}\n\nvoid constructorAndCascadeArguments(Matrix matrix) {\n  const Insets.fromSTEB(12.0, 4.0, 12.0, 4.0);\n  matrix\n    ..setEntry(3, 2, -1.0)\n    ..setEntry(0, 0, 2.0);\n}\n\n// Super/redirect initializer arguments use the same resolved contexts as calls.\nclass NumericBase {\n  final double pressure, elevation;\n  const NumericBase({required this.pressure, this.elevation = 0});\n  const NumericBase.named(this.pressure, {this.elevation = 0});\n}\n\nclass NumericChild extends NumericBase {\n  const NumericChild() : super(pressure: 0.0, elevation: 8.0);\n  const NumericChild.named() : super.named(-2.0, elevation: 4.0);\n  const NumericChild.value(double value) : super(pressure: value);\n  const NumericChild.redirect() : this.value(9.0);\n}\n\nclass GenericNumericBase<T> {\n  final T value;\n  const GenericNumericBase(this.value);\n  const GenericNumericBase.named({required this.value});\n}\n\nclass GenericNumericChild extends GenericNumericBase<double> {\n  const GenericNumericChild() : super(5.0);\n  const GenericNumericChild.named() : super.named(value: 6.0);\n}\n\nclass InitializedNumericChild extends NumericBase {\n  final int marker;\n  const InitializedNumericChild() : marker = 0, super(pressure: 10.0);\n}\n\n// Generic function-valued getters infer the result of callback tear-offs.\nclass Stub<T> {\n  void thenReturn(T value) {}\n}\n\nStub<T> Function<T>(T Function()) get when => throw 0;\n\nclass RandomValue {\n  double nextDouble() => 0;\n}\n\nvoid genericGetterInvocation(RandomValue random) {\n  when(random.nextDouble).thenReturn(0.0);\n  when(random.nextDouble).thenReturn(1.0);\n}",
       "crossFile": null,
       "good": "const double myDouble = 8;\nfinal anotherDouble = myDouble + 7.0e2;\nconst num numValue = 1.0;\ndouble fraction = 1.5;\nvar inferred = 2.0;\nObject object = 3.0;\ndouble huge = 1e300;\ndouble parenthesized = (4.0);\n\nvoid takesNum(num value) {}\n\nvoid takesObject(Object value) {}\n\nnum numReturn() => 5.0;\n\ndouble closure() {\n  var f = () {\n    return 6.0;\n  };\n  return f();\n}\n\nvoid main() {\n  takesNum(7.0);\n  takesObject(8.0);\n  var list = [1.0, 2.0];\n  var nums = <num>[3.0];\n  dynamic d = 9.0;\n  print([list, nums, d, 1.0.toString()]);\n}\n\nclass CascadeObjectContexts {\n  Object value = 0;\n  void operator []=(num index, Object value) {}\n}\n\nvoid declaredAndCascadeContexts(CascadeObjectContexts values, num? number) {\n  Object promoted = 1.0;\n  if (promoted is double) {\n    promoted = 2.0;\n  }\n  if (number is double?) {\n    number ??= 3.0;\n  }\n  values\n    ..value = 4.0\n    ..[5.0] = 6.0;\n  double conditionContext = (7.0 == 8.0) ? 1 : 2;\n}\n\n// The official lint checks no assignment contexts, even of `double` targets.\nclass CascadeDoubleContexts {\n  double value = 0;\n  void operator []=(double index, double value) {}\n}\n\nvoid cascadeContexts(CascadeDoubleContexts values) {\n  values\n    ..value = 13.0;\n  values\n    ..[14.0] =\n      15.0;\n}\n\nclass NumericBase {\n  final double pressure, elevation;\n  const NumericBase({required this.pressure, this.elevation = 0});\n}\n\nclass NumericChild extends NumericBase {\n  const NumericChild() : super(pressure: 1.5, elevation: (2.0));\n  const NumericChild.integer() : super(pressure: 2);\n}\n\nclass GenericNumericBase<T> {\n  final T value;\n  const GenericNumericBase(this.value);\n  const GenericNumericBase.named({required this.value});\n}\n\nclass BroadNumericChild extends GenericNumericBase<num> {\n  const BroadNumericChild() : super(7.0);\n  const BroadNumericChild.named() : super.named(value: 8.0);\n}\n\nclass UnconstrainedNumericChild<T> extends GenericNumericBase<T> {\n  const UnconstrainedNumericChild(T value) : super(value);\n}"
     },
@@ -18294,12 +18505,18 @@
         "file": null,
         "line": 60,
         "message": "Missing a required trailing comma."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 64,
+        "message": "Missing a required trailing comma."
       }
     ],
     "docs": "Flags a multi-line call, declaration, assert, or collection literal that is\nmissing a trailing comma.\n\nWhen the opening and closing delimiters of an argument list, parameter list,\n`assert`, or list/set/map literal sit on different lines, the last element\nmust be followed by a comma so the formatter keeps one element per line:\n\n```dart\nfoo(a, b);                    // fine: fits on one line\nfoo(\n  a,\n  b                           // flagged at `)`\n);\nvoid f({\n  required int a              // flagged at `}`\n}) {}\n```\n\nA positional last element that itself spans several lines is exempt when it\nis a block-bodied function literal, a string literal, an immediately\ninvoked function literal whose arguments fit on one line, or a list, set, or\nmap literal — the classic `test('name', () { ... });` shape. Named\narguments and parameters never get the exemption. Record literals, type\nargument lists, and extension type representation clauses are not checked.\n\nDelimiters inside string interpolations (`'${f(a, b)}'`) are matched like\nany others.\n\nLike the official lint, the rule is off in libraries at language version\n3.7 or later, where the formatter's tall style owns trailing commas.",
     "domains": [],
     "examples": {
-      "bad": "// Tall-style formatting (language 3.7+) disables the lint; pin an older version.\n// @dart = 3.6\nvoid call(Object a, [Object? b, Object? c]) {}\nvoid named({Object? a, Object? b}) {}\n\nclass Point {\n  final int x;\n  final int y;\n\n  Point(\n    this.x,\n    this.y)\n      : assert(x >= 0,\n            'x must be non-negative');\n\n  Point.origin({\n    this.x = 0,\n    this.y = 0});\n}\n\nvoid declaration(\n  int a,\n  int b) {}\n\nvoid optional(\n  int a, [\n  int b = 0]) {}\n\nvoid f() {\n  call('a',\n      'b');\n\n  named(a: 1,\n      b: () {\n        print('named function literals get no exemption');\n      });\n\n  final list = [\n    1,\n    2];\n\n  final map = {\n    'a': 1,\n    'b': 2};\n\n  assert(list.isNotEmpty,\n      map.toString());\n\n  call(1, 2,\n      3);\n}\n\ntypedef Callback = void Function(\n  int a,\n  int b);\n\nList<Object> nestedLast() => [\n      [0, 'a'],\n      [1, 'b']\n    ];",
+      "bad": "// Tall-style formatting (language 3.7+) disables the lint; pin an older version.\n// @dart = 3.6\nvoid call(Object a, [Object? b, Object? c]) {}\nvoid named({Object? a, Object? b}) {}\n\nclass Point {\n  final int x;\n  final int y;\n\n  Point(\n    this.x,\n    this.y)\n      : assert(x >= 0,\n            'x must be non-negative');\n\n  Point.origin({\n    this.x = 0,\n    this.y = 0});\n}\n\nvoid declaration(\n  int a,\n  int b) {}\n\nvoid optional(\n  int a, [\n  int b = 0]) {}\n\nvoid f() {\n  call('a',\n      'b');\n\n  named(a: 1,\n      b: () {\n        print('named function literals get no exemption');\n      });\n\n  final list = [\n    1,\n    2];\n\n  final map = {\n    'a': 1,\n    'b': 2};\n\n  assert(list.isNotEmpty,\n      map.toString());\n\n  call(1, 2,\n      3);\n}\n\ntypedef Callback = void Function(\n  int a,\n  int b);\n\nList<Object> nestedLast() => [\n      [0, 'a'],\n      [1, 'b']\n    ];\n\nString nestedInterpolation() => '${call(\n      1,\n      2)}';",
       "crossFile": null,
       "good": "// Tall-style formatting (language 3.7+) disables the lint; pin an older version.\n// @dart = 3.6\nvoid call(Object a, [Object? b, Object? c]) {}\nvoid named({Object? a, Object? b}) {}\nvoid test(String name, void Function() body) {}\n\nclass Point {\n  final int x;\n  final int y;\n\n  Point(\n    this.x,\n    this.y,\n  ) : assert(x >= 0, 'x must be non-negative');\n\n  Point.origin({\n    this.x = 0,\n    this.y = 0,\n  });\n}\n\nvoid declaration(int a, int b) {}\n\nvoid f() {\n  call('a', 'b');\n\n  // A multi-line block-bodied function literal as the last argument is exempt.\n  test('name', () {\n    print('body');\n  });\n\n  // So is a multi-line string literal ...\n  call('a', '''\nfirst line\nsecond line\n''');\n\n  // ... and a multi-line collection literal.\n  call(1, [\n    2,\n    3,\n  ]);\n  call(1, {\n    'a': 2,\n  });\n\n  final list = [\n    1,\n    2,\n  ];\n  final map = {'a': 1, 'b': 2};\n  print(map);\n  named(\n    a: 1,\n    b: 2,\n  );\n  named();\n}\n\nfinal list = <int>[];\n\ntypedef Callback = void Function(\n  int a,\n  int b,\n);\n\nvoid interpolated() {\n  // Calls inside string interpolations are checked on their own delimiters.\n  test('${'x'.padLeft(2, ' ')}', () {});\n  test('group', () {\n    call(1);\n  });\n}"
     },
@@ -18433,7 +18650,7 @@
   },
   {
     "crossFile": false,
-    "description": "Flags a `child` or `children` argument that is not the last named argument in a widget constructor call.",
+    "description": "Sort Widget-valued child properties last, except before closure arguments.",
     "diagnostics": [
       {
         "column": 23,
@@ -18466,7 +18683,7 @@
         "message": "The child/children argument should be last in a widget constructor call."
       }
     ],
-    "docs": "Flags a `child` or `children` argument that is not the last named argument in a widget constructor call.\n\nIn a Flutter widget tree the child is usually the largest and most deeply\nnested argument, so keeping it last lets the eye follow the configuration\n(padding, color, alignment) before descending into the subtree, and keeps the\nclosing `)` visually adjacent to the child's own closing bracket. This rule\nflags any `child:`/`children:` named argument that appears before another\nnamed argument. To avoid firing on ordinary function calls that happen to take\na `child` parameter, it only considers constructions whose callee is\nPascalCase — implicit `Foo(...)` calls and explicit `new`/`const Foo(...)`.",
+    "docs": "Sort Widget-valued child properties last, except before closure arguments.",
     "domains": [
       "flutter"
     ],
@@ -18754,7 +18971,7 @@
         "message": "Missing type annotation on a public API."
       },
       {
-        "column": 3,
+        "column": 12,
         "file": null,
         "line": 21,
         "message": "Missing type annotation on a public API."
@@ -18814,7 +19031,7 @@
         "message": "Missing type annotation on a public API."
       }
     ],
-    "docs": "Requires type annotations on public declarations.\n\nA public API's types are part of its contract; leaving them to inference\n(or `dynamic`) makes the contract implicit and easy to break. Public\ntop-level functions and methods need a return type (setters and\n`operator []=` excepted), their parameters need types, and public fields\nand top-level variables need a declared type unless they are `const`, or\n`final` with an initializer whose inferred type is neither `dynamic` nor\n`Null`. Parameters of public constructors of public, non-enum classes are\nchecked too.\n\n```dart\nvar answer = 42;           // flagged\ninstall(id, url) {}        // flagged\nfinal pi = 3.14;           // ok: inferred `double`\nvoid install(String id) {} // ok\n```\n\nThe analyzer's visitor also descends into the initializers of untyped\nfields and top-level variables, flagging closure parameters and locals\ndeclared there; falcon checks only the declarations themselves, since those\nnested names are not public API.",
+    "docs": "Requires type annotations on public declarations.\n\nA public API's types are part of its contract; leaving them to inference\n(or `dynamic`) makes the contract implicit and easy to break. Public\ntop-level functions and methods need a return type (setters and\n`operator []=` excepted), their parameters need types, and public fields\nand top-level variables need a declared type unless they are `const`, or\n`final` with an initializer whose inferred type is neither `dynamic` nor\n`Null`. Parameters of public constructors of public, non-enum classes are\nchecked too.\nMissing operator return types highlight the operator name alone.\n\n```dart\nvar answer = 42;           // flagged\ninstall(id, url) {}        // flagged\nfinal pi = 3.14;           // ok: inferred `double`\nvoid install(String id) {} // ok\n```\n\nThe analyzer's visitor also descends into the initializers of untyped\nfields and top-level variables, flagging closure parameters and locals\ndeclared there; falcon checks only the declarations themselves, since those\nnested names are not public API.",
     "domains": [],
     "examples": {
       "bad": "// @dart = 3.13\n\nvar answer = 42;\nfinal nothing = null;\nlate final pending;\n\ninstall(String id) {}\n\nvoid register(id, String url) {}\n\ntypedef Handler(event);\n\nclass Widget {\n  var count = 0;\n  static var shared;\n  Widget(key);\n  build() => null;\n  void update(value) {}\n  get label => '';\n  set label(v) {}\n  operator +(Widget other) => this;\n}\n\n// Primary constructors retain their written parameters, including modifiers.\nclass PrimaryFinal(final x);\nclass PrimaryVar(var x);\nclass PrimaryNamed.named(x);\nclass PrimaryPlain(x);\nclass PrimaryOptional({p});\nclass PrimaryTypeName(final Widget);\nclass PrimaryTypeNamePlain(Widget);\nextension type Representation(i) {}\n\ntypedef void LegacyTypeName(int);",
@@ -19012,92 +19229,98 @@
       {
         "column": 30,
         "file": null,
-        "line": 5,
+        "line": 7,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 10,
         "file": null,
-        "line": 8,
+        "line": 10,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 10,
         "file": null,
-        "line": 12,
+        "line": 14,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 42,
         "file": null,
-        "line": 15,
+        "line": 17,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 12,
         "file": null,
-        "line": 19,
+        "line": 21,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 34,
         "file": null,
-        "line": 22,
+        "line": 24,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 12,
         "file": null,
-        "line": 27,
+        "line": 29,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 10,
         "file": null,
-        "line": 39,
+        "line": 41,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 29,
         "file": null,
-        "line": 43,
+        "line": 45,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 12,
         "file": null,
-        "line": 45,
+        "line": 47,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 46,
         "file": null,
-        "line": 53,
+        "line": 55,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 34,
         "file": null,
-        "line": 57,
+        "line": 59,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 36,
         "file": null,
-        "line": 65,
+        "line": 67,
         "message": "Unnecessary 'await'."
       },
       {
         "column": 28,
         "file": null,
-        "line": 71,
+        "line": 73,
+        "message": "Unnecessary 'await'."
+      },
+      {
+        "column": 35,
+        "file": null,
+        "line": 78,
         "message": "Unnecessary 'await'."
       }
     ],
-    "docs": "Avoid `await` on a returned `Future` the function's own `Future` already covers.\n\nReturning a `Future` from an `async` function already completes the\nfunction's result with it, so awaiting first adds nothing:\n\n```dart\nFuture<int> load() async => await fetch(); // BAD\nFuture<int> load() async => fetch(); // GOOD\n```\n\nReported for `return await e;` statements and `=> await e` bodies (including\ngrouped expressions) of functions, methods, and closures returning `Future<R>`,\nwhen `e` is a `Future<A>` with `A` provably assignable to `R`. Closures and\nlocal functions infer their return type, flattening nested futures and\nrespecting a closure's contextual function type. Untyped top-level\ndeclarations do not infer it.\nReturns inside a `try` or `finally` block are exempt.",
+    "docs": "Avoid `await` on a returned `Future` the function's own `Future` already covers.\n\nReturning a `Future` from an `async` function already completes the\nfunction's result with it, so awaiting first adds nothing:\n\n```dart\nFuture<int> load() async => await fetch(); // BAD\nFuture<int> load() async => fetch(); // GOOD\n```\n\nReported for `return await e;` statements and `=> await e` bodies (including\ngrouped expressions) of functions, methods, and closures returning `Future<R>`,\nwhen `e` is a `Future<A>` with `A` provably assignable to `R`. Closures and\nlocal functions infer their return type, flattening nested futures and\nrespecting a closure's contextual `Future` or `FutureOr` return type. Untyped top-level\ndeclarations do not infer it.\nReturns inside a `try` or `finally` block are exempt.",
     "domains": [],
     "examples": {
-      "bad": "Future<int> fetch() async => 1;\n\nFuture<String> fetchName() async => 'name';\n\nFuture<int> arrow() async => await fetch();\n\nFuture<int> block() async {\n  return await fetch();\n}\n\nFuture<Object> wider() async {\n  return await fetchName();\n}\n\nFuture<dynamic> dynamicResult() async => await fetch();\n\nclass Repository {\n  Future<int> load() async {\n    return await fetch();\n  }\n\n  Future<int> get count async => await fetch();\n}\n\nvoid outer() {\n  Future<int> local() async {\n    return await fetch();\n  }\n\n  local();\n}\n\nFuture<int> afterTry() async {\n  try {\n    print('x');\n  } finally {\n    print('y');\n  }\n  return await fetch();\n}\n\nvoid inferredClosures() {\n  final arrow = () async => await fetch();\n  final block = () async {\n    return await fetch();\n  };\n  arrow();\n  block();\n}\n\n\nFuture<List<int>> fetchList() async => <int>[1];\nFuture<List<num>> covariantFuture() async => await fetchList();\n\nFuture<int> nestedClosureInTry() async {\n  try {\n    final callback = () async => await fetch();\n    return callback();\n  } catch (_) {\n    return 0;\n  }\n}\n\nFuture<Never> neverCompletes() => Future<Never>.error('failure');\nFuture<int> awaitsNever() async => await neverCompletes();\n\nclass AuthResult {}\nclass AuthSuccess extends AuthResult {}\nvoid registerAuth(Future<AuthResult> Function() callback) {}\nvoid subtypeClosure(Future<AuthSuccess> result) {\n  registerAuth(() async => await result);\n}",
+      "bad": "import 'dart:async';\n\nFuture<int> fetch() async => 1;\n\nFuture<String> fetchName() async => 'name';\n\nFuture<int> arrow() async => await fetch();\n\nFuture<int> block() async {\n  return await fetch();\n}\n\nFuture<Object> wider() async {\n  return await fetchName();\n}\n\nFuture<dynamic> dynamicResult() async => await fetch();\n\nclass Repository {\n  Future<int> load() async {\n    return await fetch();\n  }\n\n  Future<int> get count async => await fetch();\n}\n\nvoid outer() {\n  Future<int> local() async {\n    return await fetch();\n  }\n\n  local();\n}\n\nFuture<int> afterTry() async {\n  try {\n    print('x');\n  } finally {\n    print('y');\n  }\n  return await fetch();\n}\n\nvoid inferredClosures() {\n  final arrow = () async => await fetch();\n  final block = () async {\n    return await fetch();\n  };\n  arrow();\n  block();\n}\n\n\nFuture<List<int>> fetchList() async => <int>[1];\nFuture<List<num>> covariantFuture() async => await fetchList();\n\nFuture<int> nestedClosureInTry() async {\n  try {\n    final callback = () async => await fetch();\n    return callback();\n  } catch (_) {\n    return 0;\n  }\n}\n\nFuture<Never> neverCompletes() => Future<Never>.error('failure');\nFuture<int> awaitsNever() async => await neverCompletes();\n\nclass AuthResult {}\nclass AuthSuccess extends AuthResult {}\nvoid registerAuth(Future<AuthResult> Function() callback) {}\nvoid subtypeClosure(Future<AuthSuccess> result) {\n  registerAuth(() async => await result);\n}\n\nvoid registerPreparation(FutureOr<void> Function() callback) {}\nvoid futureOrClosure(Future<int> result) {\n  registerPreparation(() async => await result);\n}",
       "crossFile": null,
       "good": "Future<int> fetch() async => 1;\n\nFuture<String> fetchName() async => 'name';\n\nFuture<int> noAwait() async => fetch();\n\nFuture<int> plainReturn() async {\n  return fetch();\n}\n\nFuture<int> awaitInTry() async {\n  try {\n    return await fetch();\n  } catch (e) {\n    return 0;\n  }\n}\n\nFuture<int> awaitInFinally() async {\n  try {\n    print('x');\n  } finally {\n    return await fetch();\n  }\n}\n\nFuture<String> mismatch() async {\n  return '${await fetch()}';\n}\n\nFuture<void> used() async {\n  final value = await fetch();\n  print(value);\n}\n\nFuture<int> awaitsNonFuture() async {\n  return await 1;\n}\n\nFuture<num> transformed() async {\n  return (await fetch()) + 1;\n}\n\nvoid inferredClosureInTry() {\n  final callback = () async {\n    try {\n      return await fetch();\n    } catch (_) {\n      return 0;\n    }\n  };\n  callback();\n}\n\ninferredFunction() async => await fetch();\n\nclass UntypedDeclarations {\n  method() async => await fetch();\n  get value async => await fetch();\n}\n\nFuture legacy() async => 1;\nvoid register(Future<int> Function() callback) {}\nvoid typedClosure() {\n  register(() async => await legacy());\n}\n\nFuture<Future<int>> nested() async => fetch();\nvoid flattenedClosure() {\n  final callback = () async => await nested();\n  callback();\n}"
     },
@@ -19626,12 +19849,24 @@
         "file": null,
         "line": 24,
         "message": "Unnecessary use of a null-aware operator to invoke an extension method on a nullable type."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 26,
+        "message": "Unnecessary use of a null-aware operator to invoke an extension method on a nullable type."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 28,
+        "message": "Unnecessary use of a null-aware operator to invoke an extension method on a nullable type."
       }
     ],
     "docs": "Flags a null-aware access whose member comes from an extension on a nullable type.\n\nAn extension declared `on String?` already accepts `null`, so `s?.member`\nskips a call the extension could handle, and `s.member` is what the author\nmeans. The rule fires on `?.` property and method access and on `?[]`\nindex access when the target is an extension override (`E(s)?.member`) of\nan extension on a nullable type, or when the target's static type is\nnullable and every visible extension supplying that member to the type is\non a nullable type. Members the target's own class declares win over\nextensions and are not checked; for SDK classes falcon uses the loaded SDK\nsources, or without them its curated `dart:core` table (e.g.\n`String.length`, `String.[]`).\n\nEvery section of a null-aware cascade (`x?..m()..n()`) is null-aware too;\neach section's leading member is checked against the cascade target. An\nextension on `dynamic` (or `void`) is on a nullable type.\n\nImported extensions participate even through prefixed imports, subject to\nshow/hide combinators and exports. Explicit overrides resolve the extension\nby declaration identity, including qualified names. The rule stays silent\nwhen it cannot tell which extensions apply.",
     "domains": [],
     "examples": {
-      "bad": "extension NullableText on String? {\n  bool get isBlank => this == null || this!.trim().isEmpty;\n  String orEmpty() => this ?? '';\n  int operator [](int index) => this?.codeUnitAt(index) ?? 0;\n  set label(String value) {}\n}\n\nclass Crate {\n  const Crate(this.size);\n  final int size;\n}\n\nextension NullableCrate on Crate? {\n  int area() => this == null ? 0 : this!.size * this!.size;\n  int operator [](int index) => index;\n}\n\nvoid main(String? text, Crate? box) {\n  print(text?.isBlank);\n  print(text?.orEmpty());\n  text?.label = 'x';\n  print(box?[0]);\n  print(box?.area());\n  print(NullableText(text)?.orEmpty());\n}",
+      "bad": "extension NullableText on String? {\n  bool get isBlank => this == null || this!.trim().isEmpty;\n  String orEmpty() => this ?? '';\n  int operator [](int index) => this?.codeUnitAt(index) ?? 0;\n  set label(String value) {}\n}\n\nclass Crate {\n  const Crate(this.size);\n  final int size;\n}\n\nextension NullableCrate on Crate? {\n  int area() => this == null ? 0 : this!.size * this!.size;\n  int operator [](int index) => index;\n}\n\nvoid main(String? text, Crate? box) {\n  print(text?.isBlank);\n  print(text?.orEmpty());\n  text?.label = 'x';\n  print(box?[0]);\n  print(box?.area());\n  print(NullableText(text)?.orEmpty());\n  print(box /* ? */\n      ?[0]);\n  text /* ?. */\n      ?.label = 'x';\n}",
       "crossFile": null,
       "good": "extension NullableText on String? {\n  bool get isBlank => this == null || this!.trim().isEmpty;\n  int get length => 0;\n  int operator [](int index) => 0;\n}\n\nextension NonNullText on String {\n  String shout() => toUpperCase();\n}\n\nclass Box {\n  const Box(this.size);\n  final int size;\n  int area() => size * size;\n}\n\nextension NullableBox on Box? {\n  int area() => 0;\n}\n\nextension MaybeNum on num? {\n  bool get isPositive => this != null && this! > 0;\n}\n\nextension NonNullInt on int {\n  bool get isPositive => this > 0;\n}\n\nvoid main(String? text, Box? box, int? count) {\n  print(text.isBlank);\n  print(text?.shout());\n  print(box?.area());\n  print(text?.length);\n  print(count?.isPositive);\n  print(NonNullText(text ?? '').shout());\n  // `String` declares `length` and `[]`; instance members win over extensions.\n  print(text?.length);\n  print(text?[0]);\n}"
     },
@@ -20089,7 +20324,7 @@
   },
   {
     "crossFile": false,
-    "description": "Flags a backslash escape that has no effect on the string's value.",
+    "description": "Flags backslashes that do not affect a string's value.",
     "diagnostics": [
       {
         "column": 14,
@@ -20126,14 +20361,56 @@
         "file": null,
         "line": 8,
         "message": "Unnecessary escape; the backslash can be removed."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 10,
+        "message": "Unnecessary escape; the backslash can be removed."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 11,
+        "message": "Unnecessary escape; the backslash can be removed."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 12,
+        "message": "Unnecessary escape; the backslash can be removed."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 13,
+        "message": "Unnecessary escape; the backslash can be removed."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 14,
+        "message": "Unnecessary escape; the backslash can be removed."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 15,
+        "message": "Unnecessary escape; the backslash can be removed."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 16,
+        "message": "Unnecessary escape; the backslash can be removed."
       }
     ],
-    "docs": "Flags a backslash escape that has no effect on the string's value.\n\nA backslash only matters before a character that is special in the current\nstring context: recognized escapes (`\\n`, `\\t`, `\\x`, `\\u`, and friends), the\nactive quote character, `$`, and `\\` itself. Escaping anything else — `\\a`, or\n`\\'` inside a double-quoted string — produces the same character while adding\nvisual clutter and inviting confusion about whether an escape was intended.\nRaw strings (`r'...'`) are never analyzed since backslashes are literal there,\nand triple-quoted strings are skipped to avoid the edge cases around escaping\nruns of quotes. Remove the redundant backslash.",
+    "docs": "Flags backslashes that do not affect a string's value.\n\nRaw strings are exempt. In triple-quoted strings, escaping the delimiter\nquote is only necessary in runs of three quotes or at the closing delimiter.",
     "domains": [],
     "examples": {
-      "bad": "// Bad: backslash escapes that do nothing in the given string context.\nvoid examples() {\n  final a = \"\\'\";\n  final b = '\\\"';\n  final c = '\\a';\n  final d = 'x\\dy';\n  final e = \"50\\%\";\n  final f = '\\-';\n  print([a, b, c, d, e, f]);\n}",
+      "bad": "// Bad: backslash escapes that do nothing in the given string context.\nvoid examples() {\n  final a = \"\\'\";\n  final b = '\\\"';\n  final c = '\\a';\n  final d = 'x\\dy';\n  final e = \"50\\%\";\n  final f = '\\-';\n  print([a, b, c, d, e, f]);\n  print('''one\\'quote''');\n  print(\"\"\"one\\\"quote\"\"\");\n  print('''opposite\\\"quote''');\n  print('''unknown\\q''');\n  print('''$a\\'quote''');\n  print('''\\'$a''');\n  print('''\\' 'end''');\n}",
       "crossFile": null,
-      "good": "// Good: every backslash escape is meaningful (or the string is raw).\nvoid examples() {\n  final a = 'it\\'s'; // escaping the delimiter quote is required\n  final b = \"she said \\\"hi\\\"\"; // escaping the delimiter quote is required\n  final c = 'line1\\nline2'; // \\n is a newline\n  final d = 'tab\\there'; // \\t is a tab\n  final e = 'cost: \\$5'; // \\$ escapes interpolation\n  final f = 'back\\\\slash'; // \\\\ is a literal backslash\n  final g = r'\\d+\\w*'; // raw string — backslashes are literal, never flagged\n  final h = 'emoji \\u{1F600}'; // \\u is a unicode escape\n  final i = 'plain text';\n  print([a, b, c, d, e, f, g, h, i]);\n}"
+      "good": "// Good: every backslash escape is meaningful (or the string is raw).\nvoid examples() {\n  final a = 'it\\'s'; // escaping the delimiter quote is required\n  final b = \"she said \\\"hi\\\"\"; // escaping the delimiter quote is required\n  final c = 'line1\\nline2'; // \\n is a newline\n  final d = 'tab\\there'; // \\t is a tab\n  final e = 'cost: \\$5'; // \\$ escapes interpolation\n  final f = 'back\\\\slash'; // \\\\ is a literal backslash\n  final g = r'\\d+\\w*'; // raw string — backslashes are literal, never flagged\n  final h = 'emoji \\u{1F600}'; // \\u is a unicode escape\n  final i = 'plain text';\n  print([a, b, c, d, e, f, g, h, i]);\n  print('''three\\'\\'\\'quotes''');\n  print('''two''\\'quotes''');\n  print('''closing\\'''');\n  print(\"\"\"closing\\\"\"\"\");\n  print('''escaped\\\\backslash\\nnewline''');\n  print(r'''raw\\q\\'quotes''');\n  print('''${\"nested\"}''');\n}"
     },
     "group": "style",
     "name": "unnecessary-string-escapes",
@@ -20192,7 +20469,7 @@
         "message": "Unnecessary string interpolation; use the expression directly."
       }
     ],
-    "docs": "Flags a string literal whose entire content is a single interpolation of a\nprovably non-nullable `String`.\n\nWhen a string is nothing but `'$x'` or `'${x}'` and `x` is already a string,\nwrapping the value in quotes and interpolation markers is redundant — the\nliteral is equivalent to writing the expression directly. The quotes only add\nnoise and obscure that no formatting or concatenation is happening. The rule\nrequires the interpolation to span the whole content, whether a bare\n`$identifier` or a full `${...}` expression; a string with any surrounding\ntext, or two adjacent interpolations like `'$a$b'`, is left alone. Adjacent\nliteral segments are checked independently; raw segments are never flagged.\nUse the interpolated expression on its own.\n\nCanonical receiver and signature facts must prove a non-nullable `String`.\nNullable or unknown values and null-aware accesses are left alone.",
+    "docs": "Flags a string literal whose entire content is a single interpolation of a\nprovably non-nullable `String`.\n\nWhen a string is nothing but `'$x'` or `'${x}'` and `x` is already a string,\nwrapping the value in quotes and interpolation markers is redundant — the\nliteral is equivalent to writing the expression directly. The quotes only add\nnoise and obscure that no formatting or concatenation is happening. The rule\nrequires the interpolation to span the whole content, whether a bare\n`$identifier` or a full `${...}` expression; a string with any surrounding\ntext, or two adjacent interpolations like `'$a$b'`, is left alone. Adjacent\nliteral segments and raw literals are never flagged.\nUse the interpolated expression on its own.\n\nCanonical receiver and signature facts must prove a non-nullable `String`.\nNullable or unknown values and null-aware accesses are left alone.",
     "domains": [],
     "examples": {
       "bad": "// Bad: the whole string is a single interpolation of a provably non-nullable String.\nString examples(String name) {\n  final a = '$name';\n  final b = '${name}';\n  final c = \"$name\";\n  final s = 'x';\n  final d = '$s';\n  final e = '${'lit'}';\n  final f = 'a' + 'b';\n  final g = '$f';\n  final h = '${name.toUpperCase()}';\n  return '$a$b$c$d$e$g$h';\n}",
@@ -20542,7 +20819,7 @@
         "message": "Unreachable member 'IntExtension' in an executable library."
       }
     ],
-    "docs": "Report public declarations that no entry point of an executable library\nreaches.\n\nA library — its defining unit plus every `part` file — is executable when it\ndeclares a top-level function named `main`, or a top-level function\nannotated `@pragma('vm:entry-point')` whose `pragma` provably resolves to\n`dart:core`. Starting from those entry points (and from top-level functions\nannotated with a widget-preview `@Preview`), the rule follows references:\nidentifiers, invocations, constructor names and tear-offs, annotations,\nuser-defined operators, object-pattern fields, doc comment references,\nsupertypes named in a class's `extends`/`with`/`implements` clause or an\nextension type's `implements` clause, implicit super-constructor calls,\ntypedef and extension-type names, type literals, type arguments, and the\ntypes of `external` members. A plain type annotation is not a reference, and\nconstructor invocations inside constant patterns do not count. Instance\n`toJson` methods are reachable with their container, because `dart:convert`\ncalls them dynamically.\n\nThe candidates are the library's top-level declarations and the public\nconstructors (except enum constructors), fields, methods, getters, setters,\nand operators of public classes, enums, mixins, extensions, and extension\ntypes. A member that overrides a supertype member is not a candidate, nor\nare the test-harness methods `test_*`, `solo_test_*`, `setUp`, `tearDown`,\n`setUpClass`, and `tearDownClass`. Unreached public candidates are reported\nunless annotated `@visibleForTesting` or a widget preview; a member other\nthan a field is not reported again when its enclosing declaration already\nis (the analyzer reports unreachable fields of an unreachable class too).\nLibraries that declare a top-level name twice are not analyzed.\n\nFacts falcon cannot prove are resolved toward reachability, so uncertainty\ncauses misses rather than false positives: a member whose container has a\nsupertype with an incomplete indexed hierarchy may override it and is not\na candidate. Known receiver types resolve members and operators before\nconsidering extensions. An unknown receiver reaches same-named members\nonly in extensions or classes named outside their own declaration (a class\nnever named cannot be its static type); an identifier counts unless it\nresolves to a local. A library with a part that does not resolve to an\nanalyzed file is not analyzed.",
+    "docs": "Report public declarations that no entry point of an executable library\nreaches.\n\nA library — its defining unit plus every `part` file — is executable when it\ndeclares a top-level function named `main`, or a top-level function\nannotated `@pragma('vm:entry-point')` whose `pragma` provably resolves to\n`dart:core`. Starting from those entry points (and from top-level functions\nannotated with a widget-preview `@Preview`), the rule follows references:\nidentifiers, invocations, constructor names and tear-offs, annotations,\nuser-defined operators, object-pattern fields, doc comment references,\nsupertypes named in a class's `extends`/`with`/`implements` clause or an\nextension type's `implements` clause, implicit super-constructor calls,\ntypedef and extension-type names, type literals, type arguments, and the\ntypes of `external` members. Type parameters shadow same-named library\ndeclarations. A plain type annotation is not a reference, and\nconstructor invocations inside constant patterns do not count. Instance\n`toJson` methods are reachable with their container, because `dart:convert`\ncalls them dynamically.\n\nThe candidates are the library's top-level declarations and the public\nconstructors (except enum constructors), fields, methods, getters, setters,\nand operators of public classes, enums, mixins, extensions, and extension\ntypes. A member that overrides a supertype member is not a candidate, nor\nare the test-harness methods `test_*`, `solo_test_*`, `setUp`, `tearDown`,\n`setUpClass`, and `tearDownClass`. Unreached public candidates are reported\nunless annotated `@visibleForTesting` or a widget preview; a member other\nthan a field is not reported again when its enclosing declaration already\nis (the analyzer reports unreachable fields of an unreachable class too).\nLibraries that declare a top-level name twice are not analyzed.\n\nFacts falcon cannot prove are resolved toward reachability, so uncertainty\ncauses misses rather than false positives: a member whose container has a\nsupertype with an incomplete indexed hierarchy may override it and is not\na candidate. Known receiver types resolve members and operators before\nconsidering extensions. An unknown receiver reaches same-named members\nonly in extensions or classes named outside their own declaration (a class\nnever named cannot be its static type); an identifier counts unless it\nresolves to a local. A library with a part that does not resolve to an\nanalyzed file is not analyzed.",
     "domains": [],
     "examples": {
       "bad": "void main() {\n  Used();\n  print(Used.new);\n  Child();\n  Holder().value;\n  print(Shade.dark);\n  helper();\n  var shadowed = 1;\n  print(shadowed);\n  Object probe = 1;\n  if (probe is OnlyInIsCheck) {}\n  if (probe case const OnlyInConstantPattern()) {}\n  Shadower().run();\n  if (probe case OnlyInObjectPattern()) {}\n  dynamic untyped = probe;\n  untyped.sharedName();\n}\n\nvoid helper() {}\n\nclass NeverNamed {\n  void sharedName() {}\n}\n\nclass Shadower {\n  void run() {\n    print(label());\n  }\n\n  String label() => 'member';\n}\n\nString label() => 'top-level';\n\nvoid orphanFunction() {}\n\nint orphanVariable = 1;\n\nint shadowed = 2;\n\nint get orphanGetter => 7;\n\nset orphanSetter(int value) {}\n\ntypedef OrphanAlias = String;\n\nclass OrphanClass {\n  void memberOfUnreachableClass() {}\n}\n\nclass OrphanWithField {\n  int orphanField = 0;\n  static const orphanConstant = 1;\n}\n\nmixin OrphanMixin {}\n\nenum OrphanEnum { a, b }\n\nextension OrphanExtension on int {}\n\nextension type OrphanExtensionType(int value) {}\n\n@pragma('other')\nvoid unrelatedPragma() {}\n\nvoid setUpClass() {}\n\nclass Used {\n  Used();\n  Used.named();\n\n  void unusedMethod() {}\n  int? unusedField;\n  static void unusedStatic() {}\n  int get unusedGetter => 0;\n  set unusedSetter(int value) {}\n  Used operator +(Used other) => this;\n}\n\nclass Base {\n  void overridden() {}\n}\n\nclass Child extends Base {\n  @override\n  void overridden() {}\n}\n\nclass OnlyInTypeAnnotation {}\n\nclass Holder {\n  OnlyInTypeAnnotation? value;\n}\n\nclass OnlyInIsCheck {}\n\nclass OnlyInConstantPattern {\n  const OnlyInConstantPattern();\n}\n\nclass OnlyInObjectPattern {}\n\nenum Shade {\n  dark,\n  light;\n\n  static void unusedEnumStatic() {}\n}\n\nextension IntExtension on int {\n  void unusedExtensionMethod() {}\n}",
@@ -20594,7 +20871,7 @@
         "message": "Use a 'ColoredBox' rather than a 'Container' with only a 'Color'."
       },
       {
-        "column": 10,
+        "column": 14,
         "file": null,
         "line": 28,
         "message": "Use a 'ColoredBox' rather than a 'Container' with only a 'Color'."
@@ -20606,7 +20883,7 @@
         "message": "Use a 'ColoredBox' rather than a 'Container' with only a 'Color'."
       }
     ],
-    "docs": "Prefers `ColoredBox` over a `Container` that only paints a color behind its child.\n\nA `Container` whose only arguments are `color` and `child` (plus an optional\n`key`) can be replaced by the lighter, const-capable `ColoredBox`. Only\ninvocations that resolve to Flutter's `Container` are considered. Matching\nthe analyzer's nullability-suffix check, a color with a nullable static type\nis excluded, but `dynamic` and `Null` still qualify. When the type is unknown,\na constructor invocation or a Flutter `Colors.<name>` access also qualifies.\n\n```dart\nContainer(color: Colors.blue, child: child);  // BAD\nColoredBox(color: Colors.blue, child: child); // GOOD\n```",
+    "docs": "Prefers `ColoredBox` over a `Container` that only paints a color behind its child.\n\nA `Container` whose only arguments are `color` and `child` (plus an optional\n`key`) can be replaced by the lighter, const-capable `ColoredBox`. Only\ninvocations that resolve to Flutter's `Container` are considered. Matching\nthe analyzer's nullability-suffix check, a color with a nullable static type\nis excluded, but `dynamic` and `Null` still qualify. When the type is unknown,\na constructor invocation or a Flutter `Colors.<name>` access also qualifies.\nThe diagnostic covers the constructor name, excluding `new` and arguments.\n\n```dart\nContainer(color: Colors.blue, child: child);  // BAD\nColoredBox(color: Colors.blue, child: child); // GOOD\n```",
     "domains": [
       "flutter"
     ],
@@ -20892,43 +21169,43 @@
     "description": "Flags an old-style function-typed parameter written with inline parameter syntax.",
     "diagnostics": [
       {
-        "column": 18,
+        "column": 14,
         "file": null,
         "line": 2,
         "message": "Use the generic function type syntax for parameters."
       },
       {
-        "column": 15,
+        "column": 10,
         "file": null,
         "line": 3,
         "message": "Use the generic function type syntax for parameters."
       },
       {
-        "column": 15,
+        "column": 11,
         "file": null,
         "line": 4,
         "message": "Use the generic function type syntax for parameters."
       },
       {
-        "column": 18,
+        "column": 13,
         "file": null,
         "line": 5,
         "message": "Use the generic function type syntax for parameters."
       },
       {
-        "column": 20,
+        "column": 15,
         "file": null,
         "line": 6,
         "message": "Use the generic function type syntax for parameters."
       },
       {
-        "column": 22,
+        "column": 15,
         "file": null,
         "line": 9,
         "message": "Use the generic function type syntax for parameters."
       }
     ],
-    "docs": "Flags an old-style function-typed parameter written with inline parameter syntax.\n\nDart lets you declare a function-typed parameter two ways. The legacy form\ninlines the callee's own parameter list — `void f(int g(int x))` — while the\nmodern generic function type syntax writes the type up front:\n`void f(int Function(int) g)`. The modern form is preferred because it reads\nas an ordinary typed parameter, composes with nullability (`Function(int)?`),\nand keeps the parameter name in its usual place. The rule detects the old form\nby the nested parameter list the parser attaches to it; the modern form parses\nas a plain parameter with a function type and is not flagged. Rewrite using\n`Function` type syntax.",
+    "docs": "Flags an old-style function-typed parameter written with inline parameter syntax.\n\nDart lets you declare a function-typed parameter two ways. The legacy form\ninlines the callee's own parameter list — `void f(int g(int x))` — while the\nmodern generic function type syntax writes the type up front:\n`void f(int Function(int) g)`. The modern form is preferred because it reads\nas an ordinary typed parameter, composes with nullability (`Function(int)?`),\nand keeps the parameter name in its usual place. The rule detects the old form\nby the nested parameter list the parser attaches to it; the modern form parses\nas a plain parameter with a function type and is not flagged. Rewrite using\n`Function` type syntax. Diagnostics cover the complete parameter declaration.",
     "domains": [],
     "examples": {
       "bad": "// Old-style function-typed parameters.\nvoid forEach(int f(int x)) {}\nvoid run(void cb()) {}\nint apply(int g(int a, int b)) => g(1, 2);\nvoid sortBy(bool compare(int a, int b)) {}\nvoid schedule(void task(), int delay) {}\n\nclass C {\n  void method(String fn(int x)) {}\n}",
@@ -21068,7 +21345,7 @@
         "message": "Use 'late' for private members with a non-nullable type."
       }
     ],
-    "docs": "Flags a private nullable field or top-level variable that is only ever\nassigned non-null values and read through `!`, so it could be `late` with a\nnon-nullable type.\n\nWhen every read of a private variable is a null assertion and every write\nstores a non-nullable value, the nullable type only exists to defer\ninitialization; `late` expresses that and moves the null check into the\nruntime. Candidates are private (underscore) top-level variables and private\nfields (instance or static), plus every field of a private extension; instance\nfields of extension types, fields of classes with a `const` constructor, and\nall enum members are skipped, as are `late`, `const`, `external`, and\n`abstract` declarations. Any other use — a plain read, a `this._x`\ninitializing formal, a `: _x = ...` initializer, a compound or `??=`\nassignment, or an assignment whose value is not proven non-nullable —\ndisqualifies the referenced declaration. Uses in every resolved library\npart are checked together; unresolved parts prevent proving a candidate safe.\n\n```dart\nint? _i; // flagged\nvoid f() {\n  _i = 1;\n  print(_i!);\n}\n```",
+    "docs": "Flags a private nullable field or top-level variable that is only ever\nassigned non-null values and read through `!`, so it could be `late` with a\nnon-nullable type.\n\nWhen every read of a private variable is a null assertion and every write\nstores a non-nullable value, the nullable type only exists to defer\ninitialization; `late` expresses that and moves the null check into the\nruntime. Candidates are private (underscore) top-level variables and private\nfields (instance or static), plus every field of a private extension; instance\nfields of extension types, fields of classes with a `const` constructor, and\nall enum members are skipped, as are `late`, `const`, `external`, and\n`abstract` declarations. Any other use — a plain read, a `this._x`\ninitializing formal, a `: _x = ...` initializer, a compound or `??=`\nassignment, or an assignment whose value is not proven non-nullable —\ndisqualifies the referenced declaration. Qualified and cascade accesses are\nattributed to their resolved declaration, not every implementation of an\ninterface member. Uses in every resolved library part are checked together;\nunresolved parts prevent proving a candidate safe.\n\n```dart\nint? _i; // flagged\nvoid f() {\n  _i = 1;\n  print(_i!);\n}\n```",
     "domains": [],
     "examples": {
       "bad": "int? _i;\n\nString? _name;\n\nvoid setUp() {\n  _i = 1;\n  _name = 'falcon';\n}\n\nvoid use() {\n  print(_i!);\n  print(_name!.length);\n}\n\nclass Cache {\n  List<int>? _items;\n  static String? _label;\n  Object? _value = Object();\n\n  void init() {\n    _items = [1, 2, 3];\n    _label = 'cache';\n  }\n\n  int get first => _items!.first;\n  String get label => _label!;\n  Object get value => _value!;\n}\n\nclass Counter {\n  int? _count;\n\n  void reset() {\n    this._count = 0;\n  }\n\n  int next() => _count! + 1;\n}\n\n// Each class's field is its own declaration: a plain read of the other\n// class's same-named field does not disqualify this one.\nclass NullAsserted {\n  int? _count;\n\n  int next() => _count! + 1;\n}\n\n// A read inside a class with a const constructor is not visited.\nclass ConstReader {\n  const ConstReader();\n  int? read() => _i;\n}\n\n// Writes through a type name keep the field lateable.\nclass Qualified {\n  static int? _shared;\n\n  static int read() => _shared!;\n}\n\nvoid initShared() {\n  Qualified._shared = 1;\n}\n\nextension _Helpers on String {\n  static int? cached;\n\n  int get size {\n    cached = 3;\n    return cached!;\n  }\n}",
@@ -21403,57 +21680,87 @@
   },
   {
     "crossFile": false,
-    "description": "Flags a constructor parameter forwarded verbatim to `super(...)` and used nowhere else.",
+    "description": "Prefer super parameters when a constructor only forwards parameters to its superclass.",
     "diagnostics": [
       {
-        "column": 9,
+        "column": 3,
         "file": null,
-        "line": 9,
-        "message": "Use a super parameter instead of forwarding a parameter to super."
+        "line": 10,
+        "message": "Use super parameters instead of forwarding parameters to super."
       },
       {
-        "column": 9,
+        "column": 3,
         "file": null,
-        "line": 13,
-        "message": "Use a super parameter instead of forwarding a parameter to super."
+        "line": 14,
+        "message": "Use super parameters instead of forwarding parameters to super."
       },
       {
-        "column": 16,
+        "column": 3,
         "file": null,
-        "line": 13,
-        "message": "Use a super parameter instead of forwarding a parameter to super."
+        "line": 18,
+        "message": "Use super parameters instead of forwarding parameters to super."
       },
       {
-        "column": 11,
+        "column": 3,
         "file": null,
-        "line": 17,
-        "message": "Use a super parameter instead of forwarding a parameter to super."
+        "line": 22,
+        "message": "Use super parameters instead of forwarding parameters to super."
       },
       {
-        "column": 9,
+        "column": 3,
         "file": null,
-        "line": 21,
-        "message": "Use a super parameter instead of forwarding a parameter to super."
+        "line": 26,
+        "message": "Use super parameters instead of forwarding parameters to super."
       },
       {
-        "column": 9,
+        "column": 3,
         "file": null,
-        "line": 25,
-        "message": "Use a super parameter instead of forwarding a parameter to super."
+        "line": 34,
+        "message": "Use super parameters instead of forwarding parameters to super."
       },
       {
-        "column": 23,
+        "column": 3,
         "file": null,
-        "line": 33,
-        "message": "Use a super parameter instead of forwarding a parameter to super."
+        "line": 40,
+        "message": "Use super parameters instead of forwarding parameters to super."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 44,
+        "message": "Use super parameters instead of forwarding parameters to super."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 51,
+        "message": "Use super parameters instead of forwarding parameters to super."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 54,
+        "message": "Use super parameters instead of forwarding parameters to super."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 59,
+        "message": "Use super parameters instead of forwarding parameters to super."
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 64,
+        "message": "Use super parameters instead of forwarding parameters to super."
       }
     ],
-    "docs": "Flags a constructor parameter forwarded verbatim to `super(...)` and used nowhere else.\n\nSince Dart 2.17, a parameter that exists only to be passed straight through to\nthe superclass constructor can be declared as a super parameter — `super.x` —\nwhich removes both the parameter declaration and the redundant `super(x)`\nargument. Doing so cuts boilerplate and keeps subclass constructors in sync\nwith the base class automatically. The rule is conservative: it fires only\nwhen the parameter is used exactly once across the entire constructor (all\ninitializers plus the body), forwarded either as a plain positional `super`\nargument at the matching index or as a named argument `super(x: x)`. Convert\nit to a `super.` parameter.",
+    "docs": "Prefer super parameters when a constructor only forwards parameters to its superclass.\n\nSuper parameters remove repeated parameter declarations and explicit forwarding\narguments. This rule reports a constructor once when its positional parameters\ncan be converted together, or when an individual named parameter can be\nconverted without changing its type contract. Parameters used in the constructor\nbody and field-initializing formals are not suggested.\n\nAvailable starting with Dart 2.17. For example, replace\n`Child(int value) : super(value);` with `Child(super.value);`.",
     "domains": [],
     "examples": {
-      "bad": "// Parameters forwarded verbatim to super and used nowhere else.\nclass Base {\n  Base(int a);\n  Base.two(int a, int b);\n  Base.named({int? x});\n}\n\nclass A extends Base {\n  A(int a) : super(a);\n}\n\nclass B extends Base {\n  B(int a, int b) : super.two(a, b);\n}\n\nclass C extends Base {\n  C({int? x}) : super.named(x: x);\n}\n\nclass D extends Base {\n  D(int a) : super(a);\n}\n\nclass E extends Base {\n  E(int a) : super(a);\n}\n\nclass ObjectBase {\n  ObjectBase(Object e);\n}\n\nclass CatchBinding extends ObjectBase {\n  CatchBinding(Object e) : super(e) {\n    try {} catch (e) {}\n  }\n}",
+      "bad": "// Parameters forwarded verbatim to super and used nowhere else.\nclass Base {\n  Base(int a);\n  Base.two(int a, int b);\n  Base.named({int? x});\n  Base.both(int a, {int? x});\n}\n\nclass A extends Base {\n  A(int a) : super(a);\n}\n\nclass B extends Base {\n  B(int a, int b) : super.two(a, b);\n}\n\nclass C extends Base {\n  C({int? x}) : super.named(x: x);\n}\n\nclass D extends Base {\n  D(int a) : super(a);\n}\n\nclass E extends Base {\n  E(int a) : super(a);\n}\n\nclass ObjectBase {\n  ObjectBase(Object e);\n}\n\nclass CatchBinding extends ObjectBase {\n  CatchBinding(Object e) : super(e) {\n    try {} catch (e) {}\n  }\n}\n\nclass SkippedParameter extends Base {\n  SkippedParameter(String unused, int value) : super(value);\n}\n\nclass Multiline extends Base {\n  Multiline(\n    int value,\n  ) : super(value);\n}\n\nclass InitializerReference extends Base {\n  final int saved;\n  InitializerReference(int value) : saved = value, super(value);\n}\n\nclass Primary(int value) extends Base {\n  this : super(value);\n}\n\nclass NamedConstructor extends Base {\n  NamedConstructor.named(int value) : super(value);\n}\n\nclass FieldWithNamed extends Base {\n  final int field;\n  FieldWithNamed(this.field, {int? x}) : super.both(field, x: x);\n}",
       "crossFile": null,
-      "good": "// Cases that must not be flagged.\nclass Base {\n  Base(int a);\n  Base.two(int a, int b);\n}\n\nclass A extends Base {\n  A(int a) : super(a) {\n    print(a);\n  }\n}\n\nclass B extends Base {\n  B(super.a);\n}\n\nclass C extends Base {\n  C(int value) : super(value + 1);\n}\n\nclass D extends Base {\n  D(int a, int b) : super.two(b, a);\n}\n\nclass E extends Base {\n  E(int a, int b) : super.two(a, b) {\n    print(a);\n    print(b);\n  }\n}"
+      "good": "// Cases that must not be flagged.\nclass Base {\n  Base(int a);\n  Base.two(int a, int b);\n}\n\nclass A extends Base {\n  A(int a) : super(a) {\n    print(a);\n  }\n}\n\nclass B extends Base {\n  B(super.a);\n}\n\nclass C extends Base {\n  C(int value) : super(value + 1);\n}\n\nclass D extends Base {\n  D(int a, int b) : super.two(b, a);\n}\n\nclass E extends Base {\n  E(int a, int b) : super.two(a, b) {\n    print(a);\n    print(b);\n  }\n}\n\nclass PartialExpression extends Base {\n  PartialExpression(int a, int b) : super.two(a, b + 1);\n}\nclass FieldBlocker extends Base {\n  final int field;\n  FieldBlocker(this.field, int a) : super(a);\n}\nclass NamedToPositional extends Base {\n  NamedToPositional({required int a}) : super(a);\n}\nclass WideBase {\n  WideBase({num? value});\n}\nclass NarrowParameter extends WideBase {\n  NarrowParameter({int? value}) : super(value: value);\n}\n\nclass NamedBase {\n  NamedBase({int? value});\n}\n\nclass FinalDeclaringPrimary({final int? value}) extends NamedBase {\n  this : super(value: value);\n}\n\nclass VarDeclaringPrimary({var int? value}) extends NamedBase {\n  this : super(value: value);\n}"
     },
     "group": "style",
     "name": "use-super-parameters",
@@ -21527,13 +21834,13 @@
         "message": "Start the name of the method with 'to' or 'as'."
       },
       {
-        "column": 3,
+        "column": 22,
         "file": null,
         "line": 28,
         "message": "Start the name of the method with 'to' or 'as'."
       }
     ],
-    "docs": "Flags conversion methods not named `to…` or `as…`.\n\nA parameterless method that just wraps the receiver in a new object —\n`return Other(this);` — is a conversion. Dart convention names such methods\n`toX()` when they copy state into a new object and `asX()` when they return a\nview backed by the original, so readers know what the call costs.\n\n```dart\nclass Bar {\n  Foo foo() => Foo.fromBar(this);    // flagged\n  Foo toFoo() => Foo.fromBar(this);  // preferred\n}\n```\n\nNon-getter methods and operators with no parameters, a non-`void` return\ntype, and a body consisting of one constructor call taking only `this` are\nchecked. Methods overriding inherited methods are exempt. Constructor calls\ncannot be resolved when Dart's newer `new(...)` declaration syntax failed\nto parse.",
+    "docs": "Flags conversion methods not named `to…` or `as…`.\n\nA parameterless method that just wraps the receiver in a new object —\n`return Other(this);` — is a conversion. Dart convention names such methods\n`toX()` when they copy state into a new object and `asX()` when they return a\nview backed by the original, so readers know what the call costs.\nThe diagnostic covers the method name or operator token.\n\n```dart\nclass Bar {\n  Foo foo() => Foo.fromBar(this);    // flagged\n  Foo toFoo() => Foo.fromBar(this);  // preferred\n}\n```\n\nNon-getter methods and operators with no parameters, a non-`void` return\ntype, and a body consisting of one constructor call taking only `this` are\nchecked. Methods overriding inherited methods are exempt. Constructor calls\ncannot be resolved when Dart's newer `new(...)` declaration syntax failed\nto parse.",
     "domains": [],
     "examples": {
       "bad": "class Foo {\n  final Bar bar;\n  Foo(this.bar);\n  Foo.fromBar(this.bar);\n}\n\nclass Bar {\n  Foo foo() => Foo.fromBar(this);\n\n  Foo convert() {\n    return Foo(this);\n  }\n\n  Foo _wrap() => new Foo(this);\n\n  Foo tofoo() => Foo(this);\n\n  Foo assign() => Foo.fromBar(this);\n\n  void use() => _wrap();\n}\n\nextension BarX on Bar {\n  Foo view() => Foo(this);\n}\n\nclass Negatable {\n  Negatable operator ~() => Wrapped(this);\n}\nclass Wrapped extends Negatable {\n  Wrapped(Negatable value);\n}",
@@ -21916,7 +22223,7 @@
   },
   {
     "crossFile": false,
-    "description": "Flags calls that resolve to `dart:core`'s top-level `print` function.",
+    "description": "Flags calls and callback arguments resolving to `dart:core`'s `print`.",
     "diagnostics": [
       {
         "column": 3,
@@ -21961,7 +22268,7 @@
         "message": "Avoid using print in production code; use a logging framework instead."
       }
     ],
-    "docs": "Flags calls that resolve to `dart:core`'s top-level `print` function.\nLexical bindings and members declared in the enclosing body shadow it.",
+    "docs": "Flags calls and callback arguments resolving to `dart:core`'s `print`.\nLexical bindings and members declared in the enclosing body shadow it.\nCalls guarded by Flutter's `kDebugMode` are exempt within the same function body.\nDiagnostics underline the `print` identifier, not the invocation or its arguments.",
     "domains": [
       "flutter"
     ],
@@ -21982,7 +22289,7 @@
   },
   {
     "crossFile": false,
-    "description": "Flags `return null;` (and `=> null` bodies) in a function whose declared return type is `void` or `Future<void>`.",
+    "description": "Flags `return null;` (and `=> null` bodies) in synchronous `void` functions and asynchronous `Future<void>` functions.",
     "diagnostics": [
       {
         "column": 3,
@@ -22021,12 +22328,12 @@
         "message": "Don't return null from a function with a void return type."
       }
     ],
-    "docs": "Flags `return null;` (and `=> null` bodies) in a function whose declared\nreturn type is `void` or `Future<void>`.\n\nReturning an explicit `null` from a void function is contradictory: the\nsignature promises no value, so the `null` is dead and usually reflects\nconfusion about the function's contract or a copy-paste from a nullable one.\nDrop the value and write a bare `return;`, or change the return type if the\nfunction is really meant to produce a value. Each nested function is judged by\nits own return type, so an inner closure is not tainted by an enclosing void\nframe.",
+    "docs": "Flags `return null;` (and `=> null` bodies) in synchronous `void`\nfunctions and asynchronous `Future<void>` functions. A nullable future\npermits a null result only in a synchronous body; `void async` is exempt.\n\nReturning an explicit `null` from a void function is contradictory: the\nsignature promises no value, so the `null` is dead and usually reflects\nconfusion about the function's contract or a copy-paste from a nullable one.\nDrop the value and write a bare `return;`, or change the return type if the\nfunction is really meant to produce a value. Each nested function is judged by\nits own return type, so an inner closure is not tainted by an enclosing void\nframe.",
     "domains": [],
     "examples": {
       "bad": "void f() {\n  return null;\n}\n\nvoid g() => null;\n\nFuture<void> h() async {\n  return null;\n}\n\nclass C {\n  void method() {\n    return null;\n  }\n\n  set value(int v) {\n    return null;\n  }\n}\n\nvoid outer() {\n  void inner() {\n    return null;\n  }\n\n  inner();\n}",
       "crossFile": null,
-      "good": "void f() {\n  return;\n}\n\nint g() {\n  return null;\n}\n\nint? h() => null;\n\nFuture<void> i() async {\n  await Future<void>.value();\n}\n\nclass C {\n  int _v = 0;\n\n  void method() {\n    print('no return');\n  }\n\n  int compute() => null;\n\n  set value(int v) {\n    _v = v;\n  }\n}\n\nvoid outer() {\n  int inner() {\n    return null;\n  }\n\n  inner();\n}"
+      "good": "void f() {\n  return;\n}\n\nint g() {\n  return null;\n}\n\nint? h() => null;\n\nFuture<void> i() async {\n  await Future<void>.value();\n}\n\nclass C {\n  int _v = 0;\n\n  void method() {\n    print('no return');\n  }\n\n  int compute() => null;\n\n  set value(int v) {\n    _v = v;\n  }\n}\n\nvoid outer() {\n  int inner() {\n    return null;\n  }\n\n  inner();\n}\n\nvoid parenthesizedReturn() {\n  return (null);\n}\n\nvoid parenthesizedArrow() => (null);"
     },
     "group": "suspicious",
     "name": "avoid-returning-null-for-void",
@@ -22542,7 +22849,7 @@
     "examples": {
       "bad": "void f1() {\n  try {\n    doThing();\n  } catch (e) {}\n}\n\nvoid f2() {\n  try {\n    doThing();\n  } on Exception catch (e) {}\n}\n\nvoid f3() {\n  try {\n    doThing();\n  } catch (e, st) {}\n}\n\nvoid f4() {\n  try {\n    doThing();\n  } on StateError {}\n}\n\nvoid f5() {\n  try {\n    doThing();\n  } catch (error) {}\n}\n\nvoid f6() {\n  try {\n    doThing();\n  } catch (e) {\n  }\n}",
       "crossFile": null,
-      "good": "void g1() {\n  try {\n    doThing();\n  } catch (e) {\n    print(e);\n  }\n}\n\nvoid g2() {\n  try {\n    doThing();\n  } catch (_) {}\n}\n\nvoid g3() {\n  try {\n    doThing();\n  } catch (e) {\n    // Failure is expected and intentionally ignored here.\n  }\n}\n\nvoid g4() {\n  try {\n    doThing();\n  } on Exception catch (e) {\n    handle(e);\n  }\n}\n\nvoid g5() {\n  try {\n    doThing();\n  } on StateError catch (_) {}\n}\n\nvoid g6() {\n  try {\n    doThing();\n  } catch (e, st) {\n    print('$e $st');\n  }\n}"
+      "good": "void g1() {\n  try {\n    doThing();\n  } catch (e) {\n    print(e);\n  }\n}\n\nvoid g2() {\n  try {\n    doThing();\n  } catch (_) {}\n}\n\nvoid g3() {\n  try {\n    doThing();\n  } catch (e) {\n    // Failure is expected and intentionally ignored here.\n  }\n}\n\nvoid g4() {\n  try {\n    doThing();\n  } on Exception catch (e) {\n    handle(e);\n  }\n}\n\nvoid g5() {\n  try {\n    doThing();\n  } on StateError catch (_) {}\n}\n\nvoid g6() {\n  try {\n    doThing();\n  } catch (e, st) {\n    print('$e $st');\n  }\n}\n\nString documentedInterpolation() => '${(() {\n  try {\n    doThing();\n  } catch (error) { /* Deliberately ignore this } and { failure. */ }\n  return '';\n})()}';"
     },
     "group": "suspicious",
     "name": "empty-catches",
@@ -23248,103 +23555,6 @@
       "label": "Dart lints",
       "upstreamId": "recursive_getters",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/recursive_getters"
-    }
-  },
-  {
-    "crossFile": true,
-    "description": "Disallow insecure URL schemes in `pubspec.yaml` string values.",
-    "diagnostics": [
-      {
-        "column": 11,
-        "file": "bad-nested/pubspec.yaml",
-        "line": 3,
-        "message": "The 'http' protocol shouldn't be used because it isn't secure."
-      },
-      {
-        "column": 16,
-        "file": "bad-nested/pubspec.yaml",
-        "line": 5,
-        "message": "The 'http' protocol shouldn't be used because it isn't secure."
-      },
-      {
-        "column": 13,
-        "file": "bad-nested/pubspec.yaml",
-        "line": 6,
-        "message": "The 'git' protocol shouldn't be used because it isn't secure."
-      },
-      {
-        "column": 16,
-        "file": "bad-nested/pubspec.yaml",
-        "line": 9,
-        "message": "The 'git' protocol shouldn't be used because it isn't secure."
-      },
-      {
-        "column": 40,
-        "file": "bad-nested/pubspec.yaml",
-        "line": 10,
-        "message": "The 'git' protocol shouldn't be used because it isn't secure."
-      },
-      {
-        "column": 12,
-        "file": "bad-nested/pubspec.yaml",
-        "line": 14,
-        "message": "The 'http' protocol shouldn't be used because it isn't secure."
-      },
-      {
-        "column": 11,
-        "file": "bad-pubspec-only/pubspec.yaml",
-        "line": 2,
-        "message": "The 'http' protocol shouldn't be used because it isn't secure."
-      }
-    ],
-    "docs": "Disallow insecure URL schemes in `pubspec.yaml` string values.",
-    "domains": [],
-    "examples": {
-      "bad": null,
-      "crossFile": [
-        {
-          "content": "void main() {}",
-          "path": "bad-nested/lib/main.dart"
-        },
-        {
-          "content": "name: secure_fixture\n# homepage: http://example.com/comment-only\nhomepage: | #\n  http://example.com\ndocumentation: \"http:\\/\\/example.com/docs\" #\nrepository: > #\n  git:example.com/\n  repository.git\nissue_tracker: git:example.com/issues #\ndependencies: {nested_git: {git: {url: git://example.com/repository.git}}} #\ndev_dependencies:\n  nested_hosted:\n    hosted:\n      url: \"http:\\/\\/packages.example.com\" #\n  direct: http://direct.example\n  ignored:\n    host: http://host.example\nfunding:\n  - http://example.com/fund\ndescription: http://example.com/ignored\narchive_urls: [git://example.com/ignored]",
-          "path": "bad-nested/pubspec.yaml"
-        },
-        {
-          "content": "name: pubspec_only\nhomepage: http://example.com #",
-          "path": "bad-pubspec-only/pubspec.yaml"
-        },
-        {
-          "content": "void main() {}",
-          "path": "good-malformed/lib/main.dart"
-        },
-        {
-          "content": "homepage: [http://example.com",
-          "path": "good-malformed/pubspec.yaml"
-        },
-        {
-          "content": "void main() {}",
-          "path": "good-missing-manifest/lib/main.dart"
-        },
-        {
-          "content": "void main() {}",
-          "path": "good-secure/lib/main.dart"
-        },
-        {
-          "content": "name: secure_fixture\nhomepage: https://example.com\ndependencies:\n  nested_git:\n    git:\n      url: https://example.com/repository.git\n  ssh_git:\n    git: git@github.com:example/repository.git",
-          "path": "good-secure/pubspec.yaml"
-        }
-      ],
-      "good": null
-    },
-    "group": "suspicious",
-    "name": "secure-pubspec-urls",
-    "recommended": false,
-    "source": {
-      "kind": "Lints",
-      "label": "Dart lints",
-      "upstreamId": "secure_pubspec_urls",
-      "upstreamUrl": "https://dart.dev/tools/linter-rules/secure_pubspec_urls"
     }
   },
   {
