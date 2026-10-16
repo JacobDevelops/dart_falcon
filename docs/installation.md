@@ -1,7 +1,6 @@
 # Installation
 
-falcon ships as a single self-contained binary — no Dart SDK, no analysis
-server, no runtime dependencies. Pick whichever channel fits your setup.
+falcon ships as a single binary. It doesn't run the Dart analyzer or analysis server. Install the Dart SDK and resolve your dependencies for rules that need SDK or package types.
 
 ## Supported platforms
 
@@ -12,7 +11,7 @@ server, no runtime dependencies. Pick whichever channel fits your setup.
 | macOS Intel      | native                       |
 | macOS Apple Silicon | native                    |
 
-Windows binaries are not published yet — Windows users can
+Windows binaries are not published yet. Windows users can
 [build from source](#build-from-source) or use WSL.
 
 ## Prebuilt binaries (recommended)
@@ -22,9 +21,9 @@ Every release attaches platform tarballs to the
 tarball contains a single `falcon` executable.
 
 ```sh
-# Substitute the latest version and your platform:
+# Substitute the release version in both the tag and archive name, and your platform:
 #   x86_64-linux | aarch64-linux | x86_64-darwin | aarch64-darwin
-curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-0.3.0-x86_64-linux.tar.gz \
+curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.3.0/falcon-0.3.0-x86_64-linux.tar.gz \
   | tar -xz
 sudo mv falcon /usr/local/bin/   # or anywhere on your PATH
 
@@ -33,11 +32,12 @@ falcon version
 
 ## Build from source
 
-With a stable Rust toolchain:
+With a nightly Rust toolchain. On x86_64 GNU/Linux, building the bundled jemalloc
+also requires a native C compiler, a POSIX shell, and make:
 
 ```sh
 # straight from the repository
-cargo install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
+cargo +nightly install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
 
 # or from a checkout
 cargo build --release
@@ -69,8 +69,8 @@ With [mise activated](https://mise.jdx.dev/getting-started.html), `falcon` is av
 falcon speaks LSP (`falcon lsp`); first-party extensions live in
 [`extensions/`](../extensions):
 
-- **VS Code** — `extensions/falcon-vscode`
-- **Zed** — `extensions/falcon-zed`
+- **VS Code**: `extensions/falcon-vscode`
+- **Zed**: `extensions/falcon-zed`
 
 Both launch the `falcon` binary from your `PATH`, so install falcon with any
 channel above first.
@@ -86,5 +86,5 @@ channel above first.
 ## Next steps
 
 See [configuration.md](./configuration.md) for configuring rules and options,
-or run `falcon check .` — with no `falcon.json` present, every recommended rule
+or run `falcon check .`. With no `falcon.json` present, every recommended rule
 runs at its default severity.

@@ -22,6 +22,9 @@ lsp-types  = "0.97"
 # Parallel execution
 rayon = "1"
 
+# Binary allocator
+tikv-jemallocator = "0.7.0"
+
 # Fast hashing of internal index keys
 rustc-hash = "2"
 
@@ -56,6 +59,9 @@ description       = "A fast Dart linter built in Rust"
 
 [dependencies]
 falcon_cli = { path = "crates/falcon_cli" }
+
+[target.'cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))'.dependencies]
+tikv-jemallocator.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
