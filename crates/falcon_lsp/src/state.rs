@@ -1020,18 +1020,19 @@ impl LspState {
             });
             self.external_index_build_count += 1;
         }
-        let identities = if let Some(cache) = &self.external_indexes {
-            IdentityIndex::with_external(
-                &identity_sources,
-                &sources,
-                &packages,
-                external,
-                Arc::clone(&cache.identities),
-            )
-        } else {
+        if self.external_indexes.is_none() {
             self.external_index_build_count += 1;
-            IdentityIndex::build(&identity_sources, &sources, &packages, Some(external))
-        };
+        }
+        let identities = IdentityIndex::build_layer(
+            &identity_sources,
+            &sources,
+            &packages,
+            Some(external),
+            self.external_indexes
+                .as_ref()
+                .map(|cache| Arc::clone(&cache.identities)),
+            Some(&grouping),
+        );
         let resolved_files = || {
             files.iter().enumerate().map(|(index, file)| {
                 (

@@ -96,21 +96,21 @@ pub fn source_size_diagnostic(path: &Path, bytes: u64) -> Option<Diagnostic> {
 
 /// A parsed file retained until shared semantic indexes are built.
 struct Parsed<'src> {
-    path: PathBuf,
+    path: &'src Path,
     source: &'src str,
     program: Program,
     syntax: falcon_syntax::SyntaxStore,
     parse_errors: Vec<ParseError>,
 }
 
-fn parse_one<'src>(path: &Path, source: &'src str, workspace: Workspace<'_>) -> Parsed<'src> {
+fn parse_one<'src>(path: &'src Path, source: &'src str, workspace: Workspace<'_>) -> Parsed<'src> {
     let falcon_dart_parser::ParseResult {
         program,
         errors: parse_errors,
         syntax,
     } = parse_for_package(source, workspace.package_language_version(path));
     Parsed {
-        path: path.to_path_buf(),
+        path,
         source,
         program,
         syntax,
@@ -127,7 +127,7 @@ fn retain(parsed: Vec<Parsed<'_>>, collect_programs: bool) -> Vec<ProjectFile> {
     parsed
         .into_iter()
         .map(|p| ProjectFile {
-            path: p.path,
+            path: p.path.to_path_buf(),
             source: p.source.to_owned(),
             program: p.program,
             syntax: p.syntax,
@@ -153,11 +153,11 @@ fn analyze_indexed(
             let _enter = span.enter();
             let project_paths: HashSet<PathBuf> = parsed
                 .iter()
-                .map(|p| canonical_or_lexical(&p.path))
+                .map(|p| canonical_or_lexical(p.path))
                 .collect();
             let roots: Vec<(&Path, &Program, &str)> = parsed
                 .iter()
-                .map(|p| (p.path.as_path(), &p.program, p.source))
+                .map(|p| (p.path, &p.program, p.source))
                 .collect();
             let libraries =
                 ExternalLibraries::load(environment, &roots, |path| project_paths.contains(path));
@@ -192,19 +192,19 @@ fn analyze_indexed(
     let semantic_parsed: Vec<&Parsed<'_>> = parsed.iter().chain(&companions).collect();
     let project_files: Vec<(PathBuf, &Program)> = semantic_parsed
         .iter()
-        .map(|file| (file.path.clone(), &file.program))
+        .map(|file| (file.path.to_path_buf(), &file.program))
         .collect();
     let grouping = group_libraries(&project_files);
     let identity_sources: Vec<IdentitySource<'_>> = semantic_parsed
         .iter()
         .map(|p| IdentitySource {
-            path: &p.path,
+            path: p.path,
             program: &p.program,
             has_parse_errors: !p.parse_errors.is_empty(),
         })
         .collect();
     let sources: Vec<&str> = semantic_parsed.iter().map(|p| p.source).collect();
-    let identities = IdentityIndex::build(
+    let identities = IdentityIndex::build_layer(
         &identity_sources,
         &sources,
         workspace.packages,
@@ -214,11 +214,13 @@ fn analyze_indexed(
                 libraries,
                 environment,
             }),
+        None,
+        Some(&grouping),
     );
     let mut type_index = TypeIndex::from_resolved_files(
         semantic_parsed.iter().enumerate().map(|(i, p)| {
             (
-                p.path.as_path(),
+                p.path,
                 LibrarySource {
                     program: &p.program,
                     has_parse_errors: !p.parse_errors.is_empty(),
@@ -249,13 +251,13 @@ fn analyze_indexed(
     let run_one = |(i, p): (usize, &Parsed<'_>)| {
         let span = info_span!("analyze_file", file = %p.path.display());
         let _enter = span.enter();
-        let ctx = AnalyzeContext::new(&p.path, p.source, config, &p.syntax)
+        let ctx = AnalyzeContext::new(p.path, p.source, config, &p.syntax)
             .with_types(&type_index)
             .with_identities(&identities)
             .with_signatures(&signatures)
             .with_library(&library_units[i])
             .with_environment(workspace.environment);
-        let mut diagnostics = syntax_error_diagnostics(&p.path, &p.parse_errors);
+        let mut diagnostics = syntax_error_diagnostics(p.path, &p.parse_errors);
         diagnostics.extend(registry.run_all(&p.program, &ctx));
         info!(file = %p.path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
         diagnostics

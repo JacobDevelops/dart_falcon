@@ -60,7 +60,7 @@ impl Rule for DirectivesOrdering {
                 span: export.span,
             })
             .collect();
-        let doc_imports: Vec<Namespace> = library_doc_imports(program, ctx.source)
+        let doc_imports: Vec<Namespace> = library_doc_imports(program, ctx.source, ctx.syntax)
             .map(|import| Namespace {
                 uri: uri_value(&import.literal),
                 span: import.span,
@@ -225,10 +225,12 @@ mod tests {
     fn doc_imports_use_literal_segments_and_import_spans() {
         let source = "/// @docImport r'dart:' '\\x63ollection';\n/// @docImport r'dart:' '\\x61sync';\nlibrary;\n";
         let falcon_dart_parser::ParseResult {
-            program, errors, ..
+            program,
+            errors,
+            syntax,
         } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
-        let imports: Vec<_> = library_doc_imports(&program, source).collect();
+        let imports: Vec<_> = library_doc_imports(&program, source, &syntax).collect();
         assert_eq!(imports.len(), 2);
         assert_eq!(uri_value(&imports[0].literal), "dart:collection");
         assert_eq!(uri_value(&imports[1].literal), "dart:async");
@@ -241,8 +243,10 @@ mod tests {
     #[test]
     fn doc_import_spans_preserve_tabs_crlf_and_block_offsets() {
         let source = "\t/**\r\n\t * @docImport r'dart:collection';\r\n\t * @docImport 'dart:async';\r\n\t */\r\nlibrary;\r\n";
-        let falcon_dart_parser::ParseResult { program, .. } = falcon_dart_parser::parse(source);
-        let imports: Vec<_> = library_doc_imports(&program, source).collect();
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = falcon_dart_parser::parse(source);
+        let imports: Vec<_> = library_doc_imports(&program, source, &syntax).collect();
         assert_eq!(imports.len(), 2);
         assert_eq!(
             &source[imports[0].span.start..imports[0].span.end],
@@ -257,8 +261,10 @@ mod tests {
     #[test]
     fn doc_import_keyword_requires_a_space_and_maps_extra_whitespace() {
         let source = "/// @docImport\t'dart:io';\n/// @docImport   'dart:async';\nlibrary;\n";
-        let falcon_dart_parser::ParseResult { program, .. } = falcon_dart_parser::parse(source);
-        let imports: Vec<_> = library_doc_imports(&program, source).collect();
+        let falcon_dart_parser::ParseResult {
+            program, syntax, ..
+        } = falcon_dart_parser::parse(source);
+        let imports: Vec<_> = library_doc_imports(&program, source, &syntax).collect();
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].span.start, source.rfind("Import").unwrap() + 2);
         assert_eq!(imports[0].span.end - imports[0].span.start, 20);
@@ -268,15 +274,34 @@ mod tests {
     fn doc_import_span_excludes_trailing_comment_trivia() {
         let source = "/// @docImport 'dart:async'; /* trailing trivia */\r\nlibrary;\r\n";
         let falcon_dart_parser::ParseResult {
-            program, errors, ..
+            program,
+            errors,
+            syntax,
         } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
-        let imports: Vec<_> = library_doc_imports(&program, source).collect();
+        let imports: Vec<_> = library_doc_imports(&program, source, &syntax).collect();
         assert_eq!(imports.len(), 1);
         assert_eq!(
             &source[imports[0].span.start..imports[0].span.end],
             "Import 'dart:async';"
         );
+    }
+
+    #[test]
+    fn doc_imports_require_attachment_to_library_directive() {
+        for source in [
+            "/// @docImport 'dart:async';\n/** replacement */\nlibrary;",
+            "/** @docImport 'dart:async'; */\n/// replacement\nlibrary;",
+        ] {
+            let falcon_dart_parser::ParseResult {
+                program, syntax, ..
+            } = falcon_dart_parser::parse(source);
+            assert_eq!(
+                library_doc_imports(&program, source, &syntax).count(),
+                0,
+                "{source}"
+            );
+        }
     }
 
     #[test]

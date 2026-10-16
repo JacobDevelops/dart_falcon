@@ -380,7 +380,7 @@ impl IdentityIndex {
         packages: &[PackageIdentity],
         external: Option<ExternalSources<'_>>,
     ) -> Self {
-        Self::build_layer(files, sources, packages, external, None)
+        Self::build_layer(files, sources, packages, external, None, None)
     }
 
     /// Build the immutable external layer once, with edit-stable file/library IDs.
@@ -441,21 +441,29 @@ impl IdentityIndex {
         external: ExternalSources<'_>,
         base: Arc<Self>,
     ) -> Self {
-        Self::build_layer(files, sources, packages, Some(external), Some(base))
+        Self::build_layer(files, sources, packages, Some(external), Some(base), None)
     }
 
-    fn build_layer(
+    /// Build project facts using an optional immutable external index and grouping.
+    /// `base` must come from `build_external`; `grouping` must describe `files`
+    /// in the same order, including any promoted companions.
+    pub fn build_layer(
         files: &[IdentitySource<'_>],
         sources: &[&str],
         packages: &[PackageIdentity],
         external: Option<ExternalSources<'_>>,
         base: Option<Arc<Self>>,
+        grouping: Option<&super::LibraryGrouping>,
     ) -> Self {
-        let grouped_input: Vec<(PathBuf, &Program)> = files
-            .iter()
-            .map(|file| (file.path.to_path_buf(), file.program))
-            .collect();
-        let grouping = group_libraries(&grouped_input);
+        let owned_grouping = grouping.is_none().then(|| {
+            let files: Vec<_> = files
+                .iter()
+                .map(|file| (file.path.to_path_buf(), file.program))
+                .collect();
+            group_libraries(&files)
+        });
+        let grouping = grouping.or(owned_grouping.as_ref()).unwrap();
+        debug_assert_eq!(grouping.len(), files.len());
 
         let mut root_to_library = HashMap::new();
         let mut libraries = Vec::<Library>::new();
@@ -545,7 +553,7 @@ impl IdentityIndex {
                 {
                     library.extensions.insert(interner.intern(&name.name));
                 }
-                for (name, identity) in declaration_identities(declaration) {
+                declaration_identities(declaration, |name, identity| {
                     let name = interner.intern(name);
                     let accessor = match declaration {
                         TopLevelDecl::Function(function) => match function.kind {
@@ -566,11 +574,11 @@ impl IdentityIndex {
                             if accessor == 1 {
                                 *file = FileId(index);
                             }
-                            continue;
+                            return;
                         }
                     }
                     merge(&mut library.declarations, name, identity, FileId(index));
-                }
+                });
             }
         }
         drop(interner);
@@ -1447,7 +1455,7 @@ impl IdentityIndex {
         {
             return None;
         }
-        let mut candidates: Vec<_> = self
+        let mut candidates = self
             .visible_imports(unit, prefix, name)
             .filter_map(|import| match import.target {
                 ImportTarget::Library(target) => self.exported_declaration(
@@ -1458,9 +1466,9 @@ impl IdentityIndex {
                 ),
                 _ => None,
             })
-            .collect();
-        if prefix.is_none() && candidates.is_empty() {
-            candidates.extend(self.implicit_core(unit, name, NameIdentity::Value));
+            .peekable();
+        if prefix.is_none() && candidates.peek().is_none() {
+            return self.implicit_core(unit, name, NameIdentity::Value);
         }
         unique_declaration(candidates)
     }
@@ -1487,15 +1495,14 @@ impl IdentityIndex {
         {
             return None;
         }
-        let candidates = self
-            .visible_imports(unit, prefix, name)
-            .filter_map(|import| match &import.target {
-                ImportTarget::Sdk(uri) => sdk_type(uri, name).or_else(|| sdk_member(uri, name)),
-                ImportTarget::Package(package) => package_member(package, name),
-                ImportTarget::Library(target) => self.exported_any(*target, name),
-                ImportTarget::Unknown => None,
-            })
-            .collect();
+        let candidates =
+            self.visible_imports(unit, prefix, name)
+                .filter_map(|import| match &import.target {
+                    ImportTarget::Sdk(uri) => sdk_type(uri, name).or_else(|| sdk_member(uri, name)),
+                    ImportTarget::Package(package) => package_member(package, name),
+                    ImportTarget::Library(target) => self.exported_any(*target, name),
+                    ImportTarget::Unknown => None,
+                });
         match unique_declaration(candidates)? {
             DeclarationIdentity::Project { library, name } => {
                 let unit = self.get(library);
@@ -1533,23 +1540,22 @@ impl IdentityIndex {
         {
             return None;
         }
-        let mut candidates: Vec<_> = self
-            .visible_imports(unit, prefix, name)
-            .filter_map(|import| match &import.target {
-                ImportTarget::Sdk(uri) => sdk_member(uri, name),
-                ImportTarget::Library(target) => self
-                    .exported_any(*target, name)
-                    .filter(|identity| matches!(identity, DeclarationIdentity::Sdk { .. })),
-                _ => None,
-            })
-            .collect();
-        if prefix.is_none() && unit.implicit_core {
-            candidates.extend(match self.core {
+        let candidates =
+            self.visible_imports(unit, prefix, name)
+                .filter_map(|import| match &import.target {
+                    ImportTarget::Sdk(uri) => sdk_member(uri, name),
+                    ImportTarget::Library(target) => self
+                        .exported_any(*target, name)
+                        .filter(|identity| matches!(identity, DeclarationIdentity::Sdk { .. })),
+                    _ => None,
+                });
+        let core = (prefix.is_none() && unit.implicit_core)
+            .then(|| match self.core {
                 Some(core) => self.exported_any(core, name),
                 None => sdk_member("dart:core", name),
-            });
-        }
-        unique_declaration(candidates)
+            })
+            .flatten();
+        unique_declaration(candidates.chain(core))
     }
 
     /// `name` as exported by `library` in either namespace.
@@ -1656,16 +1662,18 @@ impl IdentityIndex {
                 .then(|| self.declared(library, name))
                 .flatten();
         }
-        let mut candidates = Vec::new();
-        for import in self.visible_imports(unit, None, name) {
-            if self.target_may_hide_declaration(&import.target, name) {
-                return None;
-            }
-            candidates.extend(self.target_declaration(&import.target, name));
+        if self
+            .visible_imports(unit, None, name)
+            .any(|import| self.target_may_hide_declaration(&import.target, name))
+        {
+            return None;
         }
-        // Explicitly imported declarations shadow implicitly imported `dart:core`.
-        if candidates.is_empty() {
-            candidates.extend(self.implicit_core(unit, name, NameIdentity::Type));
+        let mut candidates = self
+            .visible_imports(unit, None, name)
+            .filter_map(|import| self.target_declaration(&import.target, name))
+            .peekable();
+        if candidates.peek().is_none() {
+            return self.implicit_core(unit, name, NameIdentity::Type);
         }
         unique_declaration(candidates)
     }
@@ -1680,14 +1688,16 @@ impl IdentityIndex {
         if unit.declarations.contains_key(prefix) {
             return None;
         }
-        let mut candidates = Vec::new();
-        for import in self.visible_imports(unit, Some(prefix), name) {
-            if self.target_may_hide_declaration(&import.target, name) {
-                return None;
-            }
-            candidates.extend(self.target_declaration(&import.target, name));
+        if self
+            .visible_imports(unit, Some(prefix), name)
+            .any(|import| self.target_may_hide_declaration(&import.target, name))
+        {
+            return None;
         }
-        unique_declaration(candidates)
+        unique_declaration(
+            self.visible_imports(unit, Some(prefix), name)
+                .filter_map(|import| self.target_declaration(&import.target, name)),
+        )
     }
 
     fn target_declaration(&self, target: &ImportTarget, name: &str) -> Option<DeclarationIdentity> {
@@ -1803,27 +1813,32 @@ impl IdentityIndex {
             visiting.remove(&library);
             return None;
         }
-        let candidates = unit
-            .exports
-            .iter()
-            .filter(|export| allows(&export.combinators, name))
-            .filter_map(|export| match &export.target {
-                ImportTarget::Library(target) => {
-                    self.exported_declaration(*target, name, namespace, visiting)
-                }
-                ImportTarget::Sdk(uri) if namespace == NameIdentity::Type => sdk_type(uri, name),
-                ImportTarget::Package(package) if namespace == NameIdentity::Type => {
-                    package_type(package, name)
-                }
-                ImportTarget::Sdk(uri) if namespace == NameIdentity::Value => sdk_member(uri, name),
-                ImportTarget::Package(package) if namespace == NameIdentity::Value => {
-                    package_member(package, name).filter(|_| package_type(package, name).is_none())
-                }
-                _ => None,
-            })
-            .collect();
+        let candidate = unique_declaration(
+            unit.exports
+                .iter()
+                .filter(|export| allows(&export.combinators, name))
+                .filter_map(|export| match &export.target {
+                    ImportTarget::Library(target) => {
+                        self.exported_declaration(*target, name, namespace, visiting)
+                    }
+                    ImportTarget::Sdk(uri) if namespace == NameIdentity::Type => {
+                        sdk_type(uri, name)
+                    }
+                    ImportTarget::Package(package) if namespace == NameIdentity::Type => {
+                        package_type(package, name)
+                    }
+                    ImportTarget::Sdk(uri) if namespace == NameIdentity::Value => {
+                        sdk_member(uri, name)
+                    }
+                    ImportTarget::Package(package) if namespace == NameIdentity::Value => {
+                        package_member(package, name)
+                            .filter(|_| package_type(package, name).is_none())
+                    }
+                    _ => None,
+                }),
+        );
         visiting.remove(&library);
-        unique_declaration(candidates)
+        candidate
     }
 
     fn exported(
@@ -2132,22 +2147,22 @@ fn deprecation_annotations(
     })
 }
 
-fn declaration_identities(declaration: &TopLevelDecl) -> Vec<(&str, NameIdentity)> {
+fn declaration_identities(declaration: &TopLevelDecl, mut visit: impl FnMut(&str, NameIdentity)) {
     match declaration {
-        TopLevelDecl::Class(x) => vec![(&x.name.name, NameIdentity::Type)],
-        TopLevelDecl::ClassTypeAlias(x) => vec![(&x.name.name, NameIdentity::Type)],
-        TopLevelDecl::Mixin(x) => vec![(&x.name.name, NameIdentity::Type)],
-        TopLevelDecl::MixinClass(x) => vec![(&x.name.name, NameIdentity::Type)],
-        TopLevelDecl::Enum(x) => vec![(&x.name.name, NameIdentity::Type)],
-        TopLevelDecl::ExtensionType(x) => vec![(&x.name.name, NameIdentity::Type)],
-        TopLevelDecl::TypeAlias(x) => vec![(&x.name.name, NameIdentity::Type)],
-        TopLevelDecl::Function(x) => vec![(&x.name.name, NameIdentity::Value)],
-        TopLevelDecl::Variable(x) => x
-            .declarators
-            .iter()
-            .map(|declarator| (declarator.name.name.as_str(), NameIdentity::Value))
-            .collect(),
-        TopLevelDecl::Extension(_) | TopLevelDecl::Error(_) => Vec::new(),
+        TopLevelDecl::Class(x) => visit(&x.name.name, NameIdentity::Type),
+        TopLevelDecl::ClassTypeAlias(x) => visit(&x.name.name, NameIdentity::Type),
+        TopLevelDecl::Mixin(x) => visit(&x.name.name, NameIdentity::Type),
+        TopLevelDecl::MixinClass(x) => visit(&x.name.name, NameIdentity::Type),
+        TopLevelDecl::Enum(x) => visit(&x.name.name, NameIdentity::Type),
+        TopLevelDecl::ExtensionType(x) => visit(&x.name.name, NameIdentity::Type),
+        TopLevelDecl::TypeAlias(x) => visit(&x.name.name, NameIdentity::Type),
+        TopLevelDecl::Function(x) => visit(&x.name.name, NameIdentity::Value),
+        TopLevelDecl::Variable(x) => {
+            for declarator in &x.declarators {
+                visit(&declarator.name.name, NameIdentity::Value);
+            }
+        }
+        TopLevelDecl::Extension(_) | TopLevelDecl::Error(_) => {}
     }
 }
 
@@ -2165,18 +2180,24 @@ fn merge(
 /// The unique candidate; when non-SDK candidates are present, `dart:`
 /// declarations are dropped first (a name imported from both a `dart:`
 /// library and another library denotes the other library's declaration).
-fn unique_declaration(mut candidates: Vec<DeclarationIdentity>) -> Option<DeclarationIdentity> {
-    if candidates
-        .iter()
-        .any(|candidate| !matches!(candidate, DeclarationIdentity::Sdk { .. }))
-    {
-        candidates.retain(|candidate| !matches!(candidate, DeclarationIdentity::Sdk { .. }));
+fn unique_declaration(
+    candidates: impl IntoIterator<Item = DeclarationIdentity>,
+) -> Option<DeclarationIdentity> {
+    let mut sdk = None;
+    let mut other = None;
+    for candidate in candidates {
+        let slot = if matches!(candidate, DeclarationIdentity::Sdk { .. }) {
+            &mut sdk
+        } else {
+            &mut other
+        };
+        match slot {
+            None => *slot = Some(Some(candidate)),
+            Some(Some(first)) if *first != candidate => *slot = Some(None),
+            _ => {}
+        }
     }
-    let mut candidates = candidates.into_iter();
-    let first = candidates.next()?;
-    candidates
-        .all(|candidate| candidate == first)
-        .then_some(first)
+    other.or(sdk).flatten()
 }
 
 /// Types the `dart:core` namespace provides without a source declaration.
@@ -2220,90 +2241,62 @@ pub struct DocImport<'s> {
 pub fn library_doc_imports<'s>(
     program: &Program,
     source: &'s str,
+    syntax: &'s falcon_syntax::SyntaxStore,
 ) -> impl Iterator<Item = DocImport<'s>> {
-    use falcon_dart_parser::lexer::Lexer;
-    use falcon_syntax::TokenKind;
-
-    let header = program
+    let end = program
         .library_directive
         .as_ref()
-        .and_then(|directive| source.get(..directive.span.start))
-        .unwrap_or_default();
-    // Ordinary comments and blank lines do not detach documentation, but a
-    // preceding declaration or directive does.
-    let mut lexer = Lexer::new(header);
-    let mut attached_start = 0;
-    let mut previous_block = false;
-    loop {
-        let token = lexer.next_token();
-        if token.kind == TokenKind::Eof {
-            break;
-        }
-        if !token.is_trivia() {
-            attached_start = token.offset() + token.len();
-            previous_block = false;
-        } else if token.kind == TokenKind::DocComment {
-            let is_block = token.text(header).starts_with("/**");
-            if is_block || previous_block {
-                attached_start = token.offset();
-            }
-            previous_block = is_block;
-        }
-    }
-    let header = &header[attached_start..];
-    let mut lexer = Lexer::new(header);
+        .map_or(0, |directive| directive.span.start);
+    let start = syntax
+        .documentation_start(Span::new(0, end), source)
+        .unwrap_or(end);
     let mut import_source = String::new();
-    std::iter::from_fn(move || {
-        let token = lexer.next_token();
-        (token.kind != TokenKind::Eof).then_some(token)
-    })
-    .filter(|token| token.kind == TokenKind::DocComment)
-    .flat_map(move |token| {
-        token
-            .text(header)
-            .split_inclusive('\n')
-            .scan(token.offset(), move |offset, line| {
-                let start = *offset + attached_start;
-                *offset += line.len();
-                Some((start, line))
-            })
-    })
-    .filter_map(move |(start, line)| {
-        let text = line.trim_start();
-        let text = text
-            .strip_prefix("///")
-            .or_else(|| text.strip_prefix("/**"))
-            .or_else(|| text.strip_prefix('*'))
-            .unwrap_or(text)
-            .trim_start();
-        let rest = text.strip_prefix("@docImport")?;
-        if !rest.starts_with(' ') {
-            return None;
-        }
-        let rest = rest.trim_start();
-        let directive_start = start + line.len() - rest.len() - "import ".len();
-        // Let the Dart lexer/parser handle quoting, escaping and adjacent
-        // literals rather than interpreting comment text as a string grammar.
-        import_source.clear();
-        import_source.push_str("import ");
-        import_source.push_str(rest);
-        let falcon_dart_parser::ParseResult {
-            program: parsed, ..
-        } = falcon_dart_parser::parse(&import_source);
-        let import = parsed.imports.into_iter().next()?;
-        let (first, first_span) = import.uri.segments().next()?;
-        let content_start = first_span.start.checked_sub("import ".len())? + first.content_offset;
-        let uri = rest.get(content_start..content_start + first.content.len())?;
-        let directive_end = import.span.end;
-        Some(DocImport {
-            uri,
-            span: Span::new(
-                directive_start,
-                start + line.len() - rest.len() + directive_end - "import ".len(),
-            ),
-            literal: import.uri,
+    syntax
+        .tokens_in(Span::new(start, end))
+        .filter(|token| token.kind == falcon_syntax::TokenKind::DocComment)
+        .flat_map(move |token| {
+            token
+                .text(source)
+                .split_inclusive('\n')
+                .scan(token.offset(), move |offset, line| {
+                    let start = *offset;
+                    *offset += line.len();
+                    Some((start, line))
+                })
         })
-    })
+        .filter_map(move |(start, line)| {
+            let text = line.trim_start();
+            let text = text
+                .strip_prefix("///")
+                .or_else(|| text.strip_prefix("/**"))
+                .or_else(|| text.strip_prefix('*'))
+                .unwrap_or(text)
+                .trim_start();
+            let rest = text.strip_prefix("@docImport")?;
+            if !rest.starts_with(' ') {
+                return None;
+            }
+            let rest = rest.trim_start();
+            let directive_start = start + line.len() - rest.len() - "import ".len();
+            // Let the Dart lexer/parser handle quoting, escaping and adjacent
+            // literals rather than interpreting comment text as a string grammar.
+            import_source.clear();
+            import_source.push_str("import ");
+            import_source.push_str(rest);
+            let falcon_dart_parser::ParseResult {
+                program: parsed, ..
+            } = falcon_dart_parser::parse(&import_source);
+            let import = parsed.imports.into_iter().next()?;
+            let (first, first_span) = import.uri.segments().next()?;
+            let content_start =
+                first_span.start.checked_sub("import ".len())? + first.content_offset;
+            let uri = rest.get(content_start..content_start + first.content.len())?;
+            Some(DocImport {
+                uri,
+                span: Span::new(directive_start, directive_start + import.span.end),
+                literal: import.uri,
+            })
+        })
 }
 
 /// Two namespaces' answers for one name: a name both supply is still found,
@@ -2691,6 +2684,27 @@ fn package_member(package: &str, name: &str) -> Option<DeclarationIdentity> {
 mod tests {
     use super::*;
     use falcon_dart_parser::parse;
+
+    #[test]
+    fn unique_candidates_preserve_ambiguity_and_non_sdk_precedence() {
+        let sdk = DeclarationIdentity::sdk("dart:core", "Object");
+        let other_sdk = DeclarationIdentity::sdk("dart:async", "Future");
+        let package = DeclarationIdentity::package("example", "Object");
+        let other_package = DeclarationIdentity::package("other", "Object");
+        assert_eq!(unique_declaration([]), None);
+        assert_eq!(
+            unique_declaration([sdk.clone(), sdk.clone()]),
+            Some(sdk.clone())
+        );
+        assert_eq!(unique_declaration([sdk.clone(), other_sdk.clone()]), None);
+        for candidates in [
+            [sdk.clone(), other_sdk.clone(), package.clone()],
+            [package.clone(), sdk.clone(), other_sdk.clone()],
+        ] {
+            assert_eq!(unique_declaration(candidates), Some(package.clone()));
+        }
+        assert_eq!(unique_declaration([package, other_package, sdk]), None);
+    }
 
     #[test]
     fn package_copies_share_identity_but_distinct_libraries_still_collide() {
