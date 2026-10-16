@@ -56,7 +56,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_local_var, walk_program, walk_stmt};
 
-use crate::lint::declarations::members_of;
+use crate::lint::declarations::{declaration_initializers, members_of};
 use crate::lint::lexical_usage::collection_for_inits;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::resolve::lexical_usage::local_declarations;
@@ -79,7 +79,9 @@ impl Rule for UnnecessaryLambdas {
             stable_locals: stable.0,
             optional_locals: stable.1,
             late_fields: late_fields(program),
-            typed_contexts: declaration_initializers(program),
+            typed_contexts: declaration_initializers(program)
+                .map(|initializer| (initializer.span().start, initializer.span().end))
+                .collect(),
         };
         visit_program(&mut collector, program, state);
         collector.diags
@@ -194,22 +196,6 @@ fn late_fields(program: &Program) -> HashSet<String> {
         .flatten()
         .map(|declarator| declarator.name.name.clone())
         .collect()
-}
-
-/// Initializers of top-level variables and fields.
-fn declaration_initializers(program: &Program) -> HashSet<(usize, usize)> {
-    let mut spans = HashSet::new();
-    for declaration in &program.declarations {
-        if let TopLevelDecl::Variable(variable) = declaration {
-            spans.extend(initializer_spans(&variable.declarators));
-        }
-        for member in members_of(declaration).unwrap_or_default() {
-            if let ClassMember::Field(field) = member {
-                spans.extend(initializer_spans(&field.declarators));
-            }
-        }
-    }
-    spans
 }
 
 fn initializer_spans(declarators: &[VarDeclarator]) -> impl Iterator<Item = (usize, usize)> + '_ {

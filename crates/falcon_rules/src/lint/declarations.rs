@@ -1,11 +1,13 @@
-//! Borrowed member extraction and declaration-header positions shared by
-//! declaration-agnostic lint scans. Declaration-specific policies still
-//! inspect names, bases, and type parameters themselves.
+//! Borrowed member and initializer extraction and declaration-header positions
+//! shared by declaration-agnostic lint scans. Declaration-specific policies
+//! still inspect names, bases, and type parameters themselves.
 
 use std::collections::HashSet;
 
 use falcon_analyze::AnalyzeContext;
-use falcon_syntax::ast::{Annotation, ClassMember, OperatorDecl, Span, TopLevelDecl};
+use falcon_syntax::ast::{
+    Annotation, ClassMember, Expr, OperatorDecl, Program, Span, TopLevelDecl,
+};
 
 /// Comments after metadata take precedence over comments before annotations.
 pub(crate) fn documented_node_span(
@@ -98,6 +100,31 @@ pub(crate) fn members_of(declaration: &TopLevelDecl) -> Option<&[ClassMember]> {
         TopLevelDecl::ExtensionType(node) => Some(&node.members),
         _ => None,
     }
+}
+
+/// Top-level variable and field initializers, in declaration/declarator order.
+/// Does not descend into expressions, local declarations, or constructor initializers.
+pub(crate) fn declaration_initializers(program: &Program) -> impl Iterator<Item = &Expr> {
+    program
+        .declarations
+        .iter()
+        .flat_map(|declaration| {
+            let variables = match declaration {
+                TopLevelDecl::Variable(variable) => variable.declarators.as_slice(),
+                _ => &[],
+            };
+            variables.iter().chain(
+                members_of(declaration)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|member| match member {
+                        ClassMember::Field(field) => Some(&field.declarators),
+                        _ => None,
+                    })
+                    .flatten(),
+            )
+        })
+        .filter_map(|declarator| declarator.initializer.as_ref())
 }
 
 /// Names of the fields, methods, getters, and setters `members` declare: the

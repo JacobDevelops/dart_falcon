@@ -34,7 +34,7 @@ use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
-use crate::lint::declarations::members_of;
+use crate::lint::declarations::declaration_initializers as all_declaration_initializers;
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
@@ -61,21 +61,14 @@ impl Rule for UnnecessaryNullChecks {
     }
 }
 
-/// Initializers of top-level variables and fields; the walker supplies their
-/// declared type as the expected type.
+/// Null assertions directly initializing top-level variables and fields; the
+/// walker supplies their declared type as the expected type. Return the inner
+/// assertion span when the initializer is parenthesized.
 pub(crate) fn declaration_initializers(program: &Program) -> Vec<Span> {
-    let mut spans = Vec::new();
-    for declaration in &program.declarations {
-        if let TopLevelDecl::Variable(variable) = declaration {
-            spans.extend(null_assert_initializers(&variable.declarators));
-        }
-        for member in members_of(declaration).unwrap_or_default() {
-            if let ClassMember::Field(field) = member {
-                spans.extend(null_assert_initializers(&field.declarators));
-            }
-        }
-    }
-    spans
+    all_declaration_initializers(program)
+        .filter(|initializer| matches!(initializer.unparenthesized(), Expr::NullAssert { .. }))
+        .map(|initializer| *initializer.unparenthesized().span())
+        .collect()
 }
 
 fn null_assert_initializers(declarators: &[VarDeclarator]) -> impl Iterator<Item = Span> + '_ {
