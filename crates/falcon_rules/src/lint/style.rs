@@ -79,7 +79,6 @@ pub mod no_runtime_type_to_string;
 pub mod non_constant_identifier_names;
 pub mod omit_local_variable_types;
 pub mod only_throw_errors;
-pub mod package_prefixed_library_names;
 pub mod parameter_assignments;
 pub mod prefer_adjacent_string_concatenation;
 pub mod prefer_asserts_in_initializer_lists;

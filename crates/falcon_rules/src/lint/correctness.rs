@@ -44,7 +44,6 @@ pub mod unnecessary_flutter_imports;
 pub mod unnecessary_nullable_return_type;
 pub mod unnecessary_statements;
 pub mod unrelated_type_equality_checks;
-pub mod unsafe_html;
 pub mod use_build_context_synchronously;
 pub mod use_key_in_widget_constructors;
 pub mod use_once_constructors_once_provider;

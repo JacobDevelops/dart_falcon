@@ -9,7 +9,6 @@ use falcon_rules::lint::correctness::avoid_unused_parameters::AvoidUnusedParamet
 use falcon_rules::lint::correctness::no_adjacent_strings_in_list::NoAdjacentStringsInList;
 use falcon_rules::lint::correctness::null_check_on_nullable_type_parameter::NullCheckOnNullableTypeParameter;
 use falcon_rules::lint::correctness::unnecessary_statements::UnnecessaryStatements;
-use falcon_rules::lint::correctness::unsafe_html::UnsafeHtml;
 use falcon_rules::lint::style::always_put_required_named_parameters_first::AlwaysPutRequiredNamedParametersFirst;
 use falcon_rules::lint::style::prefer_asserts_with_message::PreferAssertsWithMessage;
 use falcon_rules::lint::style::prefer_final_parameters::PreferFinalParameters;
@@ -130,17 +129,6 @@ fn wildcard_pattern_grouping_does_not_hide_expression_grouping() {
             "void f(Object? value) { if (value case (_)) {} switch (value) { case (_): break; } }"
         )
         .is_empty()
-    );
-}
-
-#[test]
-fn cascade_index_assignment_is_not_a_property_assignment() {
-    assert_eq!(
-        reports(
-            &UnsafeHtml,
-            "void f(dynamic target, int href) { target.. /* [ */ href = 'x'; target..[href] = 'x'; target..[( /* why */ href)] = 'x'; }"
-        ),
-        [".. /* [ */ href = 'x'"]
     );
 }
 

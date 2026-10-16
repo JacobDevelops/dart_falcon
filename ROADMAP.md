@@ -8,9 +8,9 @@ falcon is pre-1.0. This tracks shipped milestones and what's left, not a release
 
 ### Shipped
 
-All 145 section-1 official lints are registered. Against `dart analyze` 3.13.5 on 34 corpora, they recorded 421,953 agreements, 0 false negatives, and 36 false positives. All 36 are `package_prefixed_library_names`, which upstream no longer enforces. `implicit_reopen` deliberately differs from the analyzer's declaration-order bug.
+All 142 section-1 official lints are registered. Against `dart analyze` 3.13.5, they match on 34 corpora (421,953 agreements) and 9 additional projects: dio, bloc, riverpod, flame, drift, freezed, get_it, mobx, and jfit (206,914 agreements). Both sets have zero false positives, false negatives, or range mismatches, including UTF-16 columns and diagnostic lengths. Three obsolete upstream rules are no longer shipped; see `docs/rule-catalog-1.0.md`. `implicit_reopen` deliberately differs from the analyzer's declaration-order bug.
 
-All 145 have `recommended: false` in falcon, including the 25 upstream preset members. Enable them explicitly or migrate an analyzer config; upstream preset membership isn't falcon default enablement.
+All 142 have `recommended: false` in falcon, including the 25 section-1 upstream preset members. Enable them explicitly or migrate rules listed directly under `linter.rules` in an analyzer config. Migration doesn't expand `include:` presets.
 
 ### Remaining
 
@@ -22,7 +22,7 @@ All 145 have `recommended: false` in falcon, including the 25 upstream preset me
 - **New domains.** Alongside `flutter`, add `test`, `bloc`, `riverpod`,
   `provider`, `flutter_hooks`, and `equatable` domains (from the DCM survey),
   activated per file/framework so framework users get targeted checks.
-- **Cross-file rules.** Eight ship today: `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, `package-api-docs`, and `sort-pub-dependencies`. The 11 planned additions are Tier 1 must-haves `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, `banned-imports`; Tier 2 `unused-assets`, `unused-l10n`, `unexported-public-api`; and four Tier 3 post-1.0 rules.
+- **Cross-file rules.** Seven ship today: `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The 11 planned additions are Tier 1 must-haves `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, `banned-imports`; Tier 2 `unused-assets`, `unused-l10n`, `unexported-public-api`; and four Tier 3 post-1.0 rules.
 - **e2e OSS corpus.** A `cargo xtask e2e` harness running falcon against pinned,
   shallow clones of large real-world Dart/Flutter repos (immich, AppFlowy,
   flutter/packages, flame, LocalSend, bloc, riverpod, Wonderous, flutter/samples,

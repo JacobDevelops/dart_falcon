@@ -46,9 +46,6 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `style` group.",
               "properties": {
-                "package-api-docs": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
                 "package-names": {
                   "$ref": "#/definitions/ruleConfig"
                 }
@@ -329,9 +326,6 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "unrelated-type-equality-checks": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "unsafe-html": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "use-build-context-synchronously": {
@@ -630,9 +624,6 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "only-throw-errors": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "package-prefixed-library-names": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "parameter-assignments": {
@@ -1069,9 +1060,6 @@
               "additionalProperties": false,
               "description": "Per-rule severity levels for the `style` group.",
               "properties": {
-                "package-api-docs": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
                 "package-names": {
                   "$ref": "#/definitions/ruleConfig"
                 }
@@ -1384,9 +1372,6 @@
                 "unrelated-type-equality-checks": {
                   "$ref": "#/definitions/ruleConfig"
                 },
-                "unsafe-html": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
                 "use-build-context-synchronously": {
                   "$ref": "#/definitions/ruleConfig"
                 },
@@ -1683,9 +1668,6 @@
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "only-throw-errors": {
-                  "$ref": "#/definitions/ruleConfig"
-                },
-                "package-prefixed-library-names": {
                   "$ref": "#/definitions/ruleConfig"
                 },
                 "parameter-assignments": {

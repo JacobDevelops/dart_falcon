@@ -1469,13 +1469,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("library_names"),
     ),
-    RuleMeta::file::<lint::style::package_prefixed_library_names::PackagePrefixedLibraryNames>(
-        "package-prefixed-library-names",
-        RuleGroup::Style,
-        NONE,
-        false,
-        RuleSource::Lints("package_prefixed_library_names"),
-    ),
     RuleMeta::file::<lint::style::unnecessary_library_directive::UnnecessaryLibraryDirective>(
         "unnecessary-library-directive",
         RuleGroup::Style,
@@ -2146,13 +2139,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         false,
         RuleSource::Lints("use_test_throws_matchers"),
     ),
-    RuleMeta::resolved::<lint::correctness::unsafe_html::UnsafeHtml>(
-        "unsafe-html",
-        RuleGroup::Correctness,
-        NONE,
-        false,
-        RuleSource::Lints("unsafe_html"),
-    ),
     RuleMeta::file::<lint::correctness::always_use_package_imports::AlwaysUsePackageImports>(
         "always-use-package-imports",
         RuleGroup::Correctness,
@@ -2189,13 +2175,6 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         NONE,
         false,
         RuleSource::Lints("do_not_use_environment"),
-    ),
-    RuleMeta::cross_file::<cross_file::package_api_docs::PackageApiDocs>(
-        "package-api-docs",
-        RuleGroup::Style,
-        NONE,
-        false,
-        RuleSource::Lints("package_api_docs"),
     ),
     RuleMeta::resolved::<lint::style::public_member_api_docs::PublicMemberApiDocs>(
         "public-member-api-docs",

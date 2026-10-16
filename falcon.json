@@ -97,7 +97,6 @@
         "invalid-case-patterns": "off",
         "comment-references": "off",
         "diagnostic-describe-all-properties": "off",
-        "unsafe-html": "off",
         "always-use-package-imports": "off",
         "prefer-relative-imports": "off",
         "deprecated-member-use-from-same-package": "off"
@@ -209,7 +208,6 @@
         "combinators-ordering": "off",
         "directives-ordering": "off",
         "library-names": "off",
-        "package-prefixed-library-names": "off",
         "unnecessary-library-directive": "off",
         "always-put-control-body-on-new-line": "off",
         "require-trailing-commas": "off",
@@ -321,8 +319,7 @@
         "sort-pub-dependencies": "off"
       },
       "style": {
-        "package-names": "off",
-        "package-api-docs": "off"
+        "package-names": "off"
       },
       "suspicious": {
         "secure-pubspec-urls": "off"

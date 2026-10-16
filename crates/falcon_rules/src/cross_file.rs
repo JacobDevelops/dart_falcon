@@ -7,7 +7,6 @@
 //! package/pubspec discovery, directive-URI resolution, and path normalization.
 
 pub mod depend_on_referenced_packages;
-pub mod package_api_docs;
 pub mod package_names;
 pub mod secure_pubspec_urls;
 pub mod sort_pub_dependencies;

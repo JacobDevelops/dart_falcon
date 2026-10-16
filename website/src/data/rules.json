@@ -2326,12 +2326,12 @@
         "message": "Avoid wrapping a field in trivial getters and setters; use a public field."
       }
     ],
-    "docs": "Flags a trivial getter/setter pair that only reads and writes a private field.\n\nWhen a getter merely returns `_x` and a setter merely assigns `_x` with no\nvalidation or side effect, the pair buys nothing over a public field — Dart\nlets you later replace a public field with a getter/setter without changing\ncall sites, so the wrapping is premature. The rule fires only when a getter\nand setter share a name, both target the same backing field, and that field\nis private (has a leading underscore).",
+    "docs": "Flags a trivial getter/setter pair that only reads and writes a private field.\n\nWhen a getter merely returns `_x` and a setter merely assigns `_x` with no\nvalidation or side effect, the pair buys nothing over a public field — Dart\nlets you later replace a public field with a getter/setter without changing\ncall sites, so the wrapping is premature. The rule fires only when a getter\nand setter share a name, both target the same backing field, and that field\nis private (has a leading underscore). Metadata on either accessor exempts\nthe pair.",
     "domains": [],
     "examples": {
       "bad": "// Trivial getter/setter pairs that merely expose a private field.\nclass A {\n  int _value = 0;\n  int get value => _value;\n  set value(int v) => _value = v;\n}\n\nclass B {\n  String _name = '';\n  String get name { return _name; }\n  set name(String v) { _name = v; }\n}\n\nclass C {\n  bool _flag = false;\n  bool get flag => _flag;\n  set flag(bool v) { _flag = v; }\n}\n\nclass D {\n  double _size = 0;\n  double get size => this._size;\n  set size(double v) { this._size = v; }\n}\n\nclass E {\n  num _count = 0;\n  num get count => _count;\n  set count(num v) => _count = v;\n}",
       "crossFile": null,
-      "good": "// Accessors with real logic, lone accessors, or plain public fields.\nclass A {\n  int _value = 0;\n  int get value => _value * 2;\n  set value(int v) => _value = v;\n}\n\nclass B {\n  int _n = 0;\n  int get n => _n;\n}\n\nclass C {\n  int _c = 0;\n  set c(int v) {\n    _c = v;\n  }\n}\n\nclass D {\n  int _d = 0;\n  int get d => _d;\n  set d(int v) {\n    _d = v < 0 ? 0 : v;\n  }\n}\n\nclass E {\n  int value = 0;\n}\n\nclass F {\n  int _f = 0;\n  int get f => _f;\n  set f(int v) {\n    _f = v;\n    print(v);\n  }\n}"
+      "good": "// Accessors with real logic, lone accessors, or plain public fields.\nclass A {\n  int _value = 0;\n  int get value => _value * 2;\n  set value(int v) => _value = v;\n}\n\nclass B {\n  int _n = 0;\n  int get n => _n;\n}\n\nclass C {\n  int _c = 0;\n  set c(int v) {\n    _c = v;\n  }\n}\n\nclass D {\n  int _d = 0;\n  int get d => _d;\n  set d(int v) {\n    _d = v < 0 ? 0 : v;\n  }\n}\n\nclass E {\n  int value = 0;\n}\n\nclass F {\n  int _f = 0;\n  int get f => _f;\n  set f(int v) {\n    _f = v;\n    print(v);\n  }\n}\n\nclass AnnotatedGetter {\n  int _value = 0;\n  @deprecated\n  int get value => _value;\n  set value(int value) => _value = value;\n}\n\nclass AnnotatedSetter {\n  int _value = 0;\n  int get value => _value;\n  @deprecated\n  set value(int value) => _value = value;\n}"
     },
     "group": "complexity",
     "name": "unnecessary-getters-setters",
@@ -4216,16 +4216,28 @@
         "file": null,
         "line": 71,
         "message": "The public property isn't described by either 'debugFillProperties' or 'debugDescribeChildren'."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 78,
+        "message": "The public property isn't described by either 'debugFillProperties' or 'debugDescribeChildren'."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 79,
+        "message": "The public property isn't described by either 'debugFillProperties' or 'debugDescribeChildren'."
       }
     ],
-    "docs": "Requires every public property of a `Diagnosticable` class to be referenced in its debug methods.\n\nFlutter's diagnostics (the widget inspector, `debugDumpApp`, `toString`)\nonly show what `debugFillProperties` adds, so a public field or getter that\nis never mentioned there — nor in `debugDescribeChildren` — is invisible\nwhen debugging. A property counts as described when its name, or its\n`debug`-prefixed variant (`debugFoo` for `foo`), appears as an identifier in\neither method. Widget-valued properties (and `List`/`Set` of widgets) are\nexempt because they are described as children, and so are static members,\nprivate members, and overrides (a field or getter does not override an\ninherited setter). Like the analyzer, the rule applies to classes with a\nsupertype named `Diagnosticable` declared in an unnamed library, including\ndependency libraries. Properties whose types cannot be resolved stay silent.\nDeclaring primary constructor parameters are checked like instance fields.\n\n```dart\nclass Tile extends StatelessWidget {\n  final String title; // BAD: not described\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n  }\n}\n```",
+    "docs": "Requires every public property of a `Diagnosticable` class to be referenced in its debug methods.\n\nFlutter's diagnostics (the widget inspector, `debugDumpApp`, `toString`)\nonly show what `debugFillProperties` adds, so a public field or getter that\nis never mentioned there — nor in `debugDescribeChildren` — is invisible\nwhen debugging. A property counts as described when its name, or its\n`debug`-prefixed variant (`debugFoo` for `foo`), appears as an identifier in\neither method. Widget-valued properties (and `List`/`Set` of widgets) are\nexempt because they are described as children, and so are static members,\nprivate members, and overrides (a field or getter does not override an\ninherited setter). Like the analyzer, the rule applies to classes with a\nsupertype named `Diagnosticable` declared in an unnamed library, including\ndependency libraries. Declared and inferred property types are checked;\nunresolved types stay silent. Declaring primary constructor parameters are\nchecked like instance fields.\n\n```dart\nclass Tile extends StatelessWidget {\n  final String title; // BAD: not described\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n  }\n}\n```",
     "domains": [
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/foundation.dart';\nimport 'package:flutter/material.dart';\n\nclass Tile extends StatelessWidget {\n  const Tile({\n    super.key,\n    required this.title,\n    required this.count,\n    required this.tags,\n    required this.child,\n  });\n\n  final String title;\n  final int count;\n  final List<String> tags;\n  final Widget child;\n\n  bool get enabled => count > 0;\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n    properties.add(IntProperty('count', count));\n  }\n\n  @override\n  Widget build(BuildContext context) => child;\n}\n\nclass Counter extends StatefulWidget {\n  const Counter({super.key});\n\n  @override\n  State<Counter> createState() => _CounterState();\n}\n\nclass _CounterState extends State<Counter> {\n  int clicks = 0;\n  DateTime? lastClick;\n\n  @override\n  Widget build(BuildContext context) => const Placeholder();\n}\n\nclass Model with Diagnosticable {\n  Model(this.value);\n\n  final double value;\n  final Duration timeout = Duration.zero;\n}\n\nclass Choice<T> extends StatelessWidget {\n  const Choice({super.key, required this.value});\n\n  final T value;\n\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nabstract class SinkWidget extends StatelessWidget {\n  const SinkWidget({super.key});\n\n  set sink(int value);\n}\n\nclass Sink extends SinkWidget {\n  Sink({super.key});\n\n  // A field does not override an inherited setter.\n  int sink = 0;\n\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}",
+      "bad": "import 'package:flutter/foundation.dart';\nimport 'package:flutter/material.dart';\n\nclass Tile extends StatelessWidget {\n  const Tile({\n    super.key,\n    required this.title,\n    required this.count,\n    required this.tags,\n    required this.child,\n  });\n\n  final String title;\n  final int count;\n  final List<String> tags;\n  final Widget child;\n\n  bool get enabled => count > 0;\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n    properties.add(IntProperty('count', count));\n  }\n\n  @override\n  Widget build(BuildContext context) => child;\n}\n\nclass Counter extends StatefulWidget {\n  const Counter({super.key});\n\n  @override\n  State<Counter> createState() => _CounterState();\n}\n\nclass _CounterState extends State<Counter> {\n  int clicks = 0;\n  DateTime? lastClick;\n\n  @override\n  Widget build(BuildContext context) => const Placeholder();\n}\n\nclass Model with Diagnosticable {\n  Model(this.value);\n\n  final double value;\n  final Duration timeout = Duration.zero;\n}\n\nclass Choice<T> extends StatelessWidget {\n  const Choice({super.key, required this.value});\n\n  final T value;\n\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nabstract class SinkWidget extends StatelessWidget {\n  const SinkWidget({super.key});\n\n  set sink(int value);\n}\n\nclass Sink extends SinkWidget {\n  Sink({super.key});\n\n  // A field does not override an inherited setter.\n  int sink = 0;\n\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nclass InferredModel with Diagnosticable {\n  final count = 1;\n  final values = <String>[];\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/foundation.dart';\nimport 'package:flutter/material.dart';\n\nclass Tile extends StatelessWidget {\n  const Tile({\n    super.key,\n    required this.title,\n    required this.count,\n    required this.children,\n    required this.child,\n    this.debugLabel,\n  });\n\n  final String title;\n  final int count;\n  final List<Widget> children;\n  final Widget child;\n  final String? debugLabel;\n  final String _cache = '';\n\n  static const String tag = 'tile';\n\n  bool get enabled => count > 0;\n\n  @override\n  Key? get key => super.key;\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n    properties\n      ..add(StringProperty('title', title))\n      ..add(IntProperty('count', count))\n      ..add(StringProperty('label', label))\n      ..add(FlagProperty('enabled', value: widget.enabled));\n  }\n\n  String get label => debugLabel ?? _cache;\n\n  Tile get widget => this;\n\n  @override\n  Widget build(BuildContext context) => child;\n}\n\nclass Plain {\n  Plain(this.value);\n\n  final int value;\n}"
+      "good": "import 'package:flutter/foundation.dart';\nimport 'package:flutter/material.dart';\n\nclass Tile extends StatelessWidget {\n  const Tile({\n    super.key,\n    required this.title,\n    required this.count,\n    required this.children,\n    required this.child,\n    this.debugLabel,\n  });\n\n  final String title;\n  final int count;\n  final List<Widget> children;\n  final Widget child;\n  final String? debugLabel;\n  final String _cache = '';\n\n  static const String tag = 'tile';\n\n  bool get enabled => count > 0;\n\n  @override\n  Key? get key => super.key;\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n    properties\n      ..add(StringProperty('title', title))\n      ..add(IntProperty('count', count))\n      ..add(StringProperty('label', label))\n      ..add(FlagProperty('enabled', value: widget.enabled));\n  }\n\n  String get label => debugLabel ?? _cache;\n\n  Tile get widget => this;\n\n  @override\n  Widget build(BuildContext context) => child;\n}\n\nclass Plain {\n  Plain(this.value);\n\n  final int value;\n}\n\nclass InferredModel with Diagnosticable {\n  final count = 1;\n  final child = const SizedBox();\n  final children = <Widget>[const SizedBox()];\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n    properties.add(IntProperty('count', count));\n  }\n}"
     },
     "group": "correctness",
     "name": "diagnostic-describe-all-properties",
@@ -4346,76 +4358,76 @@
     "description": "Require `hashCode` and `==` to be overridden together.",
     "diagnostics": [
       {
-        "column": 3,
+        "column": 17,
         "file": null,
-        "line": 2,
+        "line": 3,
         "message": "Override 'hashCode' if you override the '==' operator."
       },
       {
-        "column": 3,
+        "column": 11,
         "file": null,
-        "line": 6,
+        "line": 8,
         "message": "Override the '==' operator if you override 'hashCode'."
       },
       {
-        "column": 3,
+        "column": 13,
         "file": null,
-        "line": 10,
+        "line": 13,
         "message": "Override the '==' operator if you override 'hashCode'."
       },
       {
-        "column": 3,
+        "column": 27,
         "file": null,
-        "line": 14,
+        "line": 17,
         "message": "Override 'hashCode' if you override the '==' operator."
       },
       {
-        "column": 3,
+        "column": 21,
         "file": null,
-        "line": 18,
+        "line": 21,
         "message": "Override the '==' operator if you override 'hashCode'."
       },
       {
-        "column": 3,
+        "column": 27,
         "file": null,
-        "line": 23,
+        "line": 26,
         "message": "Override 'hashCode' if you override the '==' operator."
       },
       {
-        "column": 3,
+        "column": 27,
         "file": null,
-        "line": 28,
+        "line": 31,
         "message": "Override 'hashCode' if you override the '==' operator."
       },
       {
-        "column": 3,
+        "column": 17,
         "file": null,
-        "line": 33,
+        "line": 36,
         "message": "Override 'hashCode' if you override the '==' operator."
       },
       {
-        "column": 3,
+        "column": 11,
         "file": null,
-        "line": 37,
+        "line": 40,
         "message": "Override the '==' operator if you override 'hashCode'."
       },
       {
-        "column": 3,
+        "column": 11,
         "file": null,
-        "line": 41,
+        "line": 44,
         "message": "Override the '==' operator if you override 'hashCode'."
       },
       {
-        "column": 3,
+        "column": 17,
         "file": null,
-        "line": 45,
+        "line": 48,
         "message": "Override 'hashCode' if you override the '==' operator."
       }
     ],
-    "docs": "Require `hashCode` and `==` to be overridden together.\n\nFlags a class-like declaration that overrides `==` without also defining\n`hashCode`, or defines `hashCode` without overriding `==`. The\ntwo are bound by a contract: any two objects that compare equal must return\nthe same hash code. Overriding only one breaks that invariant, so the type\nmisbehaves as a `Map` key or `Set` element — lookups miss and duplicates slip\nthrough. Override both and derive them from the same fields.",
+    "docs": "Require `hashCode` and `==` to be overridden together.\n\nFlags a class declaration that overrides `==` without also defining\n`hashCode`, or defines `hashCode` without overriding `==`. The\ntwo are bound by a contract: any two objects that compare equal must return\nthe same hash code. Overriding only one breaks that invariant, so the type\nmisbehaves as a `Map` key or `Set` element — lookups miss and duplicates slip\nthrough. Override both and derive them from the same fields.",
     "domains": [],
     "examples": {
-      "bad": "class A {\n  @override bool operator ==(Object other) => identical(this, other);\n}\n\nclass B {\n  @override int get hashCode => 42;\n}\n\nclass C {\n  @override final int hashCode = 7;\n}\n\nmixin M {\n  @override bool operator ==(Object other) => true;\n}\n\nmixin class MC {\n  @override int get hashCode => 1;\n}\n\nclass D {\n  final int value = 0;\n  @override bool operator ==(Object other) => other is D;\n}\n\n// A `hashCode` setter does not override `Object.hashCode`, so `==` is still unpaired.\nclass SetterHash {\n  @override bool operator ==(Object other) => true;\n  set hashCode(int value) {}\n}\n\nclass EqualsBase {\n  bool operator ==(Object other) => true;\n}\n\nclass InheritsEquals extends EqualsBase {\n  int get hashCode => 0;\n}\n\nclass HashBase {\n  int get hashCode => 0;\n}\n\nclass InheritsHash extends HashBase {\n  bool operator ==(Object other) => true;\n}",
+      "bad": "class A {\n  @override\n  bool operator ==(Object other) => identical(this, other);\n}\n\nclass B {\n  @override\n  int get hashCode => 42;\n}\n\nclass C {\n  @override\n  final int hashCode = 7;\n}\n\nclass M {\n  @override bool operator ==(Object other) => true;\n}\n\nmixin class MC {\n  @override int get hashCode => 1;\n}\n\nclass D {\n  final int value = 0;\n  @override bool operator ==(Object other) => other is D;\n}\n\n// A `hashCode` setter does not override `Object.hashCode`, so `==` is still unpaired.\nclass SetterHash {\n  @override bool operator ==(Object other) => true;\n  set hashCode(int value) {}\n}\n\nclass EqualsBase {\n  bool operator ==(Object other) => true;\n}\n\nclass InheritsEquals extends EqualsBase {\n  int get hashCode => 0;\n}\n\nclass HashBase {\n  int get hashCode => 0;\n}\n\nclass InheritsHash extends HashBase {\n  bool operator ==(Object other) => true;\n}",
       "crossFile": null,
       "good": "class A {\n  @override\n  bool operator ==(Object other) => identical(this, other);\n\n  @override\n  int get hashCode => 0;\n}\n\nclass B {\n  void method() {}\n}\n\nmixin M {\n  @override\n  bool operator ==(Object other) => true;\n\n  @override\n  int get hashCode => 1;\n}\n\nclass C {\n  final int value = 0;\n  int get other => 0;\n}\n\nenum E { a, b }"
     },
@@ -4983,33 +4995,33 @@
     "description": "Require `StatefulWidget.createState` to return only a fresh zero-argument Flutter `State` construction.",
     "diagnostics": [
       {
-        "column": 13,
+        "column": 27,
         "file": null,
         "line": 6,
         "message": "Avoid logic in createState; it should only return a new State instance."
       },
       {
-        "column": 13,
+        "column": 30,
         "file": null,
         "line": 14,
         "message": "Avoid logic in createState; it should only return a new State instance."
       },
       {
-        "column": 13,
+        "column": 27,
         "file": null,
         "line": 19,
         "message": "Avoid logic in createState; it should only return a new State instance."
       },
       {
-        "column": 13,
+        "column": 7,
         "file": null,
-        "line": 27,
+        "line": 28,
         "message": "Avoid logic in createState; it should only return a new State instance."
       },
       {
-        "column": 13,
+        "column": 12,
         "file": null,
-        "line": 32,
+        "line": 34,
         "message": "Avoid logic in createState; it should only return a new State instance."
       }
     ],
@@ -5018,9 +5030,9 @@
       "flutter"
     ],
     "examples": {
-      "bad": "// Bad: createState contains logic beyond returning a new State instance.\nimport 'package:flutter/material.dart';\n\nclass W1 extends StatefulWidget {\n  @override\n  State<W1> createState() {\n    print('creating');\n    return _W1State();\n  }\n}\n\nclass W2 extends StatefulWidget {\n  @override\n  State<W2> createState() => _W2State()..init();\n}\n\nclass W3 extends StatefulWidget {\n  @override\n  State<W3> createState() {\n    final state = _W3State();\n    return state;\n  }\n}\n\nclass W4 extends StatefulWidget {\n  @override\n  State<W4> createState() => _W4State(this);\n}\n\nclass W5 extends StatefulWidget {\n  @override\n  State<W5> createState() {\n    return _W5State()..counter = 0;\n  }\n}\n\nclass _W1State extends State<W1> {}\nclass _W2State extends State<W2> { void init() {} }\nclass _W3State extends State<W3> {}\nclass _W4State extends State<W4> { _W4State(Object value); }\nclass _W5State extends State<W5> { int counter = 0; }",
+      "bad": "// Bad: createState contains logic beyond returning a new State instance.\nimport 'package:flutter/material.dart';\n\nclass W1 extends StatefulWidget {\n  @override\n  State<W1> createState() {\n    print('creating');\n    return _W1State();\n  }\n}\n\nclass W2 extends StatefulWidget {\n  @override\n  State<W2> createState() => _W2State()..init();\n}\n\nclass W3 extends StatefulWidget {\n  @override\n  State<W3> createState() {\n    final state = _W3State();\n    return state;\n  }\n}\n\nclass W4 extends StatefulWidget {\n  @override\n  State<W4> createState() =>\n      _W4State(this);\n}\n\nclass W5 extends StatefulWidget {\n  @override\n  State<W5> createState() {\n    return _W5State()..counter = 0;\n  }\n}\n\nclass _W1State extends State<W1> {}\nclass _W2State extends State<W2> { void init() {} }\nclass _W3State extends State<W3> {}\nclass _W4State extends State<W4> { _W4State(Object value); }\nclass _W5State extends State<W5> { int counter = 0; }",
       "crossFile": null,
-      "good": "// Good: createState only returns a new State instance (or the class is not a StatefulWidget).\nimport 'package:flutter/material.dart';\n\nclass G1 extends StatefulWidget {\n  @override\n  State<G1> createState() => _G1State();\n}\n\nclass G2 extends StatefulWidget {\n  @override\n  State<G2> createState() {\n    return _G2State();\n  }\n}\n\nclass G3 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    final label = compute();\n    return Text(label);\n  }\n}\n\nclass G4 {\n  int createState() {\n    final value = compute();\n    return value;\n  }\n}\n\nclass G5 extends StatefulWidget {\n  @override\n  State<G5> createState() => _G5State();\n}\n\nclass _G1State extends State<G1> {}\nclass _G2State extends State<G2> {}\nclass _G5State extends State<G5> {}"
+      "good": "// Good: createState only returns a new State instance (or the class is not a StatefulWidget).\nimport 'package:flutter/material.dart';\n\nclass G1 extends StatefulWidget {\n  @override\n  State<G1> createState() =>\n      _G1State();\n}\n\nclass G2 extends StatefulWidget {\n  @override\n  State<G2> createState() {\n    return _G2State();\n  }\n}\n\nclass G3 extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) {\n    final label = compute();\n    return Text(label);\n  }\n}\n\nclass G4 {\n  int createState() {\n    final value = compute();\n    return value;\n  }\n}\n\nclass G5 extends StatefulWidget {\n  @override\n  State<G5> createState() => _G5State();\n}\n\nclass _G1State extends State<G1> {}\nclass _G2State extends State<G2> {}\nclass _G5State extends State<G5> {}"
     },
     "group": "correctness",
     "name": "no-logic-in-create-state",
@@ -6548,148 +6560,6 @@
     }
   },
   {
-    "crossFile": false,
-    "description": "Flags `dart:html` APIs that can inject untrusted HTML or URLs.",
-    "diagnostics": [
-      {
-        "column": 3,
-        "file": null,
-        "line": 11,
-        "message": "Avoid unsafe HTML APIs (assigning \"href\" attribute)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 12,
-        "message": "Avoid unsafe HTML APIs (assigning \"src\" attribute)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 13,
-        "message": "Avoid unsafe HTML APIs (assigning \"srcdoc\" attribute)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 14,
-        "message": "Avoid unsafe HTML APIs (assigning \"src\" attribute)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 15,
-        "message": "Avoid unsafe HTML APIs (assigning \"src\" attribute)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 19,
-        "message": "Avoid unsafe HTML APIs (calling the 'createFragment' method of Element)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 20,
-        "message": "Avoid unsafe HTML APIs (calling the 'setInnerHtml' method of Element)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 21,
-        "message": "Avoid unsafe HTML APIs (calling the 'open' method of Window)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 22,
-        "message": "Avoid unsafe HTML APIs (calling the 'open' method of Window)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 23,
-        "message": "Avoid unsafe HTML APIs (calling the 'open' method of Window)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 27,
-        "message": "Avoid unsafe HTML APIs (calling the 'html' constructor of Element)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 28,
-        "message": "Avoid unsafe HTML APIs (calling the 'html' constructor of DocumentFragment)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 29,
-        "message": "Avoid unsafe HTML APIs (calling the 'html' constructor of Element)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 33,
-        "message": "Avoid unsafe HTML APIs (assigning \"href\" attribute)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 34,
-        "message": "Avoid unsafe HTML APIs (assigning \"src\" attribute)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 35,
-        "message": "Avoid unsafe HTML APIs (calling the 'setInnerHtml' method of Element)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 36,
-        "message": "Avoid unsafe HTML APIs (calling the 'open' method of Window)."
-      },
-      {
-        "column": 18,
-        "file": null,
-        "line": 40,
-        "message": "Avoid unsafe HTML APIs (assigning \"href\" attribute)."
-      },
-      {
-        "column": 9,
-        "file": null,
-        "line": 41,
-        "message": "Avoid unsafe HTML APIs (calling the 'open' method of Window)."
-      },
-      {
-        "column": 3,
-        "file": null,
-        "line": 55,
-        "message": "Avoid unsafe HTML APIs (calling the 'open' method of Window)."
-      }
-    ],
-    "docs": "Flags `dart:html` APIs that can inject untrusted HTML or URLs.\n\nAssigning `href` on an `AnchorElement`, `src` on an `EmbedElement`,\n`IFrameElement`, or `ScriptElement`, or `srcdoc` on an `IFrameElement`;\ncalling `createFragment` or `setInnerHtml` on an `Element`, or `open` on a\n`Window`; and invoking the `Element.html` or `DocumentFragment.html`\nconstructors all bypass sanitization and are a common XSS vector. A\nreceiver whose static type is `dynamic` is flagged too, since it may be any\nof these. Receivers use flow-promoted types at the current use site;\nreceivers whose type cannot be established are left alone.\n\n```dart\nimport 'dart:html';\n\nvoid show(AnchorElement link, String url) {\n  link.href = url;                    // BAD\n  window.open(url, 'popup');          // BAD\n  Element.html('<p>$url</p>');        // BAD\n}\n```\n\nUPSTREAM-NOOP: `unsafe_html` is absent from current upstream, having been\nremoved from the Dart SDK in 3.7 alongside the deprecation of `dart:html`.\nFalcon retains its unsafe-HTML implementation.",
-    "domains": [],
-    "examples": {
-      "bad": "import 'dart:html';\nimport 'dart:html' as html;\n\nvoid attributes(\n  AnchorElement link,\n  IFrameElement frame,\n  ScriptElement script,\n  EmbedElement embed,\n  String url,\n) {\n  link.href = url;\n  frame.src = url;\n  frame.srcdoc = '<p>$url</p>';\n  script.src = url;\n  embed.src = url;\n}\n\nvoid methods(Element element, DivElement div, Window popup, String markup) {\n  element.createFragment(markup);\n  div.setInnerHtml(markup);\n  popup.open(markup, 'name');\n  window.open(markup, 'name');\n  html.window.open(markup, 'name');\n}\n\nvoid constructors(String markup) {\n  Element.html(markup);\n  DocumentFragment.html(markup);\n  new html.Element.html(markup);\n}\n\nvoid dynamicReceivers(dynamic target, String url) {\n  target.href = url;\n  target.src = url;\n  target.setInnerHtml(url);\n  target.open(url, 'name');\n}\n\nvoid cascades(String url) {\n  AnchorElement()..href = url;\n  window..open(url, 'popup');\n}\n\nclass SafePopup {\n  void open(String url) {}\n}\n\nvoid promotedInOneFunction(dynamic scopedPopup, String url) {\n  if (scopedPopup is SafePopup) {\n    scopedPopup.open(url);\n  }\n}\n\nvoid stillDynamicInAnotherFunction(dynamic scopedPopup, String url) {\n  scopedPopup.open(url);\n}",
-      "crossFile": null,
-      "good": "import 'dart:html';\n\nclass Link {\n  String href = '';\n  String src = '';\n  void open(String url) {}\n  void setInnerHtml(String html) {}\n}\n\nvoid safe(Link link, AnchorElement anchor, Element element, String url) {\n  link.href = url;\n  link.src = url;\n  link.open(url);\n  link.setInnerHtml(url);\n  anchor.text = url;\n  element.innerText = url;\n  element.appendText(url);\n}\n\nvoid unknownReceivers(Object target, String url) {\n  final items = <String>[url];\n  items.toString();\n  print(target);\n}\n\nvoid untypedLocal(String url) {\n  var href = '';\n  href = url;\n  print(href);\n}\n\nclass Foo {\n  void open(String url) {}\n}\n\nvoid promotedDynamic(dynamic w, String url) {\n  if (w is Foo) {\n    w.open(url);\n  }\n}"
-    },
-    "group": "correctness",
-    "name": "unsafe-html",
-    "recommended": false,
-    "source": {
-      "kind": "Lints",
-      "label": "Dart lints",
-      "upstreamId": "unsafe_html",
-      "upstreamUrl": "https://dart.dev/tools/linter-rules/unsafe_html"
-    }
-  },
-  {
     "crossFile": true,
     "description": "Report public top-level declarations that nothing references.",
     "diagnostics": [
@@ -6734,11 +6604,11 @@
           "path": "bad/main.dart"
         },
         {
-          "content": "class PublicApi {}\n\nvoid publicFunction() {}",
+          "content": "class PublicApi {}\n\nvoid publicFunction() {}\n\nconst type = 1;\nconst show = 2;\nconst get = 3;\nconst set = 4;\nconst on = 5;\nconst hide = 6;",
           "path": "good/api.dart"
         },
         {
-          "content": "import 'api.dart';\n\nvoid main() {\n  PublicApi();\n  publicFunction();\n}",
+          "content": "import 'api.dart';\n\nvoid main() {\n  PublicApi();\n  publicFunction();\n  '${type} ${show} ${get} ${set} ${on} ${hide}'.toString();\n}",
           "path": "good/main.dart"
         }
       ],
@@ -9089,7 +8959,7 @@
     "examples": {
       "bad": "import 'dart:async';\n\nvoid work() {}\nvoid log(Object e) {}\n\nvoid bareCatch() {\n  try {\n    work();\n  } catch (e) {\n    log(e);\n  }\n}\n\nvoid bareCatchWithStack() {\n  try {\n    work();\n  } catch (e, s) {\n    log(s);\n  }\n}\n\nvoid throwsSomethingElse() {\n  try {\n    work();\n  } catch (e) {\n    throw StateError('failed');\n  }\n}\n\nvoid rethrowAfterNestedCatch() {\n  try {\n    work();\n  } catch (e) {\n    try {\n      work();\n    } on FormatException {\n      log(e);\n    }\n    rethrow;\n  }\n}\n\nvoid ignoresException() {\n  try {\n    work();\n  } catch (e) {\n    print('failed');\n  }\n}\n\nvoid completesWithOtherError(Completer<void> completer) {\n  try {\n    work();\n  } catch (e) {\n    completer.completeError(StateError('other'));\n  }\n}",
       "crossFile": null,
-      "good": "import 'dart:async';\n\nvoid work() {}\nvoid log(Object e) {}\n\nvoid withOn() {\n  try {\n    work();\n  } on FormatException catch (e) {\n    log(e);\n  }\n}\n\nvoid onWithoutCatch() {\n  try {\n    work();\n  } on Exception {\n    log('x');\n  }\n}\n\nvoid rethrows() {\n  try {\n    work();\n  } catch (e) {\n    log(e);\n    rethrow;\n  }\n}\n\nvoid throwsWrapped() {\n  try {\n    work();\n  } catch (e) {\n    throw StateError('wrapped: $e');\n  }\n}\n\nFuture<void> futureError() {\n  try {\n    work();\n    return Future.value();\n  } catch (e) {\n    return Future.error(e);\n  }\n}\n\nvoid completer(Completer<void> completer) {\n  try {\n    work();\n  } catch (e, s) {\n    completer.completeError(e, s);\n  }\n}\n\nvoid throwWithStack() {\n  try {\n    work();\n  } catch (e, s) {\n    Error.throwWithStackTrace(e, s);\n  }\n}\n\nNever fail(Object error) => throw error;\n\nvoid neverReturning() {\n  try {\n    work();\n  } catch (e) {\n    fail(e);\n  }\n}"
+      "good": "import 'dart:async';\n\nvoid work() {}\nvoid log(Object e) {}\n\nvoid withOn() {\n  try {\n    work();\n  } on FormatException catch (e) {\n    log(e);\n  }\n}\n\nvoid onWithoutCatch() {\n  try {\n    work();\n  } on Exception {\n    log('x');\n  }\n}\n\nvoid rethrows() {\n  try {\n    work();\n  } catch (e) {\n    log(e);\n    rethrow;\n  }\n}\n\nvoid throwsWrapped() {\n  try {\n    work();\n  } catch (e) {\n    throw StateError('wrapped: $e');\n  }\n}\n\nFuture<void> futureError() {\n  try {\n    work();\n    return Future.value();\n  } catch (e) {\n    return Future.error(e);\n  }\n}\n\nvoid completer(Completer<void> completer) {\n  try {\n    work();\n  } catch (e, s) {\n    completer.completeError(e, s);\n  }\n}\n\nvoid throwWithStack() {\n  try {\n    work();\n  } catch (e, s) {\n    Error.throwWithStackTrace(e, s);\n  }\n}\n\nNever fail(Object error) => throw error;\n\nvoid neverReturning() {\n  try {\n    work();\n  } catch (e) {\n    fail(e);\n  }\n}\n\nvoid inferredCompleterInCallback(Stream<int> events) {\n  final completed = Completer<Map<String, dynamic>>();\n  events.listen((event) async {\n    try {\n      work();\n    } catch (error, stack) {\n      // Inferred SDK receivers forward errors just like annotated receivers.\n      if (!completed.isCompleted) completed.completeError(error, stack);\n    }\n  });\n}"
     },
     "group": "style",
     "name": "avoid-catches-without-on-clauses",
@@ -9636,14 +9506,56 @@
         "file": null,
         "line": 17,
         "message": "Don't explicitly initialize variables to null."
+      },
+      {
+        "column": 20,
+        "file": null,
+        "line": 22,
+        "message": "Don't explicitly initialize variables to null."
+      },
+      {
+        "column": 25,
+        "file": null,
+        "line": 23,
+        "message": "Don't explicitly initialize variables to null."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 27,
+        "message": "Don't explicitly initialize variables to null."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 35,
+        "message": "Don't explicitly initialize variables to null."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 38,
+        "message": "Don't explicitly initialize variables to null."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 45,
+        "message": "Don't explicitly initialize variables to null."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 53,
+        "message": "Don't explicitly initialize variables to null."
       }
     ],
     "docs": "Flags explicit `= null` initializers on declarations that already default to null.\n\nA non-`final`, non-`const`, non-`late` variable whose type is nullable,\nabsent, or `dynamic` is already initialized to `null`, so writing `= null`\nadds noise without changing behavior. Drop the initializer and let the\ndefault stand. Declarations that are `final`, `const`, `late`, or have a\nnon-nullable type are left alone, since for them the `null` is either\nrequired or meaningful.",
     "domains": [],
     "examples": {
-      "bad": "int? topLevel = null;\nvar inferred = null;\n\nclass C {\n  String? field = null;\n  dynamic dyn = null;\n\n  // Regression: a `= null` nested inside a closure in a field initializer.\n  final closureField = () {\n    var inner = null;\n    return inner;\n  };\n\n  void method() {\n    int? local = null;\n    var x = null;\n    double? a = null, b;\n    print('$local $x $a $b');\n  }\n}",
+      "bad": "int? topLevel = null;\nvar inferred = null;\n\nclass C {\n  String? field = null;\n  dynamic dyn = null;\n\n  // Regression: a `= null` nested inside a closure in a field initializer.\n  final closureField = () {\n    var inner = null;\n    return inner;\n  };\n\n  void method() {\n    int? local = null;\n    var x = null;\n    double? a = null, b;\n    print('$local $x $a $b');\n  }\n}\n\nvoid namedDefault({int? value = null}) {}\nvoid positionalDefault([int? value = null]) {}\n\nclass FieldDefault {\n  final int? value;\n  FieldDefault({this.value = null});\n}\n\nclass NullSuperDefault {\n  NullSuperDefault({int? value});\n}\n\nclass RedundantSuperDefault extends NullSuperDefault {\n  RedundantSuperDefault({super.value = null});\n}\n\nvoid parenthesizedDefault({int? value = (null)}) {}\n\nclass RequiredPositionalBase {\n  RequiredPositionalBase(int? value);\n}\n\nclass OptionalPositionalChild extends RequiredPositionalBase {\n  OptionalPositionalChild([super.value = null]);\n}\n\nclass RequiredNamedBase {\n  RequiredNamedBase({required int? value});\n}\n\nclass OptionalNamedChild extends RequiredNamedBase {\n  OptionalNamedChild({super.value = null});\n}",
       "crossFile": null,
-      "good": "int nonNull = 0;\nlate int? lazy;\n\nclass C {\n  int? uninitialized;\n  final String? name = null;\n  const C();\n  int count = 0;\n\n  void method(int? param) {\n    int? local;\n    var x = 42;\n    String value = 'hi';\n    print('$local $x $value $param');\n  }\n\n  void withDefault({int? param = null}) {\n    print(param);\n  }\n}"
+      "good": "int nonNull = 0;\nlate int? lazy;\n\nclass C {\n  int? uninitialized;\n  final String? name = null;\n  const C();\n  int count = 0;\n\n  void method(int? param) {\n    int? local;\n    var x = 42;\n    String value = 'hi';\n    print('$local $x $value $param');\n  }\n\n  void withDefault({int? param = 1}) {\n    print(param);\n  }\n}\n\nclass NonNullSuperDefault {\n  NonNullSuperDefault({int? value = 3});\n}\n\nclass ChangedSuperDefault extends NonNullSuperDefault {\n  ChangedSuperDefault({super.value = null});\n}"
     },
     "group": "style",
     "name": "avoid-init-to-null",
@@ -10158,14 +10070,32 @@
         "file": null,
         "line": 71,
         "message": "'bool' parameters should be named parameters."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 85,
+        "message": "'bool' parameters should be named parameters."
+      },
+      {
+        "column": 31,
+        "file": null,
+        "line": 87,
+        "message": "'bool' parameters should be named parameters."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 90,
+        "message": "'bool' parameters should be named parameters."
       }
     ],
     "docs": "Flags a positional `bool` parameter in a public signature.\n\nAt a call site like `setVisible(true)` the literal says nothing about what\nit means. The first positional `bool` parameter (required or optional) of a\npublic function, method, constructor, or `Function(...)` type is\nreported; make it named instead:\n\n```dart\nvoid configure(int level, bool verbose) {}   // `bool verbose` flagged\nvoid configure(int level, {bool verbose = false}) {}\n```\n\nPrivate functions, methods, and constructors (by their own name), getters,\nmethod setters, and operators are skipped, as are methods whose signature\nis fixed by an inherited member they override. Top-level setters are\nchecked like functions. `Function(...)` types are checked wherever they are\nwritten, including in overriding signatures and private declarations;\nlegacy `typedef void F(bool b);` aliases and function-typed parameters\n(`void f(bool b)` as a parameter) are not function types and are skipped.\nField and super parameters (`this.flag`, `super.flag`) take their declared\ntype. When falcon cannot resolve whether a method overrides something, it\nstays silent.",
     "domains": [],
     "examples": {
-      "bad": "void configure(int level, bool verbose) {}\n\n// Only the first positional bool is reported.\nvoid two(bool verbose, bool dryRun) {}\n\n// Optional positional bools count too.\nvoid optional(int level, [bool flag = false]) {}\n\nvoid nullable(bool? flag) {}\n\n// Top-level setters are functions to the analyzer.\nset enabled(bool value) {}\n\nclass Widget {\n  final bool enabled;\n  final bool visible;\n\n  Widget(this.enabled, this.visible);\n\n  Widget.typed(bool enabled, bool visible)\n      : enabled = enabled,\n        visible = visible;\n\n  void update(bool animate) {}\n\n  static void create(bool a) {}\n}\n\n// The unnamed constructor of a private class is public.\nclass _Private {\n  _Private(bool flag);\n}\n\nclass Base {\n  final bool flag;\n  Base(this.flag);\n  void listen(void Function(bool) callback) {}\n}\n\n// Positional super parameters match the super constructor by position.\nclass Renamed extends Base {\n  Renamed(super.other);\n}\n\nclass Sub extends Base {\n  Sub() : super(true);\n\n  // Function types are checked even in overriding signatures.\n  @override\n  void listen(void Function(bool) callback) {}\n}\n\nextension WidgetX on Widget {\n  void toggle(bool a) {}\n}\n\ntypedef Toggle = void Function(int, bool);\n\nvoid f() {\n  void local(bool a) {}\n  local(true);\n  _Private(true);\n}\n\nvoid annotated(\n  @Deprecated('use named')\n  bool flag,\n) {}\n\nclass Updatable {\n  void update(bool animate) {}\n}\n\nclass Overriding extends Updatable {\n  // Overrides keep the inherited signature.\n  @override\n  void update(bool animate) {}\n}\n\nclass Unannotated extends Updatable {\n  // An override without the annotation is still detected.\n  void update(bool animate) {}\n}",
+      "bad": "void configure(int level, bool verbose) {}\n\n// Only the first positional bool is reported.\nvoid two(bool verbose, bool dryRun) {}\n\n// Optional positional bools count too.\nvoid optional(int level, [bool flag = false]) {}\n\nvoid nullable(bool? flag) {}\n\n// Top-level setters are functions to the analyzer.\nset enabled(bool value) {}\n\nclass Widget {\n  final bool enabled;\n  final bool visible;\n\n  Widget(this.enabled, this.visible);\n\n  Widget.typed(bool enabled, bool visible)\n      : enabled = enabled,\n        visible = visible;\n\n  void update(bool animate) {}\n\n  static void create(bool a) {}\n}\n\n// The unnamed constructor of a private class is public.\nclass _Private {\n  _Private(bool flag);\n}\n\nclass Base {\n  final bool flag;\n  Base(this.flag);\n  void listen(void Function(bool) callback) {}\n}\n\n// Positional super parameters match the super constructor by position.\nclass Renamed extends Base {\n  Renamed(super.other);\n}\n\nclass Sub extends Base {\n  Sub() : super(true);\n\n  // Function types are checked even in overriding signatures.\n  @override\n  void listen(void Function(bool) callback) {}\n}\n\nextension WidgetX on Widget {\n  void toggle(bool a) {}\n}\n\ntypedef Toggle = void Function(int, bool);\n\nvoid f() {\n  void local(bool a) {}\n  local(true);\n  _Private(true);\n}\n\nvoid annotated(\n  @Deprecated('use named')\n  bool flag,\n) {}\n\nclass Updatable {\n  void update(bool animate) {}\n}\n\nclass Overriding extends Updatable {\n  // Overrides keep the inherited signature.\n  @override\n  void update(bool animate) {}\n}\n\nclass Unannotated extends Updatable {\n  // An override without the annotation is still detected.\n  void update(bool animate) {}\n}\n\nclass PrimaryBoolean(bool enabled);\n\nclass DeclaringPrimaryBoolean(final bool enabled);\n\n// Extension-type representation parameters are primary constructor parameters.\nextension type BooleanRepresentation(bool enabled) {}",
       "crossFile": null,
-      "good": "// Named bools are fine.\nvoid configure({bool verbose = false, bool dryRun = false}) {}\n\nvoid mixed(int first, {required bool second}) {}\n\n// Private declarations are skipped.\nvoid _private(bool a) {}\n\nclass Base {\n  void _hidden(bool a) {}\n\n  Base._internal(bool a);\n  Base();\n\n  // Getters, method setters, and operators are skipped.\n  set flag(bool value) {}\n  bool get flag => true;\n  bool operator ==(Object other) => true;\n  int get hashCode => 0;\n}\n\nclass Sub extends Base {\n  Sub() : super();\n\n  // A private constructor is skipped.\n  Sub._(bool a);\n}\n\n// Legacy typedefs and function-typed parameters are not function types.\ntypedef void Legacy(bool a);\n\nvoid takes(void callback(bool a)) {}\n\nvoid nonBool(int a, String b, Object c) {}\n\nvoid main() {\n  _private(true);\n  Base._internal(true);\n  Sub._(true);\n}"
+      "good": "// Named bools are fine.\nvoid configure({bool verbose = false, bool dryRun = false}) {}\n\nvoid mixed(int first, {required bool second}) {}\n\n// Private declarations are skipped.\nvoid _private(bool a) {}\n\nclass Base {\n  void _hidden(bool a) {}\n\n  Base._internal(bool a);\n  Base();\n\n  // Getters, method setters, and operators are skipped.\n  set flag(bool value) {}\n  bool get flag => true;\n  bool operator ==(Object other) => true;\n  int get hashCode => 0;\n}\n\nclass Sub extends Base {\n  Sub() : super();\n\n  // A private constructor is skipped.\n  Sub._(bool a);\n}\n\n// Legacy typedefs and function-typed parameters are not function types.\ntypedef void Legacy(bool a);\n\nvoid takes(void callback(bool a)) {}\n\nvoid nonBool(int a, String b, Object c) {}\n\nvoid main() {\n  _private(true);\n  Base._internal(true);\n  Sub._(true);\n}\n\nclass NamedPrimaryBoolean({bool enabled = false});\n\nclass PrivatePrimaryBoolean._hidden(bool enabled);"
     },
     "group": "style",
     "name": "avoid-positional-boolean-parameters",
@@ -12059,7 +11989,7 @@
         "message": "Name constant identifiers using lowerCamelCase."
       }
     ],
-    "docs": "Flags constant identifiers that are not lowerCamelCase.\n\nDart names constants in `lowerCamelCase`, not the `SCREAMING_CAPS` common in\nother languages, so `maxCount` rather than `MAX_COUNT`. Following the\nconvention keeps constants visually consistent with every other identifier.\nThe rule covers `const` declarations at every scope — top-level, static and\ninstance fields, and locals — as well as enum values. All-underscore\nwildcard names are permitted.",
+    "docs": "Flags constant identifiers that are not lowerCamelCase.\n\nDart names constants in `lowerCamelCase`, not the `SCREAMING_CAPS` common in\nother languages, so `maxCount` rather than `MAX_COUNT`. Following the\nconvention keeps constants visually consistent with every other identifier.\nThe rule covers `const` declarations at every scope — top-level, static and\ninstance fields, and locals — as well as enum values. The wildcard `_` is\npermitted.",
     "domains": [],
     "examples": {
       "bad": "// Constant identifiers must be lowerCamelCase.\n\nconst MAX_VALUE = 100;\n\nconst PI = 3.14;\n\nconst HTTP_PORT = 80;\n\nenum E { FIRST, second }\n\nclass C {\n  static const DEFAULT_SIZE = 10;\n}\n\nvoid f() {\n  const LOCAL_CONST = 1;\n  print(LOCAL_CONST);\n}\n\nvoid g() {\n  for (const FOR_LIMIT = 3; FOR_LIMIT > 0;) {\n    print(FOR_LIMIT);\n  }\n}",
@@ -12163,12 +12093,12 @@
         "message": "Dangling library doc comment. Add a 'library' directive or attach it to a declaration."
       }
     ],
-    "docs": "Attach library documentation to an explicit `library` directive.",
+    "docs": "Attach library documentation to an explicit `library` directive.\nLine docs stay grouped across blank lines and ordinary comments; declarations\nreport the doc token immediately before the first internal gap.",
     "domains": [],
     "examples": {
       "bad": "/// A library-level doc comment separated from the code below.\n\nimport 'dart:async';\n\nvoid main() {}",
       "crossFile": null,
-      "good": "/// A widget that documents the class directly below it.\nclass Widget {}"
+      "good": "/// A widget that documents the class directly below it.\n// An ordinary comment does not detach the documentation.\nclass Widget {}"
     },
     "group": "style",
     "name": "dangling-library-doc-comments",
@@ -13436,7 +13366,7 @@
         "message": "Use `lowercase_with_underscores` for a library prefix."
       }
     ],
-    "docs": "Flags import prefixes that are not `lower_case_with_underscores`.\n\nAn import prefix (`import '...' as foo;`) is a library-style name and should\nuse `lower_case_with_underscores` to match Dart's package and library\nnaming, keeping qualified references uniform. Lowercase letters, digits,\nunderscores, and `$` are all permitted; the presence of any uppercase letter\nis what makes a prefix invalid.",
+    "docs": "Flags import prefixes that are not `lower_case_with_underscores`.\n\nAn import prefix (`import '...' as foo;`) is a library-style name and should\nuse `lower_case_with_underscores` to match Dart's package and library\nnaming. Prefixes may have one leading `$` and leading underscores, then must\nstart with a lowercase letter and contain only lowercase letters, digits,\nand underscores.",
     "domains": [],
     "examples": {
       "bad": "// Import prefixes must be lower_case_with_underscores.\n\nimport 'dart:math' as Math;\nimport 'dart:async' as MyAsync;\nimport 'dart:convert' as JSON;\nimport 'dart:io' as IO;\nimport 'dart:collection' as CollectionLib;\nimport 'dart:typed_data' as TypedData;",
@@ -13498,12 +13428,24 @@
         "file": null,
         "line": 20,
         "message": "The line length exceeds the 80-character limit."
+      },
+      {
+        "column": 81,
+        "file": null,
+        "line": 24,
+        "message": "The line length exceeds the 80-character limit."
+      },
+      {
+        "column": 81,
+        "file": null,
+        "line": 25,
+        "message": "The line length exceeds the 80-character limit."
       }
     ],
     "docs": "Flags source lines longer than 80 characters.\n\nLong lines are harder to read and to review side by side. Line length is\ncounted in UTF-16 code units, excluding the line break and a leading byte\norder mark, and the diagnostic starts at the 81st character, where the line\nneeds to wrap.\n\nLines that cannot reasonably be wrapped are exempt:\n\n- every line covered by a multiline (triple-quoted) string literal;\n- a line where a single-line string literal starts whose text contains `/`\n  or `\\` (a URI or path); as in the analyzer, string literals nested in an\n  interpolation are not considered;\n- a comment line (including comments inside interpolations) whose text\n  contains `/` or `\\`, and a `// ignore:` comment line.\n\n```dart\n// A comment that runs on and on and on and on and on and on and on and on.\n//                                                    flagged ^ past column 80\n// See https://github.com/dart-lang/sdk/blob/main/pkg/linter/doc/very/long.md\n//                                  fine: the comment contains a URI ^\n```",
     "domains": [],
     "examples": {
-      "bad": "void use(Object o) {}\n\nvoid main() {\n   // A plain comment that keeps going and going well past the eighty limit.\n  use('A single-line string literal that is long but has no path separators.');\n  var aVeryLongVariableNameThatJustKeepsGoing = 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8;\n  use(aVeryLongVariableNameThatJustKeepsGoing);\n  /* Block comment text that is very long and keeps going past the limit. */\n  use('héllo wörld with accents ééééééééééééééééééééééééééééééééééééééééé');\n}\n\nvar nestedPath = '${\"p/q\"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';\n\nconst kIsWeb = true;\nvar bindingMessage =\n        'The app requested a view, but the platform did not provide one.\\n'\n        'Try using `runWidget` instead of `runApp` to start your app.\\n'\n        '`runWidget` allows you to provide a `View` widget, without requiring '\n        'a default view.'\n        '${kIsWeb ? \"\\nSee: https://flutter.dev/to/web-multiview-runwidget\" : \"\"}';",
+      "bad": "void use(Object o) {}\n\nvoid main() {\n   // A plain comment that keeps going and going well past the eighty limit.\n  use('A single-line string literal that is long but has no path separators.');\n  var aVeryLongVariableNameThatJustKeepsGoing = 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8;\n  use(aVeryLongVariableNameThatJustKeepsGoing);\n  /* Block comment text that is very long and keeps going past the limit. */\n  use('héllo wörld with accents ééééééééééééééééééééééééééééééééééééééééé');\n}\n\nvar nestedPath = '${\"p/q\"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';\n\nconst kIsWeb = true;\nvar bindingMessage =\n        'The app requested a view, but the platform did not provide one.\\n'\n        'Try using `runWidget` instead of `runApp` to start your app.\\n'\n        '`runWidget` allows you to provide a `View` widget, without requiring '\n        'a default view.'\n        '${kIsWeb ? \"\\nSee: https://flutter.dev/to/web-multiview-runwidget\" : \"\"}';\n\nvoid patternStrings(Object value) {\n  switch (value) {\n    case '${\"a/b\"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx':\n    case '${\"${\"a/b\"}\"} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx':\n      break;\n  }\n}",
       "crossFile": null,
       "good": "void use(Object o) {}\n\n// See https://github.com/dart-lang/sdk/blob/main/pkg/linter/lib/src/rules/lines_longer.dart\n/// Docs: https://dart.dev/tools/linter-rules/lines_longer_than_80_chars#details-and-more\nvoid main() {\n  use('https://example.com/a/very/long/path/that/cannot/be/wrapped/at/all/ok/really/long');\n  use(r'C:\\Users\\someone\\a\\very\\long\\windows\\path\\that\\is\\long\\too\\x\\y\\z\\w\\v\\u\\t');\n  use('''\nA multiline string line that is very long and goes past the eighty limit here, way past.\n''');\n  // ignore: some_lint_name_that_is_long_enough_to_push_this_line_past_eighty_chars_ok\n  /*\n   * Block comment line with a path segment a/b that is long enough to exceed the limit.\n   */\n  use('short');\n  use('éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé');\n}\n\nint a = 1;\nvar interpolationComment = '${a /* p/q */} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';"
     },
@@ -13556,14 +13498,32 @@
         "file": null,
         "line": 39,
         "message": "The super parameter named 'channel' does not share the same name as the corresponding parameter in the super constructor, '_channel'."
+      },
+      {
+        "column": 23,
+        "file": null,
+        "line": 42,
+        "message": "The super parameter named 'height' does not share the same name as the corresponding parameter in the super constructor, 'width'."
+      },
+      {
+        "column": 37,
+        "file": null,
+        "line": 42,
+        "message": "The super parameter named 'width' does not share the same name as the corresponding parameter in the super constructor, 'height'."
+      },
+      {
+        "column": 28,
+        "file": null,
+        "line": 44,
+        "message": "The super parameter named 'side' does not share the same name as the corresponding parameter in the super constructor, 'size'."
       }
     ],
     "docs": "Flags positional super parameters named differently from the super\nconstructor's corresponding parameter.\n\nA positional `super.x` parameter is forwarded by position, so its name is\nfree — but giving it a different name from the parameter it fills in the\nsuper constructor misleads readers about which value goes where.\n\n```dart\nclass Rectangle {\n  final int width, height;\n  Rectangle(this.width, this.height);\n}\n\nclass ColoredRectangle extends Rectangle {\n  ColoredRectangle(\n    super.height,             // flagged: corresponds to `width`\n    super.width,              // flagged: corresponds to `height`\n  );\n}\n```\n\nThe super constructor is the one invoked by `super(...)` / `super.name(...)`\nin the initializer list, or the superclass's unnamed constructor. The rule\nstays silent when that constructor cannot be resolved.",
     "domains": [],
     "examples": {
-      "bad": "class Rectangle {\n  final int width;\n  final int height;\n  Rectangle(this.width, this.height);\n  Rectangle.square(int size)\n      : width = size,\n        height = size;\n}\n\nclass ColoredRectangle extends Rectangle {\n  final String color;\n  ColoredRectangle(\n    this.color,\n    super.height,\n    super.width,\n  );\n}\n\nclass Square extends Rectangle {\n  Square(super.side) : super.square();\n}\n\nclass Base {\n  Base(int a, [int? b]);\n}\n\nclass Child extends Base {\n  Child(super.x);\n}\n\nclass OptionalChild extends Base {\n  OptionalChild(super.a, [super.c]);\n}\n\nclass PrivateBase {\n  PrivateBase(int _channel);\n}\nclass PublicChild extends PrivateBase {\n  PublicChild(super.channel);\n}",
+      "bad": "class Rectangle {\n  final int width;\n  final int height;\n  Rectangle(this.width, this.height);\n  Rectangle.square(int size)\n      : width = size,\n        height = size;\n}\n\nclass ColoredRectangle extends Rectangle {\n  final String color;\n  ColoredRectangle(\n    this.color,\n    super.height,\n    super.width,\n  );\n}\n\nclass Square extends Rectangle {\n  Square(super.side) : super.square();\n}\n\nclass Base {\n  Base(int a, [int? b]);\n}\n\nclass Child extends Base {\n  Child(super.x);\n}\n\nclass OptionalChild extends Base {\n  OptionalChild(super.a, [super.c]);\n}\n\nclass PrivateBase {\n  PrivateBase(int _channel);\n}\nclass PublicChild extends PrivateBase {\n  PublicChild(super.channel);\n}\n\nclass PrimaryMismatch(super.height, super.width) extends Rectangle;\n\nclass NamedPrimaryMismatch(super.side) extends Rectangle {\n  this : super.square();\n}",
       "crossFile": null,
-      "good": "class Rectangle {\n  final int width;\n  final int height;\n  Rectangle(this.width, this.height);\n  Rectangle.square(int size)\n      : width = size,\n        height = size;\n}\n\nclass ColoredRectangle extends Rectangle {\n  final String color;\n  ColoredRectangle(this.color, super.width, super.height);\n}\n\nclass Square extends Rectangle {\n  Square(super.size) : super.square();\n}\n\n// Named super parameters are matched by name already.\nclass Base {\n  Base({required int a});\n}\n\nclass Child extends Base {\n  Child({required super.a});\n}\n\n// Ordinary parameters forwarded explicitly are not super parameters.\nclass Explicit extends Rectangle {\n  Explicit(int w, int h) : super(w, h);\n}\n\n// Unresolvable super constructors stay silent.\nclass Remote extends SomeUnknownBase {\n  Remote(super.anything);\n}\n\n// More super parameters than the super constructor has: not reported.\nclass Short {\n  Short(int a);\n}"
+      "good": "class Rectangle {\n  final int width;\n  final int height;\n  Rectangle(this.width, this.height);\n  Rectangle.square(int size)\n      : width = size,\n        height = size;\n}\n\nclass ColoredRectangle extends Rectangle {\n  final String color;\n  ColoredRectangle(this.color, super.width, super.height);\n}\n\nclass Square extends Rectangle {\n  Square(super.size) : super.square();\n}\n\n// Named super parameters are matched by name already.\nclass Base {\n  Base({required int a});\n}\n\nclass Child extends Base {\n  Child({required super.a});\n}\n\n// Ordinary parameters forwarded explicitly are not super parameters.\nclass Explicit extends Rectangle {\n  Explicit(int w, int h) : super(w, h);\n}\n\n// Unresolvable super constructors stay silent.\nclass Remote extends SomeUnknownBase {\n  Remote(super.anything);\n}\n\n// More super parameters than the super constructor has: not reported.\nclass Short {\n  Short(int a);\n}\n\nclass PrimaryMatch(super.width, super.height) extends Rectangle;\n\nclass NamedPrimaryMatch(super.size) extends Rectangle {\n  this : super.square();\n}"
     },
     "group": "style",
     "name": "matching-super-parameters",
@@ -13942,18 +13902,42 @@
         "message": "Avoid leading underscores for local identifiers."
       },
       {
-        "column": 26,
+        "column": 8,
         "file": null,
-        "line": 35,
+        "line": 39,
+        "message": "Avoid leading underscores for local identifiers."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 43,
+        "message": "Avoid leading underscores for local identifiers."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 51,
+        "message": "Avoid leading underscores for local identifiers."
+      },
+      {
+        "column": 43,
+        "file": null,
+        "line": 56,
+        "message": "Avoid leading underscores for local identifiers."
+      },
+      {
+        "column": 21,
+        "file": null,
+        "line": 59,
         "message": "Avoid leading underscores for local identifiers."
       }
     ],
     "docs": "Flags local variables and parameters whose names begin with an underscore.\n\nA leading underscore marks a declaration as library-private, but that\nprivacy only applies to top-level and class members — locals, parameters,\nclosure parameters, for-in variables, and catch clause bindings are already\nconfined to their scope. Prefixing them with an underscore implies a privacy\nthat does not exist and misleads the reader, so drop it. Wildcard names made\nsolely of underscores (e.g. `_`, `__`) are exempt, being the idiomatic way\nto name a deliberately unused binding.",
     "domains": [],
     "examples": {
-      "bad": "// Local variables and parameters must not start with an underscore.\n\nvoid f(int _param) {}\n\nvoid g() {\n  var _local = 1;\n  print(_local);\n}\n\nvoid h() {\n  final _temp = 2;\n  print(_temp);\n}\n\nvoid i() {\n  for (var _x in <int>[]) {\n    print(_x);\n  }\n}\n\nvoid j() {\n  try {\n  } catch (_e) {\n    print(_e);\n  }\n}\n\nvoid k() {\n  final fn = (int _p) => 0;\n  print(fn(1));\n}\n\nclass Mixed {\n  final String _token;\n  Mixed(this._token, int _other);\n}",
+      "bad": "// Local variables and parameters must not start with an underscore.\n\nvoid f(int _param) {}\n\nvoid g() {\n  var _local = 1;\n  print(_local);\n}\n\nvoid h() {\n  final _temp = 2;\n  print(_temp);\n}\n\nvoid i() {\n  for (var _x in <int>[]) {\n    print(_x);\n  }\n}\n\nvoid j() {\n  try {\n  } catch (_e) {\n    print(_e);\n  }\n}\n\nvoid k() {\n  final fn = (int _p) => 0;\n  print(fn(1));\n}\n\nclass Mixed {\n  final String _token;\n  Mixed(this._token, int _other);\n}\n\nvoid localFunction() {\n  void _helper() {}\n  _helper();\n}\n\nclass Primary(int _argument, final int field);\n\nclass PatternValue {\n  final int _value;\n  PatternValue(this._value);\n}\n\nvoid renamedField(PatternValue input) {\n  if (input case PatternValue(_value: var _local)) {\n    print(_local);\n  }\n}\n\ntypedef LocalCallback = void Function(int _value);\n\nvoid functionTypedParameter(\n  void Function(int _value) callback,\n) {}",
       "crossFile": null,
-      "good": "// Locals without leading underscores; wildcards and members are exempt.\n\nint _private = 0;\n\nclass C {\n  int _field = 0;\n}\n\nvoid f(int param) {\n  print(param);\n}\n\nvoid g() {\n  var local = 1;\n  print(local);\n}\n\nvoid h(int _) {}\n\nvoid i() {\n  var __ = 1;\n  print(__);\n}\n\n// Initializing formals and super formals are not local identifiers: the\n// underscore denotes the field's privacy and the spelling is forced.\nclass Provider {\n  final String _token;\n  Provider(this._token);\n}\n\nclass NamedProvider {\n  final String _token;\n  NamedProvider({required this._token});\n}\n\nclass SubProvider extends Provider {\n  SubProvider(super._token);\n}"
+      "good": "// Locals without leading underscores; wildcards and members are exempt.\n\nint _private = 0;\n\nclass C {\n  int _field = 0;\n}\n\nvoid f(int param) {\n  print(param);\n}\n\nvoid g() {\n  var local = 1;\n  print(local);\n}\n\nvoid h(int _) {}\n\nvoid i() {\n  var __ = 1;\n  print(__);\n}\n\n// Initializing formals and super formals are not local identifiers: the\n// underscore denotes the field's privacy and the spelling is forced.\nclass Provider {\n  final String _token;\n  Provider(this._token);\n}\n\nclass NamedProvider {\n  final String _token;\n  NamedProvider({required this._token});\n}\n\nclass SubProvider extends Provider {\n  SubProvider(super._token);\n}\n\n// Declaring primary parameters and extension representations name private fields.\nclass Primary(final int _field);\nclass MutablePrimary(var int _field);\nextension type Representation(int _value) {}\n\nclass ObjectValue {\n  final int _value;\n  ObjectValue(this._value);\n}\n\nvoid fieldShortcut(ObjectValue input) {\n  if (input case ObjectValue(:var _value)) {\n    print(_value);\n  }\n}\n\nvoid localWildcardFunction() {\n  void __() {}\n  __();\n}\n\ntypedef LocalCallback = void Function(int value);\n\nvoid functionTypedParameter(void Function(int value) callback) {}"
     },
     "group": "style",
     "name": "no-leading-underscores-for-local-identifiers",
@@ -14256,7 +14240,7 @@
         "message": "Name non-constant identifiers using lowerCamelCase."
       }
     ],
-    "docs": "Flags non-constant identifiers that are not written in lowerCamelCase.\n\nDart convention reserves lowerCamelCase for everything that holds a runtime\nvalue — non-const variables and fields, formal and closure parameters, for-in\nand pattern variables, catch clause bindings, named constructors, and\nfunction, method, getter, and setter names. Consistent casing lets readers\ndistinguish these from types (UpperCamelCase) and compile-time constants at a\nglance. Operator names are exempt: they are not identifiers. The check mirrors\nthe analyzer's `isLowerCamelCase`: leading underscores are ignored, an\nall-underscore wildcard name is accepted, a single uppercase letter is\ntolerated, and the remainder must begin with a lowercase letter or `$` and\ncontain no further underscores. Type names (see `camel-case-types`) and\nconstants (see `constant-identifier-names`) are covered by separate rules and\nare out of scope here.",
+    "docs": "Flags non-constant identifiers that are not written in lowerCamelCase.\n\nDart convention reserves lowerCamelCase for everything that holds a runtime\nvalue — non-const variables and fields, formal and closure parameters, for-in\nand pattern variables, catch clause bindings, named constructors, and\nfunction, method, getter, and setter names. Consistent casing lets readers\ndistinguish these from types (UpperCamelCase) and compile-time constants at a\nglance. Operator names are exempt: they are not identifiers. The check mirrors\nthe analyzer's `isLowerCamelCase`, including optional trailing underscores\nand underscore-digit word boundaries. Field formals are exempt because the\ncorresponding field declaration is checked separately.\nConstants (see `constant-identifier-names`) are covered by a separate rule.",
     "domains": [],
     "examples": {
       "bad": "// Non-constant identifiers must be lowerCamelCase.\n\nint My_Var = 0;\n\nvoid Foo() {}\n\nvoid f(int Bad_Param) {}\n\nclass A {\n  void Some_Method() {}\n\n  A.My_Named();\n}\n\nvoid g() {\n  var Local_Var = 1;\n  print(Local_Var);\n}",
@@ -14511,175 +14495,6 @@
   },
   {
     "crossFile": true,
-    "description": "Documents public declarations in a package's exported API.",
-    "diagnostics": [
-      {
-        "column": 6,
-        "file": "bad-export/lib/api.dart",
-        "line": 2,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 5,
-        "file": "bad-export/lib/api.dart",
-        "line": 3,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 9,
-        "file": "bad-export/lib/api.dart",
-        "line": 4,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 7,
-        "file": "bad-export/lib/kinds.dart",
-        "line": 1,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 8,
-        "file": "bad-export/lib/kinds.dart",
-        "line": 2,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 6,
-        "file": "bad-export/lib/kinds.dart",
-        "line": 4,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 3,
-        "file": "bad-export/lib/kinds.dart",
-        "line": 5,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 11,
-        "file": "bad-export/lib/kinds.dart",
-        "line": 7,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 11,
-        "file": "bad-export/lib/kinds.dart",
-        "line": 8,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 28,
-        "file": "bad-export/lib/kinds.dart",
-        "line": 11,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 15,
-        "file": "bad-export/lib/kinds.dart",
-        "line": 12,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 9,
-        "file": "bad-export/lib/kinds.dart",
-        "line": 14,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 5,
-        "file": "bad-export/lib/kinds.dart",
-        "line": 15,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 7,
-        "file": "bad-export/lib/src/details.dart",
-        "line": 1,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 3,
-        "file": "bad-export/lib/src/details.dart",
-        "line": 2,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 7,
-        "file": "bad-export/lib/src/details.dart",
-        "line": 3,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 8,
-        "file": "bad-export/lib/src/details.dart",
-        "line": 4,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 11,
-        "file": "bad-export/lib/src/details.dart",
-        "line": 5,
-        "message": "Missing documentation for public API."
-      },
-      {
-        "column": 7,
-        "file": "bad-export/lib/src/details.dart",
-        "line": 6,
-        "message": "Missing documentation for public API."
-      }
-    ],
-    "docs": "Documents public declarations in a package's exported API.\n\nUPSTREAM-NOOP: `package_api_docs` is absent from current upstream, having\nbeen removed in Dart 3.7. Falcon retains its API-documentation implementation.\n\nLibraries under `lib` outside `lib/src` are entry points; local exports are\nfollowed transitively with show/hide combinators, including library parts.\nExternal and conditional exports are not resolved. Members marked\n`@override` are exempt, without guessing unannotated overrides.",
-    "domains": [],
-    "examples": {
-      "bad": null,
-      "crossFile": [
-        {
-          "content": "export 'src/bridge.dart' show Exposed;\nvoid function() {}\nint value = 0;\ntypedef Alias = int;",
-          "path": "bad-export/lib/api.dart"
-        },
-        {
-          "content": "mixin Features {\n  void method() {}\n}\nenum Choice {\n  one\n}\nextension Named on int {\n  int get doubled => this * 2;\n}\n/// Wrapper.\nextension type Wrapper(int value) {\n  static void utility() {}\n}\nint get setting => 0;\nset setting(int value) {}",
-          "path": "bad-export/lib/kinds.dart"
-        },
-        {
-          "content": "export 'details.dart' hide Hidden;",
-          "path": "bad-export/lib/src/bridge.dart"
-        },
-        {
-          "content": "class Exposed {\n  Exposed();\n  int field = 0;\n  void method() {}\n  int get value => 0;\n  set value(int v) {}\n  @override\n  String toString() => '';\n}\nclass Hidden { void method() {} }\nclass NotShown {}",
-          "path": "bad-export/lib/src/details.dart"
-        },
-        {
-          "content": "name: exported_api",
-          "path": "bad-export/pubspec.yaml"
-        },
-        {
-          "content": "export 'src/details.dart' show Exposed;\n/// Function.\nvoid function() {}\n/** Variable. */\nint value = 0;\n/// Alias.\ntypedef Alias = int;\nclass _Private { void method() {} }",
-          "path": "good-export/lib/api.dart"
-        },
-        {
-          "content": "/// Exported class.\nclass Exposed {\n  /// Constructor.\n  Exposed();\n  /// Field.\n  int field = 0;\n  /// Method.\n  void method() {}\n  @override\n  String toString() => '';\n}\nclass Hidden { void undocumented() {} }",
-          "path": "good-export/lib/src/details.dart"
-        },
-        {
-          "content": "name: exported_api",
-          "path": "good-export/pubspec.yaml"
-        }
-      ],
-      "good": null
-    },
-    "group": "style",
-    "name": "package-api-docs",
-    "recommended": false,
-    "source": {
-      "kind": "Lints",
-      "label": "Dart lints",
-      "upstreamId": "package_api_docs",
-      "upstreamUrl": "https://dart.dev/tools/linter-rules/package_api_docs"
-    }
-  },
-  {
-    "crossFile": true,
     "description": "Require package names to be valid `lower_case_with_underscores` identifiers.",
     "diagnostics": [
       {
@@ -14785,27 +14600,6 @@
       "label": "Dart lints",
       "upstreamId": "package_names",
       "upstreamUrl": "https://dart.dev/tools/linter-rules/package_names"
-    }
-  },
-  {
-    "crossFile": false,
-    "description": "Flags a library name that is not prefixed by its package name and path.",
-    "diagnostics": [],
-    "docs": "Flags a library name that is not prefixed by its package name and path.\n\nNamed libraries share one global namespace, so Effective Dart builds each\nname from the package name (from the enclosing `pubspec.yaml`) followed by\nthe dot-separated directory path of the file, with a leading `lib/` dropped.\nThe name must equal that prefix or extend it with further dotted segments:\n\n```dart\n// my_package/lib/src/parser/scanner.dart\nlibrary my_package.src.parser.scanner;  // fine\nlibrary my_package.src.parser;          // fine: equals the prefix\nlibrary scanner;                        // flagged\n```\n\nFiles with no enclosing `pubspec.yaml`, or whose manifest has no `name`, are\nnot checked. As in the upstream `createLibraryNamePrefix`, a file directly\nin the package root gets the prefix `<package>..`, so its named library is\nalways reported.\n\nUPSTREAM-NOOP: the official `package_prefixed_library_names` lint returns\nimmediately because the analyzer no longer provides project information\n(dart-lang/linter#3395). Falcon implements its documented, formerly shipped\nbehaviour.",
-    "domains": [],
-    "examples": {
-      "bad": "// No expectations on purpose: with no enclosing pubspec.yaml the rule cannot\n// name the package, so it reports nothing. project/ covers the reporting\n// cases (lib/bad_root.dart, lib/src/bad_nested.dart, tool/bad_tool.dart).\nlibrary unprefixed_name;",
-      "crossFile": null,
-      "good": "// Unnamed libraries and files without a library directive are never checked.\nlibrary;\n\nvoid main() {}"
-    },
-    "group": "style",
-    "name": "package-prefixed-library-names",
-    "recommended": false,
-    "source": {
-      "kind": "Lints",
-      "label": "Dart lints",
-      "upstreamId": "package_prefixed_library_names",
-      "upstreamUrl": "https://dart.dev/tools/linter-rules/package_prefixed_library_names"
     }
   },
   {
@@ -15017,14 +14811,20 @@
         "file": null,
         "line": 42,
         "message": "Assert should be in the initializer list."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 48,
+        "message": "Assert should be in the initializer list."
       }
     ],
     "docs": "Flags leading constructor-body asserts that could live in the initializer list.\n\nAn `assert` at the start of a generative constructor body that does not\nneed the instance (no `this`, no instance member of the class or its\nsuperclasses and mixins) can move into the initializer list, where it runs\nbefore the object is used and works for `const` constructors too. Fields\ninitialized by `this.x` formals count as available, since the formal holds\nthe same value, as do fields a `super.x` formal passes to a superclass\nconstructor's `this.x` parameter. The analyzer retains the last class's\nsuperclass/mixin chain for subsequent extension type constructors.\n\n```dart\nclass A {\n  A(int a) { assert(a != 0); } // flagged\n  A(int a) : assert(a != 0);   // ok\n}\n```",
     "domains": [],
     "examples": {
-      "bad": "int limit = 10;\n\nclass Range {\n  final int start;\n  final int end;\n  Range(this.start, this.end) {\n    assert(start <= end);\n    assert(end < limit);\n    print(start);\n  }\n  Range.of(int a, int b) : start = a, end = b {\n    assert(a <= b, 'ordered');\n  }\n  Range.single(int v) : start = v, end = v {\n    assert(isValid(v));\n  }\n  Range.list(List<int> items) : start = items.first, end = items.last {\n    assert(items.every((e) => e >= 0));\n  }\n  static bool isValid(int v) => v >= 0;\n}\n\nclass Sub extends Range {\n  Sub(int a) : super(a, a) {\n    assert(a > 0);\n  }\n}\n\nclass Parent {\n  final int value;\n  Parent(this.value);\n}\n\nclass SuperFormal extends Parent {\n  SuperFormal(super.value) {\n    assert(value > 0);\n  }\n}\n\nextension type CheckedValue(int? value) {\n  CheckedValue.checked(this.value) {\n    assert(value != null);\n  }\n}",
+      "bad": "int limit = 10;\n\nclass Range {\n  final int start;\n  final int end;\n  Range(this.start, this.end) {\n    assert(start <= end);\n    assert(end < limit);\n    print(start);\n  }\n  Range.of(int a, int b) : start = a, end = b {\n    assert(a <= b, 'ordered');\n  }\n  Range.single(int v) : start = v, end = v {\n    assert(isValid(v));\n  }\n  Range.list(List<int> items) : start = items.first, end = items.last {\n    assert(items.every((e) => e >= 0));\n  }\n  static bool isValid(int v) => v >= 0;\n}\n\nclass Sub extends Range {\n  Sub(int a) : super(a, a) {\n    assert(a > 0);\n  }\n}\n\nclass Parent {\n  final int value;\n  Parent(this.value);\n}\n\nclass SuperFormal extends Parent {\n  SuperFormal(super.value) {\n    assert(value > 0);\n  }\n}\n\nextension type CheckedValue(int? value) {\n  CheckedValue.checked(this.value) {\n    assert(value != null);\n  }\n}\n\nclass ParameterMessage {\n  ParameterMessage(int value) {\n    assert(value > 0, value);\n  }\n}",
       "crossFile": null,
-      "good": "class Range {\n  final int start;\n  final int end;\n  int get length => end - start;\n  Range(this.start, this.end) : assert(start <= end);\n  Range.checked(this.start, this.end) {\n    assert(length >= 0);\n  }\n  Range.self(this.start, this.end) {\n    assert(this.start <= this.end);\n  }\n  Range.method(this.start, this.end) {\n    assert(validate());\n  }\n  Range.late(int a, int b) : start = a, end = b {\n    print(a);\n    assert(a <= b);\n  }\n  factory Range.make(int a) {\n    assert(a > 0);\n    return Range(a, a);\n  }\n  Range.other(Range other) : start = other.start, end = other.end {\n    assert(other.length >= 0);\n  }\n  bool validate() => start <= end;\n}\n\nclass External extends Object with Mixed {\n  final int x;\n  External(this.x) {\n    assert(mixed > 0);\n  }\n}\n\nmixin Mixed {\n  int get mixed => 1;\n}\n\nclass Parent {\n  final int value;\n  Parent(this.value);\n}\n\nclass SuperFormal extends Parent {\n  SuperFormal(super.value) : assert(value > 0);\n}\n\nextension type CheckedValue(int? value) {\n  CheckedValue.checked(this.value) : assert(value != null);\n}"
+      "good": "class Range {\n  final int start;\n  final int end;\n  int get length => end - start;\n  Range(this.start, this.end) : assert(start <= end);\n  Range.checked(this.start, this.end) {\n    assert(length >= 0);\n  }\n  Range.self(this.start, this.end) {\n    assert(this.start <= this.end);\n  }\n  Range.method(this.start, this.end) {\n    assert(validate());\n  }\n  Range.late(int a, int b) : start = a, end = b {\n    print(a);\n    assert(a <= b);\n  }\n  factory Range.make(int a) {\n    assert(a > 0);\n    return Range(a, a);\n  }\n  Range.other(Range other) : start = other.start, end = other.end {\n    assert(other.length >= 0);\n  }\n  bool validate() => start <= end;\n}\n\nclass External extends Object with Mixed {\n  final int x;\n  External(this.x) {\n    assert(mixed > 0);\n  }\n}\n\nmixin Mixed {\n  int get mixed => 1;\n}\n\nclass Parent {\n  final int value;\n  Parent(this.value);\n}\n\nclass SuperFormal extends Parent {\n  SuperFormal(super.value) : assert(value > 0);\n}\n\nextension type CheckedValue(int? value) {\n  CheckedValue.checked(this.value) : assert(value != null);\n}\n\nclass InstanceMessage {\n  InstanceMessage(int value) {\n    assert(value > 0, this);\n  }\n  InstanceMessage.property(int value) {\n    assert(value > 0, this.toString());\n  }\n}"
     },
     "group": "style",
     "name": "prefer-asserts-in-initializer-lists",
@@ -15449,7 +15249,7 @@
         "message": "Use 'const' with the constructor to improve performance."
       }
     ],
-    "docs": "Prefers `const` when invoking a `const` constructor with constant arguments.\n\nWhen a constructor is declared `const` and the invocation would be a valid\nconstant expression (constant arguments the constructor accepts, set\nelements and map keys with primitive equality, no type parameters in type\narguments), invoking it with `const` produces a canonicalized instance\ninstead of allocating a new one. The rule flags such invocations outside a\nconstant context (where `const` is already implied). It stays silent when\nthe constructor cannot be resolved to a declaration known to be `const`,\nwhen an argument cannot be proven constant, for `Object()` (often used to create\nunique identity tokens), for constructors of deferred-imported classes, and\nfor a generic class invoked without type arguments whose context type,\nviewed as that class, has a type parameter as a type argument, or cannot be\nresolved (making it `const` would change the inferred type arguments).\n\n```dart\nclass A {\n  const A();\n}\n\nfinal a = A();       // BAD\nfinal b = const A(); // GOOD\n```",
+    "docs": "Prefers `const` when invoking a `const` constructor with constant arguments.\n\nWhen a constructor is declared `const` and the invocation would be a valid\nconstant expression (constant arguments the constructor accepts, set\nelements and map keys with primitive equality, no type parameters in type\narguments), invoking it with `const` produces a canonicalized instance\ninstead of allocating a new one. The rule flags such invocations outside a\nconstant context (where `const` is already implied). It stays silent when\nthe constructor cannot be resolved to a declaration known to be `const`,\nwhen an argument cannot be proven constant, for `Object()` (often used to create\nunique identity tokens), for constructors of deferred-imported classes, and\nfor a generic class invoked without type arguments whose approximate context\ncontains type parameters, or whose context cannot be resolved. As in the\nanalyzer, assignments use their result type rather than their target type.\n\n```dart\nclass A {\n  const A();\n}\n\nfinal a = A();       // BAD\nfinal b = const A(); // GOOD\n```",
     "domains": [],
     "examples": {
       "bad": "class Point {\n  const Point(this.x, this.y);\n  const Point.origin()\n      : x = 0,\n        y = 0;\n\n  final int x;\n  final int y;\n}\n\nclass Label {\n  const Label(this.text, {this.point = const Point.origin()});\n\n  final String text;\n  final Point point;\n}\n\nclass Box<T> {\n  const Box(this.value);\n\n  final T value;\n}\n\nconst int limit = 10;\n\nvoid use(Object value) {}\n\nvoid constructors() {\n  final a = Point(1, 2);\n  final b = Point.origin();\n  final c = new Point(3, 4);\n  final d = new Point.origin();\n  final e = Box<int>(limit);\n  final f = Label('title', point: const Point(0, 1));\n  use(Point(limit, -1));\n  final List<Point> points = [Point(5, 6)];\n  final Point g = .origin();\n  print([a, b, c, d, e, f, points, g]);\n}\n\nenum Shade { dark, light }\n\nclass Swatch {\n  const Swatch(this.value, {this.shade});\n  const Swatch.named(this.value) : shade = null;\n  const factory Swatch.redirect(Object? value) = Swatch;\n  static const int base = 1;\n  final Object? value;\n  final Shade? shade;\n}\n\nclass Generic<T> {\n  const Generic(this.value);\n  const Generic.named(this.value);\n  final T value;\n}\n\nint top() => 0;\n\nvoid evaluatedArguments() {\n  const local = 2;\n  print(Swatch(Shade.dark));\n  print(Swatch(Swatch.base));\n  print(Swatch(local));\n  print(Generic<int>.named(1));\n  print(Swatch.redirect(1));\n  print(Swatch('a' 'b'));\n  print(Swatch(#symbol));\n  print(Swatch(int));\n  print(Swatch(top));\n  print(Swatch(Swatch.named));\n  print(Swatch(Shade.values));\n  print(Swatch(identical(1, 2)));\n  print(Swatch([if (true) 1]));\n  print(Swatch({Swatch(1): 1}));\n  final generic = Generic(1);\n  print(generic);\n}\n\n// The context type `Box<List<T>>` has no type parameter as a type argument\n// of `Box` itself, so making it `const` changes nothing.\nBox<List<T>> emptyBox<T>() => Box([]);",
@@ -16438,7 +16238,7 @@
     "examples": {
       "bad": "void use(Object o) {}\n\nvoid main() {\n  var name = \"Ann\";\n  use('single');\n  use(r'raw single');\n  use('hello $name');\n  use('''multiline''');\n  use(\"double\" 'single');\n  use('${name.length} chars');\n}",
       "crossFile": null,
-      "good": "import \"dart:core\";\n\nvoid use(Object o) {}\n\nvoid main() {\n  var name = \"Ann\";\n  use(\"double\");\n  use('say \"hi\"');\n  use('say \\\"hi\\\"');\n  use('Hello ${name.isEmpty ? \"x\" : \"y\"}');\n  use(\"outer ${'nested'}\");\n  use('contains \"$name\"');\n  use(r\"raw\");\n}"
+      "good": "import \"dart:core\";\n\nvoid use(Object o) {}\n\nvoid main() {\n  var name = \"Ann\";\n  use(\"double\");\n  use('say \"hi\"');\n  use('say \\\"hi\\\"');\n  use('Hello ${name.isEmpty ? \"x\" : \"y\"}');\n  use(\"outer ${'nested'}\");\n  use('contains \"$name\"');\n  use(r\"raw\");\n}\n\nvoid patternStrings(Object value) {\n  switch (value) {\n    case \"a${'b'}\":\n    case \"a${'b ${'c'}'}\":\n      break;\n  }\n}"
     },
     "group": "style",
     "name": "prefer-double-quotes",
@@ -16489,14 +16289,20 @@
         "file": null,
         "line": 29,
         "message": "The private field '_f' could be 'final'."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 34,
+        "message": "The private field '_value' could be 'final'."
       }
     ],
-    "docs": "Flags a private field that is initialized but never reassigned, so it could\nbe `final` (`prefer-final-fields`, adopted from package:lints).\n\nMarking such fields `final` documents that they never change after\nconstruction and lets the compiler enforce it, preventing accidental\nmutation. The analysis is deliberately conservative to avoid false positives:\na whole-*library* scan first records every name that is ever assigned,\ncompound assigned, or incremented, and any such write disqualifies that name\n(matched by identifier across the library, so a like-named field in another\nclass also protects it). A candidate is reported only when it is provably\ninitialized through exactly one safe channel — a declaration initializer with\nno constructor ever touching it, or no initializer but every non-redirecting\ngenerative constructor setting it via `: _x = ...` or a `this._x` formal. Only\nprivate (underscore-prefixed) fields are considered, and those already\n`final`, `const`, `late`, `external`, or `abstract` are skipped.\n\nLibrary awareness (suppress-only): a private field can be written from a\nsibling part file, so write collection unions this file with every sibling in\nits [`AnalyzeContext::library`]. When the library has an unresolved part, or\nthis file declares `part`/`part of` directives but no library context is\navailable, the full set of writes cannot be seen — every private-field\ndiagnostic for the file is suppressed rather than risk a false positive. A\nstandalone file with no part directives keeps the exact single-file behavior.",
+    "docs": "Flags a private field that is initialized but never reassigned, so it could\nbe `final` (`prefer-final-fields`, adopted from package:lints).\n\nMarking such fields `final` documents that they never change after\nconstruction and lets the compiler enforce it, preventing accidental\nmutation. The analysis is deliberately conservative to avoid false positives:\na whole-*library* scan first records every name that is ever assigned,\ncompound assigned, or incremented, and any such write disqualifies that name\n(matched by identifier across the library, so a like-named field in another\nclass also protects it). A candidate is reported only when it is provably\ninitialized through the channels recognized by the analyzer: every declared\nconstructor setting it via `: _x = ...` or a `this._x` formal, or a declaration\ninitializer when no constructor sets it. Enum fields are exempt. Only\nprivate (underscore-prefixed) fields are considered, and those already\n`final`, `const`, `late`, `external`, or `abstract` are skipped.\n\nLibrary awareness (suppress-only): a private field can be written from a\nsibling part file, so write collection unions this file with every sibling in\nits [`AnalyzeContext::library`]. When the library has an unresolved part, or\nthis file declares `part`/`part of` directives but no library context is\navailable, the full set of writes cannot be seen — every private-field\ndiagnostic for the file is suppressed rather than risk a false positive. A\nstandalone file with no part directives keeps the exact single-file behavior.",
     "domains": [],
     "examples": {
-      "bad": "// Private fields only ever initialized, never reassigned.\nclass A {\n  int _a = 1;\n  int get a => _a;\n}\n\nclass B {\n  static int _shared = 0;\n  static int read() => _shared;\n}\n\nclass C {\n  int _c;\n  C(this._c);\n}\n\nclass D {\n  int _d;\n  D(int v) : _d = v;\n}\n\nclass E {\n  String _e = 'x';\n  String describe() => _e;\n}\n\nclass F {\n  final List<int> items = [];\n  int _f;\n  F(this._f);\n}",
+      "bad": "// Private fields only ever initialized, never reassigned.\nclass A {\n  int _a = 1;\n  int get a => _a;\n}\n\nclass B {\n  static int _shared = 0;\n  static int read() => _shared;\n}\n\nclass C {\n  int _c;\n  C(this._c);\n}\n\nclass D {\n  int _d;\n  D(int v) : _d = v;\n}\n\nclass E {\n  String _e = 'x';\n  String describe() => _e;\n}\n\nclass F {\n  final List<int> items = [];\n  int _f;\n  F(this._f);\n}\n\nclass EveryConstructor {\n  int _value;\n  EveryConstructor(this._value);\n  EveryConstructor.zero() : _value = 0;\n  int get value => _value;\n}",
       "crossFile": null,
-      "good": "// Fields that are reassigned, already final, public, or late.\nclass A {\n  int _a = 0;\n  void inc() {\n    _a += 1;\n  }\n}\n\nclass B {\n  int _b = 0;\n  void assign(int v) {\n    _b = v;\n  }\n}\n\nclass C {\n  final int _c;\n  C(this._c);\n}\n\nclass D {\n  int value = 0;\n  void bump() {\n    value++;\n  }\n}\n\nclass E {\n  late int _e;\n  void init() {\n    _e = 5;\n  }\n}\n\nclass F {\n  int _f = 0;\n  void tick() {\n    _f++;\n  }\n}"
+      "good": "// Fields that are reassigned, already final, public, or late.\nclass A {\n  int _a = 0;\n  void inc() {\n    _a += 1;\n  }\n}\n\nclass B {\n  int _b = 0;\n  void assign(int v) {\n    _b = v;\n  }\n}\n\nclass C {\n  final int _c;\n  C(this._c);\n}\n\nclass D {\n  int value = 0;\n  void bump() {\n    value++;\n  }\n}\n\nclass E {\n  late int _e;\n  void init() {\n    _e = 5;\n  }\n}\n\nclass F {\n  int _f = 0;\n  void tick() {\n    _f++;\n  }\n}\n\nclass Redirecting {\n  int _value;\n  Redirecting(this._value);\n  Redirecting.zero() : this(0);\n  int get value => _value;\n}\n\nenum Status {\n  active;\n  static int _cache = 0;\n  static int get cache => _cache;\n}"
     },
     "group": "style",
     "name": "prefer-final-fields",
@@ -18084,7 +17890,7 @@
     "examples": {
       "bad": "void use(Object o) {}\n\nvoid main() {\n  var name = 'Ann';\n  use(\"double\");\n  use(r\"raw double\");\n  use(\"hello $name\");\n  use(\"\"\"multiline\"\"\");\n  use('single' \"double\");\n  use(\"${name.length} chars\");\n}",
       "crossFile": null,
-      "good": "import 'dart:core';\n\nvoid use(Object o) {}\n\nvoid main() {\n  var name = 'Ann';\n  use('single');\n  use(\"it's\");\n  use(\"it\\'s escaped\");\n  use(\"Hello ${name.isEmpty ? 'x' : 'y'}\");\n  use('outer ${\"nested\"}');\n  use('a ${\"b ${\"c\"}\"} d ${\"e\"}');\n  use(\"contains '$name'\");\n  use(r'raw');\n}"
+      "good": "import 'dart:core';\n\nvoid use(Object o) {}\n\nvoid main() {\n  var name = 'Ann';\n  use('single');\n  use(\"it's\");\n  use(\"it\\'s escaped\");\n  use(\"Hello ${name.isEmpty ? 'x' : 'y'}\");\n  use('outer ${\"nested\"}');\n  use('a ${\"b ${\"c\"}\"} d ${\"e\"}');\n  use(\"contains '$name'\");\n  use(r'raw');\n}\n\nvoid patternStrings(Object value) {\n  switch (value) {\n    case 'a${\"b\"}':\n    case 'a${\"b ${\"c\"}\"}':\n      break;\n  }\n}"
     },
     "group": "style",
     "name": "prefer-single-quotes",
@@ -19987,7 +19793,7 @@
     "examples": {
       "bad": "int? counter;\n\nString? describe(int? value) => value?.toString();\n\nvoid takeNullable(String? text) {}\n\nint? lastLength;\n\nclass Holder {\n  Holder(this.name);\n  String? name;\n  String? copy;\n  String? _cache;\n  late final String? _late;\n\n  // Fields are never promotable on assignment, private or `late` alike.\n  void fill(String? value) {\n    _cache = value!;\n    _late = value!;\n    copy = value!;\n  }\n}\n\nint? doubled(int? x) => x!;\n\nList<String>? first(List<String>? items) {\n  return items!;\n}\n\nvoid main(String? text, int? number, Holder holder, (int?, int) pair) {\n  takeNullable(text!);\n  int? copy = number!;\n  holder.copy = text!;\n  counter = number!;\n  final list = <int?>[number!];\n  final map = <String?, int?>{text!: 1};\n  int? a;\n  int b;\n  (a!, b) = pair;\n  print([copy, list, map, a, b, describe(1), doubled(2), first(null)]);\n}\n\nclass UriContext {\n  String fromUri(Object? uri) => '$uri';\n}\n\nfinal UriContext uriContext = UriContext();\n\n// A top-level variable receiver resolves to its declared type.\nString fromUri(Object? uri) => uriContext.fromUri(uri!);\n\n// Analyzer 3.13.5: adv-AdvA/repro/r14_unnecessary_null_checks.dart.\nvoid takesDynamic(dynamic value) {}\nclass NullableOperators {\n  void operator []=(int index, int? value) {}\n  NullableOperators operator +(int? value) => this;\n}\ndynamic returnsDynamic(int? value) => value!;\nvoid nullableContexts(int? value, NullableOperators receiver, Map<String, int?> map) {\n  takesDynamic(value!);\n  receiver[0] = value!;\n  receiver + value!;\n  map['key'] = value!;\n}\nFuture<int?> nullableAsync(int? value) async => value!;\nStream<int?> nullableStream(int? value) async* {\n  yield value!;\n}\n// Official test_yieldSyncStar_iterableOfNullable and returnAsync_*_await.\nIterable<int?> nullableIterable(int? value) sync* {\n  yield value!;\n}\nFuture<int?> nullableAwait(int? value) async => await value!;\nint? get nullableGetter => getterValue!;\nint? getterValue;",
       "crossFile": null,
-      "good": "import 'dart:async';\nimport 'dart:math';\n\nvoid takeText(String text) {}\n\nvoid takeNullable(String? text) {}\n\nclass Holder {\n  String? name;\n\n  int? size() => name!.length;\n\n  void fill(String? value) {\n    name = name!;\n  }\n}\n\nint count(int? value) => value!;\n\nString? Function() closureOf(String? s) => () => s!;\n\nString firstOr(List<String?> xs, bool Function(String?) p, String? fallback) =>\n    xs.firstWhere(p, orElse: () => fallback!)!;\n\nvoid main(String? text, int? number, (int?, int) pair) async {\n  takeText(text!);\n  int copy = number!;\n  String? local;\n  local = text!;\n  final future = Future<int?>.value(number!);\n  final completer = Completer<int?>();\n  completer.complete(number!);\n  final list = [number!];\n  final (int a, int b) = (pair.$1!, pair.$2);\n  var (c!, d) = pair;\n  takeNullable(text);\n  print([copy, local, future, list, a, b, c, d, count(1)]);\n}\n\n// Analyzer 3.13.5: Future.value retains its null assertion even when its\n// instantiated parameter is FutureOr<int?>.\nvoid futureValue(int? value) => Future<int>.value(value!);\n\n// intl number_format.dart:120,136: generic arguments are inferred from the\n// non-nullable operands, not widened by the nullable assignment context.\nint? significantDigits;\nvoid setSignificantDigits(int value) {\n  significantDigits = min(significantDigits!, value);\n  significantDigits = max(significantDigits!, value);\n}\n\n// Flutter badge.dart/dropdown_menu.dart/icon.dart: the enclosing nullable\n// context is not the right operand's expected parameter type for `??`.\nvoid acceptsNullable(int? value) {}\nint? fallbackValue;\nvoid nullableFallback(int? value) {\n  acceptsNullable(value ?? fallbackValue!);\n  int? local = value ?? fallbackValue!;\n  significantDigits = value ?? fallbackValue!;\n  print(local);\n}\n"
+      "good": "import 'dart:async';\nimport 'dart:math';\n\nvoid takeText(String text) {}\n\nvoid takeNullable(String? text) {}\n\nclass Holder {\n  String? name;\n\n  int? size() => name!.length;\n\n  void fill(String? value) {\n    name = name!;\n  }\n}\n\nint count(int? value) => value!;\n\nString? Function() closureOf(String? s) => () => s!;\n\nString firstOr(List<String?> xs, bool Function(String?) p, String? fallback) =>\n    xs.firstWhere(p, orElse: () => fallback!)!;\n\nvoid main(String? text, int? number, (int?, int) pair) async {\n  takeText(text!);\n  int copy = number!;\n  String? local;\n  local = text!;\n  final future = Future<int?>.value(number!);\n  final completer = Completer<int?>();\n  completer.complete(number!);\n  final list = [number!];\n  final (int a, int b) = (pair.$1!, pair.$2);\n  var (c!, d) = pair;\n  takeNullable(text);\n  print([copy, local, future, list, a, b, c, d, count(1)]);\n}\n\n// Analyzer 3.13.5: Future.value retains its null assertion even when its\n// instantiated parameter is FutureOr<int?>.\nvoid futureValue(int? value) => Future<int>.value(value!);\n\n// intl number_format.dart:120,136: generic arguments are inferred from the\n// non-nullable operands, not widened by the nullable assignment context.\nint? significantDigits;\nvoid setSignificantDigits(int value) {\n  significantDigits = min(significantDigits!, value);\n  significantDigits = max(significantDigits!, value);\n}\n\n// Flutter badge.dart/dropdown_menu.dart/icon.dart: the enclosing nullable\n// context is not the right operand's expected parameter type for `??`.\nvoid acceptsNullable(int? value) {}\nint? fallbackValue;\nvoid nullableFallback(int? value) {\n  acceptsNullable(value ?? fallbackValue!);\n  int? local = value ?? fallbackValue!;\n  significantDigits = value ?? fallbackValue!;\n  print(local);\n}\n\n\nclass Registration<T extends Object> {\n  T? instance;\n  final ready = Completer<T>();\n}\n\n// Future.value and Completer.complete deliberately retain their null checks,\n// including a generic receiver obtained from an instance field.\nvoid completeRegistration<T extends Object>(Registration<T> registration) {\n  Future<T>.value(registration.instance!);\n  registration.ready.complete(registration.instance!);\n}"
     },
     "group": "style",
     "name": "unnecessary-null-checks",
@@ -20446,12 +20252,6 @@
       {
         "column": 11,
         "file": null,
-        "line": 31,
-        "message": "Unnecessary 'this.' qualifier."
-      },
-      {
-        "column": 11,
-        "file": null,
         "line": 44,
         "message": "Unnecessary 'this.' qualifier."
       },
@@ -20496,14 +20296,44 @@
         "file": null,
         "line": 87,
         "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 95,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 101,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 19,
+        "file": null,
+        "line": 111,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 119,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 17,
+        "file": null,
+        "line": 124,
+        "message": "Unnecessary 'this.' qualifier."
       }
     ],
     "docs": "Flags a redundant `this.` qualifier on member access.",
     "domains": [],
     "examples": {
-      "bad": "// `this.` where no parameter or local shadows the member.\nclass A {\n  int x = 0;\n  int y = 0;\n  void m() {\n    this.x = 1;\n    print(this.y);\n  }\n  int get sum => this.x + this.y;\n}\n\nclass B {\n  int value = 0;\n  void update(int v) {\n    this.helper();\n    value = v;\n  }\n  void helper() {}\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    this.count += 1;\n  }\n}\n\nclass SourceOrdered {\n  int value = 0;\n  void run() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n}\n\nclass NestedScopes {\n  int value = 0;\n  void run() {\n    {\n      final value = 1;\n      print(this.value + value);\n    }\n    print(this.value);\n    (() {\n      final value = 2;\n      print(this.value + value);\n    })();\n    print(this.value);\n  }\n}\n\nclass TryScopes {\n  int value = 0;\n  void run() {\n    try {\n      final value = 1;\n      print(value);\n    } catch (_) {\n      print(this.value);\n    } finally {\n      print(this.value);\n    }\n    print(this.value);\n  }\n}\n\nclass BranchScopes {\n  int value = 0;\n  void run(bool flag, Object subject) {\n    if (flag) {\n      final value = 1;\n      print(this.value + value);\n    } else {\n      print(this.value);\n    }\n    if (subject case final value) {\n      print(this.value + value.hashCode);\n    } else {\n      print(this.value);\n    }\n    while (flag) {\n      final value = 2;\n      print(this.value + value);\n      break;\n    }\n    print(this.value);\n  }\n}",
+      "bad": "// `this.` where no parameter or local shadows the member.\nclass A {\n  int x = 0;\n  int y = 0;\n  void m() {\n    this.x = 1;\n    print(this.y);\n  }\n  int get sum => this.x + this.y;\n}\n\nclass B {\n  int value = 0;\n  void update(int v) {\n    this.helper();\n    value = v;\n  }\n  void helper() {}\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    this.count += 1;\n  }\n}\n\nclass SourceOrdered {\n  int value = 0;\n  void run() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n}\n\nclass NestedScopes {\n  int value = 0;\n  void run() {\n    {\n      final value = 1;\n      print(this.value + value);\n    }\n    print(this.value);\n    (() {\n      final value = 2;\n      print(this.value + value);\n    })();\n    print(this.value);\n  }\n}\n\nclass TryScopes {\n  int value = 0;\n  void run() {\n    try {\n      final value = 1;\n      print(value);\n    } catch (_) {\n      print(this.value);\n    } finally {\n      print(this.value);\n    }\n    print(this.value);\n  }\n}\n\nclass BranchScopes {\n  int value = 0;\n  void run(bool flag, Object subject) {\n    if (flag) {\n      final value = 1;\n      print(this.value + value);\n    } else {\n      print(this.value);\n    }\n    if (subject case final value) {\n      print(this.value + value.hashCode);\n    } else {\n      print(this.value);\n    }\n    while (flag) {\n      final value = 2;\n      print(this.value + value);\n      break;\n    }\n    print(this.value);\n  }\n}\n\nbool isNull(Object? value) => value == null;\n\nclass DeclaredMember {\n  bool get isNull => false;\n  bool check() => this.isNull;\n}\n\nclass LaterNestedBlock {\n  int value = 0;\n  void run() {\n    print(this.value);\n    {\n      final value = 1;\n      print(value);\n    }\n  }\n}\n\nextension DeclaredExtension on String {\n  bool get isNull => false;\n  bool check() => this.isNull;\n}\n\nint headerValue = 0;\nint representationValue = 0;\n\n// Declaring header parameters are direct members, ahead of library names.\nclass HeaderMember(final int headerValue) {\n  int read() => this.headerValue;\n  int shadowed(int headerValue) => this.headerValue + headerValue;\n}\n\nextension type RepresentationMember(int representationValue) {\n  int read() => this.representationValue;\n  int shadowed(int representationValue) =>\n      this.representationValue + representationValue;\n}",
       "crossFile": null,
-      "good": "// `this.` needed because of a shadowing parameter or local, or no `this.`.\nclass A {\n  int x = 0;\n  void m(int x) {\n    this.x = x;\n  }\n}\n\nclass B {\n  int value = 0;\n  void update() {\n    var value = 5;\n    this.value = value;\n  }\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    count += 1;\n  }\n  int get doubled => count * 2;\n}\n\nclass D {\n  int total = 0;\n  void add(int total) {\n    this.total += total;\n  }\n}\n\nclass E {\n  void run(int helper) {\n    this.helper();\n  }\n  void helper() {}\n}\n\nclass ScopedBindings {\n  int value = 0;\n\n  void catchesAndLoops() {\n    try {\n      throw 1;\n    } catch (value) {\n      print(this.value + value.hashCode);\n    }\n    for (final value in [1]) {\n      print(this.value + value);\n    }\n    if (Object() case final value) {\n      print(this.value + value.hashCode);\n    }\n  }\n\n  void closures() {\n    ((value) => print(this.value + value))(1);\n  }\n}"
+      "good": "// `this.` needed because of a shadowing parameter or local, or no `this.`.\nclass A {\n  int x = 0;\n  void m(int x) {\n    this.x = x;\n  }\n}\n\nclass B {\n  int value = 0;\n  void update() {\n    var value = 5;\n    this.value = value;\n  }\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    count += 1;\n  }\n  int get doubled => count * 2;\n}\n\nclass D {\n  int total = 0;\n  void add(int total) {\n    this.total += total;\n  }\n}\n\nclass E {\n  void run(int helper) {\n    this.helper();\n  }\n  void helper() {}\n}\n\nclass ScopedBindings {\n  int value = 0;\n\n  void catchesAndLoops() {\n    try {\n      throw 1;\n    } catch (value) {\n      print(this.value + value.hashCode);\n    }\n    for (final value in [1]) {\n      print(this.value + value);\n    }\n    if (Object() case final value) {\n      print(this.value + value.hashCode);\n    }\n  }\n\n  void closures() {\n    ((value) => print(this.value + value))(1);\n  }\n}\n\nclass InitializerScope {\n  int value = 1;\n  void ordinary() {\n    final value = this.value;\n    print(value);\n  }\n  void pattern() {\n    final (value,) = (this.value,);\n    print(value);\n  }\n  void later() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n  void capturedLater() {\n    void read() => print(this.value);\n    final value = 1;\n    read();\n    print(value);\n  }\n}\n\nbool isNull(Object? value) => value == null;\n\nextension NullableCheck on Object? {\n  bool get isNull => this == null;\n}\n\nclass ExtensionMember {\n  bool check() => this.isNull;\n}\n\nclass InheritedBase {\n  bool get isNull => false;\n}\n\nclass InheritedMember extends InheritedBase {\n  bool check() => this.isNull;\n}\n\nclass LoopInitializers {\n  int x = 0;\n  int y = 1;\n  List<int> values = [1];\n  void run() {\n    for (var x = this.x; x < 1; x++) {}\n    for (var x = this.y, y = 1; x < y; x++) {}\n    for (final values in this.values) {\n      print(values);\n    }\n  }\n}\n\nclass SwitchGuardBodyScope {\n  int y = 0;\n  void run(int v) {\n    switch (v) {\n      // The SDK linter's ancestor scope includes the case body's declarations.\n      case _ when this.y > 0:\n        print(this.y);\n        var y = 1;\n        print(y);\n    }\n  }\n}"
     },
     "group": "style",
     "name": "unnecessary-this",
@@ -22216,45 +22046,63 @@
         "column": 10,
         "file": null,
         "line": 4,
-        "message": "Avoid shadowing type parameters."
+        "message": "The type parameter 'T' shadows a type parameter from the enclosing class."
       },
       {
         "column": 7,
         "file": null,
         "line": 8,
-        "message": "Avoid shadowing type parameters."
+        "message": "The type parameter 'S' shadows a type parameter from the enclosing class."
       },
       {
         "column": 10,
         "file": null,
         "line": 12,
-        "message": "Avoid shadowing type parameters."
+        "message": "The type parameter 'T' shadows a type parameter from the enclosing mixin."
       },
       {
         "column": 10,
         "file": null,
         "line": 16,
-        "message": "Avoid shadowing type parameters."
+        "message": "The type parameter 'T' shadows a type parameter from the enclosing function."
       },
       {
         "column": 16,
         "file": null,
         "line": 22,
-        "message": "Avoid shadowing type parameters."
+        "message": "The type parameter 'E' shadows a type parameter from the enclosing class."
       },
       {
         "column": 13,
         "file": null,
         "line": 28,
-        "message": "Avoid shadowing type parameters."
+        "message": "The type parameter 'T' shadows a type parameter from the enclosing extension."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 33,
+        "message": "The type parameter 'T' shadows a type parameter from the enclosing class."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 37,
+        "message": "The type parameter 'T' shadows a type parameter from the enclosing class."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 37,
+        "message": "The type parameter 'T' shadows a type parameter from the enclosing method."
       }
     ],
     "docs": "Flags a type parameter that shadows a type parameter of an enclosing\ndeclaration.\n\nWhen a nested declaration — a method, local function, function expression, or\ngeneric function type or typedef — reuses the name of a type parameter from\nits surrounding class or function, the inner name hides the outer one. Code in\nthe nested scope can no longer refer to the enclosing type, and a reader can\neasily mistake the two unrelated types for the same one, which invites subtle\ntype errors. Rename the inner parameter to something distinct.",
     "domains": [],
     "examples": {
-      "bad": "// A nested declaration's type parameter must not shadow an enclosing one.\n\nclass A<T> {\n  void m<T>() {}\n}\n\nclass B<T, S> {\n  S f<S>(S x) => x;\n}\n\nmixin M<T> {\n  void p<T>() {}\n}\n\nvoid g<T>() {\n  void h<T>() {}\n  h<int>();\n}\n\nclass C<E> {\n  void m() {\n    void inner<E>() {}\n    inner<int>();\n  }\n}\n\nextension Ext<T> on List<T> {\n  void each<T>() {}\n}",
+      "bad": "// A nested declaration's type parameter must not shadow an enclosing one.\n\nclass A<T> {\n  void m<T>() {}\n}\n\nclass B<T, S> {\n  S f<S>(S x) => x;\n}\n\nmixin M<T> {\n  void p<T>() {}\n}\n\nvoid g<T>() {\n  void h<T>() {}\n  h<int>();\n}\n\nclass C<E> {\n  void m() {\n    void inner<E>() {}\n    inner<int>();\n  }\n}\n\nextension Ext<T> on List<T> {\n  void each<T>() {}\n}\n\nclass StaticAncestors<T> {\n  static void method<S>() {\n    void local<T>() {}\n    local<int>();\n  }\n  static void repeated<T>() {\n    void local<T>() {}\n    local<int>();\n  }\n}",
       "crossFile": null,
-      "good": "// Nested type parameters use distinct names.\n\nclass A<T> {\n  void m<S>() {}\n}\n\nclass B<T> {\n  void m() {}\n}\n\nvoid f<T>() {\n  void g<S>() {}\n  g<int>();\n}\n\ntypedef Fn<T> = void Function(T value);\n\nclass C<T, S> {\n  S convert(T x) => x as S;\n}\n\nvoid h<T>(T x) {\n  print(x);\n}\n\nclass D {\n  void m<T>() {}\n}"
+      "good": "// Nested type parameters use distinct names.\n\nclass A<T> {\n  void m<S>() {}\n}\n\nclass B<T> {\n  void m() {}\n}\n\nvoid f<T>() {\n  void g<S>() {}\n  g<int>();\n}\n\ntypedef Fn<T> = void Function(T value);\n\nclass C<T, S> {\n  S convert(T x) => x as S;\n}\n\nvoid h<T>(T x) {\n  print(x);\n}\n\nclass D {\n  void m<T>() {}\n}\n\nclass StaticClass<T> {\n  static void method<T>() {}\n}\n\nmixin StaticMixin<T> {\n  static void method<T>() {}\n}\n\nenum StaticEnum<T> {\n  value<int>();\n  static void method<T>() {}\n}\n\nextension StaticExtension<T> on List<T> {\n  static void method<T>() {}\n}\n\nextension type StaticRepresentation<T>(List<T> values) {\n  static void method<T>() {}\n}"
     },
     "group": "suspicious",
     "name": "avoid-shadowing-type-parameters",

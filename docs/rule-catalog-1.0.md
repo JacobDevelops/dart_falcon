@@ -25,27 +25,29 @@ suspicious`.
 
 | Source | shipped | planned must-have | planned nice-to-have | planned post-1.0 | total |
 |---|---:|---:|---:|---:|---:|
-| Official lints (section 1) | 145 | 0 | 0 | 0 | 145 |
+| Official lints (section 1) | 142 | 0 | 0 | 0 | 142 |
 | DCM-inspired | 0 | 75 | 132 | 24 | 231 |
 | Cross-file additions | 0 | 4 | 3 | 4 | 11 |
-| **Total in this catalog** | **145** | **79** | **135** | **28** | **387** |
+| **Total in this catalog** | **142** | **79** | **135** | **28** | **384** |
 
-This is the catalog's scope, not the full shipped registry. Section 1 added 145 official lints; its original priorities were 25 must-have and 120 nice-to-have. The remaining planned additions total 242, including 28 post-1.0 candidates. Count any candidate that overlaps the shipped registry only once.
+This is the catalog's scope, not the full shipped registry. Section 1 ships 142 official lints; its original priorities were 25 must-have and 120 nice-to-have before three removals. The remaining planned additions total 242, including 28 post-1.0 candidates. Count any candidate that overlaps the shipped registry only once.
 
 Six DCM rows were deduplicated against the official-lints and cross-file lists (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
 ---
 
-# 1. Shipped official lints (145)
+# 1. Shipped official lints (142)
 
-**Status: shipped.** All 145 rules in this section are registered with `RuleSource::Lints` provenance. The rule column uses the upstream Dart lint id; use the registry's kebab-case id in falcon config. `no_runtimeType_toString` maps to `no-runtime-type-to-string`.
+**Status: shipped.** All 142 rules in this section are available. The rule column uses the upstream Dart lint id; use its kebab-case id in falcon config. `no_runtimeType_toString` maps to `no-runtime-type-to-string`.
 
-The groups and domains below match the registry. All 145 have `recommended: false`, including the 25 upstream preset members. Upstream `core`, `recommended`, and `flutter` membership is not falcon default enablement: explicitly enable these rules or migrate an analyzer config. A Flutter domain set to `all` also enables its file rules.
+The groups and domains below match the registry. All 142 have `recommended: false`, including the 25 section-1 upstream preset members. Upstream preset membership isn't falcon default enablement. Enable these rules explicitly or migrate rules listed directly under `linter.rules` in an analyzer config; migration doesn't expand `include:` presets. A Flutter domain set to `all` also enables its file rules.
 
-The analysis column preserves the original design estimates, not the shipped engine's execution requirements. The registry records 52 file rules without resolution, 88 resolved file rules, and 5 cross-file rules. The latter are `depend_on_referenced_packages`, `package_names`, `secure_pubspec_urls`, `package_api_docs`, and `sort_pub_dependencies`.
+The analysis column preserves the original design estimates, not the shipped engine's execution requirements. The registry records 50 file rules without resolution, 88 resolved file rules, and 4 cross-file rules. The latter are `depend_on_referenced_packages`, `package_names`, `secure_pubspec_urls`, and `sort_pub_dependencies`.
 
-Against `dart analyze` 3.13.5 on 34 corpora, section 1 recorded 421,953 agreements, 0 false negatives, and 36 false positives. All 36 are `package_prefixed_library_names`, which upstream no longer enforces. This is corpus parity evidence, not a claim of zero differences.
+`package_api_docs`, `package_prefixed_library_names`, and `unsafe_html` were removed because Dart 3.13.5 no longer implements or enforces them. Existing config entries produce unknown-rule warnings, and migration from analyzer config reports them as unrecognized without emitting them. Delete suppression comments for these rules too, as they now produce malformed-suppression warnings.
+
+Against `dart analyze` 3.13.5, all 142 section-1 rules match on 34 corpora (421,953 agreements) and 9 additional projects: dio, bloc, riverpod, flame, drift, freezed, get_it, mobx, and jfit (206,914 agreements). Both sets have zero false positives, false negatives, or range mismatches, including UTF-16 columns and diagnostic lengths.
 
 `implicit_reopen` deliberately differs from the analyzer's declaration-order bug: falcon checks the class relationship regardless of declaration order.
 
@@ -83,7 +85,7 @@ The 25 section-1 upstream preset members below were the original 1.0 must-haves.
 
 Upstream preset breakdown: core 12, recommended 10, flutter 3. These labels describe upstream membership, not falcon's `recommended` flag.
 
-## 1b. Shipped non-preset official lints (120)
+## 1b. Shipped non-preset official lints (117)
 
 | rule | falcon group | domain | analysis estimate | official group | description |
 |---|---|---|---|---|---|
@@ -150,8 +152,6 @@ Upstream preset breakdown: core 12, recommended 10, flutter 3. These labels desc
 | `omit_local_variable_types` | style | none | needs-local-type-inference | style | Omit type annotations for local variables. |
 | `one_member_abstracts` | complexity | none | syntax-only | style | Avoid a one-member abstract class when a simple function will do. |
 | `only_throw_errors` | style | none | needs-full-type-resolution | style | Only throw instances of classes extending Exception or Error. |
-| `package_api_docs` | style | none | needs-cross-file/project | style | Provide doc comments for all public APIs. |
-| `package_prefixed_library_names` | style | none | syntax-only | style | Prefix library names with the package name and a dot-separated path. Upstream no longer enforces this rule. |
 | `parameter_assignments` | style | none | needs-full-type-resolution | style | Don't reassign references to parameters of functions or methods. |
 | `prefer_asserts_in_initializer_lists` | style | none | syntax-only | style | Prefer putting asserts in initializer lists. |
 | `prefer_asserts_with_message` | style | none | syntax-only | style | Prefer asserts with message. |
@@ -194,7 +194,6 @@ Upstream preset breakdown: core 12, recommended 10, flutter 3. These labels desc
 | `unnecessary_raw_strings` | style | none | syntax-only | style | Unnecessary raw string. |
 | `unnecessary_statements` | correctness | none | needs-full-type-resolution | errors | Avoid using unnecessary statements. |
 | `unreachable_from_main` | style | none | needs-cross-file/project | style | Unreachable top-level members in executable libraries. |
-| `unsafe_html` | correctness | none | needs-full-type-resolution | errors | Avoid unsafe HTML APIs. |
 | `use_colored_box` | style | flutter | needs-full-type-resolution | style | Use `ColoredBox`. |
 | `use_decorated_box` | style | flutter | needs-full-type-resolution | style | Use `DecoratedBox`. |
 | `use_enums` | style | none | needs-full-type-resolution | style | Use enums rather than classes that behave like enums. |
@@ -565,7 +564,7 @@ infrastructure: **A** reuses the resolved directive graph / lexical name index;
 (`dependencies`/`dev_dependencies`/`flutter.assets`); **C** needs a new
 asset/l10n index (filesystem walk and/or `.arb` parsing).
 
-**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, `package-api-docs`, and `sort-pub-dependencies`. The five official lints are counted in section 1, not in the 11 planned additions below.
+**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The four official lints are counted in section 1, not in the 11 planned additions below.
 
 ## 3a. Tier 1 — must-have (4)
 
