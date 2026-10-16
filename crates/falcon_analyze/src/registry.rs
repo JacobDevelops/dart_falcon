@@ -10,15 +10,26 @@ fn no_lookup(_name: &str) -> Option<(&'static str, &'static str, bool)> {
 const RULES_STACK_SIZE: usize = 256 * 1024 * 1024;
 
 /// Deep legal ASTs can exhaust default worker stacks; all rule-execution paths need this guard.
-pub fn with_rules_stack<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+pub fn with_rules_stack<T: Send>(f: impl FnOnce() -> T + Send) -> std::io::Result<T> {
     std::thread::scope(|scope| {
-        std::thread::Builder::new()
+        let handle = std::thread::Builder::new()
             .stack_size(RULES_STACK_SIZE)
-            .spawn_scoped(scope, f)
-            .expect("spawn rules thread")
-            .join()
-            .expect("rules thread panicked")
+            .spawn_scoped(scope, f)?;
+        Ok(handle.join().expect("rules thread panicked"))
     })
+}
+
+pub(crate) fn rules_thread_diagnostic(
+    path: &std::path::Path,
+    error: &std::io::Error,
+) -> Diagnostic {
+    Diagnostic::new(
+        "syntax-error",
+        falcon_diagnostics::Severity::Error,
+        format!("could not start rules thread: {error}"),
+        path.to_string_lossy().into_owned(),
+        falcon_diagnostics::Span { start: 0, end: 0 },
+    )
 }
 
 pub struct RuleRegistry {
@@ -62,6 +73,7 @@ impl RuleRegistry {
         ctx: &AnalyzeContext,
     ) -> Vec<Diagnostic> {
         with_rules_stack(|| self.run_all_inner(program, ctx))
+            .unwrap_or_else(|error| vec![rules_thread_diagnostic(ctx.file_path, &error)])
     }
 
     fn run_all_inner(

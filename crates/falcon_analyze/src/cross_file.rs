@@ -66,5 +66,12 @@ impl CrossFileRuleRegistry {
                 .flat_map(|rule| rule.analyze_project(files, config, indexes))
                 .collect()
         })
+        .unwrap_or_else(|error| {
+            files
+                .first()
+                .map(|file| crate::registry::rules_thread_diagnostic(&file.path, &error))
+                .into_iter()
+                .collect()
+        })
     }
 }

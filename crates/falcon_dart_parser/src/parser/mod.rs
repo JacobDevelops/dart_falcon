@@ -54,10 +54,22 @@ pub fn parse_for_package(source: &str, package_version: Option<LanguageVersion>)
             .spawn_scoped(scope, || parse_inner(source, version))
         {
             Ok(handle) => handle.join().expect("parser thread panicked"),
-            // Spawn can fail under thread/memory exhaustion; parsing on the
-            // current stack is still protected by the MAX_PARSE_DEPTH guard,
-            // just with less headroom — better than aborting the process.
-            Err(_) => parse_inner(source, version),
+            Err(error) => ParseResult {
+                program: Program {
+                    library_directive: None,
+                    part_of_directive: None,
+                    part_directives: Vec::new(),
+                    imports: Vec::new(),
+                    exports: Vec::new(),
+                    declarations: Vec::new(),
+                    span: Span::new(0, 0),
+                },
+                errors: vec![ParseError {
+                    message: format!("could not start parser thread: {error}"),
+                    offset: 0,
+                }],
+                syntax: lex_syntax(source),
+            },
         }
     })
 }
