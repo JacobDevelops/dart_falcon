@@ -43,3 +43,8 @@ List<VoidCallback> f8(bool x) {
     },
   ];
 }
+
+void commentDelimiter(bool x) {
+  if (x)
+    /* ) */ doThing(); /* expect: curly-braces-in-flow-control-structures */
+}

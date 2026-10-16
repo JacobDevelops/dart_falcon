@@ -1,4 +1,5 @@
 use crate::ast::Span;
+use std::sync::OnceLock;
 
 /// Store-local lexical ID: canonical tokens first, then simple interpolation names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -50,6 +51,7 @@ pub struct SyntaxStore {
     tokens: Box<[Token]>,
     interpolations: Box<[(Span, SyntaxStore)]>,
     simple_interpolations: Box<[Token]>,
+    delimiter_pairs: OnceLock<Box<[u32]>>,
 }
 
 impl Clone for SyntaxStore {
@@ -59,6 +61,7 @@ impl Clone for SyntaxStore {
                 tokens: store.tokens.clone(),
                 interpolations: Box::new([]),
                 simple_interpolations: store.simple_interpolations.clone(),
+                delimiter_pairs: OnceLock::new(),
             }
         }
 
@@ -118,6 +121,7 @@ impl SyntaxStore {
             tokens: tokens.into_boxed_slice(),
             interpolations: Box::new([]),
             simple_interpolations: Box::new([]),
+            delimiter_pairs: OnceLock::new(),
         }
     }
 
@@ -212,7 +216,7 @@ impl SyntaxStore {
 
     /// Tokens fully contained in a source range. A range inside an interpolation
     /// uses its retained stream; a complete string remains a single token.
-    pub fn tokens_in(&self, span: Span) -> impl Iterator<Item = &Token> {
+    pub fn tokens_in(&self, span: Span) -> std::slice::Iter<'_, Token> {
         let store = self.syntax_for_span(span);
         let range = store.token_range(span);
         if range.start.index() >= store.tokens.len() && range.start != range.end {
@@ -324,26 +328,60 @@ impl SyntaxStore {
 
     /// Find the corresponding closing delimiter after a canonical opening token.
     pub fn closing_delimiter(&self, open: TokenId) -> Option<TokenId> {
-        let kind = self.token(open)?.kind;
-        if !matches!(
-            kind,
-            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
-        ) {
-            return None;
-        }
-        let close = kind.matching_delimiter()?;
-        let mut depth = 1usize;
-        for (index, token) in self.tokens.iter().enumerate().skip(open.index() + 1) {
-            if token.kind == kind {
-                depth += 1;
-            } else if token.kind == close {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(TokenId::from_index(index));
+        matches!(
+            self.token(open)?.kind,
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace | TokenKind::QmarkLBracket
+        )
+        .then(|| self.paired_delimiter(open))
+        .flatten()
+    }
+
+    /// Find the corresponding opening delimiter before a canonical closing token.
+    pub fn opening_delimiter(&self, close: TokenId) -> Option<TokenId> {
+        matches!(
+            self.token(close)?.kind,
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace
+        )
+        .then(|| self.paired_delimiter(close))
+        .flatten()
+    }
+
+    fn paired_delimiter(&self, token: TokenId) -> Option<TokenId> {
+        let pairs = self.delimiter_pairs.get_or_init(|| {
+            let mut pairs = vec![u32::MAX; self.tokens.len()];
+            let mut stacks = [u32::MAX; 3];
+            for (index, token) in self.tokens.iter().enumerate() {
+                let (stack, opening) = match token.kind {
+                    TokenKind::LParen => (0, true),
+                    TokenKind::LBracket | TokenKind::QmarkLBracket => (1, true),
+                    TokenKind::LBrace => (2, true),
+                    TokenKind::RParen => (0, false),
+                    TokenKind::RBracket => (1, false),
+                    TokenKind::RBrace => (2, false),
+                    _ => continue,
+                };
+                if opening {
+                    // Unmatched openings temporarily link to the previous opening of their kind.
+                    pairs[index] = stacks[stack];
+                    stacks[stack] = TokenId::from_index(index).0;
+                } else if stacks[stack] != u32::MAX {
+                    let open = stacks[stack] as usize;
+                    stacks[stack] = pairs[open];
+                    pairs[open] = TokenId::from_index(index).0;
+                    pairs[index] = TokenId::from_index(open).0;
                 }
             }
-        }
-        None
+            for mut open in stacks {
+                while open != u32::MAX {
+                    let previous = pairs[open as usize];
+                    pairs[open as usize] = u32::MAX;
+                    open = previous;
+                }
+            }
+            pairs.into_boxed_slice()
+        });
+        let paired = *pairs.get(token.index())?;
+        (paired != u32::MAX).then_some(TokenId(paired))
     }
 
     fn expanded_tokens(&self) -> ExpandedTokens<'_> {
@@ -644,18 +682,6 @@ impl TokenKind {
             self,
             Self::LineComment | Self::BlockComment | Self::DocComment
         )
-    }
-
-    pub fn matching_delimiter(self) -> Option<Self> {
-        match self {
-            Self::LParen => Some(Self::RParen),
-            Self::LBracket => Some(Self::RBracket),
-            Self::LBrace => Some(Self::RBrace),
-            Self::RParen => Some(Self::LParen),
-            Self::RBracket => Some(Self::LBracket),
-            Self::RBrace => Some(Self::LBrace),
-            _ => None,
-        }
     }
 
     pub fn is_identifier_like(self) -> bool {
@@ -1007,6 +1033,34 @@ mod store_tests {
         assert_eq!(store.comments_in(Span::new(0, 15)).count(), 2);
         assert_eq!(store.closing_delimiter(TokenId(4)), Some(TokenId(9)));
         assert_eq!(store.closing_delimiter(TokenId(6)), Some(TokenId(8)));
+        assert_eq!(store.opening_delimiter(TokenId(9)), Some(TokenId(4)));
+        assert_eq!(store.opening_delimiter(TokenId(8)), Some(TokenId(6)));
+        assert_eq!(store.closing_delimiter(TokenId(5)), None);
+        assert_eq!(store.opening_delimiter(TokenId(4)), None);
+        let cloned = store.clone();
+        assert!(cloned.delimiter_pairs.get().is_none());
+        assert_eq!(cloned.closing_delimiter(TokenId(4)), Some(TokenId(9)));
+    }
+
+    #[test]
+    fn delimiter_pairs_handle_mixed_nullable_and_unclosed_delimiters() {
+        let store = SyntaxStore::new(vec![
+            Token::new(TokenKind::LParen, 0, 1),
+            Token::new(TokenKind::QmarkLBracket, 1, 2),
+            Token::new(TokenKind::LBrace, 3, 1),
+            Token::new(TokenKind::RBrace, 4, 1),
+            Token::new(TokenKind::RBracket, 5, 1),
+            Token::new(TokenKind::RParen, 6, 1),
+            Token::new(TokenKind::LParen, 7, 1),
+            Token::new(TokenKind::LParen, 8, 1),
+        ]);
+        for (open, close) in [(0, 5), (1, 4), (2, 3)] {
+            assert_eq!(store.closing_delimiter(TokenId(open)), Some(TokenId(close)));
+            assert_eq!(store.opening_delimiter(TokenId(close)), Some(TokenId(open)));
+        }
+        assert_eq!(store.closing_delimiter(TokenId(6)), None);
+        assert_eq!(store.closing_delimiter(TokenId(7)), None);
+        assert_eq!(store.closing_delimiter(TokenId(8)), None);
     }
 
     #[test]

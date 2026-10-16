@@ -58,3 +58,7 @@ List<Object> nestedLast() => [
       [0, 'a'],
       [1, 'b']
     ]; /* expect: require-trailing-commas */
+
+String nestedInterpolation() => '${call(
+      1,
+      2)}'; /* expect: require-trailing-commas */

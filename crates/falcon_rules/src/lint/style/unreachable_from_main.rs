@@ -82,7 +82,8 @@ impl Rule for UnreachableFromMain {
             let mut types = ExpressionTypes::default();
             let state = SemanticState::new(unit.program, ctx)
                 .map(|state| visit_program(&mut types, unit.program, state));
-            let mut walker = RefWalker::new(&tables, index, unit.source, &bound, &mut deps);
+            let mut walker =
+                RefWalker::new(&tables, index, unit.source, unit.syntax, &bound, &mut deps);
             walker.semantic = state.as_ref().map(|state| (state, &types.0));
             for declaration in &unit.program.declarations {
                 walker.visit_top_level_decl(declaration);
@@ -320,7 +321,7 @@ impl<'a> Tables<'a> {
         };
         for (unit, source) in units.iter().enumerate() {
             for declaration in &source.program.declarations {
-                tables.add_top_level(unit, source.source, declaration);
+                tables.add_top_level(unit, source.source, source.syntax, declaration);
             }
         }
         let model = ctx.identities.map(|identities| {
@@ -364,7 +365,13 @@ impl<'a> Tables<'a> {
         id
     }
 
-    fn add_top_level(&mut self, unit: usize, source: &str, declaration: &'a TopLevelDecl) {
+    fn add_top_level(
+        &mut self,
+        unit: usize,
+        source: &str,
+        syntax: &falcon_syntax::SyntaxStore,
+        declaration: &'a TopLevelDecl,
+    ) {
         let annotations: &[Annotation] = match declaration {
             TopLevelDecl::Class(x) => &x.annotations,
             TopLevelDecl::ClassTypeAlias(x) => &x.annotations,
@@ -379,7 +386,7 @@ impl<'a> Tables<'a> {
             TopLevelDecl::Error(_) => return,
         };
         let span = *declaration.span();
-        let doc_start = doc_start(source, annotated_start(annotations, span.start));
+        let doc_start = doc_start(source, syntax, annotated_start(annotations, span.start));
         let exempt = annotations.iter().any(is_visible_for_testing);
 
         if let TopLevelDecl::Variable(variable) = declaration {
@@ -624,7 +631,7 @@ impl<'a> Tables<'a> {
                 ClassMember::Operator(x) => (&x.annotations, false),
                 ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => continue,
             };
-            let doc_start = doc_start(source, annotated_start(annotations, span.start));
+            let doc_start = doc_start(source, syntax, annotated_start(annotations, span.start));
             let visible_for_testing = annotations.iter().any(is_visible_for_testing);
             let preview = annotations.iter().any(|a| self.is_preview(a));
             let mut entries: Vec<(usize, String, String, Span, Span)> = Vec::new();
@@ -808,6 +815,8 @@ impl<'a> Tables<'a> {
             }
         }
         let mut named = vec![false; self.containers.len()];
+        // Deliberately include names in comments and strings: this conservative
+        // escape check must not conclude that a container is never named elsewhere.
         for (unit, source) in units.iter().enumerate() {
             let bytes = source.source.as_bytes();
             let mut index = 0;
@@ -975,28 +984,35 @@ fn annotated_start(annotations: &[Annotation], start: usize) -> usize {
 
 /// Start of the doc comment block immediately preceding `start`, or `start`.
 /// The empty block comment `/**/` is not a doc comment.
-fn doc_start(source: &str, start: usize) -> usize {
+// Unlike documentation_start/doc_blocks, attachment here includes all adjacent
+// documentation groups and stops at ordinary comments.
+fn doc_start(source: &str, syntax: &falcon_syntax::SyntaxStore, start: usize) -> usize {
     let mut start = start.min(source.len());
-    loop {
-        let Some(before) = source.get(..start).map(str::trim_end) else {
-            return start;
-        };
-        let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
-        if before[line_start..].trim_start().starts_with("///") {
-            start = line_start;
-            continue;
+    let syntax = syntax.syntax_for_span(Span::new(start, start));
+    let end = syntax
+        .tokens()
+        .partition_point(|token| token.offset() < start);
+    for token in syntax.tokens()[..end].iter().rev() {
+        match token.kind {
+            falcon_syntax::TokenKind::Whitespace | falcon_syntax::TokenKind::Newline => {}
+            falcon_syntax::TokenKind::DocComment => {
+                let offset = token.offset();
+                if token.text(source).starts_with("///") {
+                    let line_start = source[..offset]
+                        .rfind('\n')
+                        .map_or(0, |newline| newline + 1);
+                    if !source[line_start..offset].trim().is_empty() {
+                        break;
+                    }
+                    start = line_start;
+                } else {
+                    start = offset;
+                }
+            }
+            _ => break,
         }
-        if let Some(body_end) = before.strip_suffix("*/").map(str::len)
-            && let Some(open) = before.rfind("/**")
-            && before
-                .get(open + 3..body_end)
-                .is_some_and(|body| !body.contains("*/"))
-        {
-            start = open;
-            continue;
-        }
-        return start;
     }
+    start
 }
 
 /// A `[name]`, `[Type.member]`, or `[new Type]` reference in a doc comment.
@@ -1007,26 +1023,25 @@ struct DocReference<'s> {
 }
 
 /// Every reference in the `///` and `/** */` doc comments of `source`.
-fn doc_comment_references(source: &str) -> Vec<DocReference<'_>> {
+fn doc_comment_references<'s>(
+    source: &'s str,
+    syntax: &falcon_syntax::SyntaxStore,
+) -> Vec<DocReference<'s>> {
     let mut references = Vec::new();
-    let mut in_block = false;
-    let mut offset = 0;
-    for line in source.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        let is_doc = if in_block {
-            if trimmed.contains("*/") {
-                in_block = false;
-            }
-            true
-        } else if trimmed.starts_with("///") {
-            true
-        } else if trimmed.starts_with("/**") && !trimmed.starts_with("/**/") {
-            in_block = !trimmed.contains("*/");
-            true
-        } else {
-            false
-        };
-        if is_doc {
+    let mut checked = 0;
+    let mut line_start = 0;
+    for comment in syntax.comment_tokens().filter(|comment| {
+        if comment.kind != falcon_syntax::TokenKind::DocComment {
+            return false;
+        }
+        if let Some(newline) = source[checked..comment.offset()].rfind('\n') {
+            line_start = checked + newline + 1;
+        }
+        checked = comment.offset();
+        source[line_start..comment.offset()].trim().is_empty()
+    }) {
+        let mut offset = comment.offset();
+        for line in comment.text(source).split_inclusive('\n') {
             let mut cursor = 0;
             while let Some(open) = line[cursor..].find('[') {
                 let open = cursor + open;
@@ -1049,8 +1064,8 @@ fn doc_comment_references(source: &str) -> Vec<DocReference<'_>> {
                 }
                 cursor = close + 1;
             }
+            offset += line.len();
         }
-        offset += line.len();
     }
     references
 }
@@ -1089,6 +1104,7 @@ struct RefWalker<'t, 'a> {
     tables: &'t Tables<'a>,
     unit: usize,
     source: &'t str,
+    syntax: &'t falcon_syntax::SyntaxStore,
     /// Identifier expressions resolving to locals.
     bound: &'t HashSet<usize>,
     deps: &'t mut Vec<Vec<DeclId>>,
@@ -1111,6 +1127,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         tables: &'t Tables<'a>,
         unit: usize,
         source: &'t str,
+        syntax: &'t falcon_syntax::SyntaxStore,
         bound: &'t HashSet<usize>,
         deps: &'t mut Vec<Vec<DeclId>>,
     ) -> Self {
@@ -1118,6 +1135,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
             tables,
             unit,
             source,
+            syntax,
             bound,
             deps,
             stack: Vec::new(),
@@ -1593,7 +1611,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         let unit_decls: Vec<DeclId> = (0..tables.decls.len())
             .filter(|&id| tables.decls[id].unit == self.unit)
             .collect();
-        for reference in doc_comment_references(self.source) {
+        for reference in doc_comment_references(self.source, self.syntax) {
             self.stack.extend(unit_decls.iter().copied().filter(|&id| {
                 let decl = &tables.decls[id];
                 decl.doc_start <= reference.at && reference.at < decl.end
@@ -2028,7 +2046,8 @@ mod tests {
     #[test]
     fn doc_comment_references_parse_names_members_and_constructors() {
         let source = "/// See [A], [B.c], [new D] and [text](url).\n/** [E] */\nvoid f() {}\n";
-        let references: Vec<(bool, Vec<&str>)> = doc_comment_references(source)
+        let syntax = falcon_dart_parser::parse(source).syntax;
+        let references: Vec<(bool, Vec<&str>)> = doc_comment_references(source, &syntax)
             .into_iter()
             .map(|reference| (reference.is_new, reference.segments))
             .collect();
@@ -2047,23 +2066,82 @@ mod tests {
     #[test]
     fn doc_start_covers_line_and_block_doc_comments() {
         let source = "int a = 0;\n/// One.\n/// Two.\nvoid f() {}\n/** Block. */\nvoid g() {}\n";
+        let syntax = falcon_dart_parser::parse(source).syntax;
         assert_eq!(
-            doc_start(source, source.find("void f").unwrap()),
+            doc_start(source, &syntax, source.find("void f").unwrap()),
             source.find("/// One").unwrap()
         );
         assert_eq!(
-            doc_start(source, source.find("void g").unwrap()),
+            doc_start(source, &syntax, source.find("void g").unwrap()),
             source.find("/**").unwrap()
         );
-        assert_eq!(doc_start(source, source.find("int a").unwrap()), 0);
+        assert_eq!(doc_start(source, &syntax, source.find("int a").unwrap()), 0);
     }
 
     #[test]
     fn empty_block_comment_is_not_a_doc_comment() {
         let source = "/**/\nvoid main() {}\n";
-        assert_eq!(doc_start(source, source.find("void").unwrap()), 5);
+        let syntax = falcon_dart_parser::parse(source).syntax;
+        assert_eq!(doc_start(source, &syntax, source.find("void").unwrap()), 5);
         assert!(lint(source).is_empty());
         assert_eq!(lint("/**/\nvoid main() {}\nclass C {}\n"), ["C"]);
+    }
+
+    #[test]
+    fn doc_start_preserves_adjacent_groups_and_plain_comment_boundary() {
+        let source = "/// First.\n/** Second. */\n  /// Third.\nvoid f() {}\n\
+                      /// Detached.\n// Boundary.\n  /// Attached.\nvoid g() {}\n";
+        let syntax = falcon_dart_parser::parse(source).syntax;
+        assert_eq!(
+            doc_start(source, &syntax, source.find("void f").unwrap()),
+            0
+        );
+        assert_eq!(
+            doc_start(source, &syntax, source.find("void g").unwrap()),
+            source.find("  /// Attached").unwrap()
+        );
+    }
+
+    #[test]
+    fn doc_references_only_read_retained_documentation_comments() {
+        let source = "const text = '/// [StringOnly]';\n\
+                      // [PlainOnly]\n/**/\n\
+                      /// [Attached]\nvoid f() {}\n";
+        let syntax = falcon_dart_parser::parse(source).syntax;
+        let references = doc_comment_references(source, &syntax);
+        assert_eq!(references.len(), 1);
+        assert_eq!(references[0].segments, ["Attached"]);
+        assert_eq!(references[0].at, source.find("[Attached]").unwrap());
+    }
+
+    #[test]
+    fn attached_doc_references_reach_declarations() {
+        assert!(lint("/// See [Helper].\nvoid main() {}\nclass Helper {}\n").is_empty());
+        assert_eq!(
+            lint("/// See [Helper].\nvoid unused() {}\nvoid main() {}\nclass Helper {}\n"),
+            ["unused", "Helper"]
+        );
+    }
+
+    #[test]
+    fn inline_line_documentation_does_not_attach_to_next_declaration() {
+        let source = "void first() {} /// [Helper]\nvoid main() {}\nclass Helper {}\n";
+        let syntax = falcon_dart_parser::parse(source).syntax;
+        let start = source.find("void main").unwrap();
+        assert_eq!(doc_start(source, &syntax, start), start);
+        assert!(doc_comment_references(source, &syntax).is_empty());
+    }
+
+    #[test]
+    fn doc_references_include_nested_interpolation_comments() {
+        let source = "void main() { print('''${() {\n\
+                      /// [Helper]\nreturn 0;\n}()}'''); }\nclass Helper {}\n";
+        let syntax = falcon_dart_parser::parse(source).syntax;
+        let references = doc_comment_references(source, &syntax);
+        assert_eq!(references.len(), 1);
+        assert_eq!(references[0].segments, ["Helper"]);
+        assert_eq!(references[0].at, source.find("[Helper]").unwrap());
+        assert!(lint(source).is_empty());
     }
 
     #[test]

@@ -19,9 +19,9 @@
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Truth};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, for_each_expr, walk_expr, walk_stmt};
+use falcon_syntax::{Program, TokenKind};
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
@@ -73,12 +73,11 @@ impl SemanticRuleVisitor for Collector<'_> {
             }
             let span = self
                 .ctx
-                .source
-                .get(catch.span.start..catch.span.end)
-                .and_then(|text| text.find("catch"))
-                .map_or(catch.span, |offset| {
-                    let start = catch.span.start + offset;
-                    Span::new(start, start + "catch".len())
+                .syntax
+                .keywords_in(catch.span, TokenKind::Catch)
+                .next()
+                .map_or(catch.span, |token| {
+                    Span::new(token.offset(), token.offset() + token.len())
                 });
             self.diagnostics.push(self.ctx.diagnostic(
                 "avoid-catches-without-on-clauses",

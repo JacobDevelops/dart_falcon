@@ -31,3 +31,5 @@ void handle(int code) {
       break;
   }
 }
+
+String documentedInterpolation() => '${() { /* Intentionally empty } { */ }}';

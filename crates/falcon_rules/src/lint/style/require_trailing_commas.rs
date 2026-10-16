@@ -52,7 +52,6 @@ impl Rule for RequireTrailingCommas {
         }
         let mut collector = Collector {
             ctx,
-            // Delimiter matching below needs indexed access to this pass's tokens.
             tokens: significant_tokens(ctx).collect(),
             diags: Vec::new(),
         };
@@ -76,20 +75,6 @@ struct Collector<'a, 'ctx> {
     diags: Vec<Diagnostic>,
 }
 
-fn opens(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace | TokenKind::QmarkLBracket
-    )
-}
-
-fn closes(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace
-    )
-}
-
 impl Collector<'_, '_> {
     /// Index of the first token of `kind` starting at or after `offset`.
     fn find_from(&self, offset: usize, kind: TokenKind) -> Option<usize> {
@@ -100,37 +85,31 @@ impl Collector<'_, '_> {
             .map(|index| start + index)
     }
 
-    /// Index of the delimiter closing the one opened at `open`.
     fn matching_close(&self, open: usize) -> Option<usize> {
-        let mut depth = 0usize;
-        for (index, token) in self.tokens.iter().enumerate().skip(open) {
-            if opens(token.kind) {
-                depth += 1;
-            } else if closes(token.kind) {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(index);
-                }
-            }
-        }
-        None
+        self.matching_delimiter(open, true)
     }
 
-    /// Index of the delimiter opening the one closed at `close`.
     fn matching_open(&self, close: usize) -> Option<usize> {
-        let mut depth = 0usize;
-        for index in (0..=close).rev() {
-            let kind = self.tokens[index].kind;
-            if closes(kind) {
-                depth += 1;
-            } else if opens(kind) {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(index);
-                }
-            }
-        }
-        None
+        self.matching_delimiter(close, false)
+    }
+
+    fn matching_delimiter(&self, index: usize, opening: bool) -> Option<usize> {
+        let token = self.tokens[index];
+        let span = Span {
+            start: token.offset(),
+            end: self.end(index),
+        };
+        let syntax = self.ctx.syntax.syntax_for_span(span);
+        let id = syntax.token_range(span).start;
+        let paired = if opening {
+            syntax.closing_delimiter(id)?
+        } else {
+            syntax.opening_delimiter(id)?
+        };
+        let offset = syntax.token(paired)?.offset();
+        self.tokens
+            .binary_search_by_key(&offset, |token| token.offset())
+            .ok()
     }
 
     fn end(&self, index: usize) -> usize {

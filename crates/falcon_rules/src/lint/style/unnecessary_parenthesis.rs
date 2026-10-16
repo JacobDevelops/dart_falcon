@@ -342,8 +342,7 @@ impl Collector<'_> {
         {
             return false;
         }
-        if expression
-            .is_some_and(|expression| directly_contains_whitespace(self.ctx.source, expression))
+        if expression.is_some_and(directly_contains_whitespace)
             && !matches!(
                 parent,
                 Parent::AssignedValue
@@ -369,11 +368,7 @@ impl Collector<'_> {
                     return false;
                 }
                 Parent::MemberTarget { under_prefix, .. } => {
-                    if under_prefix
-                        && expression.is_some_and(|expression| {
-                            directly_contains_whitespace(self.ctx.source, expression)
-                        })
-                    {
+                    if under_prefix && expression.is_some_and(directly_contains_whitespace) {
                         return false;
                     }
                     if matches!(
@@ -929,7 +924,7 @@ fn contains_null_aware_invocation(expression: &Expr) -> bool {
 }
 
 /// The analyzer's `directlyContainsWhitespace`.
-fn directly_contains_whitespace(source: &str, expression: &Expr) -> bool {
+fn directly_contains_whitespace(expression: &Expr) -> bool {
     let mut current = expression;
     loop {
         match current {
@@ -940,18 +935,10 @@ fn directly_contains_whitespace(source: &str, expression: &Expr) -> bool {
             | Expr::FuncExpr { .. }
             | Expr::Is { .. }
             | Expr::Switch { .. } => return true,
-            Expr::New { span, .. } => {
-                let text = source.get(span.start..span.end).unwrap_or_default();
-                return text.starts_with("new") || text.starts_with("const");
-            }
-            Expr::List { is_const, span, .. }
-            | Expr::Map { is_const, span, .. }
-            | Expr::Set { is_const, span, .. } => {
-                return *is_const
-                    && source
-                        .get(span.start..span.end)
-                        .is_some_and(|text| text.starts_with("const"));
-            }
+            Expr::New { .. } => return true,
+            Expr::List { is_const, .. }
+            | Expr::Map { is_const, .. }
+            | Expr::Set { is_const, .. } => return *is_const,
             Expr::Field { object, .. } => current = object,
             Expr::Call { callee, .. } => match callee.as_ref() {
                 Expr::Field { object, .. } => current = object,

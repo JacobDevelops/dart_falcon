@@ -8,7 +8,7 @@
 //! closing brace.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_class_member, walk_expr, walk_function_decl, walk_getter_decl, walk_method_decl,
@@ -104,22 +104,22 @@ fn flag_if_empty(block: &Block, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContex
     if !block.stmts.is_empty() {
         return;
     }
-    let end = block.span.end.min(ctx.source.len());
-    let src_full = &ctx.source[block.span.start..end];
-    let Some(inner) = src_full.strip_suffix('}') else {
+    let syntax = ctx.syntax.syntax_for_span(block.span);
+    let open = syntax.token_range(block.span).start;
+    let Some(close_id) = syntax.closing_delimiter(open) else {
         return;
     };
-    if inner.contains("//") || inner.contains("/*") {
+    let close = &syntax.tokens()[close_id.index()];
+    if syntax.tokens()[open.index() + 1..close_id.index()]
+        .iter()
+        .any(|token| token.kind.is_comment())
+    {
         return;
     }
-    let close_byte = end - 1;
     diags.push(ctx.diagnostic(
         "no-empty-block",
         "Avoid empty blocks — add a comment explaining the intent or remove the block",
-        DiagSpan {
-            start: close_byte,
-            end: close_byte + 1,
-        },
+        Span::new(close.offset(), close.offset() + close.len()),
     ));
 }
 

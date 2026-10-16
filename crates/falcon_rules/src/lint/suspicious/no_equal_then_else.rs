@@ -27,108 +27,30 @@ impl Rule for NoEqualThenElse {
     }
 }
 
-fn normalize(source: &str) -> Vec<u8> {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Mode {
-        Code,
-        String,
-        LineComment,
-        BlockComment,
-    }
+fn normalize<'a>(ctx: &'a AnalyzeContext<'_>, span: Span) -> impl Iterator<Item = u8> + 'a {
+    use falcon_syntax::TokenKind;
 
-    let bytes = source.as_bytes();
-    let mut output = Vec::with_capacity(bytes.len());
-    let mut mode = Mode::Code;
-    let mut quote = b'\0';
-    let mut triple = false;
-    let mut raw_string = false;
-    let mut escaped = false;
-    let mut index = 0;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        let next = bytes.get(index + 1).copied();
-        match mode {
-            Mode::Code if byte.is_ascii_whitespace() => index += 1,
-            Mode::Code if byte == b'/' && next == Some(b'/') => {
-                output.extend_from_slice(b"//");
-                mode = Mode::LineComment;
-                index += 2;
+    let mut line_comment = false;
+    ctx.syntax.tokens_in(span).flat_map(move |token| {
+        let mut text = token.text(ctx.source);
+        let preserve_whitespace = if line_comment {
+            // The retained comment excludes its terminating newline; equality
+            // includes that newline and any preceding CR.
+            line_comment = token.kind != TokenKind::Newline;
+            true
+        } else {
+            if token.kind.is_comment() && text.starts_with("/* expect:") {
+                text = "";
+            } else if matches!(token.kind, TokenKind::LineComment | TokenKind::DocComment)
+                && text.starts_with("//")
+            {
+                line_comment = true;
             }
-            Mode::Code if bytes[index..].starts_with(b"/* expect:") => {
-                index += 2;
-                while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
-                {
-                    index += 1;
-                }
-                index = (index + 2).min(bytes.len());
-            }
-            Mode::Code if byte == b'/' && next == Some(b'*') => {
-                output.extend_from_slice(b"/*");
-                mode = Mode::BlockComment;
-                index += 2;
-            }
-            Mode::Code if matches!(byte, b'\'' | b'"') => {
-                quote = byte;
-                triple = bytes.get(index + 1) == Some(&byte) && bytes.get(index + 2) == Some(&byte);
-                raw_string = index > 0
-                    && bytes[index - 1] == b'r'
-                    && (index < 2 || !bytes[index - 2].is_ascii_alphanumeric());
-                escaped = false;
-                let delimiter = if triple { 3 } else { 1 };
-                output.extend_from_slice(&bytes[index..index + delimiter]);
-                index += delimiter;
-                mode = Mode::String;
-            }
-            Mode::String => {
-                if triple
-                    && byte == quote
-                    && bytes.get(index + 1) == Some(&quote)
-                    && bytes.get(index + 2) == Some(&quote)
-                {
-                    output.extend_from_slice(&bytes[index..index + 3]);
-                    index += 3;
-                    mode = Mode::Code;
-                } else {
-                    output.push(byte);
-                    if !triple && byte == quote && (raw_string || !escaped) {
-                        mode = Mode::Code;
-                    }
-                    escaped = !raw_string && byte == b'\\' && !escaped;
-                    if byte != b'\\' {
-                        escaped = false;
-                    }
-                    index += 1;
-                }
-            }
-            Mode::LineComment => {
-                output.push(byte);
-                if byte == b'\n' {
-                    mode = Mode::Code;
-                }
-                index += 1;
-            }
-            Mode::BlockComment => {
-                output.push(byte);
-                if byte == b'*' && next == Some(b'/') {
-                    output.push(b'/');
-                    mode = Mode::Code;
-                    index += 2;
-                } else {
-                    index += 1;
-                }
-            }
-            Mode::Code => {
-                output.push(byte);
-                index += 1;
-            }
-        }
-    }
-    output
-}
-
-fn span_src<'a>(source: &'a str, span: &Span) -> &'a str {
-    let end = span.end.min(source.len());
-    &source[span.start..end]
+            token.kind.is_comment() || token.kind == TokenKind::StringLit
+        };
+        text.bytes()
+            .filter(move |byte| preserve_whitespace || !byte.is_ascii_whitespace())
+    })
 }
 
 fn last_stmt_span(stmt: &Stmt) -> &Span {
@@ -153,8 +75,7 @@ impl Visitor for Collector<'_> {
             span,
             ..
         } = node
-            && normalize(span_src(self.ctx.source, then_expr.span()))
-                == normalize(span_src(self.ctx.source, else_expr.span()))
+            && normalize(self.ctx, *then_expr.span()).eq(normalize(self.ctx, *else_expr.span()))
         {
             self.diags.push(self.ctx.diagnostic(
                 "no-equal-then-else",
@@ -168,8 +89,8 @@ impl Visitor for Collector<'_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         if let Stmt::If(i) = node
             && let Some(else_branch) = &i.else_branch
-            && normalize(span_src(self.ctx.source, i.then_branch.span()))
-                == normalize(span_src(self.ctx.source, else_branch.span()))
+            && normalize(self.ctx, *i.then_branch.span())
+                .eq(normalize(self.ctx, *else_branch.span()))
         {
             let last = last_stmt_span(&i.then_branch);
             self.diags.push(self.ctx.diagnostic(
@@ -179,5 +100,59 @@ impl Visitor for Collector<'_> {
             ));
         }
         walk_stmt(self, node);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize;
+    use falcon_analyze::AnalyzeContext;
+    use falcon_config::FalconConfig;
+    use falcon_syntax::ast::Span;
+    use std::path::Path;
+
+    fn normalized(source: &str) -> Vec<u8> {
+        let parsed = falcon_dart_parser::parse(source);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+        normalize(&ctx, Span::new(0, source.len())).collect()
+    }
+
+    #[test]
+    fn branch_equality_preserves_comment_contents() {
+        assert_eq!(normalized("run( 1 );"), normalized("run(1);"));
+        assert_ne!(
+            normalized("run(); /* a b */"),
+            normalized("run(); /* ab */")
+        );
+        assert_ne!(normalized("run(); // a b\n"), normalized("run(); // ab\n"));
+        assert_ne!(normalized("run(); // same\n"), normalized("run(); // same"));
+        assert_ne!(
+            normalized("run(); // same\r\n"),
+            normalized("run(); // same\n")
+        );
+        assert_eq!(normalized("// same\r'''\n A '''"), b"// same\r'''\n A '''");
+        assert_eq!(
+            normalized("run(); /* expect: no-equal-then-else */"),
+            normalized("run();")
+        );
+        assert_ne!(
+            normalized("run(); /* expect : kept */"),
+            normalized("run();")
+        );
+        assert_ne!(
+            normalized("run(); /* outer /* inner */ a b */"),
+            normalized("run(); /* outer /* inner */ ab */")
+        );
+    }
+
+    #[test]
+    fn branch_equality_preserves_complete_literals() {
+        assert_ne!(normalized("'a b'"), normalized("'ab'"));
+        assert_ne!(normalized("r'a b'"), normalized("r'ab'"));
+        assert_ne!(normalized("'''a b'''"), normalized("'''ab'''"));
+        assert_ne!(normalized("'/* expect: kept */'"), normalized("''"));
+        assert_ne!(normalized("'${a + b}'"), normalized("'${a+b}'"));
+        assert_ne!(normalized("'${'a b'}'"), normalized("'${'ab'}'"));
     }
 }

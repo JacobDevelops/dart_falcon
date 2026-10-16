@@ -24,6 +24,9 @@ Constructor-forwarding and override rules use resolved parameter identities and
 inherited contracts, including covariance and default-expression syntax.
 `valid-regexps` checks decoded Dart string literals with ECMAScript regular-expression
 syntax.
+Syntax-sensitive rules use retained lexer tokens and AST spans, so keywords,
+delimiters, and Dartdoc-looking text inside ordinary comments or string literals
+do not masquerade as code or documentation references.
 
 Configuration is a single biome-shaped `falcon.json`: grouped rules, per-rule
 severities and options, per-path overrides, a `flutter` domain, and a separate

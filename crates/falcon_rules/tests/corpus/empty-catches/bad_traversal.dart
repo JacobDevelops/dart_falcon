@@ -30,3 +30,8 @@ void nested(bool choose) {
 }
 
 void work() {}
+
+String interpolatedCatch() => '${(() {
+  try { work(); } catch (error) {} /* expect: empty-catches */
+  return '';
+})()}';

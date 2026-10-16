@@ -41,3 +41,10 @@ void g6() {
     print('$e $st');
   }
 }
+
+String documentedInterpolation() => '${(() {
+  try {
+    doThing();
+  } catch (error) { /* Deliberately ignore this } and { failure. */ }
+  return '';
+})()}';

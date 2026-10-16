@@ -26,7 +26,7 @@ use falcon_analyze::{AnalyzeContext, Feature, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_stmt};
+use falcon_syntax::visitor::{Visitor, walk_switch_case};
 
 #[derive(Default)]
 pub struct UnnecessaryBreaks;
@@ -51,19 +51,14 @@ struct Collector<'a, 'ctx> {
 }
 
 impl Visitor for Collector<'_, '_> {
-    fn visit_stmt(&mut self, node: &Stmt) {
-        if let Stmt::Switch(switch) = node {
-            for case in &switch.cases {
-                if let [_, .., Stmt::Break(BreakStmt { label: None, span })] = case.body.as_slice()
-                {
-                    self.diags.push(self.ctx.diagnostic(
-                        "unnecessary-breaks",
-                        "Unnecessary 'break' statement.",
-                        *span,
-                    ));
-                }
-            }
+    fn visit_switch_case(&mut self, case: &SwitchCase) {
+        if let [_, .., Stmt::Break(BreakStmt { label: None, span })] = case.body.as_slice() {
+            self.diags.push(self.ctx.diagnostic(
+                "unnecessary-breaks",
+                "Unnecessary 'break' statement.",
+                *span,
+            ));
         }
-        walk_stmt(self, node);
+        walk_switch_case(self, case);
     }
 }

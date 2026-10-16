@@ -44,7 +44,7 @@ struct Collector<'a> {
 
 /// Whether `expr` begins with the identifier `name`: the leftmost operand of a
 /// `+` chain, or the first interpolation of a string that starts with it.
-fn starts_with_identifier(expr: &Expr, name: &str, source: &str) -> bool {
+fn starts_with_identifier(expr: &Expr, name: &str, syntax: &falcon_syntax::SyntaxStore) -> bool {
     let mut current = expr;
     loop {
         match current.unparenthesized() {
@@ -62,15 +62,12 @@ fn starts_with_identifier(expr: &Expr, name: &str, source: &str) -> bool {
                     return false;
                 };
                 let content_start = literal.span.start + delimiter.content_offset;
-                // The interpolation must open the string: `$s...` or `${s}...`,
-                // possibly parenthesized (`${(s)}...`).
-                let Some(prefix) = source.get(content_start..first.span.start) else {
-                    return false;
-                };
-                let opens = prefix == "$"
-                    || prefix.strip_prefix("${").is_some_and(|parens| {
-                        parens.chars().all(|c| c == '(' || c.is_whitespace())
-                    });
+                let opens = first.span.start == content_start + 1
+                    || (first.span.start == content_start + 2
+                        && syntax
+                            .interpolation_ranges(literal.span)
+                            .next()
+                            .is_some_and(|range| range == first.span));
                 if !opens {
                     return false;
                 }
@@ -147,7 +144,7 @@ impl Collector<'_> {
                         .environment
                         .binding_depth(&identifier.name)
                         .is_some_and(|depth| depth > 0))
-                    && starts_with_identifier(value, &identifier.name, self.ctx.source) =>
+                    && starts_with_identifier(value, &identifier.name, self.ctx.syntax) =>
             {
                 self.report(identifier.span);
             }
@@ -173,5 +170,37 @@ impl SemanticRuleVisitor for Collector<'_> {
             _ => return,
         };
         self.check_loop_body(body, state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::starts_with_identifier;
+    use falcon_syntax::ast::TopLevelDecl;
+
+    #[test]
+    fn interpolation_must_open_the_literal() {
+        for (literal, expected) in [
+            ("'$s'", true),
+            ("'${s}'", true),
+            ("'${ (s) }'", true),
+            ("'${/* comment */ s}'", true),
+            ("'x$s'", false),
+            ("'x${s}'", false),
+            ("'${other}$s'", false),
+            ("'${\"$s\"}'", true),
+        ] {
+            let source = format!("var value = {literal};");
+            let parsed = falcon_dart_parser::parse(&source);
+            let TopLevelDecl::Variable(declaration) = &parsed.program.declarations[0] else {
+                panic!("expected variable");
+            };
+            let expression = declaration.declarators[0].initializer.as_ref().unwrap();
+            assert_eq!(
+                starts_with_identifier(expression, "s", &parsed.syntax),
+                expected,
+                "{literal}"
+            );
+        }
     }
 }

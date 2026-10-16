@@ -10,7 +10,7 @@
 //! This includes catch clauses inside anonymous functions.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
@@ -37,24 +37,22 @@ fn check_catch(catch: &CatchClause, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeCo
         return;
     }
     // Exempt an intentionally documented empty body.
-    let end = catch.body.span.end.min(ctx.source.len());
-    let inner = &ctx.source[catch.body.span.start..end];
-    let close = match inner.rfind('}') {
-        Some(p) => p,
-        None => return,
+    let syntax = ctx.syntax.syntax_for_span(catch.body.span);
+    let open = syntax.token_range(catch.body.span).start;
+    let Some(close_id) = syntax.closing_delimiter(open) else {
+        return;
     };
-    let braces = &inner[..=close];
-    if braces.contains("//") || braces.contains("/*") {
+    let close = &syntax.tokens()[close_id.index()];
+    if syntax.tokens()[open.index() + 1..close_id.index()]
+        .iter()
+        .any(|token| token.kind.is_comment())
+    {
         return;
     }
-    let close_byte = catch.body.span.start + close;
     diags.push(ctx.diagnostic(
         "empty-catches",
         "Empty catch block — handle the exception, add a comment, or name it `_`",
-        DiagSpan {
-            start: close_byte,
-            end: close_byte + 1,
-        },
+        Span::new(close.offset(), close.offset() + close.len()),
     ));
 }
 

@@ -36,7 +36,7 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     identities: &'a IdentityIndex,
     library: LibraryId,
-    type_names: Vec<Span>,
+    type_names: Vec<&'a str>,
     primary_parameter: bool,
     representation_constructor: bool,
 }
@@ -63,22 +63,14 @@ impl Collector<'_> {
     }
 
     fn resolves_to_type(&self, name: &str) -> bool {
-        (name != "_"
-            && self
-                .type_names
-                .iter()
-                .any(|span| self.ctx.source.get(span.start..span.end) == Some(name)))
-            || self.resolves_to_library_type(name)
+        (name != "_" && self.type_names.contains(&name)) || self.resolves_to_library_type(name)
     }
 
     fn enter_types(&mut self, params: &[TypeParam], method: bool) -> usize {
         let previous = self.type_names.len();
         for param in params {
             if self.resolves_to_library_type(&param.name.name)
-                || (!method
-                    && self.type_names.iter().any(|span| {
-                        self.ctx.source.get(span.start..span.end) == Some(param.name.name.as_str())
-                    }))
+                || (!method && self.type_names.contains(&param.name.name.as_str()))
             {
                 self.diags.push(self.ctx.diagnostic(
                     "avoid-types-as-parameter-names",
@@ -91,7 +83,8 @@ impl Collector<'_> {
             params
                 .iter()
                 .filter(|param| param.name.name != "_")
-                .map(|param| param.name.span),
+                .filter_map(|param| self.ctx.syntax.tokens_in(param.name.span).next())
+                .map(|token| token.text(self.ctx.source)),
         );
         previous
     }

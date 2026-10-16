@@ -19,8 +19,8 @@
 use falcon_analyze::resolve::TypeKind;
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
 use falcon_syntax::ast::*;
+use falcon_syntax::{Program, TokenKind};
 
 use crate::lint::correctness::exhaustive_cases::is_enum_like;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
@@ -80,10 +80,10 @@ impl Collector<'_> {
             .unwrap_or(case.span.start);
         let start = self
             .ctx
-            .source
-            .get(from..case.span.end)
-            .and_then(|text| text.find("default"))
-            .map_or(case.span.start, |offset| from + offset);
+            .syntax
+            .keywords_in(Span::new(from, case.span.end), TokenKind::Default)
+            .next()
+            .map_or(case.span.start, |token| token.offset());
         Span::new(start, start + "default".len())
     }
 }

@@ -20,7 +20,6 @@ impl Rule for AvoidSingleChildColumnOrRow {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
-            source: ctx.source,
         };
         collector.visit_program(program);
         collector.diags
@@ -30,16 +29,15 @@ impl Rule for AvoidSingleChildColumnOrRow {
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
     ctx: &'s AnalyzeContext<'s>,
-    source: &'s str,
 }
 
 impl Visitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr) {
         if let Some((name, args, span)) = crate::lint::flutter::widget_construction(node)
             && matches!(name, "Column" | "Row" | "Flex")
-            // Guard against partially-parsed constructions (a complete call ends
-            // with `)`); Dart 3 pattern collection elements can truncate the node.
-            && self.source.get(span.start..span.end).is_some_and(|s| s.trim_end().ends_with(')'))
+            // A recovery node can stop before the construction's closing token.
+            && self.ctx.syntax.tokens_in(*span).last()
+                .is_some_and(|token| token.kind == falcon_syntax::TokenKind::RParen)
         {
             for named in &args.named {
                 if named.name.name == "children"

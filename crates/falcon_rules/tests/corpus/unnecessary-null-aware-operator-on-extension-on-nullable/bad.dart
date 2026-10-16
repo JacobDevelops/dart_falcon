@@ -22,4 +22,8 @@ void main(String? text, Crate? box) {
   print(box?[0]); /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
   print(box?.area()); /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
   print(NullableText(text)?.orEmpty()); /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
+  print(box /* ? */
+      ?[0]); /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
+  text /* ?. */
+      ?.label = 'x'; /* expect: unnecessary-null-aware-operator-on-extension-on-nullable */
 }

@@ -39,12 +39,12 @@ use falcon_analyze::{
     SignatureIndex, SourceSelector, TypeParameterScope, evaluate_constant, resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
+use falcon_syntax::TokenKind;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr, walk_formal_param,
     walk_function_decl, walk_method_decl, walk_stmt, walk_top_level_decl,
 };
-use falcon_syntax::{Token, TokenKind};
 
 use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
 use crate::lint::semantic_scope::{
@@ -110,10 +110,8 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
                 frontier.excluded.push(metadata);
             }
         }
-        let tokens = ctx.tokens();
         let mut uses = Uses {
             ctx,
-            tokens,
             package_root: package.lib_root.clone(),
             same_package: HashMap::new(),
             excluded: frontier.excluded,
@@ -745,7 +743,6 @@ impl Visitor for Frontier<'_> {
 
 struct Uses<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    tokens: &'a [Token],
     package_root: std::path::PathBuf,
     same_package: HashMap<std::path::PathBuf, bool>,
     excluded: Vec<Span>,
@@ -1118,10 +1115,9 @@ impl<'ctx> Uses<'ctx> {
         })
     }
     fn cascade_index_span(&self, start: usize, index: &Expr) -> Span {
-        let after = self
-            .tokens
-            .partition_point(|token| token.offset() < index.span().end);
-        let end = self.tokens[after..]
+        let syntax = self.ctx.syntax.syntax_for_span(*index.span());
+        let after = syntax.token_range(*index.span()).end.index();
+        let end = syntax.tokens()[after..]
             .iter()
             .find(|token| token.kind == TokenKind::RBracket)
             .map_or(index.span().end, |token| token.offset() + token.len());
@@ -2346,6 +2342,39 @@ void use(int value) {
 ";
         let diagnostics = analyze(source, fixture_path());
         assert_eq!(diagnostics.len(), 3, "{diagnostics:?}");
+    }
+
+    #[test]
+    fn cascade_index_spans_follow_each_index_in_the_local_token_store() {
+        let source = r#"
+class Box {
+  Box get items => this;
+  Box add(List<int> values) => this;
+  @deprecated Box operator [](int index) => this;
+}
+void use(Box box) {
+  box..items[0][1];
+  box..items?[2];
+  box..add([3])[4];
+  print('${(box..items[5])}');
+}
+"#;
+        let mut diagnostics = analyze(source, fixture_path());
+        diagnostics.sort_unstable_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
+        let actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                "..items[0]",
+                "..items[0][1]",
+                "..items?[2]",
+                "..add([3])[4]",
+                "..items[5]",
+            ]
+        );
     }
 
     #[test]

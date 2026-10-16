@@ -10,6 +10,7 @@
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
+use falcon_syntax::TokenKind;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
 
@@ -37,12 +38,15 @@ struct Collector<'s> {
 impl Collector<'_> {
     /// True when the body begins on the same source line as the condition's
     /// closing `)`, mirroring the official single-line `if` exemption.
-    fn on_condition_line(&self, body: &Stmt) -> bool {
-        let start = body.span().start;
-        match self.source[..start].rfind(')') {
-            Some(p) => !self.source[p..start].contains('\n'),
-            None => true,
-        }
+    fn on_condition_line(&self, statement: &IfStmt) -> bool {
+        let start = statement.then_branch.span().start;
+        let close = self
+            .ctx
+            .syntax
+            .tokens_in(Span::new(statement.span.start, start))
+            .rev()
+            .find(|token| token.kind == TokenKind::RParen);
+        close.is_none_or(|token| !self.source[token.offset()..start].contains('\n'))
     }
 }
 
@@ -51,9 +55,7 @@ impl Visitor for Collector<'_> {
         match node {
             Stmt::If(i) => match &i.else_branch {
                 None => {
-                    if !matches!(&*i.then_branch, Stmt::Block(_))
-                        && !self.on_condition_line(&i.then_branch)
-                    {
+                    if !matches!(&*i.then_branch, Stmt::Block(_)) && !self.on_condition_line(i) {
                         self.diags.push(self.ctx.diagnostic(
                             "curly-braces-in-flow-control-structures",
                             "Use curly braces around the body of this flow-control statement",

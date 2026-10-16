@@ -25,6 +25,7 @@
 
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, MemberResult, ResolvedType, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_syntax::TokenKind;
 use falcon_syntax::ast::*;
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
@@ -146,49 +147,45 @@ impl Collector<'_> {
         })
     }
 
-    fn report(&mut self, from: usize, to: usize, operator: &str) {
-        let Some(offset) = self
+    fn report(&mut self, from: usize, to: usize, kind: TokenKind, len: usize) {
+        let Some(token) = self
             .ctx
-            .source
-            .get(from..to)
-            .and_then(|between| between.find(operator))
+            .syntax
+            .tokens_in(Span::new(from, to))
+            .find(|token| token.kind == kind)
         else {
             return;
         };
-        let start = from + offset;
         self.diags.push(self.ctx.diagnostic(
             "unnecessary-null-aware-operator-on-extension-on-nullable",
             "Unnecessary use of a null-aware operator to invoke an extension method on a nullable type.",
             DiagSpan {
-                start,
-                end: start + operator.len(),
+                start: token.offset(),
+                end: token.offset() + len,
             },
         ));
     }
 
     /// Reports the `?..` or `..` operator opening the cascade section at `start`.
     fn report_cascade_operator(&mut self, start: usize) {
-        let source = self.ctx.source;
-        let at = |offset: usize, text: &str| {
-            source
-                .get(offset..)
-                .is_some_and(|rest| rest.starts_with(text))
-        };
-        let (start, len) = if at(start, "?..") {
-            (start, 3)
-        } else if start > 0 && at(start - 1, "?..") {
-            (start - 1, 3)
-        } else if at(start, "..") {
-            (start, 2)
-        } else {
+        let Some(token) = self
+            .ctx
+            .syntax
+            .tokens_in(Span::new(start.saturating_sub(1), start + 3))
+            .find(|token| {
+                matches!(token.kind, TokenKind::DotDot | TokenKind::DotDotQmark)
+                    && token.offset() <= start
+                    && start < token.offset() + token.len()
+            })
+        else {
             return;
         };
         self.diags.push(self.ctx.diagnostic(
             "unnecessary-null-aware-operator-on-extension-on-nullable",
             "Unnecessary use of a null-aware operator to invoke an extension method on a nullable type.",
             DiagSpan {
-                start,
-                end: start + len,
+                start: token.offset(),
+                end: token.offset() + token.len(),
             },
         ));
     }
@@ -214,7 +211,7 @@ impl SemanticRuleVisitor for Collector<'_> {
                     field.name.clone()
                 };
                 if self.extension_on_nullable(object, &member, state) {
-                    self.report(object.span().end, field.span.start, "?.");
+                    self.report(object.span().end, field.span.start, TokenKind::QmarkDot, 2);
                 }
             }
             Expr::Cascade {
@@ -248,7 +245,12 @@ impl SemanticRuleVisitor for Collector<'_> {
             } => {
                 let member = if self.is_assigned(span) { "[]=" } else { "[]" };
                 if self.extension_on_nullable(object, member, state) {
-                    self.report(object.span().end, index.span().start, "?");
+                    self.report(
+                        object.span().end,
+                        index.span().start,
+                        TokenKind::QmarkLBracket,
+                        1,
+                    );
                 }
             }
             _ => {}

@@ -6,3 +6,5 @@ void check(bool condition) {
   ];
   print(callbacks);
 }
+
+String interpolatedBlock() => '${() {}}'; /* expect: no-empty-block */
