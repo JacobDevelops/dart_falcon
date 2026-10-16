@@ -4,11 +4,11 @@ Section 1 has shipped. Sections 2 and 3 track planned DCM-inspired and cross-fil
 
 **Priorities**
 
-- **must-have** — blocks 1.0. The rule is either an official preset member or a
+- **must-have**: blocks 1.0. The rule is either an official preset member or a
   high-signal correctness/idiom check expected of a serious Dart/Flutter linter.
-- **nice-to-have** — 1.0 stretch. Shipped if the workstream reaches it, but the
+- **nice-to-have**: 1.0 stretch. Shipped if the workstream reaches it, but the
   release does not block on it.
-- **post-1.0** — explicitly out of 1.0 scope (experimental, hyper-niche, or
+- **post-1.0**: explicitly out of 1.0 scope (experimental, hyper-niche, or
   needs config/schema design that is itself post-1.0 work).
 
 **Falcon groups** are `complexity | correctness | performance | style |
@@ -16,10 +16,10 @@ suspicious`.
 
 **Analysis types** (what a rule needs from the engine):
 
-- **syntax-only** — AST/token pass, no types.
-- **needs-local-type-inference** — falcon's minimal resolver; local flow/types.
-- **needs-full-type-resolution** — element model / SDK type hierarchies.
-- **needs-cross-file/project** — whole-program or pubspec/asset analysis.
+- **syntax-only**: AST/token pass, no types.
+- **needs-local-type-inference**: local flow/types.
+- **needs-full-type-resolution**: element model / SDK type hierarchies.
+- **needs-cross-file/project**: whole-program or pubspec/asset analysis.
 
 ## Catalog status and size
 
@@ -213,19 +213,14 @@ All 117 are registered with `recommended: false`; none are deferred.
 
 # 2. Planned DCM-inspired rules (231)
 
-Rules worth reimplementing as **open** falcon rules, surveyed from the DCM
-(dcm.dev) catalog. DCM went commercial (~2023): its free CLI tier covers metrics
-plus a small legacy `dart_code_metrics` (MIT, pre-1.0) subset — most of which
-falcon already ports. Everything below is treated as **DCM-paid** unless marked
-`legacy-free`; reimplementing paid rules as open falcon rules is the point.
-`paid?` = DCM's per-rule Pro badge was not individually verified.
+These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
 Analysis legend: **S** syntax-only, **LT** needs-local-type-inference, **FT**
 needs-full-type-resolution, **X** needs-cross-file/project. Domain-rule falcon
 groups (flutter/test/bloc/riverpod/provider/flutter_hooks/equatable) are
 assigned here for the catalog and should be confirmed at implementation time.
 
-## 2a. core — correctness
+## 2a. core: correctness
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -271,7 +266,7 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `pass-correct-accepted-type` | correctness | FT | paid | Argument type mismatch (DCM-style). | post-1.0 |
 | `handle-throwing-invocations` | correctness | FT | paid | Call to throwing API without try/catch. | post-1.0 |
 
-## 2b. core — suspicious
+## 2b. core: suspicious
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -301,7 +296,7 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `avoid-importing-entrypoint-exports` | suspicious | X | paid | Importing from an app entrypoint. | post-1.0 |
 | `avoid-similar-names` | suspicious | S | paid | Confusingly similar identifiers in scope. | post-1.0 |
 
-## 2c. core — style
+## 2c. core: style
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -338,7 +333,7 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `prefer-prefixed-global-constants` | style | S | paid | Global const naming convention. | post-1.0 |
 | `match-class-name-pattern` | style | S | paid | Class names must match a configured regex. | post-1.0 |
 
-## 2d. core — complexity
+## 2d. core: complexity
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -355,7 +350,7 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `avoid-local-functions` | complexity | S | paid | Overuse of local functions. | post-1.0 |
 | `avoid-excessive-expressions` | complexity | S | paid | Expression-length metric. | post-1.0 |
 
-## 2e. core — performance
+## 2e. core: performance
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -367,10 +362,10 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `prefer-return-await` | performance | FT | paid | `return await` needed for correct stack traces. | nice-to-have |
 | `prefer-bytes-builder` | performance | FT | paid | Building byte lists without BytesBuilder. | post-1.0 |
 
-## 2f. core — unnecessary/redundant cleanups (style)
+## 2f. core: unnecessary/redundant cleanups (style)
 
 Not covered by falcon's existing `unnecessary-*` family; verify each against the
-shipped set before implementing — several are near-twins that should be aliased,
+shipped set before implementing. Several are near-twins that should be aliased,
 not re-added.
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
@@ -548,9 +543,7 @@ checks (`use-setstate-synchronously`, `use-closest-build-context`) vs official
 falcon's shipped `no-duplicate-case-values`; `avoid-self-compare` vs falcon's
 shipped `no-self-comparisons`.
 
-**Excluded from the survey entirely** (already in falcon, or too niche for 1.0):
-~55 DCM rules that falcon already ports, and the flame (4), patrol (2),
-mocktail (4), get_it (1), and fake_async (1) niche-package rule sets.
+The survey excludes rules already ported by falcon and niche-package rules for flame, patrol, mocktail, get_it, and fake_async.
 
 ---
 
@@ -566,16 +559,16 @@ asset/l10n index (filesystem walk and/or `.arb` parsing).
 
 **Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The four official lints are counted in section 1, not in the 11 planned additions below.
 
-## 3a. Tier 1 — must-have (4)
+## 3a. Tier 1: must-have (4)
 
 | rule | falcon group | analysis | difficulty | description |
 |---|---|---|---|---|
 | `unused-dependencies` | correctness | needs-cross-file/project | B | A package in pubspec `dependencies:` that no source file imports via `package:<dep>/…`. |
 | `undeclared-dependencies` | correctness | needs-cross-file/project | B | A `package:<x>/…` import whose `<x>` is neither a declared (dev)dependency nor the package itself. |
 | `no-import-cycles` | correctness | needs-cross-file/project | A | Import/export cycle between library files (SCC over the resolved directive graph). |
-| `banned-imports` | correctness | needs-cross-file/project | A | User-configured architecture boundaries — files matching glob X may not import glob Y. |
+| `banned-imports` | correctness | needs-cross-file/project | A | User-configured architecture boundaries: files matching glob X may not import glob Y. |
 
-## 3b. Tier 2 — nice-to-have (3)
+## 3b. Tier 2: nice-to-have (3)
 
 | rule | falcon group | analysis | difficulty | description |
 |---|---|---|---|---|
@@ -583,7 +576,7 @@ asset/l10n index (filesystem walk and/or `.arb` parsing).
 | `unused-l10n` | correctness | needs-cross-file/project | C | Generated localization key (`.arb`) never referenced through the generated accessor. |
 | `unexported-public-api` | style | needs-cross-file/project | A | Public declaration used across the package but never surfaced through a barrel/public library. |
 
-## 3c. Tier 3 — post-1.0 (4)
+## 3c. Tier 3: post-1.0 (4)
 
 | rule | falcon group | analysis | difficulty | description |
 |---|---|---|---|---|

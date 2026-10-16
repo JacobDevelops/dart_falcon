@@ -1,28 +1,23 @@
 # Getting Started
 
-falcon is a fast, standalone linter for Dart and Flutter, written in Rust. It
-parses Dart itself — no Dart SDK, no `analyzer` package, no analysis server — so a
-whole project lints in a single pass. This guide takes you from install to a
-green CI run.
+falcon is a standalone linter for Dart and Flutter, written in Rust. It doesn't run the Dart analyzer or analysis server. Install the Dart SDK and resolve your dependencies for rules that need SDK or package types.
 
 ## Installation
 
-falcon ships as a single self-contained binary. Pick whichever channel fits your
-setup; [installation.md](./installation.md) covers every platform and channel in
-full.
+falcon ships as a single binary. [installation.md](./installation.md) covers all platforms and channels.
 
 **Prebuilt binary** (Linux x86_64/aarch64 static, macOS Intel/Apple Silicon):
 
 ```sh
-curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-0.3.0-x86_64-linux.tar.gz | tar -xz
+curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.3.0/falcon-0.3.0-x86_64-linux.tar.gz | tar -xz
 sudo mv falcon /usr/local/bin/
 falcon version
 ```
 
-**From source** with a stable Rust toolchain:
+**From source** with a nightly Rust toolchain:
 
 ```sh
-cargo install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
+cargo +nightly install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
 ```
 
 **mise**: add this to your project's `mise.toml`, then run `mise install`:
@@ -44,7 +39,7 @@ falcon check .
 ```
 
 When you want to tune the rule set, drop a `falcon.json` at your project root.
-There is no `init` command — create the file yourself:
+There is no `init` command; create the file yourself:
 
 ```json
 {
@@ -65,15 +60,13 @@ There is no `init` command — create the file yourself:
 }
 ```
 
-> **Note:** Point `$schema` at the published schema for rule-name autocomplete and
-> validation in your editor. All rule ids and config keys are **kebab-case**
-> (`max-lines-for-file`, `cross-file`, `max-errors`).
+> Point `$schema` at the published schema for rule-name autocomplete and validation. Rule ids and structural config keys use kebab-case (`max-lines-for-file`, `cross-file`, `max-errors`); names inside rule `options` use snake_case.
 
 Rules live under groups (`complexity`, `correctness`, `performance`, `style`,
 `suspicious`); each entry is a level string (`off`/`on`/`info`/`warn`/`error`) or
 a `{ "level", "options" }` object. Whole-project checks such as `unused-files`
-live in the separate top-level [`cross-file`](./configuration.md#cross-file--cross-file-rules)
-section — not under `linter`. See [configuration.md](./configuration.md) for the
+live in the separate top-level [`cross-file`](./configuration.md#cross-file-cross-file-rules)
+section, not under `linter`. See [configuration.md](./configuration.md) for the
 full surface.
 
 ## Usage
@@ -94,22 +87,18 @@ Emit machine-readable output for tooling:
 falcon check . --format json
 ```
 
-JSON diagnostics no longer include `code` (identical to `rule`; read `rule` instead), or the always-empty `suggestions` and `context_lines` fields.
-
 Diagnostic `line` and `col` are one-based, with columns counted in UTF-16 code units. The half-open `span.start` and `span.end` are UTF-8 byte offsets into the source file, not a column and length. To compare a diagnostic range with `dart analyze --format=machine`, count the UTF-16 code units in the source slice covered by `span`.
 
 The opt-in `eol-at-end-of-file` rule can report a virtual one-character range at EOF. In that case `span.end` is one byte beyond the file; preserve the extra unit when computing the UTF-16 range length.
 
-falcon discovers `falcon.json` automatically — the current directory, then the
+falcon discovers `falcon.json` automatically: the current directory, then the
 enclosing git root, then `~/.falcon.json`.
 
-**Exit codes:** `falcon check` exits `0` when clean and `1` when any diagnostic
-(warning or error) is reported — so a failing check breaks CI by default. Override
-the failure code with `--exit-code`, or cap output with `--max-errors`:
+**Exit codes:** `falcon check` exits `0` when clean and `1` when diagnostics (including info or warnings) are reported. `--exit-code` changes the findings exit code. Configuration failures and source files larger than 4 GiB (4,294,967,295 bytes) exit `1` regardless of that flag; unreadable or non-UTF-8 files are skipped with a warning. Use `--max-errors` to cap reported diagnostics:
 
 ```sh
 falcon check . --exit-code 2    # use exit code 2 on findings
-falcon check . --max-errors 50  # stop after 50 diagnostics
+falcon check . --max-errors 50  # report at most 50 diagnostics
 ```
 
 ## Editor setup
@@ -120,11 +109,10 @@ falcon speaks LSP. Start the server directly:
 falcon lsp
 ```
 
-First-party extensions launch that server for you and wire up `$schema`
-autocomplete for `falcon.json`:
+First-party extensions launch that server for you. The VS Code extension also enables schema autocomplete for `falcon.json`:
 
-- **VS Code** — `extensions/falcon-vscode`
-- **Zed** — `extensions/falcon-zed`
+- **VS Code**: `extensions/falcon-vscode`
+- **Zed**: `extensions/falcon-zed`
 
 Both launch the `falcon` binary from your `PATH`, so install falcon with any
 channel above first. See [installation.md](./installation.md#editor-extensions)
@@ -132,8 +120,7 @@ for details.
 
 ## CI usage
 
-Download the release binary and run `falcon check` — a non-zero exit fails the
-job automatically:
+Download the release binary and run `falcon check`; a non-zero exit fails the job:
 
 ```yaml
 # .github/workflows/lint.yml
@@ -146,25 +133,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install falcon
         run: |
-          curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-0.3.0-x86_64-linux.tar.gz | tar -xz
+          curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.3.0/falcon-0.3.0-x86_64-linux.tar.gz | tar -xz
           sudo mv falcon /usr/local/bin/
       - name: Lint
         run: falcon check .
 ```
 
-> **Note:** Pin the version in the download URL (here `0.3.0`) so CI is
-> reproducible. falcon is [pre-1.0](../ROADMAP.md) — behavior can change between
-> releases.
+> Pin both the release tag and archive version in CI, for example `/releases/download/v0.3.0/falcon-0.3.0-x86_64-linux.tar.gz`. A `/releases/latest/download/` URL is not pinned. falcon is [pre-1.0](../ROADMAP.md), so behavior can change between releases.
 
 ## Next steps
 
-- [Configuration](./configuration.md) — every rule, option, per-path `overrides`,
-  and the `flutter` domain.
-- [Rules index](/linter/rules) — the full rule catalog with examples.
-- [Suppressions](./suppressions.md) — silence a single diagnostic inline with
-  `// falcon-ignore`.
-- [Installation](./installation.md) — all channels, supported platforms, and how
-  releases are cut.
-- [Migrating](./configuration.md#migrating-from-dart_code_linter--pyramid_lint) —
-  generate a `falcon.json` from an existing `analysis_options.yaml`.
-- [Roadmap](../ROADMAP.md) — near-term plans and the road to 1.0.
+- [Configuration](./configuration.md): options, per-path `overrides`, and the `flutter` domain.
+- [Rules index](/linter/rules): rule descriptions and examples.
+- [Suppressions](./suppressions.md): silence diagnostics with `// falcon-ignore`.
+- [Installation](./installation.md): channels, platforms, and releases.
+- [Migrating](./configuration.md#migrating-from-dart_code_linter--pyramid_lint): generate a `falcon.json` from `analysis_options.yaml`.
+- [Roadmap](../ROADMAP.md): plans for 1.0.

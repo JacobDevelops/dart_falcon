@@ -1,7 +1,6 @@
 # Contributing to falcon
 
-Thanks for your interest in falcon. This guide covers the dev environment, the
-checks your change must pass, and how to add a lint rule end-to-end.
+This guide covers the dev environment, checks, and how to add a lint rule.
 
 falcon is pre-1.0: rule ids, the rule set, and the config surface are still
 moving. If you're planning a large change, open an issue first so we can agree on
@@ -9,11 +8,7 @@ the shape before you write it.
 
 ## AI assistance notice
 
-AI-assisted contributions are welcome, as long as **you have verified the result**
-— you understand the change, it passes every gate below, and the diagnostics are
-actually correct (a plausible-looking rule that fires on the wrong nodes is worse
-than no rule). Please disclose meaningful AI assistance in your pull request so
-reviewers can calibrate. Don't open a PR you can't explain.
+AI-assisted contributions are welcome if you understand and verify the result. Run the checks below and confirm the diagnostics are correct. Disclose meaningful AI assistance in your pull request. Don't open a PR you can't explain.
 
 ## Dev environment
 
@@ -24,15 +19,14 @@ mise install
 makers build
 ```
 
-`mise.toml` pins cargo-make (`makers`), `cargo-nextest`, `cargo-watch`, taplo, and Bun. Activate mise in your shell to put them on `PATH`, or prefix commands with `mise exec --`. Rust stays under rustup: `rust-toolchain.toml` tracks the latest nightly with `rust-src`, `rust-analyzer`, Clippy, rustfmt, and the `wasm32-wasip2` target. Cargo installs the declared toolchain on first use. `makers --list-all-steps` lists every task.
+`mise.toml` pins cargo-make (`makers`), `cargo-nextest`, `cargo-watch`, taplo, and Bun. Activate mise in your shell to put them on `PATH`, or prefix commands with `mise exec --`. Rust stays under rustup: `rust-toolchain.toml` tracks the latest nightly with `rust-src`, `rust-analyzer`, Clippy, rustfmt, and the `wasm32-wasip2` target. rustup installs the declared toolchain on first use. `makers --list-all-steps` lists every task.
 
 The repo is a colocated jj + git repo. **jj (Jujutsu) users are welcome**, but
-plain git works fine — use whichever you prefer.
+plain git works fine. Use whichever you prefer.
 
 ## The gates
 
-Your change must pass all of these before it's ready for review. CI
-(`.github/workflows/ci.yml`) runs the same set:
+Run these checks before review. CI runs lint, tests, corpus validation, and benchmark compilation; `makers A` also checks the workspace and builds release binaries locally.
 
 ```sh
 makers lint            # rustfmt, taplo, clippy -D warnings
@@ -50,7 +44,7 @@ cargo xtask schema        # writes schema/falcon.schema.json
 `cargo test --workspace` fails if the committed schema is stale (a contract test
 regenerates it and compares), so this isn't optional.
 
-Fix issues at the root cause — don't silence clippy, `#[allow]` around a real
+Fix issues at the root cause. Don't silence clippy, `#[allow]` around a real
 problem, or loosen a test to go green.
 
 The benchmark in `benches/jfit_mobile_bench.rs` optionally uses a private corpus
@@ -62,16 +56,16 @@ fallback path. The corpus is not required to contribute or run the test suite.
 Every rule is validated against fixtures under
 `crates/falcon_rules/tests/corpus/<rule-id>/`:
 
-- **`bad.dart`** — code that triggers the rule, with a `/* expect: <rule-id> */`
+- **`bad.dart`**: code that triggers the rule, with a `/* expect: <rule-id> */`
   annotation on the same line as each violation (optionally
   `/* expect: <rule-id>, msg: "..." */` to assert the message).
-- **`good.dart`** — code that must produce **zero** diagnostics for the rule (no
+- **`good.dart`**: code that must produce **zero** diagnostics for the rule (no
   annotations at all).
 - Additional `bad_2.dart` / `good_2.dart` variants are allowed; aim for ≥5
   positive and ≥5 negative examples.
-- **`config.json`** (optional) — a full-shaped `falcon.json` applied only when
+- **`config.json`** (optional): a full-shaped `falcon.json` applied only when
   validating that directory; use it for threshold- or option-gated rules.
-- **`cross-file/`** subdir — cross-file rules put a small multi-file Dart
+- **`cross-file/`** subdir: cross-file rules put a small multi-file Dart
   project here so the harness can exercise whole-module analysis.
 
 The full spec, including the annotation format and upstream-fixture migration
@@ -92,60 +86,25 @@ notes, is in
    This writes the rule module and empty `bad.dart` / `good.dart` fixtures, then
    prints the exact follow-up steps.
 
-2. **Implement** the rule. Rule structs derive `Default` and implement the `Rule`
-   trait from `falcon_analyze` (or `CrossFileRule` for project-wide analysis).
-   Use the `Visitor` trait / `visit_*` helpers in `falcon_syntax::visitor` to
-   traverse the AST from `falcon_syntax` (`falcon_syntax::ast::*`). Override the
-   hook for the syntax you inspect; call its `walk_*` helper to continue into
-   children. Shared walkers explicitly match every AST enum variant, so new
-   variants require a traversal decision at compile time. Focused regression
-   tests cover known traversal gaps; a representative parsed-program test pins
-   observed hook counts and exactly-once source-child traversal. Names not
-   delivered to `visit_identifier` use `visit_name`; native-body literals use
-   `visit_native_string`.
-   Synthesized duplicate legacy-typedef trees are not traversed as source.
-   Do not add a rule-local recursive AST walker.
+2. **Implement** the rule. Derive `Default` and implement `Rule` from `falcon_analyze`, or `CrossFileRule` for project-wide analysis. Use `falcon_syntax::visitor::Visitor` and its `walk_*` helpers rather than a rule-local recursive walker. Call the matching walker from an overridden hook to visit children.
 
-   `parse` and `parse_for_package` return a `ParseResult` containing `program`,
-   `errors`, and the retained `syntax` store. Pass that same store to
-   `AnalyzeContext::new(path, source, config, &syntax)`. Use `ctx.syntax`
-   `tokens_in(span)`, `keywords_in`, `closing_delimiter`, `comments_in`, and
-   `documentation_start`/`doc_blocks(source)` instead of constructing a lexer or
-   searching raw declaration text. `TokenId` is local to its store: use
-   `syntax_for_span(span)` before resolving a nested interpolation's token range.
-   Interpolation tokens are retained in the store too. Token text borrows the
-   existing source; use source slices only when spelling or layout is the rule's
-   actual subject. Expression comparisons must preserve literal spelling, not
-   strip whitespace from strings.
+   Use the parsed `SyntaxStore` through `ctx.syntax` for tokens, delimiters, and comments; don't re-lex the file. Pass the parser's store to `AnalyzeContext::new(path, source, config, &syntax)`. Token ids belong to their store, so use `syntax_for_span(span)` for nested interpolations. Preserve literal spelling when comparing expressions.
 
-   For lexical mutation checks, use `ctx.local_writes(program)` or
-   `ctx.mutated_declarations(program)`. These share one declaration-resolved
-   collector per file, including closure shadowing, patterns, and loop bindings.
-   Name-only `flow_writes` facts are not interchangeable with declaration identities.
-
-   Source coordinates use compact `u32` byte offsets, so sources may contain at
-   most `u32::MAX` (4,294,967,295) UTF-8 bytes. Use
-   `falcon_analyze::source::read_source` at disk ingestion boundaries: oversized
-   files follow the existing unreadable-file error/skip path before parsing.
-   In-memory analysis and LSP open/change/save buffers report oversized input as
-   a `syntax-error` at byte zero. The LSP discards rejected text until the next
-   valid full-sync change and excludes that buffer from project indexes. Cross-file
-   diagnostics are withheld while any buffer is rejected, because its references
-   are unknown rather than absent. Never pass oversized source directly to the parser.
+   Use `ctx.local_writes(program)` or `ctx.mutated_declarations(program)` for mutation checks. They resolve declarations and handle shadowing; name-only write facts are not a substitute.
 
    > **Construction gotcha:** `Expr::New` is emitted **only** for `new X(...)` and
    > `const X(...)`. A plain `X()` or a named constructor like `X.from()` parses as
    > a **`Call` chain**, not `Expr::New`. A rule that detects object construction
    > must handle both shapes, or it will silently miss the common `X()` case.
 
-3. **Declare the module** in `crates/falcon_rules/src/lint/<group>/mod.rs`
+3. **Declare the module** in `crates/falcon_rules/src/lint/<group>.rs`
    (or `src/cross_file.rs` for a cross-file rule).
 
 4. **Register the rule** with one `RuleMeta` entry in
    `crates/falcon_rules/src/meta.rs`, using `RuleMeta::file::<T>` for syntax-only
    rules, `RuleMeta::resolved::<T>` for file rules requiring resolution, or
    `RuleMeta::cross_file::<T>` for project-wide rules. Pass the canonical name,
-   typed `RuleGroup`, `Domain` slice, `recommended` flag, and source. Sources are
+   typed `RuleGroup`, optional `Domain`, `recommended` flag, and source. Sources are
    `RuleSource::DartCodeLinter("...")`, `RuleSource::PyramidLint("...")`,
    `RuleSource::Lints("...")`, or `RuleSource::Falcon` for original rules.
    Constructors use `T::default()`. Execution identities, registries, and schemas
@@ -167,19 +126,11 @@ notes, is in
 
 ### Rule options
 
-Rules read their options through `ctx.config.rule_options(group, rule_id)`, which
-returns the parsed option object for the active config (or `None` for defaults).
-See `max_parameters_for_function` or `use-design-system-item` for a worked
-example, and document new options in [`docs/configuration.md`](./docs/configuration.md).
+Read options with `crate::lint::options::for_rule(ctx, "<rule-id>")` and the typed `options::usize` / `options::strings` helpers. They look up the group from metadata and honor per-path overrides through `ctx.rule_options`. See `max_parameters_for_function` or `use_design_system_item` for examples. Document new options in [`docs/configuration.md`](./docs/configuration.md).
 
 ### Suppressions
 
-Inline suppression is handled centrally by
-`crates/falcon_analyze/src/suppressions.rs` — you don't wire it up per rule. The
-directive shape is `// falcon-ignore lint/<group>/<rule>: <reason>` (or
-`cross-file/<group>/<rule>` for cross-file rules — the legacy `project/…` spelling
-still works — and the `falcon-ignore-all` whole-file variant). The reason is
-mandatory; a malformed directive is itself reported.
+Inline suppression is handled centrally by `crates/falcon_analyze/src/suppressions.rs`; don't wire it up per rule. Use `// falcon-ignore lint/<group>/<rule>: <reason>` for file rules or `cross-file/<group>/<rule>` for cross-file rules. `falcon-ignore-all` suppresses a rule throughout a file. A reason is mandatory, and malformed directives are reported.
 
 ## Commits & pull requests
 
@@ -197,4 +148,3 @@ falcon versions its workspace crates together. To cut a release:
 
 The tag triggers `.github/workflows/release.yml`, which builds the four platform binaries and publishes a GitHub Release with auto-generated notes (failing if the tag and `Cargo.toml` version disagree).
 
-Thanks for contributing!

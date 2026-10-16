@@ -1,6 +1,6 @@
 # Configuring falcon (`falcon.json`)
 
-falcon reads a biome 2.x-shaped `falcon.json`. Discovery order (first match wins):
+falcon reads `falcon.json`. Discovery order (first match wins):
 
 1. `falcon.json` in the current directory
 2. `falcon.json` at the enclosing git root
@@ -9,7 +9,7 @@ falcon reads a biome 2.x-shaped `falcon.json`. Discovery order (first match wins
 If no config is found, falcon runs with defaults: every recommended rule enabled
 at its default severity (warning).
 
-A config that **is** found but fails to load is a hard **error** — falcon prints
+A config that **is** found but fails to load is a hard **error**: falcon prints
 a message and exits non-zero rather than silently falling back to defaults. This
 covers invalid JSON, wrong-typed values, `max-errors: 0` (see
 [`max-errors`](#max-errors)), and the [legacy flat
@@ -20,12 +20,12 @@ rule.
 ## Unknown and legacy keys
 
 Unknown top-level keys are **warned about by name** and then ignored, so a
-mistyped section (`linterr` for `linter`, `cross_file` for `cross-file`) never
+mistyped section (`linterr` for `linter`, `crossfile` for `cross-file`) never
 vanishes silently. The deprecated spellings `project` and `cross_file` (for
 `cross-file`) and `max_errors` (for `max-errors`) still load, but each earns a
-deprecation warning pointing at `falcon migrate` — including when the legacy
+deprecation warning pointing at `falcon migrate`, including when the legacy
 spelling appears inside an `overrides` entry. The published JSON schema
-validates only the canonical kebab-case keys — an editor will flag a legacy
+validates only the canonical kebab-case keys, so an editor will flag a legacy
 spelling even though falcon still accepts it, which is your cue to migrate.
 
 ## Editor autocomplete (`$schema`)
@@ -37,10 +37,7 @@ autocomplete and validation in editors:
 "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/main/schema/falcon.schema.json"
 ```
 
-The schema is generated from falcon's rule metadata (`cargo xtask schema`) and
-committed at [`schema/falcon.schema.json`](../schema/falcon.schema.json), so it
-always lists the current rule set. The VS Code extension wires this up
-automatically for any file named `falcon.json`.
+The VS Code extension enables the [published schema](../schema/falcon.schema.json) automatically for files named `falcon.json`.
 
 ## Full example
 
@@ -81,7 +78,7 @@ automatically for any file named `falcon.json`.
 
 A single mixed list of globs:
 
-- Plain entries are **positive includes** — only files matching at least one are
+- Plain entries are **positive includes**: only files matching at least one are
   linted. A list containing a bare catch-all (`**` or `**/*`), or an empty list,
   means "no positive filtering": every file is a candidate.
 - Entries prefixed with `!` are **exclusions**, applied on top of the includes.
@@ -100,7 +97,7 @@ A bare `**` (or `**/*`) entry disables positive filtering entirely.
 
 ## `linter`
 
-- `enabled` (default `true`): when `false`, no rule runs — zero diagnostics.
+- `enabled` (default `true`): when `false`, no file rule runs. Cross-file checks are configured separately.
 - `domains`: per-domain gating. Keys are domain names (currently `flutter`);
   values are `all`, `recommended`, or `none`.
 - `rules`: the recommended preset plus per-group rule levels.
@@ -114,15 +111,9 @@ Out-of-workspace dependency watches need editor support for LSP 3.17 relative pa
 ### `linter.rules`
 
 - `recommended` (default `true`): whether the recommended preset is active.
-- Every other key is a **group** — one of `complexity`, `correctness`,
-  `performance`, `style`, `suspicious` — mapping rule names to a configuration.
+- Every other key is a **group** (`complexity`, `correctness`, `performance`, `style`, or `suspicious`) mapping rule names to a configuration.
 
-> **Rule ids are kebab-case.** Every rule id uses dashes (e.g.
-> `max-lines-for-file`, `no-magic-number`). The pre-1.0 `snake_case` ids still
-> resolve as aliases — an old id in `falcon.json` or a `// falcon-ignore` comment
-> keeps working — but they are deprecated. Run `falcon migrate --input
-> falcon.json` to rewrite them to the canonical ids (see
-> [Migrating](#migrating-from-dart_code_linter--pyramid_lint)).
+> **Rule ids are kebab-case**, for example `max-lines-for-file` and `no-magic-number`. Registered legacy `snake_case` aliases still work in config and suppression comments. Run `falcon migrate --input falcon.json --write` to rewrite them to canonical ids (see [Migrating](#migrating-from-dart_code_linter--pyramid_lint)).
 
 A rule configuration is either a **level string** or an **object**:
 
@@ -147,21 +138,14 @@ For each rule falcon resolves an effective severity (or "disabled"):
 
 1. If `linter.enabled` is `false` → disabled.
 2. An **explicit** entry under the rule's group wins and bypasses domain gating.
-3. Otherwise, if the rule has domains: enabled if **any** of its domains resolves
-   enabled. A missing domain key defaults to `recommended`. `all` → enabled;
-   `recommended` → enabled iff the recommended preset is active; `none` →
-   disabled.
-4. Otherwise (no domains): enabled iff the recommended preset is active.
+3. Otherwise, a domain-scoped rule follows its domain setting (currently `flutter`). `all` enables every rule in that domain; `none` disables them; `recommended` enables only recommended rules when the recommended preset is active. A missing domain setting defaults to `recommended`.
+4. Otherwise, the rule runs only if it is recommended and the recommended preset is active.
 
-Net effect: with no config file, every recommended rule is on at warning.
+With no config file, only falcon's recommended rules run, at warning severity.
 
 ## `max-errors`
 
-Optional cap on the number of reported diagnostics (`null` = unlimited). Must be
-**at least 1**: `0` is rejected at load (it would suppress every diagnostic and
-pass a run green with violations present). A CLI `--max-errors` flag overrides
-the config value. The legacy `max_errors` (underscore) spelling still loads with
-a deprecation warning.
+Optional cap on reported diagnostics (`null` = unlimited). In `falcon.json`, the value must be **at least 1**; `0` is rejected at load. The CLI `--max-errors` flag overrides the config value. Use a positive value: the CLI currently accepts `--max-errors 0`, which hides every diagnostic and can return a clean exit code even when violations exist. The legacy config key `max_errors` still loads with a deprecation warning.
 
 ## Rule options
 
@@ -199,7 +183,7 @@ Option names use `snake_case` inside the `options` object.
 
 | Rule (group) | Option | Default | Meaning |
 |--------------|--------|---------|---------|
-| `prefer-correct-identifier-length` (`style`) | `min_length` | `3` | Flag identifiers shorter than this. Matches dart_code_linter's default. Scope is limited to variable/field declarations, getter/setter names and enum constants — parameters, catch clauses, for-each variables and plain function/method names are never checked. A single leading underscore is stripped before the length and exception checks. |
+| `prefer-correct-identifier-length` (`style`) | `min_length` | `3` | Flag identifiers shorter than this. Checks variable/field declarations, getter/setter names and enum constants, not parameters, catch clauses, for-each variables or plain function/method names. A single leading underscore is stripped before the length and exception checks. |
 | | `max_length` | `300` | Flag identifiers longer than this. |
 | | `exceptions` | `[]` | Names always allowed regardless of length (there is no built-in list). |
 | `boolean-prefixes` (`style`) | `valid_prefixes` | `["is","are","was","were","has","have","had","can","should","will","do","does","did"]` | Accepted boolean-name prefixes (dart-pyramid-lint defaults). User entries **extend** the defaults. Only variable/field declarations with a boolean-*literal* initializer, and bool-returning methods/getters/functions, are checked; parameters and uninitialized fields are not. Names are matched with a single leading underscore stripped, and `@override` methods are exempt. |
@@ -253,12 +237,9 @@ instance fields → constructors → static methods → instance methods).
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `order` | built-in | List of category tokens giving the required member sequence. Supported tokens: `public-fields`, `private-fields`, `fields`, `static-fields`, `constructors`, `named-constructors`, `static-methods`, `private-methods`, `public-methods`, `methods`, `getters`, `setters`. A member is ranked by the earliest token in the list it qualifies for; members matching no token are ignored. |
-| `widgets_order` | — | For a class that `extends State`, orders lifecycle members by this list. Supported tokens: `constructor`, `init-state`, `did-change-dependencies`, `did-update-widget`, `dispose`, `build`, `overridden-methods`. |
+| `widgets_order` | none | For a class that `extends State`, orders lifecycle members by this list. Supported tokens: `constructor`, `init-state`, `did-change-dependencies`, `did-update-widget`, `dispose`, `build`, `overridden-methods`. |
 
-> **`widgets_order` is best-effort.** falcon has no type resolution, so State
-> detection keys on the syntactic `extends State`/`State<T>` clause, and only the
-> relative order of the recognized lifecycle members is checked;
-> `overridden-methods` matches any other `@override` method.
+> `widgets_order` detects `State` from the written `extends State`/`State<T>` clause. Only recognized lifecycle members are ordered; `overridden-methods` matches any other `@override` method.
 
 `class-members-ordering` (`style`) accepts the same `order` option with the same
 category tokens; it differs from `member-ordering` only in its default sequence.
@@ -302,16 +283,11 @@ given.
 
 ### `overrides[].linter` and `overrides[].cross-file`
 
-A partial rule block for file rules (`linter`) or cross-file rules (`cross-file`;
-the legacy keys `project` and `cross_file` are still accepted), respectively. Both have the same
-shape as `linter.rules`: rule levels, per-rule
-`options`, and an optional `enabled` master switch are honored — but no
-`domains`, no nested `overrides`, no `files`. An override may carry either or
-both sections; each patches the correspondingly-named base block.
+Each block accepts an optional `enabled` switch and a `rules` object shaped like `linter.rules`, with grouped rule levels and options. Neither block accepts `domains`, nested `overrides`, or `files`. An override may carry either or both blocks. The legacy cross-file keys `project` and `cross_file` still load.
 
 - Each explicit rule entry (under its group) **replaces** the base resolution
   for that rule on matching files: `off` disables it; `on`/`info`/`warn`/`error`
-  enables it at that severity — even turning on a rule the base config disabled.
+  enables it at that severity, even turning on a rule the base config disabled.
 - A rule entry's `options` block **replaces** the base rule's options on matching
   files (options are not deep-merged). An override that sets only a level leaves
   the base options intact.
@@ -322,7 +298,7 @@ both sections; each patches the correspondingly-named base block.
 
 For a given file, every override whose `includes` match applies **in order**:
 later overrides win over earlier ones, and all win over the base config. A rule
-is registered (and run) if it is enabled for *any* path — base or override — so
+is registered (and run) if it is enabled for *any* path (base or override), so
 an override can re-enable a rule the base config turned off.
 
 ### Path-matching caveat
@@ -336,7 +312,7 @@ a leading `**/` (e.g. `**/theme.dart`) to match.
 ### Per-path options
 
 An override may carry rule `options`, letting a rule run with different options on
-different paths — for example a stricter `max-lines-for-file` under `test/`:
+different paths, for example a stricter `max-lines-for-file` under `test/`:
 
 ```jsonc
 "overrides": [
@@ -361,7 +337,7 @@ sets only a level leaves the base options intact.
 
 `falcon.json` turns whole rules on or off. To silence a single occurrence
 instead, annotate the code with an inline `// falcon-ignore <section>/<group>/<rule>:
-<reason>` comment (the reason is mandatory) — or `// falcon-ignore-all` for a
+<reason>` comment (the reason is mandatory), or `// falcon-ignore-all` for a
 whole file. The full grammar, placement rules, stacking, and error cases are
 documented in **[suppressions.md](./suppressions.md)**.
 
@@ -369,14 +345,14 @@ documented in **[suppressions.md](./suppressions.md)**.
 dynamic payload = decode(bytes); // falcon-ignore lint/suspicious/avoid-dynamic: interop boundary
 ```
 
-## `cross-file` — cross-file rules
+## `cross-file`: cross-file rules
 
 Most rules analyze one file at a time. **Cross-file rules** instead reason across
 the analyzed file set or package manifests, checking references and package
 metadata. They are a **separate feature** from the linter and live under their
 own top-level `cross-file` block, *not* under
 `linter`. The pre-1.0 spellings `project` and `cross_file` (underscore) are still
-accepted as deprecated aliases (each warns on load — run `falcon migrate`):
+accepted as deprecated aliases (each warns on load; run `falcon migrate`):
 
 ```json
 "cross-file": {
@@ -392,7 +368,7 @@ accepted as deprecated aliases (each warns on load — run `falcon migrate`):
 ```
 
 - `enabled` (default `true`): when `false`, no cross-file rule runs.
-- `rules`: the recommended preset plus per-group rule levels — the **same shape**
+- `rules`: the recommended preset plus per-group rule levels, the **same shape**
   as `linter.rules` (level strings or `{ "level", "options" }` objects), but with
   **no `domains`** gating, since cross-file rules are not domain-scoped.
 
@@ -400,7 +376,7 @@ Cross-file rules are grouped under their category (`correctness`, `style`, or `s
 share the same metadata table as file rules, and are suppressible with
 `// falcon-ignore cross-file/<group>/<rule>: <reason>` comments (or the
 `// falcon-ignore-all` variant). Configuring a cross-file rule under
-`linter.rules` (or a file rule under `cross-file.rules`) is a mistake — falcon
+`linter.rules` (or a file rule under `cross-file.rules`) is a mistake: falcon
 warns and steers you to the right section, and the misplaced entry does not take
 effect.
 
@@ -409,43 +385,26 @@ effect.
 | `unused-files`           | correctness  | yes         | `check-unused-files`          |
 | `unused-code`            | correctness  | yes         | `check-unused-code`           |
 | `unnecessary-nullable`   | correctness  | yes         | `check-unnecessary-nullable`  |
-| `depend-on-referenced-packages` | correctness | yes | — |
-| `package-names`          | style        | yes         | —                            |
-| `secure-pubspec-urls`    | suspicious   | yes         | —                            |
+| `depend-on-referenced-packages` | correctness | no | |
+| `package-names`          | style        | no          |                              |
+| `secure-pubspec-urls`    | suspicious   | no          |                              |
+| `sort-pub-dependencies`  | correctness  | no          |                              |
 
 Notes:
 
-- **Where they run.** Cross-file rules run in the `falcon check` pipeline's
-  cross-file pass, after the per-file pass, over every collected file. The **LSP
-  server also runs them**: it walks the workspace (open buffers overlaid on the
-  on-disk files) on didOpen, didSave, didClose, config reload, and each debounced
-  didChange flush. With debouncing disabled, every didChange triggers the pass.
-  It republishes merged per-file and cross-file diagnostics for open documents.
+- **Where they run.** Both `falcon check` and the language server run cross-file checks. The language server includes unsaved edits in open files.
 - **Scope.** `unused-files` and `unused-code` only flag files/declarations under
   the package `lib/` directory (resolved from the nearest `pubspec.yaml`), while
   counting references from every analyzed file (including `test/`). Exclude
   generated code (`lib/gen/**`, `*.pb*.dart`, etc.) via `files.includes` the same
   way you would for any rule.
-- **Package boundaries.** The CLI and LSP preserve every discovered
-  `pubspec.yaml` as a package boundary, even when it is unreadable or invalid.
-  Such a package has no known name: files below it do not inherit the enclosing
-  package's name or resolve through that enclosing package's `package:` mapping.
-- **`unnecessary-nullable` is resolver-backed** and on by the recommended preset.
-  It still restricts itself to `_`-prefixed private declarations (so every call
-  site is visible in-project), but falcon's type-resolution layer now decides
-  whether each argument can be null: local type inference recognizes structurally
-  non-null forms (literals, `new`, arithmetic), and a cross-file return-type index
-  resolves a callee's or getter's declared return type. An argument proven
-  non-null no longer counts as "passes null", which removed the false positives
-  that had kept the rule opt-in. It remains a cross-file rule (cross-file
-  pass). Per-file exclusions (the old `--exclude` flags) are expressible with
-  `overrides`.
+- **Package boundaries.** Each `pubspec.yaml` starts a package boundary. An unreadable or invalid manifest doesn't inherit the enclosing package's name.
+- **`unnecessary-nullable`** checks private (`_`-prefixed) declarations whose call sites are visible in the project. It is recommended by default. Use `overrides` to disable it for particular files.
 
 ## Migrating from dart_code_linter / pyramid_lint
 
 falcon replaces the `dart_code_linter` and `pyramid_lint` linters, and can
-generate a `falcon.json` from an existing `analysis_options.yaml` — the same idea
-as `biome migrate eslint/prettier`:
+generate a `falcon.json` from an existing `analysis_options.yaml`:
 
 ```sh
 # Print the generated config to stdout
@@ -455,18 +414,13 @@ falcon migrate --input analysis_options.yaml
 falcon migrate --write
 ```
 
-Rules under the `dart_code_linter:` block are matched against their upstream
-dart_code_linter ids; rules under `custom_lint:` (how pyramid_lint is configured)
-are matched against their pyramid_lint ids. Each mapped rule is emitted under its
-falcon group as `"warn"`; disabled entries (`- rule: false`) become `"off"`, and
-entries with options become `{ "level": "warn", "options": { ... } }`.
+Migration reads explicit rules from `dart_code_linter.rules`, legacy `custom_lint.rules`, and the analyzer's top-level `linter.rules` (list or map form). It doesn't expand `include:` presets or read `plugins:` configuration. Each mapped rule is emitted under its falcon group as `"warn"`; disabled entries become `"off"`, and options are preserved.
 
-The migration is **explicit**: `recommended` is set to `false` in the output so
-only the rules present in your `analysis_options.yaml` are active (like biome).
+The generated `linter.rules` sets `recommended: false`. If cross-file rules are migrated, their block also sets `recommended: false`; otherwise the block is omitted and falcon's recommended cross-file rules remain active. Add `"cross-file": { "enabled": false }` if you don't want those checks.
+
 Notes:
 
-- Option **key names are passed through verbatim** and may need manual review —
-  falcon's option schema is not guaranteed to match the upstream linter's.
+- Option **key names are passed through verbatim** and may need manual review. falcon's option schema is not guaranteed to match the upstream linter's.
 - Upstream rules with no falcon equivalent are reported as warnings on stderr and
   omitted from the output.
 - The former twin rules (`no_empty_block`/`avoid_empty_blocks`, `no_magic_number`,
@@ -490,7 +444,7 @@ falcon migrate --input falcon.json --write
 ## Migrating from the legacy flat schema
 
 The old flat schema (`rules`, `exclude_patterns`, `severity_override` at the top
-level) is no longer accepted — falcon reports an error rather than silently
+level) is no longer accepted. falcon reports an error rather than silently
 ignoring it. Migrate as follows:
 
 | Legacy                                             | New                                                            |

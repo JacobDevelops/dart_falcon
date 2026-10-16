@@ -4,41 +4,11 @@
 
 [![CI](https://github.com/JacobDevelops/dart_falcon/actions/workflows/ci.yml/badge.svg)](https://github.com/JacobDevelops/dart_falcon/actions/workflows/ci.yml)
 
-**falcon** is a fast, standalone linter for Dart and Flutter, written in Rust. It
-parses Dart itself — no Dart SDK, no `analyzer` package, no analysis server — so a
-whole project lints in a single pass with no warm-up.
+falcon is a standalone linter for Dart and Flutter, written in Rust. It parses Dart without the Dart analyzer or analysis server. Install the Dart SDK and resolve your dependencies for rules that need SDK or package types.
 
-falcon ships **173 rules** across five groups (`complexity`, `correctness`,
-`performance`, `style`, `suspicious`), including **cross-file** rules that reason
-about the module graph and package manifests rather than one file at a time.
-The set now covers the official
-`package:lints` / `package:flutter_lints` recommended rules, and the `flutter`
-domain is complete for the rules those presets can express without full type
-resolution. Three resolver-backed rules — `no-boolean-literal-compare`,
-`avoid-ignoring-return-values`, and the `unnecessary-nullable` cross-file rule —
-sit on a minimal type-resolution layer and are now reliable enough to be **on by
-default**.
+falcon ships **290 rules**, with **140 recommended** by default, across five groups: `complexity`, `correctness`, `performance`, `style`, and `suspicious`. These include cross-file checks and 142 official lints from the 1.0 catalog. Those 142 are opt-in, not part of falcon's recommended preset.
 
-Resolver-backed rules share the analyzer's member and invocation queries rather than maintaining a separate semantic resolver.
-Constructor-forwarding and override rules use resolved parameter identities and
-inherited contracts, including covariance and default-expression syntax. Effective
-covariance is resolved when a rule requests a contract, not during type inference.
-Generic function-valued getters and fields retain their type parameters through
-invocation, including explicit type arguments and inferred callback results.
-Partial result contexts leave unresolved inference variables open for argument
-inference, and conditional generic tear-offs align equivalent type parameters.
-Generic callbacks preserve their downward parameter context separately from the
-type arguments inferred after their bodies are analyzed.
-`valid-regexps` checks decoded Dart string literals with ECMAScript regular-expression
-syntax.
-Syntax-sensitive rules use retained lexer tokens and AST spans, so keywords,
-delimiters, and Dartdoc-looking text inside ordinary comments or string literals
-do not masquerade as code or documentation references.
-
-Configuration is a single biome-shaped `falcon.json`: grouped rules, per-rule
-severities and options, per-path overrides, a `flutter` domain, and a separate
-`cross-file` section for cross-file analysis. Diagnostics are suppressed inline with
-`// falcon-ignore lint/<group>/<rule>: <reason>` — the reason is mandatory.
+Configure rules, severities, options, and per-path overrides in `falcon.json`. Cross-file checks have a separate `cross-file` section. Inline suppressions require a reason: `// falcon-ignore lint/<group>/<rule>: <reason>`.
 
 > **Status: pre-1.0.** falcon is usable today but the rule set, rule ids, and
 > config surface are still moving. Expect breaking changes before 1.0 (see the
@@ -46,21 +16,28 @@ severities and options, per-path overrides, a `flutter` domain, and a separate
 
 ## Installation
 
-falcon is a single self-contained binary — no Dart SDK, no analysis server.
+falcon ships as a single binary.
 
 **Prebuilt binaries** (Linux x86_64/aarch64 static, macOS Intel/Apple Silicon)
 are attached to every [GitHub Release](https://github.com/JacobDevelops/dart_falcon/releases):
 
 ```sh
-curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-0.3.0-x86_64-linux.tar.gz | tar -xz
+curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.3.0/falcon-0.3.0-x86_64-linux.tar.gz | tar -xz
 sudo mv falcon /usr/local/bin/
 ```
 
-**From source** with a stable Rust toolchain:
+**From source** with a nightly Rust toolchain:
 
 ```sh
-cargo install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
+cargo +nightly install --git https://github.com/JacobDevelops/dart_falcon dart_falcon
 ```
+
+On x86_64 GNU/Linux, falcon uses jemalloc for Rust allocations with its default
+configuration. Other targets, including the prebuilt binaries, retain the system
+allocator. Building jemalloc requires a native C compiler,
+a POSIX shell for the bundled configure script, and make. The Rust allocator
+wrapper is MIT/Apache-2.0 licensed; bundled jemalloc is
+[BSD-2-Clause licensed](https://docs.rs/crate/tikv-jemalloc-sys/0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8/source/jemalloc/COPYING).
 
 **mise**: add this to your project's `mise.toml`, then run `mise install`:
 
@@ -93,8 +70,7 @@ Checks analyze files in parallel and sort diagnostics deterministically. Set `RA
 
 ## Configuration
 
-`falcon.json` is biome 2.x-shaped — rules are grouped, and each entry is either a
-severity string or `{ "level": ..., "options": { ... } }`:
+`falcon.json` groups rules by category. Each entry is a severity string or `{ "level": ..., "options": { ... } }`:
 
 ```json
 {
@@ -115,8 +91,7 @@ severity string or `{ "level": ..., "options": { ... } }`:
 }
 ```
 
-Full reference — every rule, option, per-path `overrides`, and the `flutter`
-domain — is in [docs/configuration.md](./docs/configuration.md).
+See [docs/configuration.md](./docs/configuration.md) for options, per-path `overrides`, and the `flutter` domain.
 
 ## Suppressions
 
@@ -135,8 +110,8 @@ suppress a rule across a whole file.
 falcon speaks LSP (`falcon lsp`). First-party extensions live in
 [`extensions/`](./extensions):
 
-- **VS Code** — `extensions/falcon-vscode`
-- **Zed** — `extensions/falcon-zed`
+- **VS Code**: `extensions/falcon-vscode`
+- **Zed**: `extensions/falcon-zed`
 
 ## Roadmap
 
@@ -144,15 +119,11 @@ Near-term plans and the road to 1.0 are tracked in [ROADMAP.md](./ROADMAP.md).
 
 ## Contributing
 
-Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for the dev
-environment, the CI gates, and how to add a rule end-to-end.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, checks, and how to add a rule.
 
 ## Credits
 
-falcon's configuration design is inspired by [Biome](https://biomejs.dev). Many
-rules are ports of [dart_code_linter](https://github.com/dart-code-checker/dart-code-linter)
-and [pyramid_lint](https://github.com/Nialixus/pyramid_lint); provenance is
-tracked per-rule in the rule metadata (`RuleSource`).
+falcon's configuration design is inspired by [Biome](https://biomejs.dev). Many rules are ports of [dart_code_linter](https://github.com/dart-code-checker/dart-code-linter), [pyramid_lint](https://pub.dev/packages/pyramid_lint), and Dart's official lints.
 
 ## License
 

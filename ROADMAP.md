@@ -15,31 +15,20 @@ All 142 have `recommended: false` in falcon, including the 25 section-1 upstream
 ### Remaining
 
 - **Rule-catalog expansion.** Two sources remain in the catalog:
-  - **DCM-inspired rules — 231** (75 must-have, 132 nice-to-have, 24 post-1.0).
-    DCM's modern catalog is paywalled; these reimplement the high-value ones as
-    open falcon rules.
-  - **Cross-file rules — 11** (see below).
+  - **DCM-inspired rules: 231** (75 must-have, 132 nice-to-have, 24 post-1.0).
+    These are candidates from the DCM survey, not current pricing claims.
+  - **Cross-file rules: 11** (see below).
 - **New domains.** Alongside `flutter`, add `test`, `bloc`, `riverpod`,
   `provider`, `flutter_hooks`, and `equatable` domains (from the DCM survey),
   activated per file/framework so framework users get targeted checks.
 - **Cross-file rules.** Seven ship today: `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The 11 planned additions are Tier 1 must-haves `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, `banned-imports`; Tier 2 `unused-assets`, `unused-l10n`, `unexported-public-api`; and four Tier 3 post-1.0 rules.
-- **e2e OSS corpus.** A `cargo xtask e2e` harness running falcon against pinned,
-  shallow clones of large real-world Dart/Flutter repos (immich, AppFlowy,
-  flutter/packages, flame, LocalSend, bloc, riverpod, Wonderous, flutter/samples,
-  dart-lang/sdk `tests/language`). Gates: zero panics, zero parser/internal-error
-  diagnostics, `insta` snapshots of diagnostic counts, and `migrate` smoke tests
-  over vendored `analysis_options.yaml` fixtures (flutter_lints,
-  very_good_analysis, DCM, custom_lint, strict modes). PR CI runs a fast subset;
-  the full set runs nightly.
-- **Generated rule docs.** The docs site is live; rule documentation still needs
-  to be generated from rule metadata and rustdoc rather than hand-written.
+- **e2e OSS corpus.** Add a `cargo xtask e2e` harness for pinned, shallow clones of large Dart/Flutter repos, including immich, AppFlowy, flutter/packages, flame, LocalSend, bloc, riverpod, Wonderous, flutter/samples, and dart-lang/sdk `tests/language`. It should catch panics and parser/internal errors, snapshot diagnostic counts, and smoke-test migration of common `analysis_options.yaml` presets. Run a fast subset in PR CI and the full set nightly.
 - **Fix `prefer-iterable-every` porting bug.** Our port detects the *negated*
   `!where(pred).isEmpty` (which is `any(pred)` semantics, overlapping
-  `prefer-iterable-any`) and suggests `.every()` without inverting the predicate.
-  Upstream pyramid_lint matches the *non-negated* `where(pred).isEmpty` →
-  `every(!pred)`. Change detection to bare `where(pred).isEmpty`, invert the
-  predicate in the fix, and rewrite the corpus accordingly (keep the valid
-  `where(pred).length == length` case). Behavior change — do it as its own PR.
+  `prefer-iterable-any`) and suggests `.every()` with the wrong predicate semantics.
+  Match the non-negated `where(pred).isEmpty` instead, which corresponds to
+  `every(!pred)`, and update the corpus. Keep the valid
+  `where(pred).length == length` case. Make this behavior change separately.
 - **CHANGELOG.** A maintained changelog, starting at the 1.0 release.
 
 ## Post-1.0
