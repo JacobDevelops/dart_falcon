@@ -27,3 +27,14 @@ class C<E> {
 extension Ext<T> on List<T> {
   void each<T>() {} /* expect: avoid-shadowing-type-parameters */
 }
+
+class StaticAncestors<T> {
+  static void method<S>() {
+    void local<T>() {} /* expect: avoid-shadowing-type-parameters */
+    local<int>();
+  }
+  static void repeated<T>() {
+    void local<T>() {} /* expect: avoid-shadowing-type-parameters */ /* expect: avoid-shadowing-type-parameters */
+    local<int>();
+  }
+}

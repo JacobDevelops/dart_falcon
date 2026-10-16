@@ -8,9 +8,9 @@
 //! compound assigned, or incremented, and any such write disqualifies that name
 //! (matched by identifier across the library, so a like-named field in another
 //! class also protects it). A candidate is reported only when it is provably
-//! initialized through exactly one safe channel — a declaration initializer with
-//! no constructor ever touching it, or no initializer but every non-redirecting
-//! generative constructor setting it via `: _x = ...` or a `this._x` formal. Only
+//! initialized through the channels recognized by the analyzer: every declared
+//! constructor setting it via `: _x = ...` or a `this._x` formal, or a declaration
+//! initializer when no constructor sets it. Enum fields are exempt. Only
 //! private (underscore-prefixed) fields are considered, and those already
 //! `final`, `const`, `late`, `external`, or `abstract` are skipped.
 //!
@@ -59,6 +59,9 @@ impl Rule for PreferFinalFields {
 
         let mut diags = Vec::new();
         for decl in &program.declarations {
+            if matches!(decl, TopLevelDecl::Enum(_)) {
+                continue;
+            }
             if let Some(members) = crate::lint::declarations::members_of(decl) {
                 check_class(members, &written.names, ctx, &mut diags);
             }
@@ -73,15 +76,14 @@ fn check_class(
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    // Non-redirecting generative constructors: the ones a final field must be
-    // initialized by if it has no declaration initializer.
-    let generative: Vec<&ConstructorDecl> = members
+    // The analyzer requires every declared constructor to initialize a field
+    // when any constructor does, including redirecting and factory constructors.
+    let constructors: Vec<&ConstructorDecl> = members
         .iter()
         .filter_map(|m| match m {
             ClassMember::Constructor(c) => Some(c),
             _ => None,
         })
-        .filter(|c| !c.is_factory && !is_redirecting(c))
         .collect();
 
     for member in members {
@@ -101,14 +103,12 @@ fn check_class(
                 continue;
             }
             let has_decl_init = d.initializer.is_some();
-            let touched_by_ctor = members.iter().any(
-                |member| matches!(member, ClassMember::Constructor(c) if inits_field(c, name)),
-            );
+            let touched_by_ctor = constructors.iter().any(|c| inits_field(c, name));
 
-            let ok = if has_decl_init {
-                !touched_by_ctor
+            let ok = if touched_by_ctor {
+                constructors.iter().all(|c| inits_field(c, name))
             } else {
-                !generative.is_empty() && generative.iter().all(|c| inits_field(c, name))
+                has_decl_init
             };
 
             if ok {
@@ -120,12 +120,6 @@ fn check_class(
             }
         }
     }
-}
-
-fn is_redirecting(c: &ConstructorDecl) -> bool {
-    c.initializers
-        .iter()
-        .any(|i| matches!(i, ConstructorInitializer::ThisCall { .. }))
 }
 
 fn inits_field(c: &ConstructorDecl, name: &str) -> bool {

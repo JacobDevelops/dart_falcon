@@ -7,19 +7,27 @@
 //! non-nullable type are left alone, since for them the `null` is either
 //! required or meaningful.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, ParameterDefault, ResolvedType, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_local_var, walk_top_level_decl};
+use falcon_syntax::visitor::{
+    Visitor, walk_class_member, walk_field_decl, walk_formal_param, walk_local_var,
+    walk_top_level_decl,
+};
+
+use crate::lint::semantic_scope::SemanticState;
 
 #[derive(Default)]
 pub struct AvoidInitToNull;
 
 impl Rule for AvoidInitToNull {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        let state = SemanticState::new(program, ctx);
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
+            state: state.as_ref(),
+            superclass: None,
         };
         collector.visit_program(program);
         collector.diags
@@ -29,6 +37,8 @@ impl Rule for AvoidInitToNull {
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    state: Option<&'a SemanticState<'a>>,
+    superclass: Option<ResolvedType>,
 }
 
 impl Collector<'_> {
@@ -58,6 +68,73 @@ impl Collector<'_> {
             }
         }
     }
+
+    fn check_super_defaults(
+        &mut self,
+        params: &FormalParamList,
+        initializers: &[ConstructorInitializer],
+    ) {
+        let (Some(state), Some(ResolvedType::Interface { identity, .. })) =
+            (self.state, self.superclass.as_ref())
+        else {
+            return;
+        };
+        let target = initializers
+            .iter()
+            .find_map(|initializer| match initializer {
+                ConstructorInitializer::SuperCall { call_name, .. } => {
+                    Some(call_name.as_ref().map_or("new", |name| name.name.as_str()))
+                }
+                _ => None,
+            })
+            .unwrap_or("new");
+        let Some(signature) = state.signatures.constructor(identity, target) else {
+            return;
+        };
+        let mut position = 0;
+        for param in &params.params {
+            if param.initializing != Some(InitializingFormal::Super) {
+                continue;
+            }
+            let name = if matches!(param.kind, ParamKind::Named { .. }) {
+                Some(param.name.name.as_str())
+            } else {
+                let name = signature
+                    .positional_parameter_names
+                    .get(position)
+                    .map(String::as_str);
+                position += 1;
+                name
+            };
+            let exists = if matches!(param.kind, ParamKind::Named { .. }) {
+                signature.named.contains_key(&param.name.name)
+            } else {
+                position <= signature.positional.len()
+            };
+            if exists
+                && name
+                    .and_then(|name| signature.defaults.get(name))
+                    .is_none_or(default_is_null)
+            {
+                self.check_default(param);
+            }
+        }
+    }
+
+    fn check_default(&mut self, param: &FormalParam) {
+        if defaults_to_null(&param.param_type)
+            && matches!(
+                param.default_value.as_ref().map(Expr::unparenthesized),
+                Some(Expr::NullLit { .. })
+            )
+        {
+            self.diags.push(self.ctx.diagnostic(
+                "avoid-init-to-null",
+                "Don't explicitly initialize variables to null.",
+                param.span,
+            ));
+        }
+    }
 }
 
 fn defaults_to_null(var_type: &Option<DartType>) -> bool {
@@ -67,8 +144,37 @@ fn defaults_to_null(var_type: &Option<DartType>) -> bool {
     }
 }
 
+fn default_is_null(default: &ParameterDefault) -> bool {
+    match default {
+        ParameterDefault::Null => true,
+        ParameterDefault::Declared(expression) => {
+            matches!(expression.as_ref(), Expr::NullLit { .. })
+        }
+        ParameterDefault::Inherited { default, .. } => default_is_null(default),
+    }
+}
+
 impl Visitor for Collector<'_> {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        self.superclass = match node {
+            TopLevelDecl::Class(class) => class.extends.as_ref(),
+            TopLevelDecl::MixinClass(class) => class.extends.as_ref(),
+            _ => None,
+        }
+        .and_then(|ty| self.state.map(|state| state.model.resolve_type(ty)));
+        if let TopLevelDecl::Class(class) = node
+            && let Some(constructor) = &class.primary_constructor
+        {
+            let initializers = class
+                .members
+                .iter()
+                .find_map(|member| match member {
+                    ClassMember::PrimaryConstructorBody(body) => Some(body.initializers.as_slice()),
+                    _ => None,
+                })
+                .unwrap_or(&[]);
+            self.check_super_defaults(&constructor.params, initializers);
+        }
         if let TopLevelDecl::Variable(v) = node {
             self.check(v.keyword, v.is_late, &v.var_type, &v.declarators);
         }
@@ -88,5 +194,19 @@ impl Visitor for Collector<'_> {
     fn visit_local_var(&mut self, lv: &LocalVarDecl) {
         self.check(lv.keyword, lv.is_late, &lv.var_type, &lv.declarators);
         walk_local_var(self, lv);
+    }
+
+    fn visit_formal_param(&mut self, param: &FormalParam) {
+        if param.initializing != Some(InitializingFormal::Super) {
+            self.check_default(param);
+        }
+        walk_formal_param(self, param);
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember) {
+        if let ClassMember::Constructor(constructor) = member {
+            self.check_super_defaults(&constructor.params, &constructor.initializers);
+        }
+        walk_class_member(self, member);
     }
 }

@@ -38,3 +38,16 @@ class F {
     _f++;
   }
 }
+
+class Redirecting {
+  int _value;
+  Redirecting(this._value);
+  Redirecting.zero() : this(0);
+  int get value => _value;
+}
+
+enum Status {
+  active;
+  static int _cache = 0;
+  static int get cache => _cache;
+}

@@ -38,3 +38,7 @@ void main() {
   Base._internal(true);
   Sub._(true);
 }
+
+class NamedPrimaryBoolean({bool enabled = false});
+
+class PrivatePrimaryBoolean._hidden(bool enabled);

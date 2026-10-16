@@ -1,10 +1,12 @@
 //! Flags a redundant `this.` qualifier on member access.
 
 use crate::lint::lexical_usage::NameScopes;
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, DocName, Rule, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
-use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_pattern, walk_stmt};
+use falcon_syntax::visitor::{
+    Visitor, walk_block, walk_expr, walk_function_body, walk_pattern, walk_stmt,
+};
 
 #[derive(Default)]
 pub struct UnnecessaryThis;
@@ -12,26 +14,86 @@ pub struct UnnecessaryThis;
 impl Rule for UnnecessaryThis {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
+        let model = ctx
+            .identities
+            .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types));
         for declaration in &program.declarations {
             let Some(members) = crate::lint::declarations::members_of(declaration) else {
                 continue;
             };
+            let mut names = crate::lint::declarations::member_names(members);
+            let effective = match declaration {
+                TopLevelDecl::Class(node) => node.element_members(),
+                TopLevelDecl::MixinClass(node) => node.element_members(),
+                TopLevelDecl::Enum(node) => node.element_members(),
+                TopLevelDecl::ExtensionType(node) => node.element_members(),
+                _ => EffectiveMembers::declared(members),
+            };
+            names.extend(
+                effective
+                    .declaring_params()
+                    .map(|param| param.name.name.clone()),
+            );
+            // Direct members stop lookup before the library; inherited and
+            // extension-provided members can still be shadowed there.
+            let library_shadows = |name: &str| {
+                !names.contains(name) && library_contains_name(program, model.as_ref(), name)
+            };
             for member in members {
-                check_member(member, ctx, &mut diagnostics);
+                check_member(member, ctx, &library_shadows, &mut diagnostics);
             }
         }
         diagnostics
     }
 }
 
-fn check_member(member: &ClassMember, ctx: &AnalyzeContext, diagnostics: &mut Vec<Diagnostic>) {
+fn library_contains_name(program: &Program, model: Option<&SemanticModel<'_>>, name: &str) -> bool {
+    if program.imports.iter().any(|import| {
+        import
+            .as_name
+            .as_ref()
+            .is_some_and(|prefix| prefix.name == name)
+    }) {
+        return true;
+    }
+    if let Some(model) = model {
+        return matches!(
+            model.resolve_library_name(name),
+            DocName::Declaration { .. } | DocName::Prefix | DocName::Extension
+        );
+    }
+    program
+        .declarations
+        .iter()
+        .any(|declaration| match declaration {
+            TopLevelDecl::Function(function) => function.name.name == name,
+            TopLevelDecl::Variable(variable) => variable
+                .declarators
+                .iter()
+                .any(|declarator| declarator.name.name == name),
+            _ => false,
+        })
+}
+
+fn check_member(
+    member: &ClassMember,
+    ctx: &AnalyzeContext,
+    library_shadows: &dyn Fn(&str) -> bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let (params, body) = match member {
         ClassMember::Method(method) if !method.is_static => (&method.params, method.body.as_ref()),
         ClassMember::Getter(getter) if !getter.is_static => {
-            return check_body(None, getter.body.as_ref(), ctx, diagnostics);
+            return check_body(
+                None,
+                getter.body.as_ref(),
+                ctx,
+                library_shadows,
+                diagnostics,
+            );
         }
         ClassMember::Setter(setter) if !setter.is_static => {
-            let mut collector = Collector::new(ctx, diagnostics);
+            let mut collector = Collector::new(ctx, library_shadows, diagnostics);
             collector.scopes.declare(&setter.param.name);
             if let Some(body) = &setter.body {
                 walk_function_body(&mut collector, body);
@@ -43,19 +105,20 @@ fn check_member(member: &ClassMember, ctx: &AnalyzeContext, diagnostics: &mut Ve
         ClassMember::Constructor(constructor) => (&constructor.params, constructor.body.as_ref()),
         _ => return,
     };
-    check_body(Some(params), body, ctx, diagnostics);
+    check_body(Some(params), body, ctx, library_shadows, diagnostics);
 }
 
 fn check_body(
     params: Option<&FormalParamList>,
     body: Option<&FunctionBody>,
     ctx: &AnalyzeContext,
+    library_shadows: &dyn Fn(&str) -> bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(body) = body else {
         return;
     };
-    let mut collector = Collector::new(ctx, diagnostics);
+    let mut collector = Collector::new(ctx, library_shadows, diagnostics);
     if let Some(params) = params {
         collector.scopes.params(params);
     }
@@ -66,14 +129,20 @@ struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
     diagnostics: &'a mut Vec<Diagnostic>,
     scopes: NameScopes,
+    library_shadows: &'a dyn Fn(&str) -> bool,
 }
 
 impl<'a, 'ctx> Collector<'a, 'ctx> {
-    fn new(ctx: &'a AnalyzeContext<'ctx>, diagnostics: &'a mut Vec<Diagnostic>) -> Self {
+    fn new(
+        ctx: &'a AnalyzeContext<'ctx>,
+        library_shadows: &'a dyn Fn(&str) -> bool,
+        diagnostics: &'a mut Vec<Diagnostic>,
+    ) -> Self {
         Self {
             ctx,
             diagnostics,
             scopes: NameScopes::default(),
+            library_shadows,
         }
     }
 
@@ -97,10 +166,27 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
 
     fn local(&mut self, declaration: &LocalVarDecl) {
         for declarator in &declaration.declarators {
+            self.scopes.declare(&declarator.name.name);
+        }
+        for declarator in &declaration.declarators {
             if let Some(initializer) = &declarator.initializer {
                 self.visit_expr(initializer);
             }
-            self.scopes.declare(&declarator.name.name);
+        }
+    }
+
+    fn prebind(&mut self, statements: &[Stmt]) {
+        for statement in statements {
+            match statement {
+                Stmt::LocalVar(declaration) => {
+                    for declarator in &declaration.declarators {
+                        self.scopes.declare(&declarator.name.name);
+                    }
+                }
+                Stmt::LocalFunc(function) => self.scopes.declare(&function.name.name),
+                Stmt::PatternDecl(declaration) => self.scopes.pattern(&declaration.pattern),
+                _ => {}
+            }
         }
     }
 
@@ -113,16 +199,16 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
                 iterable,
                 ..
             } => {
-                self.visit_expr(iterable);
                 if *declares_variable {
                     self.scopes.declare(&name.name);
                 }
+                self.visit_expr(iterable);
             }
             ForInit::PatternForIn {
                 pattern, iterable, ..
             } => {
-                self.visit_expr(iterable);
                 self.pattern(pattern);
+                self.visit_expr(iterable);
             }
             ForInit::Exprs(expressions) => {
                 for expression in expressions {
@@ -134,6 +220,13 @@ impl<'a, 'ctx> Collector<'a, 'ctx> {
 }
 
 impl Visitor for Collector<'_, '_> {
+    fn visit_block(&mut self, node: &Block) {
+        // Dart's block scope includes declarations following the reference,
+        // including references in the declaration's own initializer.
+        self.prebind(&node.stmts);
+        walk_block(self, node);
+    }
+
     fn visit_local_var(&mut self, node: &LocalVarDecl) {
         self.local(node);
     }
@@ -151,8 +244,9 @@ impl Visitor for Collector<'_, '_> {
                 self.nested_function(&function.params, &function.body);
             }
             Stmt::PatternDecl(declaration) => {
+                self.scopes.pattern(&declaration.pattern);
                 self.visit_expr(&declaration.init);
-                self.pattern(&declaration.pattern);
+                walk_pattern(self, &declaration.pattern);
             }
             Stmt::If(statement) => match &statement.condition {
                 IfCondition::Expr(condition) => {
@@ -204,6 +298,7 @@ impl Visitor for Collector<'_, '_> {
                 self.visit_expr(&statement.subject);
                 for case in &statement.cases {
                     self.scopes.push();
+                    self.prebind(&case.body);
                     for kind in &case.cases {
                         if let SwitchCaseKind::Pattern(pattern, guard) = kind {
                             self.pattern(pattern);
@@ -222,9 +317,7 @@ impl Visitor for Collector<'_, '_> {
             }
             Stmt::TryCatch(statement) => {
                 self.scopes.push();
-                for statement in &statement.body.stmts {
-                    self.visit_stmt(statement);
-                }
+                self.visit_block(&statement.body);
                 self.scopes.pop();
                 for catch in &statement.catches {
                     self.scopes.push();
@@ -234,16 +327,12 @@ impl Visitor for Collector<'_, '_> {
                     if let Some(name) = &catch.stack_trace_var {
                         self.scopes.declare(&name.name);
                     }
-                    for statement in &catch.body.stmts {
-                        self.visit_stmt(statement);
-                    }
+                    self.visit_block(&catch.body);
                     self.scopes.pop();
                 }
                 if let Some(finally) = &statement.finally {
                     self.scopes.push();
-                    for statement in &finally.stmts {
-                        self.visit_stmt(statement);
-                    }
+                    self.visit_block(finally);
                     self.scopes.pop();
                 }
             }
@@ -255,6 +344,7 @@ impl Visitor for Collector<'_, '_> {
         if let Expr::Field { object, field, .. } = node
             && matches!(object.unparenthesized(), Expr::This { .. })
             && !self.scopes.bound(&field.name)
+            && !(self.library_shadows)(&field.name)
         {
             let span = object.span();
             self.diagnostics.push(self.ctx.diagnostic(

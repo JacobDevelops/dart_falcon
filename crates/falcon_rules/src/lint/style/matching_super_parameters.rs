@@ -52,12 +52,8 @@ impl Rule for MatchingSuperParameters {
             let Some(facts) = signatures.declaration(&identity) else {
                 continue;
             };
-            for member in &class.members {
-                let ClassMember::Constructor(constructor) = member else {
-                    continue;
-                };
-                let super_params: Vec<&FormalParam> = constructor
-                    .params
+            for (params, initializers) in constructor_inputs(class) {
+                let super_params: Vec<&FormalParam> = params
                     .params
                     .iter()
                     .filter(|param| {
@@ -68,8 +64,7 @@ impl Rule for MatchingSuperParameters {
                 if super_params.is_empty() {
                     continue;
                 }
-                let target = constructor
-                    .initializers
+                let target = initializers
                     .iter()
                     .find_map(|initializer| match initializer {
                         ConstructorInitializer::SuperCall { call_name, .. } => {
@@ -110,4 +105,27 @@ impl Rule for MatchingSuperParameters {
         }
         diags
     }
+}
+
+fn constructor_inputs(
+    class: &ClassDecl,
+) -> impl Iterator<Item = (&FormalParamList, &[ConstructorInitializer])> {
+    let constructors = class.members.iter().filter_map(|member| match member {
+        ClassMember::Constructor(constructor) => {
+            Some((&constructor.params, constructor.initializers.as_slice()))
+        }
+        _ => None,
+    });
+    let primary = class.primary_constructor.as_ref().map(|constructor| {
+        let initializers = class
+            .members
+            .iter()
+            .find_map(|member| match member {
+                ClassMember::PrimaryConstructorBody(body) => Some(body.initializers.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[]);
+        (&constructor.params, initializers)
+    });
+    constructors.chain(primary)
 }

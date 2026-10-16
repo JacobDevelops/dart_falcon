@@ -608,7 +608,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::Lints("use_string_in_part_of_directives"),
     ),
-    RuleMeta::file::<lint::style::avoid_init_to_null::AvoidInitToNull>(
+    RuleMeta::resolved::<lint::style::avoid_init_to_null::AvoidInitToNull>(
         "avoid-init-to-null",
         RuleGroup::Style,
         NONE,
@@ -790,7 +790,7 @@ pub const RULE_METADATA: &[RuleMeta] = &[
         true,
         RuleSource::Lints("unnecessary_string_interpolations"),
     ),
-    RuleMeta::file::<lint::style::unnecessary_this::UnnecessaryThis>(
+    RuleMeta::resolved::<lint::style::unnecessary_this::UnnecessaryThis>(
         "unnecessary-this",
         RuleGroup::Style,
         NONE,

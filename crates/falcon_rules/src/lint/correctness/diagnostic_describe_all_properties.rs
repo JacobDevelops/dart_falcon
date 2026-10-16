@@ -10,8 +10,9 @@
 //! private members, and overrides (a field or getter does not override an
 //! inherited setter). Like the analyzer, the rule applies to classes with a
 //! supertype named `Diagnosticable` declared in an unnamed library, including
-//! dependency libraries. Properties whose types cannot be resolved stay silent.
-//! Declaring primary constructor parameters are checked like instance fields.
+//! dependency libraries. Declared and inferred property types are checked;
+//! unresolved types stay silent. Declaring primary constructor parameters are
+//! checked like instance fields.
 //!
 //! ```dart
 //! class Tile extends StatelessWidget {
@@ -185,10 +186,10 @@ impl Checker<'_> {
         if name.starts_with('_') || self.overrides(owner, name, annotations) {
             return false;
         }
-        let Some(ty) = ty else {
-            return false;
-        };
-        self.is_widget_property(&self.model.resolve_type_in(ty, parameters)) == Some(false)
+        let resolved = ty
+            .map(|ty| self.model.resolve_type_in(ty, parameters))
+            .or_else(|| self.signatures.field(owner, name).map(|(_, ty)| ty.clone()));
+        resolved.is_some_and(|ty| self.is_widget_property(&ty) == Some(false))
     }
 
     fn overrides(

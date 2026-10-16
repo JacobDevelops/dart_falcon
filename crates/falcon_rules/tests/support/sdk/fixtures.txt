@@ -36,3 +36,4 @@ diagnostic-describe-all-properties/good_primary.dart
 diagnostic-describe-all-properties/good_replay_named_library.dart
 diagnostic-describe-all-properties/bad_own_diagnosticable.dart
 prefer-int-literals/bad_external.dart
+unnecessary-this/library_scope.dart

@@ -37,3 +37,17 @@ class F {
     print(v);
   }
 }
+
+class AnnotatedGetter {
+  int _value = 0;
+  @deprecated
+  int get value => _value;
+  set value(int value) => _value = value;
+}
+
+class AnnotatedSetter {
+  int _value = 0;
+  int get value => _value;
+  @deprecated
+  set value(int value) => _value = value;
+}

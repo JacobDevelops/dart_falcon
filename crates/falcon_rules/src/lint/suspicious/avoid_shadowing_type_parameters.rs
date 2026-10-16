@@ -31,31 +31,33 @@ impl Rule for AvoidShadowingTypeParameters {
     }
 }
 
-const MESSAGE: &str = "Avoid shadowing type parameters.";
-
 struct Checker<'a, 'ctx> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'ctx>,
-    scope: Vec<String>,
+    scope: Vec<(String, &'static str)>,
 }
 
 impl Checker<'_, '_> {
-    fn enter(&mut self, tps: &[TypeParam]) -> usize {
+    fn enter(&mut self, tps: &[TypeParam], kind: &'static str) -> usize {
         for tp in tps {
-            if self.scope.contains(&tp.name.name) {
+            for (_, ancestor_kind) in self.scope.iter().filter(|(name, _)| name == &tp.name.name) {
                 self.diags.push(self.ctx.diagnostic(
                     "avoid-shadowing-type-parameters",
-                    MESSAGE,
+                    format!(
+                        "The type parameter '{}' shadows a type parameter from the enclosing {}.",
+                        tp.name.name, ancestor_kind
+                    ),
                     tp.name.span,
                 ));
             }
         }
-        self.scope.extend(tps.iter().map(|tp| tp.name.name.clone()));
+        self.scope
+            .extend(tps.iter().map(|tp| (tp.name.name.clone(), kind)));
         tps.len()
     }
 
-    fn scoped(&mut self, tps: &[TypeParam], walk: impl FnOnce(&mut Self)) {
-        let entered = self.enter(tps);
+    fn scoped(&mut self, tps: &[TypeParam], kind: &'static str, walk: impl FnOnce(&mut Self)) {
+        let entered = self.enter(tps, kind);
         walk(self);
         self.scope.truncate(self.scope.len() - entered);
     }
@@ -63,19 +65,19 @@ impl Checker<'_, '_> {
 
 impl Visitor for Checker<'_, '_> {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
-        let type_params: &[TypeParam] = match node {
-            TopLevelDecl::Class(x) => &x.type_params,
-            TopLevelDecl::ClassTypeAlias(x) => &x.type_params,
-            TopLevelDecl::Mixin(x) => &x.type_params,
-            TopLevelDecl::MixinClass(x) => &x.type_params,
-            TopLevelDecl::Enum(x) => &x.type_params,
-            TopLevelDecl::Extension(x) => &x.type_params,
-            TopLevelDecl::ExtensionType(x) => &x.type_params,
-            TopLevelDecl::Function(x) => &x.type_params,
-            TopLevelDecl::TypeAlias(x) => &x.type_params,
-            TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => &[],
+        let (type_params, kind): (&[TypeParam], _) = match node {
+            TopLevelDecl::Class(x) => (&x.type_params, "class"),
+            TopLevelDecl::ClassTypeAlias(x) => (&x.type_params, "class"),
+            TopLevelDecl::Mixin(x) => (&x.type_params, "mixin"),
+            TopLevelDecl::MixinClass(x) => (&x.type_params, "mixin"),
+            TopLevelDecl::Enum(x) => (&x.type_params, "enum"),
+            TopLevelDecl::Extension(x) => (&x.type_params, "extension"),
+            TopLevelDecl::ExtensionType(x) => (&x.type_params, "extension type"),
+            TopLevelDecl::Function(x) => (&x.type_params, "function"),
+            TopLevelDecl::TypeAlias(x) => (&x.type_params, "typedef"),
+            TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => (&[], "declaration"),
         };
-        self.scoped(type_params, |this| walk_top_level_decl(this, node));
+        self.scoped(type_params, kind, |this| walk_top_level_decl(this, node));
     }
 
     fn visit_class_member(&mut self, node: &ClassMember) {
@@ -89,12 +91,24 @@ impl Visitor for Checker<'_, '_> {
             | ClassMember::Operator(_)
             | ClassMember::Error(_) => &[],
         };
-        self.scoped(type_params, |this| walk_class_member(this, node));
+        // Upstream exempts the static method's own parameters, but nested
+        // declarations still check all syntactic ancestors, including the class.
+        if matches!(node, ClassMember::Method(method) if method.is_static) {
+            self.scope.extend(
+                type_params
+                    .iter()
+                    .map(|parameter| (parameter.name.name.clone(), "method")),
+            );
+            walk_class_member(self, node);
+            self.scope.truncate(self.scope.len() - type_params.len());
+        } else {
+            self.scoped(type_params, "method", |this| walk_class_member(this, node));
+        }
     }
 
     fn visit_stmt(&mut self, node: &Stmt) {
         if let Stmt::LocalFunc(local) = node {
-            self.scoped(&local.type_params, |this| walk_stmt(this, node));
+            self.scoped(&local.type_params, "function", |this| walk_stmt(this, node));
         } else {
             walk_stmt(self, node);
         }
@@ -102,19 +116,23 @@ impl Visitor for Checker<'_, '_> {
 
     fn visit_expr(&mut self, node: &Expr) {
         if let Expr::FuncExpr { type_params, .. } = node {
-            self.scoped(type_params, |this| walk_expr(this, node));
+            self.scoped(type_params, "function", |this| walk_expr(this, node));
         } else {
             walk_expr(self, node);
         }
     }
 
     fn visit_formal_param(&mut self, node: &FormalParam) {
-        self.scoped(&node.type_params, |this| walk_formal_param(this, node));
+        self.scoped(&node.type_params, "parameter", |this| {
+            walk_formal_param(this, node)
+        });
     }
 
     fn visit_dart_type(&mut self, node: &DartType) {
         if let DartType::Function(function) = node {
-            self.scoped(&function.type_params, |this| walk_dart_type(this, node));
+            self.scoped(&function.type_params, "function", |this| {
+                walk_dart_type(this, node)
+            });
         } else {
             walk_dart_type(self, node);
         }

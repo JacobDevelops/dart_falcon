@@ -29,3 +29,10 @@ class F {
   int _f; /* expect: prefer-final-fields */
   F(this._f);
 }
+
+class EveryConstructor {
+  int _value; /* expect: prefer-final-fields */
+  EveryConstructor(this._value);
+  EveryConstructor.zero() : _value = 0;
+  int get value => _value;
+}

@@ -1794,3 +1794,60 @@ fn external_has_class(libraries: &ExternalLibraries, name: &str) -> bool {
             falcon_syntax::ast::TopLevelDecl::Class(class) if class.name.name == name)
         })
 }
+
+#[test]
+fn executable_library_names_preserve_collisions_without_documentation_imports() {
+    use falcon_analyze::DocName;
+
+    let dir = tempfile::tempdir().unwrap();
+    let source = "/// @docImport 'docs.dart';\nlibrary;\nimport 'first.dart';\nimport 'second.dart';\nimport 'first.dart' as pref;\nimport 'package:missing/missing.dart' show hidden;\nextension Named on int {}";
+    let texts = [
+        ("app.dart", source),
+        ("first.dart", "int collision = 1;"),
+        ("second.dart", "int collision = 2;"),
+        ("docs.dart", "class Documented {}"),
+    ];
+    let paths: Vec<_> = texts
+        .iter()
+        .map(|(name, text)| write(dir.path(), name, text))
+        .collect();
+    let programs: Vec<_> = texts
+        .iter()
+        .map(|(_, text)| {
+            let falcon_dart_parser::ParseResult {
+                program, errors, ..
+            } = parse(text);
+            assert!(errors.is_empty(), "{errors:?}");
+            program
+        })
+        .collect();
+    let sources: Vec<_> = paths
+        .iter()
+        .zip(&programs)
+        .map(|(path, program)| IdentitySource {
+            path,
+            program,
+            has_parse_errors: false,
+        })
+        .collect();
+    let content: Vec<_> = texts.iter().map(|(_, text)| *text).collect();
+    let identities = IdentityIndex::build(&sources, &content, &[], None);
+    let model = SemanticModel::new(&paths[0], &identities, None);
+
+    assert!(matches!(
+        model.resolve_library_name("collision"),
+        DocName::Declaration { identity: None, .. }
+    ));
+    assert_eq!(model.resolve_library_name("pref"), DocName::Prefix);
+    assert_eq!(model.resolve_library_name("Named"), DocName::Extension);
+    assert_eq!(model.resolve_library_name("hidden"), DocName::Unknown);
+    assert_eq!(model.resolve_library_name("absent"), DocName::Absent);
+    assert_eq!(model.resolve_library_name("Documented"), DocName::Absent);
+    assert!(matches!(
+        model.resolve_doc_name("Documented"),
+        DocName::Declaration {
+            identity: Some(_),
+            ..
+        }
+    ));
+}

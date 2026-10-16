@@ -14,6 +14,8 @@ pub struct LanguageVersion {
 pub enum Feature {
     /// `C.new` and `C.named` constructor tear-offs.
     ConstructorTearoffs,
+    /// A library directive without an explicit name.
+    UnnamedLibraries,
     /// Records, patterns, class modifiers, sealed classes.
     Patterns,
     PrivateFieldPromotion,
@@ -30,6 +32,7 @@ impl Feature {
     pub const fn since(self) -> LanguageVersion {
         let (major, minor) = match self {
             Self::ConstructorTearoffs => (2, 15),
+            Self::UnnamedLibraries => (2, 19),
             Self::Patterns => (3, 0),
             Self::PrivateFieldPromotion => (3, 2),
             Self::WildcardVariables | Self::TallStyle => (3, 7),

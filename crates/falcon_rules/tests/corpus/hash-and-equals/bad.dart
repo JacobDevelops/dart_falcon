@@ -1,16 +1,19 @@
 class A {
-  @override bool operator ==(Object other) => identical(this, other); /* expect: hash-and-equals */
+  @override
+  bool operator ==(Object other) => identical(this, other); /* expect: hash-and-equals */
 }
 
 class B {
-  @override int get hashCode => 42; /* expect: hash-and-equals */
+  @override
+  int get hashCode => 42; /* expect: hash-and-equals */
 }
 
 class C {
-  @override final int hashCode = 7; /* expect: hash-and-equals */
+  @override
+  final int hashCode = 7; /* expect: hash-and-equals */
 }
 
-mixin M {
+class M {
   @override bool operator ==(Object other) => true; /* expect: hash-and-equals */
 }
 

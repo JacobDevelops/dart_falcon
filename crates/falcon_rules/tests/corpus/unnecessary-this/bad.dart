@@ -28,7 +28,7 @@ class C {
 class SourceOrdered {
   int value = 0;
   void run() {
-    print(this.value); /* expect: unnecessary-this */
+    print(this.value);
     final value = 1;
     print(value);
   }
@@ -86,4 +86,42 @@ class BranchScopes {
     }
     print(this.value); /* expect: unnecessary-this */
   }
+}
+
+bool isNull(Object? value) => value == null;
+
+class DeclaredMember {
+  bool get isNull => false;
+  bool check() => this.isNull; /* expect: unnecessary-this */
+}
+
+class LaterNestedBlock {
+  int value = 0;
+  void run() {
+    print(this.value); /* expect: unnecessary-this */
+    {
+      final value = 1;
+      print(value);
+    }
+  }
+}
+
+extension DeclaredExtension on String {
+  bool get isNull => false;
+  bool check() => this.isNull; /* expect: unnecessary-this */
+}
+
+int headerValue = 0;
+int representationValue = 0;
+
+// Declaring header parameters are direct members, ahead of library names.
+class HeaderMember(final int headerValue) {
+  int read() => this.headerValue; /* expect: unnecessary-this */
+  int shadowed(int headerValue) => this.headerValue + headerValue;
+}
+
+extension type RepresentationMember(int representationValue) {
+  int read() => this.representationValue; /* expect: unnecessary-this */
+  int shadowed(int representationValue) =>
+      this.representationValue + representationValue;
 }

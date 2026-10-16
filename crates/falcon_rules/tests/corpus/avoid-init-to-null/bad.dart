@@ -18,3 +18,37 @@ class C {
     print('$local $x $a $b');
   }
 }
+
+void namedDefault({int? value = null}) {} /* expect: avoid-init-to-null */
+void positionalDefault([int? value = null]) {} /* expect: avoid-init-to-null */
+
+class FieldDefault {
+  final int? value;
+  FieldDefault({this.value = null}); /* expect: avoid-init-to-null */
+}
+
+class NullSuperDefault {
+  NullSuperDefault({int? value});
+}
+
+class RedundantSuperDefault extends NullSuperDefault {
+  RedundantSuperDefault({super.value = null}); /* expect: avoid-init-to-null */
+}
+
+void parenthesizedDefault({int? value = (null)}) {} /* expect: avoid-init-to-null */
+
+class RequiredPositionalBase {
+  RequiredPositionalBase(int? value);
+}
+
+class OptionalPositionalChild extends RequiredPositionalBase {
+  OptionalPositionalChild([super.value = null]); /* expect: avoid-init-to-null */
+}
+
+class RequiredNamedBase {
+  RequiredNamedBase({required int? value});
+}
+
+class OptionalNamedChild extends RequiredNamedBase {
+  OptionalNamedChild({super.value = null}); /* expect: avoid-init-to-null */
+}

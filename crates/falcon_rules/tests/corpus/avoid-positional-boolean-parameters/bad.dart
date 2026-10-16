@@ -81,3 +81,10 @@ class Unannotated extends Updatable {
   // An override without the annotation is still detected.
   void update(bool animate) {}
 }
+
+class PrimaryBoolean(bool enabled); /* expect: avoid-positional-boolean-parameters */
+
+class DeclaringPrimaryBoolean(final bool enabled); /* expect: avoid-positional-boolean-parameters */
+
+// Extension-type representation parameters are primary constructor parameters.
+extension type BooleanRepresentation(bool enabled) {} /* expect: avoid-positional-boolean-parameters */

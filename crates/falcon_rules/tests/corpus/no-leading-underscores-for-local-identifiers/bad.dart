@@ -32,5 +32,29 @@ void k() {
 
 class Mixed {
   final String _token;
-  Mixed(this._token, int _other); /* expect: no-leading-underscores-for-local-identifiers */
+  Mixed(this._token, int _other);
 }
+
+void localFunction() {
+  void _helper() {} /* expect: no-leading-underscores-for-local-identifiers */
+  _helper();
+}
+
+class Primary(int _argument, final int field); /* expect: no-leading-underscores-for-local-identifiers */
+
+class PatternValue {
+  final int _value;
+  PatternValue(this._value);
+}
+
+void renamedField(PatternValue input) {
+  if (input case PatternValue(_value: var _local)) { /* expect: no-leading-underscores-for-local-identifiers */
+    print(_local);
+  }
+}
+
+typedef LocalCallback = void Function(int _value); /* expect: no-leading-underscores-for-local-identifiers */
+
+void functionTypedParameter(
+  void Function(int _value) callback, /* expect: no-leading-underscores-for-local-identifiers */
+) {}

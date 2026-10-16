@@ -73,3 +73,8 @@ class Sink extends SinkWidget {
   @override
   Widget build(BuildContext context) => const SizedBox();
 }
+
+class InferredModel with Diagnosticable {
+  final count = 1; /* expect: diagnostic-describe-all-properties */
+  final values = <String>[]; /* expect: diagnostic-describe-all-properties */
+}

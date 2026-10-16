@@ -39,3 +39,9 @@ class Remote extends SomeUnknownBase {
 class Short {
   Short(int a);
 }
+
+class PrimaryMatch(super.width, super.height) extends Rectangle;
+
+class NamedPrimaryMatch(super.size) extends Rectangle {
+  this : super.square();
+}

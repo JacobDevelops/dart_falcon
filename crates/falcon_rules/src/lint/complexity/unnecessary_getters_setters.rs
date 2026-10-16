@@ -5,7 +5,8 @@
 //! lets you later replace a public field with a getter/setter without changing
 //! call sites, so the wrapping is premature. The rule fires only when a getter
 //! and setter share a name, both target the same backing field, and that field
-//! is private (has a leading underscore).
+//! is private (has a leading underscore). Metadata on either accessor exempts
+//! the pair.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
@@ -47,6 +48,9 @@ fn check_members(members: &[ClassMember], ctx: &AnalyzeContext, diags: &mut Vec<
         let Some(setter) = setters.get(name) else {
             continue;
         };
+        if !getter.annotations.is_empty() || !setter.annotations.is_empty() {
+            continue;
+        }
         let (Some(gf), Some(sf)) = (getter_returns_field(getter), setter_assigns_field(setter))
         else {
             continue;

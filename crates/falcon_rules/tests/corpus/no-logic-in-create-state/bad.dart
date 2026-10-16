@@ -24,13 +24,14 @@ class W3 extends StatefulWidget {
 
 class W4 extends StatefulWidget {
   @override
-  State<W4> createState() => _W4State(this); /* expect: no-logic-in-create-state */
+  State<W4> createState() =>
+      _W4State(this); /* expect: no-logic-in-create-state */
 }
 
 class W5 extends StatefulWidget {
   @override
-  State<W5> createState() { /* expect: no-logic-in-create-state */
-    return _W5State()..counter = 0;
+  State<W5> createState() {
+    return _W5State()..counter = 0; /* expect: no-logic-in-create-state */
   }
 }
 

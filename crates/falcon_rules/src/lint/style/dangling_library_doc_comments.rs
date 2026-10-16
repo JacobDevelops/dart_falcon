@@ -1,4 +1,6 @@
 //! Attach library documentation to an explicit `library` directive.
+//! Line docs stay grouped across blank lines and ordinary comments; declarations
+//! report the doc token immediately before the first internal gap.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
@@ -9,8 +11,18 @@ pub struct DanglingLibraryDocComments;
 
 impl Rule for DanglingLibraryDocComments {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let comments = documentation_blocks(ctx.source);
-        let starts = dangling_starts(program, ctx.source, &comments);
+        let limit = first_directive(program, ctx)
+            .map(|(offset, _)| offset)
+            .or_else(|| {
+                program
+                    .declarations
+                    .iter()
+                    .map(|decl| decl.span().start)
+                    .min()
+            })
+            .unwrap_or(ctx.source.len());
+        let comments = documentation_blocks(ctx, limit);
+        let starts = dangling_starts(program, ctx, &comments);
         starts
             .into_iter()
             .map(|start| {
@@ -26,7 +38,9 @@ impl Rule for DanglingLibraryDocComments {
 #[derive(Clone, Copy)]
 struct DocBlock {
     start: usize,
+    end: usize,
     end_line: usize,
+    gap_start: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -36,115 +50,196 @@ enum FirstDirective {
     Other,
 }
 
-fn dangling_starts(program: &Program, source: &str, comments: &[DocBlock]) -> Vec<usize> {
-    if let Some((offset, kind)) = first_directive(program) {
+fn dangling_starts(program: &Program, ctx: &AnalyzeContext, comments: &[DocBlock]) -> Vec<usize> {
+    if let Some((offset, kind)) = first_directive(program, ctx) {
         if matches!(kind, FirstDirective::Library | FirstDirective::PartOf) {
             return Vec::new();
         }
-        return comments
-            .iter()
-            .rev()
-            .find(|comment| comment.start < offset)
-            .map(|comment| vec![comment.start])
+        return attached_comment(ctx, comments, offset)
+            .map(|(comment, _)| vec![comment.start])
             .unwrap_or_default();
     }
 
-    let first_declaration = program
+    let Some(keyword) = program
         .declarations
         .iter()
         .map(|decl| decl.span().start)
-        .min();
-    let Some(offset) = first_declaration else {
-        return comments.iter().map(|comment| comment.start).collect();
+        .min()
+    else {
+        return ctx
+            .tokens()
+            .iter()
+            .filter(|token| token.kind == falcon_syntax::TokenKind::DocComment)
+            .map(|token| token.offset())
+            .collect();
     };
-    let Some(comment) = comments.iter().rev().find(|comment| comment.start < offset) else {
+    let Some((comment, offset)) = attached_comment(ctx, comments, keyword) else {
         return Vec::new();
     };
-    let declaration_line = line_of(source, offset);
-    (declaration_line > comment.end_line + 1)
+    if let Some(start) = comment.gap_start {
+        return vec![start];
+    }
+    let mut end_line = comment.end_line;
+    let mut scanned = comment.end;
+    for token in ctx.tokens().iter().filter(|token| {
+        token.offset() >= comment.end
+            && token.offset() < offset
+            && matches!(
+                token.kind,
+                falcon_syntax::TokenKind::LineComment | falcon_syntax::TokenKind::BlockComment
+            )
+    }) {
+        let start_line = end_line
+            + ctx.source[scanned..token.offset()]
+                .bytes()
+                .filter(|b| *b == b'\n')
+                .count();
+        if start_line > end_line + 1 {
+            return vec![comment.start];
+        }
+        scanned = token.offset() + token.len();
+        end_line = start_line
+            + ctx.source[token.offset()..scanned]
+                .bytes()
+                .filter(|b| *b == b'\n')
+                .count();
+    }
+    let declaration_line = end_line
+        + ctx.source[scanned..offset]
+            .bytes()
+            .filter(|b| *b == b'\n')
+            .count();
+    (declaration_line > end_line + 1)
         .then_some(vec![comment.start])
         .unwrap_or_default()
 }
 
-fn first_directive(program: &Program) -> Option<(usize, FirstDirective)> {
+// Comments before the keyword win; otherwise use the last annotated token
+// with preceding documentation, as the analyzer's metadata fallback does.
+fn attached_comment<'a>(
+    ctx: &AnalyzeContext,
+    comments: &'a [DocBlock],
+    keyword: usize,
+) -> Option<(&'a DocBlock, usize)> {
+    let mut comments = comments.iter().peekable();
+    let mut candidate = None;
+    for token in ctx
+        .tokens()
+        .iter()
+        .take_while(|token| token.offset() < keyword)
+    {
+        if token.is_trivia() {
+            continue;
+        }
+        let mut preceding = None;
+        while comments
+            .peek()
+            .is_some_and(|comment| comment.start < token.offset())
+        {
+            preceding = comments.next();
+        }
+        if token.kind == falcon_syntax::TokenKind::At
+            && let Some(comment) = preceding
+        {
+            candidate = Some((comment, token.offset()));
+        }
+    }
+    comments
+        .last()
+        .map(|comment| (comment, keyword))
+        .or(candidate)
+}
+
+fn first_directive(program: &Program, ctx: &AnalyzeContext) -> Option<(usize, FirstDirective)> {
+    let keyword = |annotations: &[Annotation], span| {
+        crate::lint::declarations::first_token_after_annotations(annotations, span, ctx.syntax)
+    };
     let mut directives = Vec::new();
     if let Some(directive) = &program.library_directive {
-        directives.push((directive.span.start, FirstDirective::Library));
+        directives.push((
+            keyword(&directive.annotations, directive.span),
+            FirstDirective::Library,
+        ));
     }
     if let Some(directive) = &program.part_of_directive {
-        directives.push((directive.span.start, FirstDirective::PartOf));
+        directives.push((
+            keyword(&directive.annotations, directive.span),
+            FirstDirective::PartOf,
+        ));
     }
-    directives.extend(
-        program
-            .part_directives
-            .iter()
-            .map(|directive| (directive.span.start, FirstDirective::Other)),
-    );
-    directives.extend(
-        program
-            .imports
-            .iter()
-            .map(|directive| (directive.span.start, FirstDirective::Other)),
-    );
-    directives.extend(
-        program
-            .exports
-            .iter()
-            .map(|directive| (directive.span.start, FirstDirective::Other)),
-    );
+    directives.extend(program.part_directives.iter().map(|directive| {
+        (
+            keyword(&directive.annotations, directive.span),
+            FirstDirective::Other,
+        )
+    }));
+    directives.extend(program.imports.iter().map(|directive| {
+        (
+            keyword(&directive.annotations, directive.span),
+            FirstDirective::Other,
+        )
+    }));
+    directives.extend(program.exports.iter().map(|directive| {
+        (
+            keyword(&directive.annotations, directive.span),
+            FirstDirective::Other,
+        )
+    }));
     directives.into_iter().min_by_key(|(start, _)| *start)
 }
 
-fn documentation_blocks(source: &str) -> Vec<DocBlock> {
-    let mut blocks = Vec::new();
-    let mut offset = 0;
+fn documentation_blocks(ctx: &AnalyzeContext, limit: usize) -> Vec<DocBlock> {
+    let mut blocks: Vec<DocBlock> = Vec::new();
+    let mut scanned = 0;
     let mut line = 1;
-    let lines = source.split_inclusive('\n').collect::<Vec<_>>();
-    let mut index = 0;
-    while index < lines.len() {
-        let text = lines[index];
-        let trimmed = text.trim_start();
-        let indent = text.len() - trimmed.len();
-        if trimmed.starts_with("///") {
-            let start = offset + indent;
-            let mut end_line = line;
-            offset += text.len();
-            line += 1;
-            index += 1;
-            while index < lines.len() && lines[index].trim_start().starts_with("///") {
-                end_line = line;
-                offset += lines[index].len();
-                line += 1;
-                index += 1;
-            }
-            blocks.push(DocBlock { start, end_line });
+    let mut metadata_end = 0;
+    let mut last_doc_start = 0;
+    for token in ctx.tokens() {
+        if token.offset() >= limit {
+            break;
+        }
+        if !token.is_trivia() {
+            metadata_end = token.offset() + token.len();
+        }
+        if token.kind != falcon_syntax::TokenKind::DocComment {
             continue;
         }
-        if trimmed.starts_with("/**") {
-            let start = offset + indent;
-            let mut end_line = line;
-            let mut closed = trimmed.contains("*/");
-            offset += text.len();
-            line += 1;
-            index += 1;
-            while !closed && index < lines.len() {
-                closed = lines[index].contains("*/");
-                end_line = line;
-                offset += lines[index].len();
-                line += 1;
-                index += 1;
+        let end = token.offset() + token.len();
+        let start_line = line
+            + ctx.source[scanned..token.offset()]
+                .bytes()
+                .filter(|b| *b == b'\n')
+                .count();
+        let end_line = start_line
+            + ctx.source[token.offset()..end]
+                .bytes()
+                .filter(|b| *b == b'\n')
+                .count();
+        scanned = end;
+        line = end_line;
+        if let Some(previous) = blocks.last_mut()
+            && previous.start >= metadata_end
+            // Analyzer groups line docs across whitespace and ordinary comments.
+            && ctx.source[previous.start..].starts_with("///")
+            && ctx.source[token.offset()..].starts_with("///")
+        {
+            if start_line > previous.end_line + 1 && previous.gap_start.is_none() {
+                previous.gap_start = Some(last_doc_start);
             }
-            blocks.push(DocBlock { start, end_line });
-            continue;
+            previous.end = end;
+            previous.end_line = end_line;
+        } else {
+            blocks.push(DocBlock {
+                start: token.offset(),
+                end,
+                end_line,
+                gap_start: None,
+            });
         }
-        offset += text.len();
-        line += 1;
-        index += 1;
+        last_doc_start = token.offset();
     }
     blocks
 }
-
-use crate::lint::expressions::line_of;
 
 #[cfg(test)]
 mod tests {
@@ -172,5 +267,36 @@ mod tests {
             &source[diagnostics[0].span.start..diagnostics[0].span.end],
             "///"
         );
+    }
+
+    #[test]
+    fn line_doc_groups_keep_the_first_internal_gap() {
+        for source in [
+            "/// first\n\n/// last\nimport 'dart:async';",
+            "/// first\n// ordinary\n/// last\n\nclass C {}",
+            "/// first\n\n/// last\nclass C {}",
+        ] {
+            let diagnostics = diags(source);
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(diagnostics[0].span.start, 0);
+        }
+        let source = "/// first\n/// second\n\n/// last\nclass C {}";
+        let diagnostics = diags(source);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].span.start,
+            source.find("/// second").unwrap()
+        );
+    }
+
+    #[test]
+    fn comment_only_files_report_each_doc_token() {
+        let diagnostics = diags("/// first\n/// second\n");
+        assert_eq!(diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn ordinary_comments_inside_doc_group_are_not_following_comments() {
+        assert!(diags("/// a\n/* x */ /// b\nclass C {}").is_empty());
     }
 }

@@ -29,7 +29,8 @@ use falcon_analyze::{
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_class_member, walk_dart_type, walk_function_decl, walk_stmt,
+    Visitor, walk_class_member, walk_dart_type, walk_function_decl, walk_primary_constructor,
+    walk_stmt,
 };
 
 use crate::lint::semantic_scope::{SemanticState, resolved_super_param_type};
@@ -218,6 +219,30 @@ impl<'p> Collector<'_, '_, 'p> {
 }
 
 impl Visitor for Collector<'_, '_, '_> {
+    fn visit_primary_constructor(&mut self, node: &PrimaryConstructor) {
+        if !node
+            .constructor_name
+            .as_ref()
+            .is_some_and(|name| name.name.starts_with('_'))
+        {
+            let target = self.container.as_ref().and_then(|container| {
+                container.members.iter().find_map(|member| match member {
+                    ClassMember::PrimaryConstructorBody(body) => {
+                        body.initializers.iter().find_map(|init| match init {
+                            ConstructorInitializer::SuperCall { call_name, .. } => {
+                                Some(call_name.as_ref().map_or("new", |name| name.name.as_str()))
+                            }
+                            _ => None,
+                        })
+                    }
+                    _ => None,
+                })
+            });
+            self.check_params(&node.params, Some(target.unwrap_or("new")));
+        }
+        walk_primary_constructor(self, node);
+    }
+
     fn visit_function_decl(&mut self, node: &FunctionDecl) {
         if !node.name.name.starts_with('_')
             && let Some(params) = node.params()

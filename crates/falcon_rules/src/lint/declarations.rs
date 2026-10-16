@@ -275,7 +275,14 @@ mod tests {
             ),
             (
                 "hash-and-equals",
-                &["Enum", "Extension", "ExtensionType"],
+                &[
+                    "Class",
+                    "MixinClass",
+                    "Mixin",
+                    "Enum",
+                    "Extension",
+                    "ExtensionType",
+                ],
                 "int get hashCode => 42;",
             ),
             (
@@ -330,6 +337,7 @@ mod tests {
             let rule = make();
             for &kind in kinds {
                 let header = match kind {
+                    "Class" => "class Probe",
                     "Mixin" => "mixin Probe",
                     "MixinClass" => "mixin class Probe",
                     "Enum" => "enum Probe",
@@ -348,9 +356,10 @@ mod tests {
                 let ctx =
                     AnalyzeContext::new(Path::new("containers.dart"), &source, &config, &syntax);
                 let diagnostics = rule.analyze(&program, &ctx);
-                assert!(
+                assert_eq!(
                     diagnostics.iter().any(|diagnostic| diagnostic.rule == name),
-                    "{name} did not inspect newly included {kind} members: {diagnostics:?}",
+                    name != "hash-and-equals" || matches!(kind, "Class" | "MixinClass"),
+                    "{name}/{kind} violated its declaration-kind contract: {diagnostics:?}",
                 );
             }
         }

@@ -6,12 +6,10 @@
 //! function, method, getter, and setter names. Consistent casing lets readers
 //! distinguish these from types (UpperCamelCase) and compile-time constants at a
 //! glance. Operator names are exempt: they are not identifiers. The check mirrors
-//! the analyzer's `isLowerCamelCase`: leading underscores are ignored, an
-//! all-underscore wildcard name is accepted, a single uppercase letter is
-//! tolerated, and the remainder must begin with a lowercase letter or `$` and
-//! contain no further underscores. Type names (see `camel-case-types`) and
-//! constants (see `constant-identifier-names`) are covered by separate rules and
-//! are out of scope here.
+//! the analyzer's `isLowerCamelCase`, including optional trailing underscores
+//! and underscore-digit word boundaries. Field formals are exempt because the
+//! corresponding field declaration is checked separately.
+//! Constants (see `constant-identifier-names`) are covered by a separate rule.
 
 use crate::lint::naming::is_lower_camel_case;
 use falcon_analyze::{AnalyzeContext, Rule};
@@ -30,6 +28,7 @@ impl Rule for NonConstantIdentifierNames {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
+            in_extension_type: false,
         };
         collector.visit_program(program);
         collector.diags
@@ -41,6 +40,7 @@ const MESSAGE: &str = "Name non-constant identifiers using lowerCamelCase.";
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    in_extension_type: bool,
 }
 
 impl Collector<'_> {
@@ -51,6 +51,12 @@ impl Collector<'_> {
                 MESSAGE,
                 name.span,
             ));
+        }
+    }
+
+    fn check_parameter(&mut self, name: &Identifier) {
+        if !name.name.bytes().all(|byte| byte == b'_') {
+            self.check(name);
         }
     }
 
@@ -67,6 +73,7 @@ impl Collector<'_> {
 
 impl Visitor for Collector<'_> {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        self.in_extension_type = matches!(node, TopLevelDecl::ExtensionType(_));
         if let TopLevelDecl::Variable(v) = node {
             self.check_declarators(
                 &v.declarators,
@@ -74,6 +81,7 @@ impl Visitor for Collector<'_> {
             );
         }
         walk_top_level_decl(self, node);
+        self.in_extension_type = false;
     }
 
     /// Covers top-level functions, getters, and setters alike — the analyzer
@@ -95,7 +103,7 @@ impl Visitor for Collector<'_> {
 
     fn visit_setter_decl(&mut self, node: &SetterDecl) {
         self.check(&node.name);
-        self.check(&node.param);
+        self.check_parameter(&node.param);
         walk_setter_decl(self, node);
     }
 
@@ -103,7 +111,11 @@ impl Visitor for Collector<'_> {
     /// name is governed by `camel-case-types`.
     fn visit_constructor(&mut self, node: ConstructorRef<'_>) {
         if let Some(named) = &node.constructor_name {
-            self.check(named);
+            if self.in_extension_type && node.is_primary {
+                self.check(named);
+            } else {
+                self.check_parameter(named);
+            }
         }
     }
 
@@ -116,8 +128,23 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_formal_param(&mut self, node: &FormalParam) {
-        self.check(&node.name);
+        if node.initializing != Some(InitializingFormal::This) {
+            self.check_parameter(&node.name);
+        }
         walk_formal_param(self, node);
+    }
+
+    fn visit_dart_type(&mut self, node: &DartType) {
+        if let DartType::Function(function) = node {
+            for param in &function.params {
+                if let Some(name) = &param.name
+                    && !name.name.bytes().all(|byte| byte == b'_')
+                {
+                    self.check(name);
+                }
+            }
+        }
+        falcon_syntax::visitor::walk_dart_type(self, node);
     }
 
     fn visit_local_var(&mut self, node: &LocalVarDecl) {
@@ -145,10 +172,10 @@ impl Visitor for Collector<'_> {
             Stmt::TryCatch(tc) => {
                 for catch in &tc.catches {
                     if let Some(v) = &catch.exception_var {
-                        self.check(v);
+                        self.check_parameter(v);
                     }
                     if let Some(v) = &catch.stack_trace_var {
-                        self.check(v);
+                        self.check_parameter(v);
                     }
                 }
             }

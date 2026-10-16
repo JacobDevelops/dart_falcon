@@ -38,3 +38,9 @@ class PrivateBase {
 class PublicChild extends PrivateBase {
   PublicChild(super.channel); /* expect: matching-super-parameters */
 }
+
+class PrimaryMismatch(super.height, super.width) extends Rectangle; /* expect: matching-super-parameters */ /* expect: matching-super-parameters */
+
+class NamedPrimaryMismatch(super.side) extends Rectangle { /* expect: matching-super-parameters */
+  this : super.square();
+}

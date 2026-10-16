@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 
 class G1 extends StatefulWidget {
   @override
-  State<G1> createState() => _G1State();
+  State<G1> createState() =>
+      _G1State();
 }
 
 class G2 extends StatefulWidget {

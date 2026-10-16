@@ -48,3 +48,15 @@ class Plain {
 
   final int value;
 }
+
+class InferredModel with Diagnosticable {
+  final count = 1;
+  final child = const SizedBox();
+  final children = <Widget>[const SizedBox()];
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+    super.debugFillProperties(properties);
+    properties.add(IntProperty('count', count));
+  }
+}

@@ -49,3 +49,12 @@ class SuperFormal extends Parent {
 extension type CheckedValue(int? value) {
   CheckedValue.checked(this.value) : assert(value != null);
 }
+
+class InstanceMessage {
+  InstanceMessage(int value) {
+    assert(value > 0, this);
+  }
+  InstanceMessage.property(int value) {
+    assert(value > 0, this.toString());
+  }
+}

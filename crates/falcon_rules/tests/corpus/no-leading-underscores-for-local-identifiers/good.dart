@@ -37,3 +37,28 @@ class NamedProvider {
 class SubProvider extends Provider {
   SubProvider(super._token);
 }
+
+// Declaring primary parameters and extension representations name private fields.
+class Primary(final int _field);
+class MutablePrimary(var int _field);
+extension type Representation(int _value) {}
+
+class ObjectValue {
+  final int _value;
+  ObjectValue(this._value);
+}
+
+void fieldShortcut(ObjectValue input) {
+  if (input case ObjectValue(:var _value)) {
+    print(_value);
+  }
+}
+
+void localWildcardFunction() {
+  void __() {}
+  __();
+}
+
+typedef LocalCallback = void Function(int value);
+
+void functionTypedParameter(void Function(int value) callback) {}

@@ -1,0 +1,1 @@
+int importedName() => 2;

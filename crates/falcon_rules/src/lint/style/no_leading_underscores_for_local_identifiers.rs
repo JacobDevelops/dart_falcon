@@ -13,7 +13,8 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
-    Visitor, walk_formal_param, walk_pattern, walk_setter_decl, walk_stmt,
+    Visitor, walk_dart_type, walk_formal_param_list, walk_pattern, walk_primary_constructor,
+    walk_setter_decl, walk_stmt, walk_top_level_decl,
 };
 
 #[derive(Default)]
@@ -24,6 +25,9 @@ impl Rule for NoLeadingUnderscoresForLocalIdentifiers {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
+            primary_params: None,
+            representation_params: None,
+            field_shortcuts: Vec::new(),
         };
         collector.visit_program(program);
         collector.diags
@@ -35,6 +39,9 @@ const MESSAGE: &str = "Avoid leading underscores for local identifiers.";
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    primary_params: Option<usize>,
+    representation_params: Option<usize>,
+    field_shortcuts: Vec<usize>,
 }
 
 impl Collector<'_> {
@@ -50,19 +57,50 @@ impl Collector<'_> {
 }
 
 impl Visitor for Collector<'_> {
-    /// Every formal parameter is a local binding: top-level and member
-    /// functions, closures, operators, and function-typed parameter signatures.
-    ///
-    /// Initializing formals (`this.x`) and super formals (`super.x`) are not
-    /// local identifiers — the underscore is the *field's* privacy and the
-    /// spelling is forced — so upstream skips them ("These are not local
-    /// identifiers.") and so do we. The default value is still walked, since it
-    /// can host a closure with its own parameters.
-    fn visit_formal_param(&mut self, node: &FormalParam) {
-        if node.initializing.is_none() {
-            self.check(&node.name);
+    fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
+        self.representation_params = match node {
+            TopLevelDecl::ExtensionType(extension) => {
+                Some(extension.primary_constructor.params.span.start)
+            }
+            _ => None,
+        };
+        walk_top_level_decl(self, node);
+    }
+
+    fn visit_primary_constructor(&mut self, node: &PrimaryConstructor) {
+        self.primary_params = Some(node.params.span.start);
+        walk_primary_constructor(self, node);
+        self.primary_params = None;
+    }
+
+    fn visit_formal_param_list(&mut self, node: &FormalParamList) {
+        if self.representation_params != Some(node.span.start) {
+            for parameter in &node.params {
+                if parameter.initializing.is_some()
+                    || (self.primary_params == Some(node.span.start)
+                        && (parameter.is_var || parameter.is_final))
+                {
+                    break;
+                }
+                if !matches!(parameter.kind, ParamKind::Named { .. }) {
+                    self.check(&parameter.name);
+                }
+            }
         }
-        walk_formal_param(self, node);
+        walk_formal_param_list(self, node);
+    }
+
+    fn visit_dart_type(&mut self, node: &DartType) {
+        if let DartType::Function(function) = node {
+            for parameter in &function.params {
+                if !parameter.is_named
+                    && let Some(name) = &parameter.name
+                {
+                    self.check(name);
+                }
+            }
+        }
+        walk_dart_type(self, node);
     }
 
     /// A class setter's value parameter is not part of a `FormalParamList`, so
@@ -82,6 +120,7 @@ impl Visitor for Collector<'_> {
     fn visit_stmt(&mut self, node: &Stmt) {
         match node {
             // Local declarations and pattern bindings use their dedicated hooks.
+            Stmt::LocalFunc(function) => self.check(&function.name),
             Stmt::For(f) => {
                 if let Some(ForInit::ForIn {
                     declares_variable: true,
@@ -110,10 +149,21 @@ impl Visitor for Collector<'_> {
     /// Declared variable patterns bind locals: `final (_a, _b) = pair`,
     /// `case final _x`, `for (final (_a, _b) in xs)`.
     fn visit_pattern(&mut self, node: &Pattern) {
-        if let Pattern::Variable { name, .. } = node {
+        let shortcuts = self.field_shortcuts.len();
+        if let Pattern::Object(object) = node {
+            for field in &object.fields {
+                if self.ctx.source.as_bytes().get(field.span.start) == Some(&b':') {
+                    self.field_shortcuts.push(field.name.span.start);
+                }
+            }
+        }
+        if let Pattern::Variable { name, .. } = node
+            && !self.field_shortcuts.contains(&name.span.start)
+        {
             self.check(name);
         }
         walk_pattern(self, node);
+        self.field_shortcuts.truncate(shortcuts);
     }
 }
 
@@ -196,10 +246,22 @@ mod tests {
         assert_eq!(run("class C { final int _t; C(this._t); }"), 0);
         assert_eq!(run("class C { C({required this._t}); final int _t; }"), 0);
         assert_eq!(run("class D extends C { D(super._t); }"), 0);
-        // Ordinary parameters alongside them are still reported.
-        assert_eq!(run("class C { final int _t; C(this._t, int _other); }"), 1);
+        // Upstream stops checking this list at its first field formal.
+        assert_eq!(run("class C { final int _t; C(this._t, int _other); }"), 0);
         // A function-typed field formal's own parameters are still local.
         assert_eq!(run("class C { final f; C(this.f(int _a)); }"), 1);
+        assert_eq!(run("class C { final int t; C(int _other, this.t); }"), 1);
+    }
+
+    #[test]
+    fn distinguishes_private_fields_from_local_bindings() {
+        assert_eq!(run("class C(final int _field);"), 0);
+        assert_eq!(run("class C(var int _field);"), 0);
+        assert_eq!(run("class C(int _argument);"), 1);
+        assert_eq!(run("extension type C(int _representation) {}"), 0);
+        assert_eq!(run("void f() { void _local() {} }"), 1);
+        assert_eq!(run("void f(x) { if (x case C(:var _field)) {} }"), 0);
+        assert_eq!(run("void f(x) { if (x case C(_field: var _local)) {} }"), 1);
     }
 
     #[test]

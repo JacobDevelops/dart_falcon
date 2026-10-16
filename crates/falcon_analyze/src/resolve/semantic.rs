@@ -2533,6 +2533,13 @@ impl<'a> SemanticModel<'a> {
             .resolve_extension_declaration(self.library?, name.into())
     }
 
+    /// `name` in the executable library scope, excluding documentation imports.
+    pub fn resolve_library_name(&self, name: &str) -> super::DocName {
+        self.library.map_or(super::DocName::Unknown, |library| {
+            self.identities.library_name(library, name)
+        })
+    }
+
     /// `name` in this library's documentation-comment scope (see
     /// [`IdentityIndex::doc_name`]).
     pub fn resolve_doc_name(&self, name: &str) -> super::DocName {

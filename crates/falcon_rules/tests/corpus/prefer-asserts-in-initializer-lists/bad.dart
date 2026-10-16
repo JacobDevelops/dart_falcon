@@ -42,3 +42,9 @@ extension type CheckedValue(int? value) {
     assert(value != null); /* expect: prefer-asserts-in-initializer-lists */
   }
 }
+
+class ParameterMessage {
+  ParameterMessage(int value) {
+    assert(value > 0, value); /* expect: prefer-asserts-in-initializer-lists */
+  }
+}

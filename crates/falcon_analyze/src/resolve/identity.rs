@@ -1035,16 +1035,9 @@ impl IdentityIndex {
             })
     }
 
-    /// What the simple `name` denotes in the documentation-comment scope of
-    /// `library`, as the analyzer's `DocumentationCommentScope` resolves it:
-    /// the library scope (declarations, import prefixes, imports, implicit
-    /// `dart:core`) first, then the export namespaces of the `@docImport`s,
-    /// the first doc import supplying a name winning. Doc imports contribute
-    /// no prefixes and their
-    /// combinators are ignored, as by the analyzer (which also reports both as
-    /// invalid). Without loaded SDK sources the implicit `dart:core` supplies
-    /// only its curated members.
-    pub fn doc_name(&self, library: LibraryId, name: &str) -> DocName {
+    /// Resolve the executable library scope, excluding documentation imports.
+    /// Ambiguous declarations and prefixes remain distinct from absent names.
+    pub fn library_name(&self, library: LibraryId, name: &str) -> DocName {
         let unit = self.get(library);
         if let Some(declared) = self.declared_doc_name(library, name) {
             return declared;
@@ -1080,9 +1073,24 @@ impl IdentityIndex {
                 }
             };
         }
+        scope
+    }
+
+    /// What the simple `name` denotes in the documentation-comment scope of
+    /// `library`, as the analyzer's `DocumentationCommentScope` resolves it:
+    /// the library scope (declarations, import prefixes, imports, implicit
+    /// `dart:core`) first, then the export namespaces of the `@docImport`s,
+    /// the first doc import supplying a name winning. Doc imports contribute
+    /// no prefixes and their
+    /// combinators are ignored, as by the analyzer (which also reports both as
+    /// invalid). Without loaded SDK sources the implicit `dart:core` supplies
+    /// only its curated members.
+    pub fn doc_name(&self, library: LibraryId, name: &str) -> DocName {
+        let scope = self.library_name(library, name);
         if !matches!(scope, DocName::Absent | DocName::Unknown) {
             return scope;
         }
+        let unit = self.get(library);
         let mut uncertain = scope == DocName::Unknown;
         for target in &unit.doc_imports {
             match self.target_doc_name(target, name, &mut HashSet::new()) {

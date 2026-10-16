@@ -26,3 +26,24 @@ void h<T>(T x) {
 class D {
   void m<T>() {}
 }
+
+class StaticClass<T> {
+  static void method<T>() {}
+}
+
+mixin StaticMixin<T> {
+  static void method<T>() {}
+}
+
+enum StaticEnum<T> {
+  value<int>();
+  static void method<T>() {}
+}
+
+extension StaticExtension<T> on List<T> {
+  static void method<T>() {}
+}
+
+extension type StaticRepresentation<T>(List<T> values) {
+  static void method<T>() {}
+}

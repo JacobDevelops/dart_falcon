@@ -62,11 +62,27 @@ impl Rule for NoLogicInCreateState {
                 diags.push(ctx.diagnostic(
                     "no-logic-in-create-state",
                     "Avoid logic in createState; it should only return a new State instance.",
-                    method.name.span,
+                    violation_span(body),
                 ));
             }
         }
         diags
+    }
+}
+
+fn violation_span(body: &FunctionBody) -> Span {
+    match body {
+        FunctionBody::Arrow(expression, _) => *expression.span(),
+        FunctionBody::Block(block) => match block.stmts.as_slice() {
+            [
+                Stmt::Return(ReturnStmt {
+                    value: Some(expression),
+                    ..
+                }),
+            ] => *expression.span(),
+            _ => *body.span(),
+        },
+        FunctionBody::Native(..) => *body.span(),
     }
 }
 

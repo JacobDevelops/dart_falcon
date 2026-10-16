@@ -14,7 +14,15 @@ class C {
     print('$local $x $value $param');
   }
 
-  void withDefault({int? param = null}) {
+  void withDefault({int? param = 1}) {
     print(param);
   }
+}
+
+class NonNullSuperDefault {
+  NonNullSuperDefault({int? value = 3});
+}
+
+class ChangedSuperDefault extends NonNullSuperDefault {
+  ChangedSuperDefault({super.value = null});
 }

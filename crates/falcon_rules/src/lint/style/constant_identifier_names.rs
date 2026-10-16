@@ -4,8 +4,8 @@
 //! other languages, so `maxCount` rather than `MAX_COUNT`. Following the
 //! convention keeps constants visually consistent with every other identifier.
 //! The rule covers `const` declarations at every scope — top-level, static and
-//! instance fields, and locals — as well as enum values. All-underscore
-//! wildcard names are permitted.
+//! instance fields, and locals — as well as enum values. The wildcard `_` is
+//! permitted.
 
 use crate::lint::naming::is_lower_camel_case;
 use falcon_analyze::{AnalyzeContext, Rule};
