@@ -27,7 +27,9 @@
 //!
 //! Adopted from the official `deprecated_consistency` lint.
 
-use falcon_analyze::{AnalyzeContext, QualifiedName, ResolvedType, Rule, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, QualifiedName, ResolvedType, Rule, RulePreparation, SemanticModel,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_formal_param, walk_top_level_decl};
@@ -36,9 +38,13 @@ use falcon_syntax::visitor::{Visitor, walk_formal_param, walk_top_level_decl};
 pub struct DeprecatedConsistency;
 
 impl Rule for DeprecatedConsistency {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let mut visitor = Declarations {
             ctx,
@@ -46,7 +52,7 @@ impl Rule for DeprecatedConsistency {
             diagnostics: Vec::new(),
         };
         visitor.visit_program(program);
-        visitor.diagnostics
+        RulePreparation::Diagnostics(visitor.diagnostics)
     }
 }
 
@@ -197,6 +203,7 @@ mod tests {
     use falcon_config::FalconConfig;
 
     use super::*;
+    use falcon_analyze::RuleAnalysis;
 
     #[test]
     fn primary_constructors_do_not_borrow_type_deprecation() {

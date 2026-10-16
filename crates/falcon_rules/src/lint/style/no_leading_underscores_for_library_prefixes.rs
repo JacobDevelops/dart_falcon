@@ -8,15 +8,18 @@
 //! intentional throwaway name rather than a misapplied privacy marker.
 
 use crate::lint::naming::has_leading_underscore;
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct NoLeadingUnderscoresForLibraryPrefixes;
 
 impl Rule for NoLeadingUnderscoresForLibraryPrefixes {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for import in &program.imports {
             if let Some(prefix) = &import.as_name
@@ -29,7 +32,7 @@ impl Rule for NoLeadingUnderscoresForLibraryPrefixes {
                 ));
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

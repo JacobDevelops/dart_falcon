@@ -25,19 +25,22 @@
 //! Adopted from the official `use_setters_to_change_properties` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, SemanticModel,
-    SignatureIndex, TypeParameterScope,
+    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
+    SemanticModel, SignatureIndex, TypeParameterScope,
 };
-use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct UseSettersToChangeProperties;
 
 impl Rule for UseSettersToChangeProperties {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
@@ -102,7 +105,7 @@ impl Rule for UseSettersToChangeProperties {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

@@ -5,7 +5,7 @@
 //! failure. The rule matches a negated `.where(...).isEmpty` and a
 //! `.where(...).length` compared for equality against a `.length`.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -14,13 +14,17 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 pub struct PreferIterableEvery;
 
 impl Rule for PreferIterableEvery {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

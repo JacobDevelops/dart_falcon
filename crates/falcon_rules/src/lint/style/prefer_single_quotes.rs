@@ -17,7 +17,7 @@
 //! Adopted from the official `prefer_single_quotes` lint.
 
 use crate::lint::string_lit::{LiteralPart, decoded_text, literal_parts};
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_string_interpolation};
@@ -26,8 +26,12 @@ use falcon_syntax::visitor::{Visitor, walk_string_interpolation};
 pub struct PreferSingleQuotes;
 
 impl Rule for PreferSingleQuotes {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        QuoteVisitor::run(
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Diagnostics(QuoteVisitor::run(
             program,
             ctx,
             QuotePreference {
@@ -35,7 +39,7 @@ impl Rule for PreferSingleQuotes {
                 message: "Unnecessary use of double quotes.",
                 preferred: b'\'',
             },
-        )
+        ))
     }
 }
 

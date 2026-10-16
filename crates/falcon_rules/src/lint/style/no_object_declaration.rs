@@ -8,7 +8,7 @@
 //! operators; parameters, local variables, setters, and top-level declarations
 //! are out of scope.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
@@ -17,13 +17,17 @@ use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 pub struct NoObjectDeclaration;
 
 impl Rule for NoObjectDeclaration {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut visitor = Collector {
             diags: Vec::new(),
             ctx,
         };
         visitor.visit_program(program);
-        visitor.diags
+        RulePreparation::Diagnostics(visitor.diags)
     }
 }
 

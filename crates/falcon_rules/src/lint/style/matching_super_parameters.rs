@@ -25,17 +25,20 @@
 //!
 //! Adopted from the official `matching_super_parameters` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, SemanticModel};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct MatchingSuperParameters;
 
 impl Rule for MatchingSuperParameters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
@@ -92,18 +95,18 @@ impl Rule for MatchingSuperParameters {
                 for (param, expected) in super_params.iter().zip(&super_positional) {
                     if param.name.name != *expected {
                         diags.push(ctx.diagnostic(
-                            "matching-super-parameters",
-                            format!(
-                                "The super parameter named '{}' does not share the same name as the corresponding parameter in the super constructor, '{expected}'.",
-                                param.name.name
-                            ),
-                            param.span,
-                        ));
+                    "matching-super-parameters",
+                    format!(
+                        "The super parameter named '{}' does not share the same name as the corresponding parameter in the super constructor, '{expected}'.",
+                        param.name.name
+                    ),
+                    param.span,
+                ));
                     }
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

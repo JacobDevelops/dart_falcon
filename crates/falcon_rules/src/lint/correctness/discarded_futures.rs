@@ -32,21 +32,25 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, Truth,
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
 use crate::lint::function_bodies::FunctionBodies;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct DiscardedFutures;
 
 impl Rule for DiscardedFutures {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        unused_futures(
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(unused_futures(
             program,
             ctx,
             &UnusedFuturesRule {
@@ -57,7 +61,7 @@ impl Rule for DiscardedFutures {
                     "Function returning 'FutureOr' invoked in a non-'async' function.",
                 ),
             },
-        )
+        ))
     }
 }
 
@@ -73,23 +77,19 @@ pub(crate) struct UnusedFuturesRule {
     pub(crate) future_or_message: Option<&'static str>,
 }
 
-pub(crate) fn unused_futures(
-    program: &Program,
-    ctx: &AnalyzeContext,
-    rule: &UnusedFuturesRule,
-) -> Vec<Diagnostic> {
-    let Some(state) = SemanticState::new(program, ctx) else {
-        return Vec::new();
-    };
-    let mut collector = Collector {
+pub(crate) fn unused_futures<'a>(
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
+    rule: &'a UnusedFuturesRule,
+) -> Box<dyn SemanticRuleVisitor + 'a> {
+    let collector = Collector {
         diagnostics: Vec::new(),
         ctx,
         rule,
         bodies: FunctionBodies::new(program),
         annotated_local_functions: HashSet::new(),
     };
-    visit_program(&mut collector, program, state);
-    collector.diagnostics
+    Box::new(collector)
 }
 
 struct Collector<'a> {
@@ -251,6 +251,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         match node {
             Stmt::Expr(statement) => self.check_expression(&statement.expr, state),

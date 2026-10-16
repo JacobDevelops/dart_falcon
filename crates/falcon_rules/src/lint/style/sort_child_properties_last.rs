@@ -1,25 +1,26 @@
 //! Sort Widget-valued child properties last, except before closure arguments.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Truth};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct SortChildPropertiesLast;
 
 impl Rule for SortChildPropertiesLast {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut visitor = ChildOrdering {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(ChildOrdering {
             ctx,
             diagnostics: Vec::new(),
-        };
-        visit_program(&mut visitor, program, state);
-        visitor.diagnostics
+        }))
     }
 }
 
@@ -29,6 +30,10 @@ struct ChildOrdering<'a, 'ctx> {
 }
 
 impl SemanticRuleVisitor for ChildOrdering<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if !matches!(node, Expr::New { .. } | Expr::Call { .. }) {
             return;

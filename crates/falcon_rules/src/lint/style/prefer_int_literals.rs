@@ -20,7 +20,7 @@
 //!
 //! Adopted from the official `prefer_int_literals` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, SemanticModel};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -30,7 +30,7 @@ use falcon_syntax::visitor::{
 };
 use std::collections::HashMap;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 const RULE: &str = "prefer-int-literals";
 const MESSAGE: &str = "Unnecessary use of a 'double' literal.";
@@ -39,23 +39,26 @@ const MESSAGE: &str = "Unnecessary use of a 'double' literal.";
 pub struct PreferIntLiterals;
 
 impl Rule for PreferIntLiterals {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let Some(identities) = ctx.identities else {
+            return RulePreparation::Diagnostics(Vec::new());
         };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let diagnostics = {
             let mut declared = DeclaredContexts {
                 diagnostics: Vec::new(),
                 ctx,
-                model: &state.model,
+                model: &model,
                 returns_double: Vec::new(),
             };
             declared.visit_program(program);
             declared.diagnostics
         };
-        let mut arguments = ArgumentContexts { diagnostics, ctx };
-        visit_program(&mut arguments, program, state);
-        arguments.diagnostics
+        RulePreparation::Semantic(Box::new(ArgumentContexts { diagnostics, ctx }))
     }
 }
 
@@ -261,6 +264,9 @@ impl ArgumentContexts<'_> {
 }
 
 impl SemanticRuleVisitor for ArgumentContexts<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
     fn visit_call_arguments(
         &mut self,
         args: &ArgList,

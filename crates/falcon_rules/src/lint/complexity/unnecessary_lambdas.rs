@@ -49,8 +49,8 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, Feature, MemberFacts, MemberKind, QualifiedName,
-    ResolvedType, Rule, SignatureIndex, expression_segments, resolve_call_constructor,
-    resolve_new_constructor,
+    ResolvedType, Rule, RulePreparation, SignatureIndex, expression_segments,
+    resolve_call_constructor, resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -58,20 +58,21 @@ use falcon_syntax::visitor::{Visitor, walk_expr, walk_local_var, walk_program, w
 
 use crate::lint::declarations::{declaration_initializers, members_of};
 use crate::lint::lexical_usage::collection_for_inits;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::resolve::lexical_usage::local_declarations;
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UnnecessaryLambdas;
 
 impl Rule for UnnecessaryLambdas {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut stable = StableLocals::default();
         stable.visit_program(program);
-        let mut collector = Collector {
+        RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
             program,
@@ -82,9 +83,7 @@ impl Rule for UnnecessaryLambdas {
             typed_contexts: declaration_initializers(program)
                 .map(|initializer| (initializer.span().start, initializer.span().end))
                 .collect(),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -817,6 +816,10 @@ fn callee_root(callee: &Expr) -> &Expr {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, _state: &SemanticState<'_>) {
         if let Stmt::LocalVar(declaration) = node {
             self.typed_contexts

@@ -27,7 +27,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{
-    AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, ProjectFile, Rule,
+    AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, ProjectFile, Rule, RuleAnalysis,
     SignatureIndex, TypeIndex,
 };
 use falcon_config::FalconConfig;

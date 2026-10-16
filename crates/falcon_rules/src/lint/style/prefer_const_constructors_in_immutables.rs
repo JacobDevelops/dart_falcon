@@ -29,9 +29,9 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    SignatureIndex, Truth,
 };
-use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::const_eval::initializer_potentially_constant;
@@ -41,9 +41,13 @@ use crate::lint::declarations::{first_token_after_annotations, member_names};
 pub struct PreferConstConstructorsInImmutables;
 
 impl Rule for PreferConstConstructorsInImmutables {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
@@ -120,8 +124,8 @@ impl Rule for PreferConstConstructorsInImmutables {
             }
             if let Some(primary) = members.primary {
                 let has_body = members.declared.iter().any(|member| {
-                    matches!(member, ClassMember::PrimaryConstructorBody(body) if body.body.is_some())
-                });
+            matches!(member, ClassMember::PrimaryConstructorBody(body) if body.body.is_some())
+        });
                 let constructor = members
                     .constructors()
                     .find(|constructor| constructor.is_primary)
@@ -148,7 +152,7 @@ impl Rule for PreferConstConstructorsInImmutables {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

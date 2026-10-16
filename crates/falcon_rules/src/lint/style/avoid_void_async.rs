@@ -14,7 +14,7 @@
 //!
 //! Adopted from the official `avoid_void_async` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -27,7 +27,11 @@ use falcon_syntax::visitor::{
 pub struct AvoidVoidAsync;
 
 impl Rule for AvoidVoidAsync {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diagnostics: Vec::new(),
             ctx,
@@ -44,7 +48,7 @@ impl Rule for AvoidVoidAsync {
             }
             collector.visit_top_level_decl(declaration);
         }
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 

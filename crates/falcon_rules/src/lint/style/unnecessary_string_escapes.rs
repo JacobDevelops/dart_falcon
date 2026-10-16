@@ -6,7 +6,7 @@
 use crate::lint::string_lit::{
     LiteralPart, interpolated_literals, literal_parts, multiline_lead_len,
 };
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::Visitor;
@@ -15,13 +15,17 @@ use falcon_syntax::visitor::Visitor;
 pub struct UnnecessaryStringEscapes;
 
 impl Rule for UnnecessaryStringEscapes {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

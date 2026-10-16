@@ -21,7 +21,7 @@
 //! `constructor`, `init-state`, `did-change-dependencies`, `did-update-widget`,
 //! `dispose`, `build`, and `overridden-methods`.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -33,7 +33,11 @@ pub struct MemberOrdering;
 const NAME: &str = "member-ordering";
 
 impl Rule for MemberOrdering {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         let order = read_string_list(ctx, NAME, "order");
         let widgets_order = read_string_list(ctx, NAME, "widgets_order");
@@ -62,7 +66,7 @@ impl Rule for MemberOrdering {
                 _ => {}
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

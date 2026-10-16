@@ -5,6 +5,7 @@
 #[path = "support/inference.rs"]
 mod inference;
 
+use falcon_analyze::RuleAnalysis;
 use falcon_rules::all_rules;
 use inference::assert_lints as assert_external_lints;
 
@@ -214,7 +215,7 @@ fn dependency_frontend_fail_uses_its_declaring_library() {
     // Dart 3.13.5 reports both dependency calls, but not the locally shadowed fail.
     use falcon_analyze::{
         AnalysisEnvironment, AnalyzeContext, ExternalLibraries, ExternalSources, IdentityIndex,
-        IdentitySource, LibrarySource, Rule, SignatureIndex, TypeIndex,
+        IdentitySource, LibrarySource, SignatureIndex, TypeIndex,
     };
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

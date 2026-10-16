@@ -148,18 +148,17 @@ fn pascal_case(snake: &str) -> String {
 /// Render the Rule impl stub for a new rule.
 fn rule_stub(struct_name: &str) -> String {
     format!(
-        r#"use falcon_analyze::{{AnalyzeContext, Rule}};
-use falcon_diagnostics::Diagnostic;
+        r#"use falcon_analyze::{{AnalyzeContext, Rule, RulePreparation}};
 use falcon_syntax::Program;
 
 #[derive(Default)]
 pub struct {struct_name};
 
 impl Rule for {struct_name} {{
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {{
+    fn prepare<'a>(&self, program: &'a Program, ctx: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {{
         let _ = (program, ctx);
         // TODO: walk `program.declarations` and emit diagnostics per violation.
-        Vec::new()
+        RulePreparation::Diagnostics(Vec::new())
     }}
 }}
 "#

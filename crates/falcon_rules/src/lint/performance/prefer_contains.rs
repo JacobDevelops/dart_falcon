@@ -15,13 +15,13 @@
 
 use falcon_analyze::constant_value::Number;
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, ResolvedType, Rule, Truth, evaluate_constant_with_local_values,
-    parse_int,
+    AnalyzeContext, ConstantValue, ResolvedType, Rule, RulePreparation, Truth,
+    evaluate_constant_with_local_values, parse_int,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 const RULE: &str = "prefer-contains";
 
@@ -29,16 +29,15 @@ const RULE: &str = "prefer-contains";
 pub struct PreferContains;
 
 impl Rule for PreferContains {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -55,6 +54,10 @@ enum Finding {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::Binary {
             op,

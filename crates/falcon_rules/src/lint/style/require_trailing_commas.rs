@@ -31,7 +31,7 @@
 //!
 //! Adopted from the official `require_trailing_commas` lint.
 
-use falcon_analyze::{AnalyzeContext, Feature, Rule};
+use falcon_analyze::{AnalyzeContext, Feature, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::token::{Token, TokenKind};
@@ -46,9 +46,13 @@ use crate::lint::tokens::significant_tokens;
 pub struct RequireTrailingCommas;
 
 impl Rule for RequireTrailingCommas {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if ctx.language_version().supports(Feature::TallStyle) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let mut collector = Collector {
             ctx,
@@ -56,7 +60,7 @@ impl Rule for RequireTrailingCommas {
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

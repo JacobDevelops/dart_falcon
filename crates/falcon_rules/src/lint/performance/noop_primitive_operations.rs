@@ -12,27 +12,28 @@
 //!
 //! Adopted from the official `noop_primitive_operations` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::expressions::is_parenthesized;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct NoopPrimitiveOperations;
 
 impl Rule for NoopPrimitiveOperations {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -119,6 +120,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         match node {
             Expr::StringLit(literal) => {

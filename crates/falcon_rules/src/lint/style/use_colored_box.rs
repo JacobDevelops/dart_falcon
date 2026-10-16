@@ -15,27 +15,26 @@
 //!
 //! Adopted from the official `use_colored_box` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UseColoredBox;
 
 impl Rule for UseColoredBox {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             ctx,
             diags: Vec::new(),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -45,6 +44,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Some((identity, "new", args)) =
             crate::lint::flutter::constructor_invocation(node, &state.model)

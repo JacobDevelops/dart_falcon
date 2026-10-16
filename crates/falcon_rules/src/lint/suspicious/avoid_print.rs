@@ -4,8 +4,8 @@
 //! Diagnostics underline the `print` identifier, not the invocation or its arguments.
 
 use crate::lint::declarations::members_of;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -14,47 +14,30 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 pub struct AvoidPrint;
 
 impl Rule for AvoidPrint {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if !ctx.source.contains("print") {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        let mut presence = PrintPresence(false);
-        presence.visit_program(program);
-        if !presence.0 {
-            return Vec::new();
-        }
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+        let Some(identities) = ctx.identities else {
+            return RulePreparation::Diagnostics(Vec::new());
         };
-        if !state
-            .model
+        let model = falcon_analyze::SemanticModel::new(ctx.file_path, identities, ctx.types);
+        if !model
             .resolve_sdk_member("print")
             .is_some_and(|identity| identity.is_sdk("dart:core", "print"))
         {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        let mut collector = Collector {
+        RulePreparation::Semantic(Box::new(Collector {
             diagnostics: Vec::new(),
             ctx,
             declarations: &program.declarations,
             debug_calls: Vec::new(),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diagnostics
-    }
-}
-
-struct PrintPresence(bool);
-
-impl Visitor for PrintPresence {
-    fn visit_identifier(&mut self, node: &Identifier) {
-        self.0 |= node.name == "print";
-    }
-
-    fn visit_expr(&mut self, node: &Expr) {
-        if !self.0 {
-            walk_expr(self, node);
-        }
+        }))
     }
 }
 
@@ -66,6 +49,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         let Stmt::If(statement) = node else {
             return;

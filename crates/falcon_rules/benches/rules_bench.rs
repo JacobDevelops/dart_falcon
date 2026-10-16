@@ -1,5 +1,5 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RuleAnalysis};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
 use falcon_rules::all_rules;

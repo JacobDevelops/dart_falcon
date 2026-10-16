@@ -7,8 +7,7 @@
 //! list, set, or map literal that takes exactly one positional argument and no
 //! named arguments; other shapes and non-literal receivers are ignored.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::for_each_expr_in_program;
 
@@ -16,7 +15,11 @@ use falcon_syntax::visitor::for_each_expr_in_program;
 pub struct PreferSpreadCollections;
 
 impl Rule for PreferSpreadCollections {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for_each_expr_in_program(program, |node| {
             if let Expr::Cascade {
@@ -43,7 +46,7 @@ impl Rule for PreferSpreadCollections {
                 }
             }
         });
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

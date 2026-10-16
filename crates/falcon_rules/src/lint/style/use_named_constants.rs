@@ -18,32 +18,31 @@
 use std::collections::HashMap;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, evaluate_constant,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, evaluate_constant,
     evaluate_construction,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::const_eval::ConstructorConstContexts as ConstContexts;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UseNamedConstants;
 
 impl Rule for UseNamedConstants {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
             contexts: ConstContexts::new(program),
             own_field_initializers: own_field_initializers(program),
             local_classes: local_classes(program),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -194,6 +193,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if matches!(node, Expr::Paren { .. }) {
             return;

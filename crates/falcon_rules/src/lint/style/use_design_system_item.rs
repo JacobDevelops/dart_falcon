@@ -18,7 +18,7 @@
 //!
 //! Checks constructions throughout the program, including initializers and annotations.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -26,10 +26,14 @@ use falcon_syntax::ast::*;
 pub struct UseDesignSystemItem;
 
 impl Rule for UseDesignSystemItem {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let items = parse_config_items(ctx);
         if items.is_empty() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
 
         let mut diags = Vec::new();
@@ -46,7 +50,7 @@ impl Rule for UseDesignSystemItem {
                 emit_for_base(name, span, &mut diags, ctx, &items);
             }
         });
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

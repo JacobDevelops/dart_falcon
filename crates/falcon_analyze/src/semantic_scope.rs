@@ -2,14 +2,15 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use falcon_analyze::constant_value::LocalConstants;
-use falcon_analyze::resolve::flow::{FlowContext, loop_jumps};
-use falcon_analyze::resolve::flow_writes::FlowWrites;
-use falcon_analyze::{
+use crate::constant_value::LocalConstants;
+use crate::resolve::flow::{FlowContext, loop_jumps};
+use crate::resolve::flow_writes::FlowWrites;
+use crate::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, Feature, InferenceContext, MemberKind,
     ParameterOwner, QualifiedName, ResolvedSignature, ResolvedType, SemanticModel, SignatureIndex,
     TypeEnvironment, TypeParameterId, TypeParameterScope,
 };
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -27,14 +28,26 @@ struct LocalConstant {
 }
 
 /// Assignment syntax with the shared walker's index-selector classification.
-pub(crate) struct CascadeAssignment<'a> {
-    pub(crate) target: &'a Expr,
-    pub(crate) value: &'a Expr,
-    pub(crate) operator: AssignOp,
-    pub(crate) indexed: bool,
+#[derive(Clone, Copy)]
+pub struct CascadeAssignment<'a> {
+    pub target: &'a Expr,
+    pub value: &'a Expr,
+    pub operator: AssignOp,
+    pub indexed: bool,
 }
 
-pub(crate) trait SemanticRuleVisitor {
+/// Observes semantic events without recursing into syntax.
+///
+/// The shared traversal owns scope and inference state for every observer.
+pub trait SemanticRuleVisitor {
+    /// Consume this file's collector after the shared traversal.
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        Vec::new()
+    }
+
+    /// Called once after traversal, with the completed top-level semantic state.
+    fn visit_program_end(&mut self, _state: &SemanticState<'_>) {}
+
     fn visit_expr(&mut self, _node: &Expr, _state: &SemanticState<'_>) {}
 
     fn visit_call_arguments(
@@ -84,22 +97,22 @@ pub(crate) trait SemanticRuleVisitor {
     }
 }
 
-pub(crate) struct SemanticState<'a> {
-    pub(crate) model: SemanticModel<'a>,
+pub struct SemanticState<'a> {
+    pub model: SemanticModel<'a>,
     // Only the single-file fallback owns signatures.
-    pub(crate) signatures: Cow<'a, SignatureIndex>,
-    pub(crate) environment: TypeEnvironment,
-    pub(crate) type_parameters: TypeParameterScope,
+    pub signatures: Cow<'a, SignatureIndex>,
+    pub environment: TypeEnvironment,
+    pub type_parameters: TypeParameterScope,
     /// Context types of the enclosing expressions; `None` marks a position
     /// without a context type (an untyped declaration's initializer), as
     /// opposed to `Some(Unknown)` for a context falcon cannot resolve.
     expected: Vec<Option<ResolvedType>>,
     return_type: Vec<ResolvedType>,
     matched: Vec<ResolvedType>,
-    pub(crate) enclosing_type: Option<ResolvedType>,
+    pub enclosing_type: Option<ResolvedType>,
     /// Lexical constant namespace, distinct from an extension's `this` on-type.
-    pub(crate) constant_owner: Option<DeclarationIdentity>,
-    pub(crate) superclass: Option<ResolvedType>,
+    pub constant_owner: Option<DeclarationIdentity>,
+    pub superclass: Option<ResolvedType>,
     globals: &'a HashMap<String, ResolvedType>,
     /// `const` local variables in open scopes, with the environment scope
     /// index that binds them.
@@ -110,11 +123,11 @@ pub(crate) struct SemanticState<'a> {
     private_field_promotion: bool,
     inference_depth: std::cell::Cell<usize>,
     inference_cache: std::cell::RefCell<HashMap<*const Expr, ResolvedType>>,
-    pub(crate) inside_cascade: bool,
+    pub inside_cascade: bool,
 }
 
 impl<'a> SemanticState<'a> {
-    pub(crate) fn new(program: &Program, ctx: &'a AnalyzeContext<'a>) -> Option<Self> {
+    pub fn new(program: &Program, ctx: &'a AnalyzeContext<'a>) -> Option<Self> {
         let identities = ctx.identities?;
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let signatures = ctx
@@ -145,10 +158,10 @@ impl<'a> SemanticState<'a> {
         })
     }
 
-    pub(crate) fn is_constructor_invocation(&self, callee: &Expr) -> bool {
-        falcon_analyze::resolve_call_constructor(callee, &self.model, true)
+    pub fn is_constructor_invocation(&self, callee: &Expr) -> bool {
+        crate::resolve_call_constructor(callee, &self.model, true)
             .filter(|_| {
-                falcon_analyze::expression_segments(callee, true).is_some_and(|segments| {
+                crate::expression_segments(callee, true).is_some_and(|segments| {
                     segments.first().is_some_and(|head| {
                         !self.environment.is_bound(head)
                             && self.implicit_member_type(head).is_none()
@@ -163,7 +176,7 @@ impl<'a> SemanticState<'a> {
             })
     }
 
-    pub(crate) fn is_callable_value_member(&self, receiver: &ResolvedType, name: &str) -> bool {
+    pub fn is_callable_value_member(&self, receiver: &ResolvedType, name: &str) -> bool {
         if receiver.record_field(name).is_some() {
             return true;
         }
@@ -188,7 +201,7 @@ impl<'a> SemanticState<'a> {
 
     /// Analyzer rewrites calls through variables, getters and record fields
     /// into function-expression invocations rather than method invocations.
-    pub(crate) fn is_function_expression_invocation(&self, callee: &Expr) -> bool {
+    pub fn is_function_expression_invocation(&self, callee: &Expr) -> bool {
         match callee {
             Expr::Ident(identifier) => {
                 let name = identifier.name.as_str();
@@ -218,7 +231,7 @@ impl<'a> SemanticState<'a> {
                 is_null_safe,
                 ..
             } => {
-                if let Some(segments) = falcon_analyze::expression_segments(callee, false)
+                if let Some(segments) = crate::expression_segments(callee, false)
                     && segments.first().is_some_and(|head| {
                         !self.environment.is_bound(head)
                             && self.implicit_member_type(head).is_none()
@@ -229,7 +242,7 @@ impl<'a> SemanticState<'a> {
                     return self.signatures.value_type(&identity).is_some()
                         || self.signatures.is_value_getter(&identity);
                 }
-                if let Some(segments) = falcon_analyze::expression_segments(object, false)
+                if let Some(segments) = crate::expression_segments(object, false)
                     && segments.first().is_some_and(|head| {
                         !self.environment.is_bound(head)
                             && self.implicit_member_type(head).is_none()
@@ -254,7 +267,7 @@ impl<'a> SemanticState<'a> {
         }
     }
 
-    pub(crate) fn infer(&self, expression: &Expr) -> ResolvedType {
+    pub fn infer(&self, expression: &Expr) -> ResolvedType {
         if matches!(expression, Expr::This { .. }) {
             return self.enclosing_type.clone().unwrap_or(ResolvedType::Unknown);
         }
@@ -280,7 +293,7 @@ impl<'a> SemanticState<'a> {
         result
     }
 
-    pub(crate) fn infer_with_context(
+    pub fn infer_with_context(
         &self,
         expression: &Expr,
         expected: Option<&ResolvedType>,
@@ -300,7 +313,7 @@ impl<'a> SemanticState<'a> {
 
     /// Official omission policy distinguishes generic top/local functions from
     /// ordinary methods and function-valued variables.
-    pub(crate) fn generic_function_returns_type_parameter(&self, expression: &Expr) -> bool {
+    pub fn generic_function_returns_type_parameter(&self, expression: &Expr) -> bool {
         let Expr::Call {
             callee, type_args, ..
         } = expression
@@ -315,7 +328,7 @@ impl<'a> SemanticState<'a> {
                 matches!(self.environment.lookup(&identifier.name),
                     ResolvedType::Function { return_type, .. } if matches!(return_type.as_ref(), ResolvedType::TypeParameter { .. }))
             }
-            target => falcon_analyze::expression_segments(target, true)
+            target => crate::expression_segments(target, true)
                 .filter(|segments| {
                     segments
                         .first()
@@ -335,7 +348,7 @@ impl<'a> SemanticState<'a> {
     /// The static type of a member access's receiver: `super` is the
     /// superclass, `x!` the non-nullable type of `x`, anything else
     /// [`Self::infer`].
-    pub(crate) fn infer_receiver(&self, object: &Expr) -> ResolvedType {
+    pub fn infer_receiver(&self, object: &Expr) -> ResolvedType {
         match object {
             Expr::Paren { expr, .. } => self.infer_receiver(expr),
             Expr::Super { .. } => self.superclass.clone().unwrap_or(ResolvedType::Unknown),
@@ -344,7 +357,7 @@ impl<'a> SemanticState<'a> {
         }
     }
 
-    pub(crate) fn infer_access_receiver(
+    pub fn infer_access_receiver(
         &self,
         object: &Expr,
         name: &str,
@@ -365,7 +378,7 @@ impl<'a> SemanticState<'a> {
         )
     }
 
-    pub(crate) fn callable_return_type(callable: &ResolvedType) -> ResolvedType {
+    pub fn callable_return_type(callable: &ResolvedType) -> ResolvedType {
         if let Some(return_type) = callable.function_return_type() {
             return return_type;
         }
@@ -376,7 +389,7 @@ impl<'a> SemanticState<'a> {
         }
     }
 
-    pub(crate) fn cascade_invoke_return_type(
+    pub fn cascade_invoke_return_type(
         &self,
         receiver: &ResolvedType,
         type_args: &[DartType],
@@ -403,7 +416,7 @@ impl<'a> SemanticState<'a> {
     /// order: a member the enclosing type itself declares, library and imported
     /// declarations, then an inherited field or getter (through `this`) or a
     /// static field.
-    pub(crate) fn implicit_member_type(&self, name: &str) -> Option<ResolvedType> {
+    pub fn implicit_member_type(&self, name: &str) -> Option<ResolvedType> {
         if self.environment.is_bound(name) {
             return None;
         }
@@ -432,7 +445,7 @@ impl<'a> SemanticState<'a> {
                 .signatures
                 .declared_member_facts(identity, name)
                 .iter()
-                .any(|facts| matches!(facts.kind, falcon_analyze::MemberKind::Method))
+                .any(|facts| matches!(facts.kind, crate::MemberKind::Method))
         {
             // Generic tear-offs need the individual expression's context,
             // not the enclosing declaration's expected type.
@@ -469,13 +482,13 @@ impl<'a> SemanticState<'a> {
         self.globals.get(name).cloned().or_else(member)
     }
 
-    pub(crate) fn expected(&self) -> Option<&ResolvedType> {
+    pub fn expected(&self) -> Option<&ResolvedType> {
         self.expected.last()?.as_ref()
     }
 
     /// The initializer of the `const` local variable `name` refers to, when
     /// its innermost binding is one.
-    pub(crate) fn local_constant(&self, name: &str) -> Option<&Expr> {
+    pub fn local_constant(&self, name: &str) -> Option<&Expr> {
         let declaration = self.environment.binding_declaration(name)?;
         self.local_constants
             .iter()
@@ -485,7 +498,7 @@ impl<'a> SemanticState<'a> {
     }
 
     /// Declaration-time values and current promoted types of visible constants.
-    pub(crate) fn visible_local_constants(&self) -> LocalConstants<'_> {
+    pub fn visible_local_constants(&self) -> LocalConstants<'_> {
         self.local_constants
             .iter()
             .filter(|constant| {
@@ -502,7 +515,7 @@ impl<'a> SemanticState<'a> {
 
     /// Whether the current expression's context type is unresolved, rather
     /// than resolved or absent.
-    pub(crate) fn expected_unknown(&self) -> bool {
+    pub fn expected_unknown(&self) -> bool {
         matches!(self.expected.last(), Some(Some(ResolvedType::Unknown)))
     }
 
@@ -511,7 +524,7 @@ impl<'a> SemanticState<'a> {
     /// `Function`, possibly `FutureOr`-wrapped) context, or such an instance
     /// instantiated with type arguments (`c<int>`). The analyzer wraps such an
     /// expression in an `ImplicitCallReference`.
-    pub(crate) fn implicit_call_tearoff(&self, node: &Expr) -> bool {
+    pub fn implicit_call_tearoff(&self, node: &Expr) -> bool {
         match node {
             Expr::Field { field, .. } if field.name == "call" => return false,
             Expr::GenericInstantiation { target, .. } => {
@@ -533,15 +546,14 @@ impl<'a> SemanticState<'a> {
 
     /// Whether instances of `ty` have an instance `call` method.
     fn has_call_method(&self, ty: &ResolvedType) -> bool {
-        let is_call = |fact: &falcon_analyze::MemberFacts| {
-            fact.kind == falcon_analyze::MemberKind::Method && !fact.is_static
-        };
+        let is_call =
+            |fact: &crate::MemberFacts| fact.kind == crate::MemberKind::Method && !fact.is_static;
         match ty {
             ResolvedType::TypeParameter { bound, .. } => self.has_call_method(bound),
             ResolvedType::Function { .. } | ResolvedType::Unknown | ResolvedType::Dynamic => false,
             ResolvedType::Interface { identity, .. }
                 if self.signatures.type_kind(identity)
-                    == Some(falcon_analyze::resolve::TypeKind::ExtensionType) =>
+                    == Some(crate::resolve::TypeKind::ExtensionType) =>
             {
                 matches!(
                     self.signatures.interface_member(identity, identity, "call"),
@@ -555,7 +567,7 @@ impl<'a> SemanticState<'a> {
         }
     }
 
-    pub(crate) fn is_own_field(&self, name: &str) -> bool {
+    pub fn is_own_field(&self, name: &str) -> bool {
         self.environment.is_bound_in_root_scope(name)
             && self.enclosing_type.as_ref().is_some_and(|enclosing| {
                 self.signatures
@@ -566,7 +578,7 @@ impl<'a> SemanticState<'a> {
 
     /// Whether an unqualified read denotes storage rather than an explicit
     /// getter. Follow the same local/member/library order as type inference.
-    pub(crate) fn is_variable_read(&self, name: &str) -> bool {
+    pub fn is_variable_read(&self, name: &str) -> bool {
         if self.environment.is_bound(name) {
             return !self.environment.is_local_function(name);
         }
@@ -575,11 +587,12 @@ impl<'a> SemanticState<'a> {
                 self.signatures
                     .resolved_member_facts(receiver, name, &self.model)
                     .is_some_and(|facts| {
-                        facts.iter().any(|fact| {
-                            matches!(fact.kind, falcon_analyze::MemberKind::Field { .. })
-                        }) && !facts
+                        facts
                             .iter()
-                            .any(|fact| fact.kind == falcon_analyze::MemberKind::Getter)
+                            .any(|fact| matches!(fact.kind, crate::MemberKind::Field { .. }))
+                            && !facts
+                                .iter()
+                                .any(|fact| fact.kind == crate::MemberKind::Getter)
                     })
             })
         };
@@ -596,7 +609,7 @@ impl<'a> SemanticState<'a> {
         member_is_field()
     }
 
-    pub(crate) fn writable_type(&self, target: &Expr) -> ResolvedType {
+    pub fn writable_type(&self, target: &Expr) -> ResolvedType {
         let member = match target {
             Expr::Ident(identifier) if self.environment.is_bound(&identifier.name) => {
                 return self.environment.declared_type(&identifier.name);
@@ -658,10 +671,7 @@ impl<'a> SemanticState<'a> {
             .unwrap_or_else(|| self.infer(target))
     }
 
-    pub(crate) fn named_extension(
-        &self,
-        callee: &Expr,
-    ) -> Option<falcon_analyze::DeclarationIdentity> {
+    pub fn named_extension(&self, callee: &Expr) -> Option<crate::DeclarationIdentity> {
         self.environment.named_extension(
             callee,
             &InferenceContext {
@@ -674,7 +684,7 @@ impl<'a> SemanticState<'a> {
         )
     }
 
-    pub(crate) fn call_signature(
+    pub fn call_signature(
         &self,
         callee: &Expr,
         type_args: &[DartType],
@@ -731,7 +741,7 @@ impl<'a> SemanticState<'a> {
         Some(signature)
     }
 
-    pub(crate) fn call_return_type(
+    pub fn call_return_type(
         &self,
         callee: &Expr,
         type_args: &[DartType],
@@ -752,7 +762,7 @@ impl<'a> SemanticState<'a> {
         )
     }
 
-    fn call_parameter_types(
+    pub fn call_parameter_types(
         &self,
         callee: &Expr,
         type_args: &[DartType],
@@ -783,11 +793,11 @@ impl<'a> SemanticState<'a> {
         Some((positional, named))
     }
 
-    fn call_target<'s>(
+    pub fn call_target<'s>(
         &'s self,
         callee: &'s Expr,
         type_args: &'s [DartType],
-    ) -> Option<falcon_analyze::ResolvedInvocation<'s>> {
+    ) -> Option<crate::ResolvedInvocation<'s>> {
         self.environment.resolved_invocation(
             callee,
             type_args,
@@ -822,7 +832,7 @@ impl<'a> SemanticState<'a> {
     }
 
     /// Infer call substitutions while preserving the resolved receiver's owner arguments.
-    pub(crate) fn signature_substitutions(
+    pub fn signature_substitutions(
         &self,
         signature: &ResolvedSignature,
         owner: &HashMap<TypeParameterId, ResolvedType>,
@@ -888,7 +898,7 @@ impl<'a> SemanticState<'a> {
             .substitute(&signature.return_type, &substitutions)
     }
 
-    pub(crate) fn substituted_parameters(
+    pub fn substituted_parameters(
         &self,
         signature: &ResolvedSignature,
         substitutions: &HashMap<TypeParameterId, ResolvedType>,
@@ -908,7 +918,7 @@ impl<'a> SemanticState<'a> {
 }
 
 /// The receiver of one explicit `.call` access, without traversing other syntax.
-pub(crate) fn explicit_call_receiver(callee: &Expr) -> Option<&Expr> {
+pub fn explicit_call_receiver(callee: &Expr) -> Option<&Expr> {
     if let Expr::Field { object, field, .. } = callee
         && field.name == "call"
     {
@@ -918,7 +928,7 @@ pub(crate) fn explicit_call_receiver(callee: &Expr) -> Option<&Expr> {
     }
 }
 
-pub(crate) fn visit_program<'a, V: SemanticRuleVisitor>(
+pub fn visit_program<'a, V: SemanticRuleVisitor + ?Sized>(
     visitor: &mut V,
     program: &Program,
     state: SemanticState<'a>,
@@ -932,6 +942,7 @@ pub(crate) fn visit_program<'a, V: SemanticRuleVisitor>(
         primary_body_environment: None,
     };
     walker.visit_program(program);
+    walker.visitor.visit_program_end(&walker.state);
     walker.state
 }
 
@@ -940,7 +951,7 @@ pub(crate) fn visit_program<'a, V: SemanticRuleVisitor>(
 /// Named super parameters match by name; positional ones by their position
 /// among the positional super parameters (a super call cannot also pass
 /// positional arguments).
-pub(crate) fn resolved_super_param_type(
+pub fn resolved_super_param_type(
     param: &FormalParam,
     params: &FormalParamList,
     superclass: &ResolvedType,
@@ -970,7 +981,7 @@ pub(crate) fn resolved_super_param_type(
     Some(model.substitute(ty, &substitutions))
 }
 
-struct ScopedWalker<'a, 'model, V> {
+struct ScopedWalker<'a, 'model, V: ?Sized> {
     visitor: &'a mut V,
     state: SemanticState<'model>,
     assigning_pattern: bool,
@@ -1002,7 +1013,7 @@ struct Callable<'f> {
     async_marker: AsyncMarker,
 }
 
-impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
+impl<V: SemanticRuleVisitor + ?Sized> ScopedWalker<'_, '_, V> {
     fn with_fresh_environment(&mut self, f: impl FnOnce(&mut Self)) {
         let saved = std::mem::replace(
             &mut self.state.environment,
@@ -1302,7 +1313,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                     &self.state.model,
                 )?;
                 return Some(ResolvedType::Function {
-                    shape: Some(falcon_analyze::resolve::FunctionTypeShape::empty()),
+                    shape: Some(crate::resolve::FunctionTypeShape::empty()),
                     optional_positional: 0,
                     alias: Default::default(),
                     return_type: ResolvedType::Void.into(),
@@ -1434,7 +1445,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
             } if async_marker == AsyncMarker::Async && identity.is_sdk("dart:async", "Future") => {
                 ResolvedType::Interface {
                     occurrence,
-                    identity: falcon_analyze::DeclarationIdentity::sdk("dart:async", "FutureOr"),
+                    identity: crate::DeclarationIdentity::sdk("dart:async", "FutureOr"),
                     arguments,
                     nullable: false,
                     extension_type: false,
@@ -1732,15 +1743,14 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                     .var_type
                     .as_ref()
                     .map(|_| self.state.environment.declared_type(&declarator.name.name));
-                let value =
-                    falcon_analyze::constant_value::evaluate_constant_with_local_values_in_context(
-                        initializer,
-                        self.state.constant_owner.as_ref(),
-                        &self.state.visible_local_constants(),
-                        &self.state.model,
-                        &self.state.signatures,
-                        expected.as_ref(),
-                    );
+                let value = crate::constant_value::evaluate_constant_with_local_values_in_context(
+                    initializer,
+                    self.state.constant_owner.as_ref(),
+                    &self.state.visible_local_constants(),
+                    &self.state.model,
+                    &self.state.signatures,
+                    expected.as_ref(),
+                );
                 self.state.local_constants.push(LocalConstant {
                     depth: self.state.environment.depth() - 1,
                     declaration: declarator.name.span,
@@ -1811,7 +1821,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                             .state
                             .signatures
                             .subtype(&ty, &element, &self.state.model)
-                            == falcon_analyze::Truth::Yes
+                            == crate::Truth::Yes
                     {
                         element = ty;
                     } else if !matches!(ty, ResolvedType::Unknown)
@@ -1819,7 +1829,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                             .state
                             .signatures
                             .subtype(&element, &ty, &self.state.model)
-                            != falcon_analyze::Truth::Yes
+                            != crate::Truth::Yes
                     {
                         element = ResolvedType::Never;
                     }
@@ -2372,7 +2382,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
     }
 }
 
-impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
+impl<V: SemanticRuleVisitor + ?Sized> Visitor for ScopedWalker<'_, '_, V> {
     fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
         let enclosing_name = match node {
             TopLevelDecl::Class(declaration) => Some(&declaration.name.name),
@@ -3117,7 +3127,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                     });
                 }
                 let ty = ResolvedType::Function {
-                    shape: Some(falcon_analyze::resolve::FunctionTypeShape::new(
+                    shape: Some(crate::resolve::FunctionTypeShape::new(
                         function
                             .params
                             .named()
@@ -3242,7 +3252,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                     .expected()
                     .filter(|expected| {
                         !matches!(expected, ResolvedType::Unknown)
-                            && falcon_analyze::expression_has_dot_shorthand_base(callee)
+                            && crate::expression_has_dot_shorthand_base(callee)
                     })
                     .cloned();
                 self.with_context(expected, |walker| walker.visit_expr(callee));
@@ -3293,7 +3303,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                     .expected()
                     .filter(|expected| {
                         !matches!(expected, ResolvedType::Unknown)
-                            && falcon_analyze::expression_has_dot_shorthand_base(object)
+                            && crate::expression_has_dot_shorthand_base(object)
                     })
                     .cloned();
                 self.with_context(expected, |walker| walker.visit_expr(object));
@@ -3304,7 +3314,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                 args,
                 ..
             } => {
-                let constructor = falcon_analyze::resolve_new_constructor(
+                let constructor = crate::resolve_new_constructor(
                     dart_type,
                     constructor_name.as_ref(),
                     &self.state.model,
@@ -3823,7 +3833,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
     }
 }
 
-pub(crate) fn returned_expressions(body: &FunctionBody) -> Vec<&Expr> {
+pub fn returned_expressions(body: &FunctionBody) -> Vec<&Expr> {
     fn collect<'a>(statements: &'a [Stmt], expressions: &mut Vec<&'a Expr>) {
         for statement in statements {
             collect_statement(statement, expressions);
@@ -3930,895 +3940,5 @@ fn collect_type_parameter_ids(
             }
         }
         _ => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use falcon_dart_parser::parse;
-
-    use super::*;
-
-    #[test]
-    fn generic_predicate_closure_keeps_completed_input_context() {
-        use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
-        use falcon_config::FalconConfig;
-        use std::path::PathBuf;
-
-        let source = "bool predicate<T>(bool Function(T) callback) => true; \
-                      void use() { predicate((trace) { trace as StackTrace; return true; }); }";
-        let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                program: &program,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path.as_path(),
-                falcon_analyze::LibrarySource {
-                    program: &program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let signatures =
-            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
-        let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &syntax)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
-        struct Observed;
-        impl SemanticRuleVisitor for Observed {
-            fn visit_call_arguments(
-                &mut self,
-                _: &ArgList,
-                positional: &[ResolvedType],
-                _: &HashMap<String, ResolvedType>,
-                state: &SemanticState<'_>,
-            ) {
-                let ResolvedType::Function {
-                    positional: inputs, ..
-                } = &positional[0]
-                else {
-                    panic!("callback context: {positional:?}")
-                };
-                assert_eq!(
-                    inputs[0],
-                    state.model.core_type("Object", true),
-                    "callback context"
-                );
-            }
-
-            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-                if let Expr::As { expr, .. } = node {
-                    assert_eq!(
-                        state.infer(expr),
-                        state.model.core_type("Object", true),
-                        "closure binding",
-                    );
-                }
-            }
-        }
-        visit_program(
-            &mut Observed,
-            &program,
-            SemanticState::new(&program, &context).unwrap(),
-        );
-    }
-
-    #[test]
-    fn collection_callbacks_and_implicit_function_calls_match_context() {
-        use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
-        use falcon_config::FalconConfig;
-        use std::path::PathBuf;
-
-        let source = r#"
-void allOf(dynamic value) {}
-void objectContext(Object value) {}
-void unresolvedContext(Missing value) {}
-void f() {
-  allOf([(dynamicElement) => dynamicElement.type]);
-  objectContext([(objectElement) => objectElement.type]);
-  unresolvedContext([(unresolvedElement) => unresolvedElement.type]);
-}
-class JSObject {}
-typedef PostMessage = void Function(JSObject? msg, List<JSObject>? transfer);
-extension on PostMessage {
-  void sendTyped(JSObject object, List<JSObject> transfer) {
-    call(object, transfer);
-    this.call(object, transfer);
-  }
-  void shadowed(void Function(int) call) { call(1); }
-}
-class GenericLookup {
-  static T? maybeFind<T>() => null;
-  int example() => maybeFind<int>()!;
-}
-"#;
-        let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                program: &program,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path.as_path(),
-                falcon_analyze::LibrarySource {
-                    program: &program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let signatures =
-            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
-        let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &syntax)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
-        #[derive(Default)]
-        struct Observed {
-            elements: Vec<ResolvedType>,
-            implicit_call: Option<Vec<ResolvedType>>,
-            explicit_call: Option<Vec<ResolvedType>>,
-            shadowed: bool,
-            static_generic: bool,
-        }
-        impl SemanticRuleVisitor for Observed {
-            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-                match node {
-                    Expr::Call { callee, .. } if matches!(callee.as_ref(), Expr::Ident(name) if name.name == "maybeFind") =>
-                    {
-                        assert!(state.implicit_member_type("maybeFind").is_none());
-                        let result = state.infer(node);
-                        assert!(result.interface("dart:core", "int"));
-                        assert!(result.nullable());
-                        self.static_generic = true;
-                    }
-                    Expr::Field { object, field, .. } if field.name == "type" => {
-                        self.elements.push(state.infer(object));
-                    }
-                    Expr::Call {
-                        callee,
-                        type_args,
-                        args,
-                        ..
-                    } if matches!(callee.as_ref(), Expr::Ident(name) if name.name == "call")
-                        || matches!(callee.as_ref(), Expr::Field { field, .. } if field.name == "call") =>
-                    {
-                        let signature = state.call_signature(callee, type_args, args, None);
-                        if args.positional.len() == 2 && matches!(callee.as_ref(), Expr::Ident(_)) {
-                            assert!(state.infer(callee).interface("dart:core", "Function"));
-                            assert!(signature.is_none());
-                            self.implicit_call = Some(Vec::new());
-                            return;
-                        }
-                        let signature = signature.unwrap();
-                        if args.positional.len() == 1 {
-                            assert_eq!(signature.positional.len(), 1);
-                            assert!(signature.positional[0].interface("dart:core", "int"));
-                            assert!(state.implicit_member_type("call").is_none());
-                            self.shadowed = true;
-                        } else {
-                            self.explicit_call = Some(signature.positional);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        let mut observed = Observed::default();
-        visit_program(
-            &mut observed,
-            &program,
-            SemanticState::new(&program, &context).unwrap(),
-        );
-        assert_eq!(
-            observed.elements,
-            [
-                ResolvedType::Dynamic,
-                ResolvedType::Dynamic,
-                ResolvedType::Unknown,
-            ]
-        );
-        let implicit = observed.implicit_call.unwrap();
-        assert!(implicit.is_empty());
-        let explicit = observed.explicit_call.unwrap();
-        assert_eq!(explicit.len(), 2);
-        assert!(explicit[0].nullable());
-        assert!(explicit[1].nullable());
-        assert!(observed.shadowed);
-        assert!(observed.static_generic);
-    }
-
-    #[test]
-    fn inherited_implicit_generic_method_preserves_call_parameters() {
-        use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
-        use falcon_config::FalconConfig;
-        use std::path::PathBuf;
-
-        let source = r#"
-class Token {}
-class Base { T identity<T>(T value, {bool flag = false}) => value; }
-class Child extends Base {
-  void probe(Token value) {
-    identity<Token>(value);
-    identity(value);
-  }
-}
-class Other {}
-extension OtherMethods on Other {
-  T identity<T>(T value, {bool flag = false}) => value;
-  void probe(Token value) {
-    identity<Token>(value);
-    identity(value);
-  }
-}
-"#;
-        let path = PathBuf::from("/project/lib/main.dart");
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let program = parsed.program;
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                program: &program,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path.as_path(),
-                falcon_analyze::LibrarySource {
-                    program: &program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let signatures =
-            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
-        let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &parsed.syntax)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
-
-        #[derive(Default)]
-        struct Observed {
-            calls: usize,
-        }
-        impl SemanticRuleVisitor for Observed {
-            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-                let Expr::Call {
-                    callee,
-                    type_args,
-                    args,
-                    ..
-                } = node
-                else {
-                    return;
-                };
-                if !matches!(callee.as_ref(), Expr::Ident(name) if name.name == "identity") {
-                    return;
-                }
-                let token =
-                    ResolvedType::interface_identity(state.model.resolve_name("Token").unwrap());
-                let target = state.call_target(callee, type_args).unwrap();
-                assert_eq!(target.signature.call_parameters.len(), 1);
-                assert!(target.signature.defaults.contains_key("flag"));
-                let signature = state.call_signature(callee, type_args, args, None).unwrap();
-                assert_eq!(
-                    signature.positional.as_slice(),
-                    std::slice::from_ref(&token)
-                );
-                assert_eq!(signature.return_type, token);
-                assert_eq!(state.infer(node), token);
-                self.calls += 1;
-            }
-        }
-        let mut observed = Observed::default();
-        visit_program(
-            &mut observed,
-            &program,
-            SemanticState::new(&program, &context).unwrap(),
-        );
-        assert_eq!(observed.calls, 4);
-    }
-
-    #[test]
-    fn nullsafe_accesses_preserve_call_and_assignment_contexts_without_an_sdk() {
-        use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
-        use falcon_config::FalconConfig;
-        use std::path::PathBuf;
-
-        let source = r#"
-class Value { Value echo() => this; }
-class Box {
-  Value item;
-  Value? maybe;
-  Value take(Value value) => value;
-  T generic<T>(T value) => value;
-  Value operator [](int index) => item;
-  void operator []=(int index, Value value) {}
-}
-class Parent { Box? box; }
-class Child extends Parent {
-  void check(Value value) {
-    box?.take(value);
-    super.box?.take(value);
-    super.box?.item.echo();
-    super.box?.take(value).echo();
-    super.box?.generic<Value>.call(value).echo();
-    super.box?.item;
-    super.box?[0];
-    super.box?.item = value;
-    super.box?.maybe = value;
-    super.box?[0] = value;
-  }
-}
-void check(Box? box, Value value) {
-  box?.take(value);
-  box?.item = value;
-  box?.maybe = value;
-  box?[0] = value;
-}
-void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
-  positional?.$1.echo();
-  named?.slot.echo();
-  maybe?.$1;
-}
-"#;
-        let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                program: &program,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path.as_path(),
-                falcon_analyze::LibrarySource {
-                    program: &program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let signatures =
-            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
-        let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &syntax)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
-
-        fn assert_value(state: &SemanticState<'_>, ty: &ResolvedType, nullable: bool) {
-            assert!(
-                matches!(ty, ResolvedType::Interface { identity, .. }
-                    if Some(identity.clone()) == state.model.resolve_name("Value")),
-                "{ty:?}"
-            );
-            assert_eq!(ty.nullable(), nullable, "{ty:?}");
-        }
-
-        #[derive(Default)]
-        struct Observed {
-            calls: usize,
-            assignments: usize,
-            reads: usize,
-            echoes: usize,
-            record_fields: usize,
-        }
-        impl SemanticRuleVisitor for Observed {
-            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-                match node {
-                    Expr::Call {
-                        callee,
-                        type_args,
-                        args,
-                        ..
-                    } if matches!(callee.as_ref(), Expr::Field { field, .. } if field.name == "echo") =>
-                    {
-                        let Expr::Field { object, .. } = callee.as_ref() else {
-                            unreachable!()
-                        };
-                        assert_value(
-                            state,
-                            &state.infer_access_receiver(object, "echo", false),
-                            false,
-                        );
-                        let signature =
-                            state.call_signature(callee, type_args, args, None).unwrap();
-                        assert!(signature.positional.is_empty());
-                        assert_value(state, &state.infer_with_context(node, None), true);
-                        assert_value(state, &state.infer(node), true);
-                        self.echoes += 1;
-                    }
-                    Expr::Call {
-                        callee,
-                        type_args,
-                        args,
-                        ..
-                    } if matches!(callee.as_ref(), Expr::Field { field, .. } if field.name == "take") =>
-                    {
-                        let signature =
-                            state.call_signature(callee, type_args, args, None).unwrap();
-                        let (positional, named) = state
-                            .call_parameter_types(callee, type_args, args, None)
-                            .unwrap();
-                        assert!(named.is_empty());
-                        assert_eq!(positional.len(), 1);
-                        assert_value(state, &positional[0], false);
-                        assert_value(state, &signature.positional[0], false);
-                        assert_value(state, &state.infer(node), true);
-                        self.calls += 1;
-                    }
-                    Expr::Assign { target, .. } => {
-                        let nullable = matches!(target.as_ref(), Expr::Field { field, .. } if field.name == "maybe");
-                        assert_value(state, &state.writable_type(target), nullable);
-                        self.assignments += 1;
-                    }
-                    Expr::Field {
-                        object,
-                        field,
-                        is_null_safe: true,
-                        ..
-                    } if field.name == "$1" || field.name == "slot" => {
-                        let nullable = matches!(object.as_ref(), Expr::Ident(identifier) if identifier.name == "maybe");
-                        assert_value(
-                            state,
-                            &state.infer_access_receiver(node, "", false),
-                            nullable,
-                        );
-                        assert_value(state, &state.infer(node), true);
-                        self.record_fields += 1;
-                    }
-                    Expr::Field {
-                        field,
-                        is_null_safe: true,
-                        ..
-                    } if field.name == "item" || field.name == "maybe" => {
-                        assert_value(state, &state.infer(node), true);
-                        self.reads += 1;
-                    }
-                    Expr::Index {
-                        is_null_safe: true, ..
-                    } => {
-                        assert_value(state, &state.infer(node), true);
-                        self.reads += 1;
-                    }
-                    _ => {}
-                }
-            }
-        }
-        let mut observed = Observed::default();
-        visit_program(
-            &mut observed,
-            &program,
-            SemanticState::new(&program, &context).unwrap(),
-        );
-        assert_eq!(observed.calls, 4);
-        assert_eq!(observed.assignments, 6);
-        assert_eq!(observed.reads, 9);
-        assert_eq!(observed.echoes, 5);
-        assert_eq!(observed.record_fields, 3);
-    }
-
-    #[test]
-    fn legacy_switch_case_expressions_reach_semantic_visitors() {
-        use falcon_analyze::{IdentityIndex, IdentitySource};
-        use falcon_config::FalconConfig;
-        use std::path::PathBuf;
-
-        let source = "// @dart=2.19\nvoid f(int x) { switch (x) { case 7: break; } }";
-        let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                program: &program,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let config = FalconConfig::default();
-        let context =
-            AnalyzeContext::new(&path, source, &config, &syntax).with_identities(&identities);
-        #[derive(Default)]
-        struct CaseOperand(usize);
-        impl SemanticRuleVisitor for CaseOperand {
-            fn visit_expr(&mut self, node: &Expr, _state: &SemanticState<'_>) {
-                if matches!(node, Expr::IntLit { value, .. } if value == "7") {
-                    self.0 += 1;
-                }
-            }
-        }
-        let mut operand = CaseOperand::default();
-        visit_program(
-            &mut operand,
-            &program,
-            SemanticState::new(&program, &context).unwrap(),
-        );
-        assert_eq!(operand.0, 1);
-    }
-
-    #[test]
-    fn primary_parameters_and_locals_stay_in_constructor_scopes() {
-        use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
-        use falcon_config::FalconConfig;
-        use std::path::PathBuf;
-
-        // Analyzer ConstructorInitializerScope includes primary parameters in
-        // non-late instance initializers, but not in methods or late/static fields.
-        let source = r#"
-bool Future = true;
-class C(final int? _x, var int? y, int Future) {
-  final x = Future;
-  late bool delayed = Future;
-  static bool shared = Future;
-  bool get f => true;
-  this { final f = 1; Future; if (y != null) y; }
-  void later() { f; Future; }
-  int promote() => _x != null ? _x.abs() : 0;
-}
-extension type E(int? y) {
-  this { if (y != null) y; }
-}
-"#;
-        let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                program: &program,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path.as_path(),
-                falcon_analyze::LibrarySource {
-                    program: &program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let signatures =
-            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
-        let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &syntax)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
-        #[derive(Default)]
-        struct Observed {
-            future_types: Vec<ResolvedType>,
-            member_types: Vec<ResolvedType>,
-            promoted_field: bool,
-            body_field_types: Vec<ResolvedType>,
-        }
-        impl SemanticRuleVisitor for Observed {
-            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-                if let Expr::Ident(identifier) = node {
-                    let ty = state.infer(node);
-                    match identifier.name.as_str() {
-                        "Future" => self.future_types.push(ty),
-                        "f" => self.member_types.push(ty),
-                        "y" => self.body_field_types.push(ty),
-                        "_x" => {
-                            self.promoted_field |=
-                                ty.interface("dart:core", "int") && !ty.nullable();
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        let mut observed = Observed::default();
-        visit_program(
-            &mut observed,
-            &program,
-            SemanticState::new(&program, &context).unwrap(),
-        );
-        assert_eq!(observed.future_types.len(), 5);
-        for (ty, name) in observed
-            .future_types
-            .iter()
-            .zip(["int", "bool", "bool", "int", "bool"])
-        {
-            assert!(ty.interface("dart:core", name), "{ty:?}");
-        }
-        assert_eq!(observed.member_types.len(), 1);
-        assert!(observed.member_types[0].interface("dart:core", "bool"));
-        assert!(observed.promoted_field);
-        assert_eq!(observed.body_field_types.len(), 4);
-        assert!(
-            observed
-                .body_field_types
-                .iter()
-                .all(|ty| { ty.interface("dart:core", "int") && ty.nullable() })
-        );
-    }
-
-    #[test]
-    fn binary_operands_use_operator_parameters_not_the_result_context() {
-        use falcon_analyze::{AnalyzeContext, IdentityIndex, IdentitySource, Rule, TypeIndex};
-        use falcon_config::FalconConfig;
-        use std::path::PathBuf;
-
-        let source = r#"
-T pick<T extends num>(T value) => value;
-class Numeric {
-  double operator +(num value) => 0;
-  double operator -(double value) => 0;
-}
-void run(Numeric number) {
-  double broad = number + pick(1.0);
-  double narrow = number - pick(2.0);
-  double direct = pick(3.0);
-}
-"#;
-        let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                program: &program,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path.as_path(),
-                falcon_analyze::LibrarySource {
-                    program: &program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let signatures =
-            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
-        let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &syntax)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
-        let diagnostics =
-            crate::lint::style::prefer_int_literals::PreferIntLiterals.analyze(&program, &context);
-        let reported: Vec<_> = diagnostics
-            .iter()
-            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
-            .collect();
-        assert_eq!(reported, ["2.0", "3.0"]);
-    }
-
-    #[test]
-    fn assignment_patterns_and_nullable_cascades_supply_precise_contexts() {
-        use falcon_analyze::{AnalyzeContext, IdentityIndex, IdentitySource, TypeIndex};
-        use falcon_config::FalconConfig;
-        use std::path::PathBuf;
-
-        let source = r#"
-void f(dynamic d, dynamic other, void value) {
-  if (d is! String) return;
-  int a = 0;
-  (d, a) = (other, a);
-  d.length;
-  [value] = [1];
-  [value] = <dynamic>[1];
-}
-class C { C? parent; void go() {} }
-extension Nullable on C? { void method() {} }
-void cascades(C? value) {
-  value?..method();
-  value..method();
-}
-void assertedCascade(C value) {
-  value..parent!.go();
-}
-"#;
-        let path = PathBuf::from("/project/lib/main.dart");
-        let falcon_dart_parser::ParseResult {
-            program,
-            errors,
-            syntax,
-        } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                program: &program,
-                has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path.as_path(),
-                falcon_analyze::LibrarySource {
-                    program: &program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let signatures =
-            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
-        let config = FalconConfig::default();
-        let context = AnalyzeContext::new(&path, source, &config, &syntax)
-            .with_identities(&identities)
-            .with_types(&types)
-            .with_signatures(&signatures);
-        #[derive(Default)]
-        struct Observed {
-            promoted: bool,
-            elements: Vec<ResolvedType>,
-            cascade_nullable: Vec<bool>,
-        }
-        impl SemanticRuleVisitor for Observed {
-            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
-                if let Expr::Field { object, field, .. } = node
-                    && field.name == "length"
-                {
-                    self.promoted = state.infer(object).interface("dart:core", "String");
-                }
-                if let Expr::List { type_arg, .. } = node {
-                    // Observe the schema directly without requiring SDK
-                    // List-to-Iterable inheritance in this scope-only test.
-                    let ty = if type_arg.is_some() {
-                        state.infer_with_context(node, state.expected())
-                    } else {
-                        state.expected().cloned().unwrap_or(ResolvedType::Unknown)
-                    };
-                    self.elements
-                        .push(ty.type_argument(0).unwrap_or(ResolvedType::Unknown));
-                }
-            }
-            fn visit_cascade_operation(
-                &mut self,
-                _operation: &CascadeOp,
-                receiver: &ResolvedType,
-                _section: Span,
-                _state: &SemanticState<'_>,
-            ) {
-                self.cascade_nullable.push(receiver.nullable());
-            }
-        }
-        let mut observed = Observed::default();
-        visit_program(
-            &mut observed,
-            &program,
-            SemanticState::new(&program, &context).unwrap(),
-        );
-        assert!(observed.promoted);
-        assert_eq!(
-            observed.elements,
-            [ResolvedType::Void, ResolvedType::Dynamic]
-        );
-        assert_eq!(observed.cascade_nullable, [false, true, false, true, false]);
-    }
-
-    #[test]
-    fn finds_nested_returns_without_crossing_function_boundaries() {
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse(
-            "void f() {
-                if (true) { return 1; } else { return 2; }
-                for (;;) { return 3; }
-                while (true) { return 4; }
-                do { return 5; } while (true);
-                switch (1) { case 1: return 6; default: return 7; }
-                try { return 8; } catch (e) { return 9; } finally { return 10; }
-                label: { return 11; }
-                void local() { return 12; }
-                () { return 13; };
-                return () { return 14; };
-            }",
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-        let TopLevelDecl::Function(function) = &program.declarations[0] else {
-            panic!()
-        };
-        let returns = returned_expressions(function.body.as_ref().unwrap());
-        assert_eq!(returns.len(), 12);
-        for (expression, expected) in returns
-            .iter()
-            .zip(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"])
-        {
-            assert!(matches!(expression, Expr::IntLit { value, .. } if value == expected));
-        }
-        assert!(matches!(returns[11], Expr::FuncExpr { .. }));
-    }
-
-    #[test]
-    fn returns_borrowed_block_and_arrow_expressions() {
-        let falcon_dart_parser::ParseResult {
-            program, errors, ..
-        } = parse("int block() { return 1; } int arrow() => 2;");
-        assert!(errors.is_empty(), "{errors:?}");
-        for declaration in &program.declarations {
-            let TopLevelDecl::Function(function) = declaration else {
-                panic!()
-            };
-            let body = function.body.as_ref().unwrap();
-            let expression = match body {
-                FunctionBody::Block(block) => {
-                    let Stmt::Return(ReturnStmt {
-                        value: Some(expression),
-                        ..
-                    }) = &block.stmts[0]
-                    else {
-                        panic!()
-                    };
-                    expression
-                }
-                FunctionBody::Arrow(expression, _) => expression.as_ref(),
-                FunctionBody::Native(_, _) => panic!(),
-            };
-            let returns = returned_expressions(body);
-            assert_eq!(returns.len(), 1);
-            assert!(std::ptr::eq(returns[0], expression));
-        }
     }
 }

@@ -7,8 +7,8 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, Rule, SemanticModel,
-    SignatureIndex, TypeParameterId, TypeParameterScope,
+    AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, Rule, RulePreparation,
+    SemanticModel, SignatureIndex, TypeParameterId, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
@@ -19,9 +19,13 @@ use falcon_syntax::visitor::Visitor;
 pub struct UseKeyInWidgetConstructors;
 
 impl Rule for UseKeyInWidgetConstructors {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut collector = Collector {
@@ -31,7 +35,7 @@ impl Rule for UseKeyInWidgetConstructors {
             signatures,
         };
         collector.visit_program(program);
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 
@@ -273,7 +277,7 @@ fn target_defines_key(
 mod tests {
     use falcon_analyze::{
         AnalysisEnvironment, ExternalLibraries, ExternalSources, IdentityIndex, IdentitySource,
-        LibrarySource, TypeIndex, canonical_or_lexical,
+        LibrarySource, RuleAnalysis, TypeIndex, canonical_or_lexical,
     };
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

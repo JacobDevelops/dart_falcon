@@ -18,7 +18,8 @@ pub(crate) mod options;
 pub(crate) mod package_layout;
 pub mod performance;
 pub(crate) mod resource_leaks;
-pub(crate) mod semantic_scope;
+#[cfg(test)]
+mod semantic_scope_tests;
 pub(crate) mod semantic_type_operations;
 pub(crate) mod string_lit;
 pub mod style;

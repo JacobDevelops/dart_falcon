@@ -18,17 +18,20 @@
 //! Adopted from the official `prefer_mixin` lint.
 
 use falcon_analyze::resolve::TypeKind;
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, SemanticModel};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct PreferMixin;
 
 impl Rule for PreferMixin {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
@@ -56,13 +59,14 @@ impl Rule for PreferMixin {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_analyze::{IdentityIndex, IdentitySource, LibrarySource, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

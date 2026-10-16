@@ -7,8 +7,8 @@
 //! the name, keeping the `library;` directive itself if it anchors documentation
 //! or annotations.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::ast::*;
 use falcon_syntax::language_version::Feature;
 
@@ -16,9 +16,13 @@ use falcon_syntax::language_version::Feature;
 pub struct UnnecessaryLibraryName;
 
 impl Rule for UnnecessaryLibraryName {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if !ctx.language_version().supports(Feature::UnnamedLibraries) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let mut diags = Vec::new();
         if let Some(lib) = &program.library_directive
@@ -33,6 +37,6 @@ impl Rule for UnnecessaryLibraryName {
                 },
             ));
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }

@@ -1,3 +1,4 @@
+use falcon_analyze::RuleAnalysis;
 use falcon_rules::all_rules;
 
 #[path = "support/inference.rs"]

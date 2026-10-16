@@ -29,7 +29,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -46,7 +46,11 @@ const NAMES: [&str; 5] = ["List", "Map", "Set", "LinkedHashMap", "LinkedHashSet"
 const CONCRETE: [&str; 2] = ["LinkedHashMap", "LinkedHashSet"];
 
 impl Rule for PreferCollectionLiterals {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut scan = ContextScan {
             suppressed: HashSet::new(),
         };
@@ -58,7 +62,7 @@ impl Rule for PreferCollectionLiterals {
             suppressed: &scan.suppressed,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 
@@ -288,6 +292,7 @@ fn default_collection_ctor(expr: &Expr) -> Option<(&Span, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_analyze::TypeIndex;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

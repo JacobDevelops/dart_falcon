@@ -7,8 +7,10 @@
 //! Qualified constants report the complete constant expression, including their
 //! import or class prefix but excluding an enclosing null-check pattern's `?`.
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Truth};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -16,16 +18,16 @@ use falcon_syntax::ast::*;
 #[derive(Default)]
 pub struct TypeLiteralInConstantPattern;
 impl Rule for TypeLiteralInConstantPattern {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 struct Collector<'a> {
@@ -33,6 +35,10 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_pattern(
         &mut self,
         pattern: &Pattern,
@@ -110,7 +116,9 @@ fn is_type_subtype(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_analyze::{IdentityIndex, IdentitySource, SemanticModel, SignatureIndex};
+    use falcon_analyze::{
+        IdentityIndex, IdentitySource, RuleAnalysis, SemanticModel, SignatureIndex,
+    };
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;

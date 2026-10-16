@@ -13,57 +13,35 @@
 use std::collections::HashMap;
 
 use falcon_analyze::resolve::MemberKind;
-use falcon_analyze::{AnalyzeContext, Feature, ResolvedType, Rule, Truth};
+use falcon_analyze::{AnalyzeContext, Feature, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct PreferInitializingFormals;
 
 impl Rule for PreferInitializingFormals {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let collector = Collector {
+            ctx,
             private_named: ctx
                 .language_version()
                 .supports(Feature::PrivateNamedParameters),
             references: HashMap::new(),
             candidates: Vec::new(),
         };
-        visit_program(&mut collector, program, state);
-        collector
-            .candidates
-            .into_iter()
-            .filter_map(|candidate| {
-                let mut references = collector
-                    .references
-                    .get(&candidate.parameter)?
-                    .iter()
-                    .filter(|offset| {
-                        candidate
-                            .regions
-                            .iter()
-                            .flatten()
-                            .any(|region| region.start <= **offset && **offset < region.end)
-                    });
-                (references.next() == Some(&candidate.reference) && references.next().is_none())
-                    .then(|| {
-                        ctx.diagnostic(
-                            "prefer-initializing-formals",
-                            "Use an initializing formal to assign a parameter to a field.",
-                            candidate.anchor,
-                        )
-                    })
-            })
-            .collect()
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 
-struct Collector {
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
     private_named: bool,
     references: HashMap<Span, Vec<usize>>,
     candidates: Vec<Candidate>,
@@ -76,7 +54,7 @@ struct Candidate {
     regions: [Option<Span>; 2],
 }
 
-impl Collector {
+impl Collector<'_> {
     fn check(
         &mut self,
         field: &Identifier,
@@ -158,7 +136,36 @@ impl Collector {
     }
 }
 
-impl SemanticRuleVisitor for Collector {
+impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        let collector = *self;
+        let ctx = collector.ctx;
+        collector
+            .candidates
+            .into_iter()
+            .filter_map(|candidate| {
+                let mut references = collector
+                    .references
+                    .get(&candidate.parameter)?
+                    .iter()
+                    .filter(|offset| {
+                        candidate
+                            .regions
+                            .iter()
+                            .flatten()
+                            .any(|region| region.start <= **offset && **offset < region.end)
+                    });
+                (references.next() == Some(&candidate.reference) && references.next().is_none())
+                    .then(|| {
+                        ctx.diagnostic(
+                            "prefer-initializing-formals",
+                            "Use an initializing formal to assign a parameter to a field.",
+                            candidate.anchor,
+                        )
+                    })
+            })
+            .collect()
+    }
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Expr::Ident(identifier) = node
             && let Some(binding) = state.environment.binding_declaration(&identifier.name)

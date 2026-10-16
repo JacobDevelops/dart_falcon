@@ -11,7 +11,7 @@
 //! `max_cases` (integer, default: 10) — flag when the number of non-default
 //! cases exceeds this.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
@@ -20,14 +20,18 @@ use falcon_syntax::visitor::{Visitor, walk_stmt};
 pub struct MaxSwitchCases;
 
 impl Rule for MaxSwitchCases {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
             threshold: max_cases_option(ctx),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{AnalyzeContext, Rule, resolve_call_constructor};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, resolve_call_constructor};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
@@ -30,59 +30,29 @@ use falcon_syntax::visitor::{
 };
 
 use crate::lint::const_eval::{ConstContexts, constant_in_context, deferred_prefixes};
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct PreferConstDeclarations;
 
 impl Rule for PreferConstDeclarations {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        if ctx.identities.is_none() {
+            return RulePreparation::Diagnostics(Vec::new());
+        }
         let mut declarations = Declarations::default();
         declarations.visit_program(program);
-        let mut checker = Checker {
+        let checker = Checker {
+            ctx,
             declarations,
             contexts: ConstContexts::of(program),
             deferred: deferred_prefixes(program),
         };
-        visit_program(&mut checker, program, state);
-        checker
-            .declarations
-            .groups
-            .into_iter()
-            .filter_map(|group| {
-                if !group.valid || group.remaining != 0 {
-                    return None;
-                }
-                let start = if group.is_local {
-                    group.span.start
-                } else {
-                    let mut start = group.span.start;
-                    let mut preceding_late = None;
-                    for token in ctx
-                        .syntax
-                        .tokens_in(Span::new(group.span.start, group.first_name))
-                        .filter(|token| !token.is_trivia())
-                    {
-                        if token.kind == TokenKind::Final {
-                            start = preceding_late.unwrap_or(token.offset());
-                        }
-                        preceding_late = (token.kind == TokenKind::Late).then_some(token.offset());
-                    }
-                    start
-                };
-                Some(ctx.diagnostic(
-                    "prefer-const-declarations",
-                    "Use 'const' for final variables initialized to a constant value.",
-                    Span {
-                        start,
-                        end: group.span.end,
-                    },
-                ))
-            })
-            .collect()
+        RulePreparation::Semantic(Box::new(checker))
     }
 }
 
@@ -170,12 +140,52 @@ impl Visitor for Declarations {
 }
 
 struct Checker<'a> {
+    ctx: &'a AnalyzeContext<'a>,
     declarations: Declarations,
     contexts: ConstContexts,
     deferred: Vec<&'a str>,
 }
 
 impl SemanticRuleVisitor for Checker<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        let checker = *self;
+        let ctx = checker.ctx;
+        checker
+            .declarations
+            .groups
+            .into_iter()
+            .filter_map(|group| {
+                if !group.valid || group.remaining != 0 {
+                    return None;
+                }
+                let start = if group.is_local {
+                    group.span.start
+                } else {
+                    let mut start = group.span.start;
+                    let mut preceding_late = None;
+                    for token in ctx
+                        .syntax
+                        .tokens_in(Span::new(group.span.start, group.first_name))
+                        .filter(|token| !token.is_trivia())
+                    {
+                        if token.kind == TokenKind::Final {
+                            start = preceding_late.unwrap_or(token.offset());
+                        }
+                        preceding_late = (token.kind == TokenKind::Late).then_some(token.offset());
+                    }
+                    start
+                };
+                Some(ctx.diagnostic(
+                    "prefer-const-declarations",
+                    "Use 'const' for final variables initialized to a constant value.",
+                    Span {
+                        start,
+                        end: group.span.end,
+                    },
+                ))
+            })
+            .collect()
+    }
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Some(index) = self.declarations.initializers.remove(&node.span().start) else {
             return;
@@ -221,6 +231,7 @@ impl SemanticRuleVisitor for Checker<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_analyze::{IdentityIndex, IdentitySource, SignatureIndex, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

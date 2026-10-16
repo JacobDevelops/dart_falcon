@@ -21,17 +21,22 @@
 //!
 //! Adopted from the official `use_to_and_as_if_applicable` lint.
 
-use falcon_analyze::{AnalyzeContext, MemberKind, Rule, SemanticModel, resolve_call_constructor};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{
+    AnalyzeContext, MemberKind, Rule, RulePreparation, SemanticModel, resolve_call_constructor,
+};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct UseToAndAsIfApplicable;
 
 impl Rule for UseToAndAsIfApplicable {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
@@ -98,7 +103,7 @@ impl Rule for UseToAndAsIfApplicable {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

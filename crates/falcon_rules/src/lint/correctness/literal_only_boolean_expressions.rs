@@ -14,13 +14,13 @@
 //!
 //! Adopted from the official `literal_only_boolean_expressions` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
 use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 const RULE: &str = "literal-only-boolean-expressions";
 const MESSAGE: &str = "The Boolean expression has a constant value.";
@@ -29,17 +29,17 @@ const MESSAGE: &str = "The Boolean expression has a constant value.";
 pub struct LiteralOnlyBooleanExpressions;
 
 impl Rule for LiteralOnlyBooleanExpressions {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let collector = Collector {
             ctx,
             diags: Vec::new(),
             deferred: deferred_prefixes(program),
         };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 
@@ -163,6 +163,10 @@ impl Collector<'_, '_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         match node {
             Stmt::If(statement) => match &statement.condition {

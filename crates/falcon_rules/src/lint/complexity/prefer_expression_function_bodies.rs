@@ -11,7 +11,7 @@
 //!
 //! Adopted from the official `prefer_expression_function_bodies` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -23,13 +23,17 @@ use falcon_syntax::visitor::{
 pub struct PreferExpressionFunctionBodies;
 
 impl Rule for PreferExpressionFunctionBodies {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 
@@ -118,6 +122,7 @@ impl Visitor for Collector<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;

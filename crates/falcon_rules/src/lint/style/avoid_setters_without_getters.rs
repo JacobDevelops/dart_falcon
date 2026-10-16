@@ -19,11 +19,11 @@
 //!
 //! Adopted from the official `avoid_setters_without_getters` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::SemanticState;
+use falcon_analyze::semantic_scope::SemanticState;
 
 /// Concrete getters every type inherits from `Object`.
 const OBJECT_GETTERS: [&str; 2] = ["hashCode", "runtimeType"];
@@ -32,9 +32,13 @@ const OBJECT_GETTERS: [&str; 2] = ["hashCode", "runtimeType"];
 pub struct AvoidSettersWithoutGetters;
 
 impl Rule for AvoidSettersWithoutGetters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let mut diags = Vec::new();
         for declaration in &program.declarations {
@@ -61,7 +65,7 @@ impl Rule for AvoidSettersWithoutGetters {
                 &mut diags,
             );
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

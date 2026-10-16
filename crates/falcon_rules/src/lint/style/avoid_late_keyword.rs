@@ -7,7 +7,7 @@
 //! failure mode visible. Top-level variables, instance fields, and local
 //! declarations inside any function body are all checked.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_local_var, walk_top_level_decl};
@@ -16,13 +16,17 @@ use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_local_var, walk_top_
 pub struct AvoidLateKeyword;
 
 impl Rule for AvoidLateKeyword {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

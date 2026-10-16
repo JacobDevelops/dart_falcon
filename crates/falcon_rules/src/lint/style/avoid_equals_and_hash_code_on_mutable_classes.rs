@@ -24,8 +24,9 @@
 //! Adopted from the official `avoid_equals_and_hash_code_on_mutable_classes`
 //! lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, SemanticModel, Truth, has_immutable_annotation};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, SemanticModel, Truth, has_immutable_annotation,
+};
 use falcon_syntax::ast::*;
 
 use crate::lint::declarations::first_token_after_annotations;
@@ -34,7 +35,11 @@ use crate::lint::declarations::first_token_after_annotations;
 pub struct AvoidEqualsAndHashCodeOnMutableClasses;
 
 impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             let (name, annotations, members, has_supertypes) = match decl {
@@ -84,27 +89,28 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
                 };
                 let start = first_token_after_annotations(annotations, span, ctx.syntax);
                 diags.push(ctx.diagnostic(
-                    "avoid-equals-and-hash-code-on-mutable-classes",
-                    format!(
-                        "The method '{member_name}' should not be overridden in classes not annotated with '@immutable'."
-                    ),
-                    Span::new(
-                        start,
-                        ctx.syntax
-                            .tokens_in(Span::new(start, span.end))
-                            .next()
-                            .map_or(start, |token| token.offset() + token.len()),
-                    ),
-                ));
+            "avoid-equals-and-hash-code-on-mutable-classes",
+            format!(
+                "The method '{member_name}' should not be overridden in classes not annotated with '@immutable'."
+            ),
+            Span::new(
+                start,
+                ctx.syntax
+                    .tokens_in(Span::new(start, span.end))
+                    .next()
+                    .map_or(start, |token| token.offset() + token.len()),
+            ),
+        ));
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;

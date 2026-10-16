@@ -10,7 +10,7 @@
 //!
 //! Adopted from the official `prefer_asserts_with_message` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -23,13 +23,17 @@ const MESSAGE: &str = "Missing a message in an assert.";
 pub struct PreferAssertsWithMessage;
 
 impl Rule for PreferAssertsWithMessage {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

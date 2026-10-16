@@ -27,15 +27,18 @@
 //!
 //! Adopted from the official `implicit_reopen` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, SemanticModel};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, SemanticModel};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct ImplicitReopen;
 
 impl Rule for ImplicitReopen {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let siblings = ctx.library.map_or(&[][..], |library| library.siblings());
         let library = || std::iter::once(program).chain(siblings.iter().copied());
         let model = ctx
@@ -126,6 +129,6 @@ impl Rule for ImplicitReopen {
                 name.span,
             ));
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }

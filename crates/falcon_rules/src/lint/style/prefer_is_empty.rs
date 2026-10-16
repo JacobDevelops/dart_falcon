@@ -20,8 +20,7 @@
 //! precedence. Without a type index, those negative proofs are unavailable,
 //! but source-derived receiver types are still inferred.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::Program;
 
 use super::collection_checks::{Emptiness, analyze_emptiness};
@@ -29,8 +28,12 @@ use super::collection_checks::{Emptiness, analyze_emptiness};
 #[derive(Default)]
 pub struct PreferIsEmpty;
 impl Rule for PreferIsEmpty {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        analyze_emptiness(program, ctx, Emptiness::Empty)
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(analyze_emptiness(ctx, Emptiness::Empty))
     }
 }
 

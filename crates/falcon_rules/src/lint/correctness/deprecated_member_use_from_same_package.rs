@@ -37,8 +37,9 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, MemberSelector,
-    MemberSelectorKind as SelectorKind, QualifiedName, ResolvedType, Rule, SemanticModel,
-    SignatureIndex, SourceSelector, TypeParameterScope, evaluate_constant, resolve_new_constructor,
+    MemberSelectorKind as SelectorKind, QualifiedName, ResolvedType, Rule, RulePreparation,
+    SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope, evaluate_constant,
+    resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
@@ -49,9 +50,7 @@ use falcon_syntax::visitor::{
 };
 
 use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
-use crate::lint::semantic_scope::{
-    CascadeAssignment, SemanticRuleVisitor, SemanticState, visit_program,
-};
+use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
 const ID: &str = "deprecated-member-use-from-same-package";
 
@@ -59,12 +58,16 @@ const ID: &str = "deprecated-member-use-from-same-package";
 pub struct DeprecatedMemberUseFromSamePackage;
 
 impl Rule for DeprecatedMemberUseFromSamePackage {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(package) = crate::cross_file::enclosing_package(ctx.file_path) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         if ctx
             .identities
@@ -81,7 +84,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
                 deprecation(&library.annotations, state.model, ctx.signatures).is_some()
             })
         {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let mut frontier = Frontier {
             ctx,
@@ -241,8 +244,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
                 }
             }
         }
-        visit_program(&mut uses, program, state);
-        uses.diagnostics
+        RulePreparation::Semantic(Box::new(uses))
     }
 }
 
@@ -1476,6 +1478,10 @@ fn binary_operator(op: BinaryOp) -> Option<&'static str> {
 }
 
 impl SemanticRuleVisitor for Uses<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_cascade_operation(
         &mut self,
         operation: &CascadeOp,
@@ -1837,7 +1843,7 @@ impl SemanticRuleVisitor for Uses<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_analyze::{IdentityIndex, IdentitySource, SignatureIndex, TypeIndex};
+    use falcon_analyze::{IdentityIndex, IdentitySource, RuleAnalysis, SignatureIndex, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;

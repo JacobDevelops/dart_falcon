@@ -1,25 +1,24 @@
 //! Flags an `async` closure passed to a proven synchronous callback parameter.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct AvoidPassingAsyncWhenSyncExpected;
 
 impl Rule for AvoidPassingAsyncWhenSyncExpected {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             ctx,
             diagnostics: Vec::new(),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diagnostics
+        }))
     }
 }
 
@@ -29,6 +28,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::FuncExpr {
             async_marker: AsyncMarker::Async | AsyncMarker::AsyncStar,

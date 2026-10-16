@@ -18,28 +18,27 @@
 //! Adopted from the official `no_default_cases` lint.
 
 use falcon_analyze::resolve::TypeKind;
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::{Program, TokenKind};
 
 use crate::lint::correctness::exhaustive_cases::is_enum_like;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct NoDefaultCases;
 
 impl Rule for NoDefaultCases {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -108,6 +107,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         let Stmt::Switch(switch) = node else {
             return;

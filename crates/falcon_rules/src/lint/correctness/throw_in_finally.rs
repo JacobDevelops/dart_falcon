@@ -17,7 +17,7 @@
 //!
 //! Adopted from the official `throw_in_finally` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
@@ -26,14 +26,18 @@ use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 pub struct ThrowInFinally;
 
 impl Rule for ThrowInFinally {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut finder = Finder {
             ctx,
             diagnostics: Vec::new(),
             in_finally: false,
         };
         finder.visit_program(program);
-        finder.diagnostics
+        RulePreparation::Diagnostics(finder.diagnostics)
     }
 }
 

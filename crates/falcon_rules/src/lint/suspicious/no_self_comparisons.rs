@@ -6,27 +6,26 @@
 //! A scalar read type does not establish stability: unqualified top-level and
 //! inherited getter names still execute a getter on each evaluation.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct NoSelfComparisons;
 
 impl Rule for NoSelfComparisons {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             ctx,
             diags: Vec::new(),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -36,6 +35,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::Binary {
             op,
@@ -131,6 +134,7 @@ use crate::lint::expressions::equivalent;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_analyze::{IdentityIndex, IdentitySource, SemanticModel, SignatureIndex, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

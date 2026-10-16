@@ -33,7 +33,7 @@ use std::collections::HashSet;
 use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, NameIdentity, QualifiedName, ResolvedType, Rule,
-    resolve_call_constructor,
+    RulePreparation, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -45,7 +45,7 @@ use falcon_syntax::visitor::{
 use falcon_syntax::{Program, TokenKind};
 
 use crate::lint::declarations::{documented_node_span, member_names, members_of};
-use crate::lint::semantic_scope::SemanticState;
+use falcon_analyze::semantic_scope::SemanticState;
 
 const RULE: &str = "always-specify-types";
 const MESSAGE: &str = "Missing type annotation.";
@@ -70,7 +70,11 @@ pub(crate) fn setter_parameter_span(node: &SetterDecl, ctx: &AnalyzeContext) -> 
 pub struct AlwaysSpecifyTypes;
 
 impl Rule for AlwaysSpecifyTypes {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let state = SemanticState::new(program, ctx);
         let locals = if state.is_some() {
             locally_bound_identifiers(program)
@@ -89,7 +93,7 @@ impl Rule for AlwaysSpecifyTypes {
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

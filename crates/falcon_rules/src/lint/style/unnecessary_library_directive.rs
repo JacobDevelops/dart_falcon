@@ -18,8 +18,7 @@
 //!
 //! Adopted from the official `unnecessary_library_directive` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 use falcon_syntax::token::{SyntaxStore, TokenKind};
 
@@ -27,21 +26,25 @@ use falcon_syntax::token::{SyntaxStore, TokenKind};
 pub struct UnnecessaryLibraryDirective;
 
 impl Rule for UnnecessaryLibraryDirective {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(lib) = &program.library_directive else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         if !program.part_directives.is_empty() || !lib.annotations.is_empty() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         if has_doc_comment(ctx.syntax, lib.span.start) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        vec![ctx.diagnostic(
+        RulePreparation::Diagnostics(vec![ctx.diagnostic(
             "unnecessary-library-directive",
             "Library directives without comments or annotations should be avoided.",
             lib.span,
-        )]
+        )])
     }
 }
 

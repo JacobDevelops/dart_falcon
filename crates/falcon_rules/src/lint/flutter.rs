@@ -69,7 +69,7 @@ pub(crate) fn constructor_invocation<'a>(
 /// Constructor resolution through type aliases in its lexical value scope.
 pub(crate) fn scoped_constructor_invocation<'a>(
     expression: &'a Expr,
-    state: &crate::lint::semantic_scope::SemanticState<'_>,
+    state: &falcon_analyze::semantic_scope::SemanticState<'_>,
 ) -> Option<(DeclarationIdentity, &'a str, &'a ArgList)> {
     if let Expr::Call { callee, .. } = expression.unparenthesized() {
         let segments = falcon_analyze::expression_segments(callee, false)?;

@@ -22,7 +22,7 @@
 //!
 //! Adopted from the official `unnecessary_breaks` lint.
 
-use falcon_analyze::{AnalyzeContext, Feature, Rule};
+use falcon_analyze::{AnalyzeContext, Feature, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -32,16 +32,20 @@ use falcon_syntax::visitor::{Visitor, walk_switch_case};
 pub struct UnnecessaryBreaks;
 
 impl Rule for UnnecessaryBreaks {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if !ctx.language_version().supports(Feature::Patterns) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let mut collector = Collector {
             ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

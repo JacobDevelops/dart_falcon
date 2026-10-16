@@ -6,15 +6,18 @@
 //! the containing file, is more robust, and is the form modern Dart tooling prefers.
 //! The rule reports only the named form (a non-empty dotted name with no string URI).
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct UseStringInPartOfDirectives;
 
 impl Rule for UseStringInPartOfDirectives {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         if let Some(part_of) = &program.part_of_directive
             && part_of.uri.is_none()
@@ -26,6 +29,6 @@ impl Rule for UseStringInPartOfDirectives {
                 part_of.span,
             ));
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }

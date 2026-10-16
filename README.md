@@ -10,6 +10,8 @@ When separate apps load physical copies of the same package or SDK library, falc
 
 falcon ships **290 rules**, with **165 recommended** by default, across seven groups: `a11y`, `complexity`, `correctness`, `performance`, `security`, `style`, and `suspicious`. The `a11y` group currently has no shipped rules. The shipped rules include cross-file checks and 142 official lints from the 1.0 catalog. Falcon chooses its recommended set independently of upstream presets.
 
+Enabled semantic rules share one scope-aware traversal per file, with independent per-rule collectors and diagnostics. Syntax-only rules and dependency-ordered library analyses retain their specialized traversals.
+
 Configure rules, severities, options, and per-path overrides in `falcon.json`. Cross-file checks have a separate `cross-file` section. Inline suppressions require a reason: `// falcon-ignore lint/<group>/<rule>: <reason>`.
 
 > **Status: pre-1.0.** falcon is usable today but the rule set, rule ids, and

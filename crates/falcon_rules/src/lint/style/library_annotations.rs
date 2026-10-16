@@ -2,8 +2,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, QualifiedName, Rule, SemanticModel};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, QualifiedName, Rule, RulePreparation, SemanticModel};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -11,9 +10,13 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 pub struct LibraryAnnotations;
 
 impl Rule for LibraryAnnotations {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if program.part_of_directive.is_some() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let library_annotations = library_annotation_names(program, ctx);
         let declared_names = declared_names(program, ctx);
@@ -45,7 +48,7 @@ impl Rule for LibraryAnnotations {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 
@@ -305,6 +308,7 @@ fn late_trust_pragma(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::PathBuf;

@@ -18,26 +18,25 @@
 //!
 //! Adopted from the official `join_return_with_assignment` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{self, SemanticRuleVisitor, SemanticState};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct JoinReturnWithAssignment;
 
 impl Rule for JoinReturnWithAssignment {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             ctx,
             diagnostics: Vec::new(),
-        };
-        semantic_scope::visit_program(&mut collector, program, state);
-        collector.diagnostics
+        }))
     }
 }
 
@@ -47,6 +46,10 @@ struct Collector<'a, 's> {
 }
 
 impl SemanticRuleVisitor for Collector<'_, '_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_block_end(&mut self, node: &Block, state: &SemanticState<'_>) {
         let [.., second_last, last] = node.stmts.as_slice() else {
             return;

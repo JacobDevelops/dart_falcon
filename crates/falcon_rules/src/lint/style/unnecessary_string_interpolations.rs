@@ -15,25 +15,24 @@
 //! Canonical receiver and signature facts must prove a non-nullable `String`.
 //! Nullable or unknown values and null-aware accesses are left alone.
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use crate::lint::string_lit::{interpolated_literals, multiline_lead_len};
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct UnnecessaryStringInterpolations;
 impl Rule for UnnecessaryStringInterpolations {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 struct Collector<'a> {
@@ -41,6 +40,10 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::StringLit(node) = node else {
             return;
@@ -86,6 +89,8 @@ impl SemanticRuleVisitor for Collector<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
+    use falcon_analyze::semantic_scope::visit_program;
     use falcon_analyze::{IdentityIndex, IdentitySource, SemanticModel, SignatureIndex, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

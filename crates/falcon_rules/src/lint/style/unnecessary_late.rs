@@ -7,7 +7,7 @@
 //! the declarator actually has an initializer, since `late` on an uninitialized
 //! static or top-level variable does carry meaning. Drop the `late` keyword.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -16,7 +16,11 @@ use falcon_syntax::ast::*;
 pub struct UnnecessaryLate;
 
 impl Rule for UnnecessaryLate {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
 
         for decl in &program.declarations {
@@ -32,7 +36,7 @@ impl Rule for UnnecessaryLate {
             }
         }
 
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

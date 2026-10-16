@@ -16,7 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::{
     AnalyzeContext, CrossFileRule, IdentityIndex, IdentitySource, LibrarySource, ProjectFile,
     SemanticIndexes, SignatureIndex, TypeIndex, group_libraries,

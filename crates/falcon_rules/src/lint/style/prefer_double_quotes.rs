@@ -18,16 +18,19 @@
 //! Adopted from the official `prefer_double_quotes` lint.
 
 use crate::lint::style::prefer_single_quotes::{QuotePreference, QuoteVisitor};
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct PreferDoubleQuotes;
 
 impl Rule for PreferDoubleQuotes {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        QuoteVisitor::run(
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Diagnostics(QuoteVisitor::run(
             program,
             ctx,
             QuotePreference {
@@ -35,6 +38,6 @@ impl Rule for PreferDoubleQuotes {
                 message: "Unnecessary use of single quotes.",
                 preferred: b'"',
             },
-        )
+        ))
     }
 }

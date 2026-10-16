@@ -23,31 +23,38 @@
 //! `dart:core` `Type` redeclares `toString`.
 
 use falcon_analyze::resolve::TypeKind;
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Truth};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct AvoidTypeToString;
 
 impl Rule for AvoidTypeToString {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let Some(identities) = ctx.identities else {
+            return RulePreparation::Diagnostics(Vec::new());
         };
+        let model = falcon_analyze::SemanticModel::new(ctx.file_path, identities, ctx.types);
         let stale_this = program
             .declarations
             .iter()
             .filter_map(|declaration| {
                 let ty = match declaration {
-                    TopLevelDecl::Class(class) => this_type(&class.name, &state),
-                    TopLevelDecl::MixinClass(class) => this_type(&class.name, &state),
-                    TopLevelDecl::Mixin(mixin) => this_type(&mixin.name, &state),
+                    TopLevelDecl::Class(class) => this_type(&class.name, &model),
+                    TopLevelDecl::MixinClass(class) => this_type(&class.name, &model),
+                    TopLevelDecl::Mixin(mixin) => this_type(&mixin.name, &model),
                     TopLevelDecl::Extension(extension) => {
-                        Some(state.model.resolve_type(&extension.on_type))
+                        Some(model.resolve_type(&extension.on_type))
                             .filter(|ty| matches!(ty, ResolvedType::Interface { .. }))
                     }
                     _ => return None,
@@ -55,19 +62,17 @@ impl Rule for AvoidTypeToString {
                 Some((declaration.span().start, ty))
             })
             .collect();
-        let mut collector = Collector {
+        let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
             stale_this,
         };
-        visit_program(&mut collector, program, state);
-        collector.diagnostics
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 
-fn this_type(name: &Identifier, state: &SemanticState<'_>) -> Option<ResolvedType> {
-    state
-        .model
+fn this_type(name: &Identifier, model: &falcon_analyze::SemanticModel<'_>) -> Option<ResolvedType> {
+    model
         .resolve_name(&*name.name)
         .map(|identity| ResolvedType::Interface {
             occurrence: Default::default(),
@@ -198,6 +203,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         match node {
             Expr::Call { callee, args, .. } => {

@@ -14,7 +14,9 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Truth, resolve_call_constructor};
+use falcon_analyze::{
+    AnalyzeContext, ResolvedType, SemanticModel, Truth, resolve_call_constructor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -23,9 +25,7 @@ use falcon_syntax::visitor::{
 };
 
 use crate::lint::function_bodies::{FunctionBodies, contains};
-use crate::lint::semantic_scope::{
-    CascadeAssignment, SemanticRuleVisitor, SemanticState, visit_program,
-};
+use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
 /// A resource type and the method that releases it.
 pub(crate) struct Release {
@@ -34,6 +34,7 @@ pub(crate) struct Release {
     pub(crate) method: &'static str,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct LeakRule {
     pub(crate) name: &'static str,
     pub(crate) message: &'static str,
@@ -41,36 +42,21 @@ pub(crate) struct LeakRule {
 }
 
 impl LeakRule {
-    pub(crate) fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut locals = LocalCandidates {
-            rule: self,
+    pub(crate) fn semantic_visitor<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> Option<Box<dyn SemanticRuleVisitor + 'a>> {
+        let model = SemanticModel::new(ctx.file_path, ctx.identities?, ctx.types);
+        Some(Box::new(LocalCandidates {
+            rule: *self,
+            program,
+            ctx,
             bodies: FunctionBodies::new(program),
-            references: References::new(program, ctx.source.len(), &state),
+            references: References::new(program, ctx.source.len(), &model),
             candidates: Vec::new(),
             excluded_calls: Vec::new(),
-        };
-        let state = visit_program(&mut locals, program, state);
-        let mut fields = FieldCandidates {
-            rule: self,
-            state: &state,
-            file: Span::new(0, ctx.source.len()),
-            candidates: locals.candidates,
-        };
-        walk_program(&mut fields, program);
-        let mut uses = ValidUses {
-            candidates: fields.candidates,
-            references: locals.references,
-            excluded_calls: locals.excluded_calls,
-        };
-        walk_program(&mut uses, program);
-        uses.candidates
-            .iter()
-            .filter(|candidate| !candidate.valid)
-            .map(|candidate| ctx.diagnostic(self.name, self.message, candidate.declarator))
-            .collect()
+        }))
     }
 
     /// The release methods that apply to a variable of type `ty`.
@@ -238,8 +224,10 @@ impl Candidate {
     }
 }
 
-struct LocalCandidates<'r> {
-    rule: &'r LeakRule,
+struct LocalCandidates<'a> {
+    rule: LeakRule,
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
     bodies: FunctionBodies,
     candidates: Vec<Candidate>,
     references: References,
@@ -247,6 +235,34 @@ struct LocalCandidates<'r> {
 }
 
 impl SemanticRuleVisitor for LocalCandidates<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        let mut uses = ValidUses {
+            candidates: self.candidates,
+            references: self.references,
+            excluded_calls: self.excluded_calls,
+        };
+        walk_program(&mut uses, self.program);
+        uses.candidates
+            .iter()
+            .filter(|candidate| !candidate.valid)
+            .map(|candidate| {
+                self.ctx
+                    .diagnostic(self.rule.name, self.rule.message, candidate.declarator)
+            })
+            .collect()
+    }
+
+    fn visit_program_end(&mut self, state: &SemanticState<'_>) {
+        let mut fields = FieldCandidates {
+            rule: &self.rule,
+            state,
+            file: Span::new(0, self.ctx.source.len()),
+            candidates: std::mem::take(&mut self.candidates),
+        };
+        walk_program(&mut fields, self.program);
+        self.candidates = fields.candidates;
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let enclosing = self
             .references
@@ -659,7 +675,7 @@ enum BindingKind {
 }
 
 impl References {
-    fn new(program: &Program, len: usize, state: &SemanticState<'_>) -> Self {
+    fn new(program: &Program, len: usize, model: &SemanticModel<'_>) -> Self {
         let file = Span::new(0, len);
         let mut references = Self {
             scopes: vec![file],
@@ -678,21 +694,21 @@ impl References {
         };
         struct Contexts<'r, 's, 'a> {
             references: &'r mut References,
-            state: &'s SemanticState<'a>,
+            model: &'s SemanticModel<'a>,
         }
         impl Visitor for Contexts<'_, '_, '_> {
             fn visit_top_level_decl(&mut self, node: &TopLevelDecl) {
                 if let TopLevelDecl::Extension(extension) = node {
-                    self.references.extension_receivers.push((
-                        extension.span,
-                        self.state.model.resolve_type(&extension.on_type),
-                    ));
+                    self.references
+                        .extension_receivers
+                        .push((extension.span, self.model.resolve_type(&extension.on_type)));
                 }
                 if let TopLevelDecl::Mixin(mixin) = node {
                     self.references.mixin_constraints.extend(
-                        mixin.on_clause.iter().map(|constraint| {
-                            (mixin.span, self.state.model.resolve_type(constraint))
-                        }),
+                        mixin
+                            .on_clause
+                            .iter()
+                            .map(|constraint| (mixin.span, self.model.resolve_type(constraint))),
                     );
                 }
                 self.references.visit_top_level_decl(node);
@@ -701,7 +717,7 @@ impl References {
         walk_program(
             &mut Contexts {
                 references: &mut references,
-                state,
+                model,
             },
             program,
         );

@@ -7,15 +7,19 @@
 //! excludes the empty `/**/` comment. It does not fully model raw, multiline or
 //! interpolated strings, or nested block comments.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct SlashForDocComments;
 
 impl Rule for SlashForDocComments {
-    fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for start in doc_block_comment_starts(ctx.source) {
             diags.push(ctx.diagnostic(
@@ -27,7 +31,7 @@ impl Rule for SlashForDocComments {
                 },
             ));
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

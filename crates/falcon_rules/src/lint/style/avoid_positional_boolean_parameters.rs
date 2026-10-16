@@ -24,7 +24,8 @@
 //! Adopted from the official `avoid_positional_boolean_parameters` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    SignatureIndex,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
@@ -33,7 +34,7 @@ use falcon_syntax::visitor::{
     walk_stmt,
 };
 
-use crate::lint::semantic_scope::{SemanticState, resolved_super_param_type};
+use falcon_analyze::semantic_scope::{SemanticState, resolved_super_param_type};
 
 const RULE: &str = "avoid-positional-boolean-parameters";
 const MESSAGE: &str = "'bool' parameters should be named parameters.";
@@ -42,9 +43,13 @@ const MESSAGE: &str = "'bool' parameters should be named parameters.";
 pub struct AvoidPositionalBooleanParameters;
 
 impl Rule for AvoidPositionalBooleanParameters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let mut collector = Collector {
             ctx,
@@ -57,7 +62,7 @@ impl Rule for AvoidPositionalBooleanParameters {
             collector.container = collector.enter(declaration);
             collector.visit_top_level_decl(declaration);
         }
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

@@ -5,8 +5,7 @@
 //! obscures intent. Rewrite `foo..bar()` as `foo.bar()`. Cascades with two or
 //! more sections are the idiomatic form and are not flagged.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::for_each_stmt_in_program;
 
@@ -14,7 +13,11 @@ use falcon_syntax::visitor::for_each_stmt_in_program;
 pub struct AvoidSingleCascadeInExpressionStatements;
 
 impl Rule for AvoidSingleCascadeInExpressionStatements {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for_each_stmt_in_program(program, |node| {
             if let Stmt::Expr(e) = node
@@ -28,6 +31,6 @@ impl Rule for AvoidSingleCascadeInExpressionStatements {
                 ));
             }
         });
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }

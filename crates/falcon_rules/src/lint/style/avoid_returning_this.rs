@@ -20,19 +20,22 @@
 //!
 //! Adopted from the official `avoid_returning_this` lint.
 
-use falcon_analyze::{AnalyzeContext, MemberKind, Rule, SemanticModel};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, MemberKind, Rule, RulePreparation, SemanticModel};
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::returned_expressions;
+use falcon_analyze::semantic_scope::returned_expressions;
 
 #[derive(Default)]
 pub struct AvoidReturningThis;
 
 impl Rule for AvoidReturningThis {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let returns_this = |expr: &Expr| matches!(expr, Expr::This { .. });
@@ -104,7 +107,7 @@ impl Rule for AvoidReturningThis {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

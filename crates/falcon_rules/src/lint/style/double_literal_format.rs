@@ -7,7 +7,7 @@
 //! part is exactly `0` (`24.0`) is deliberately left alone, since stripping that
 //! digit would turn the `double` into an `int`.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -16,13 +16,17 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 pub struct DoubleLiteralFormat;
 
 impl Rule for DoubleLiteralFormat {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

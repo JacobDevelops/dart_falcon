@@ -25,8 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, PackageConfig, Rule, percent_decode};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, PackageConfig, Rule, RulePreparation, percent_decode};
 use falcon_syntax::{Program, ast::StringLitNode};
 
 use crate::lint::correctness::always_use_package_imports::uri_scheme;
@@ -38,7 +37,11 @@ pub struct ConditionalUriDoesNotExist;
 const NAME: &str = "conditional-uri-does-not-exist";
 
 impl Rule for ConditionalUriDoesNotExist {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut configurations = program
             .imports
             .iter()
@@ -51,7 +54,7 @@ impl Rule for ConditionalUriDoesNotExist {
             )
             .peekable();
         if configurations.peek().is_none() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let config = ctx
             .environment
@@ -64,19 +67,21 @@ impl Rule for ConditionalUriDoesNotExist {
                 Some(sdk.library(uri).is_some())
             },
         };
-        configurations
-            .filter_map(|configuration| {
-                let uri = &configuration.uri;
-                let value = uri_value(uri);
-                (resolver.exists(&value) == Some(false)).then(|| {
-                    ctx.diagnostic(
-                        NAME,
-                        format!("The target of the conditional URI '{value}' doesn't exist."),
-                        uri.span,
-                    )
+        RulePreparation::Diagnostics(
+            configurations
+                .filter_map(|configuration| {
+                    let uri = &configuration.uri;
+                    let value = uri_value(uri);
+                    (resolver.exists(&value) == Some(false)).then(|| {
+                        ctx.diagnostic(
+                            NAME,
+                            format!("The target of the conditional URI '{value}' doesn't exist."),
+                            uri.span,
+                        )
+                    })
                 })
-            })
-            .collect()
+                .collect(),
+        )
     }
 }
 
@@ -265,6 +270,7 @@ fn remove_dot_segments(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{ConditionalUriDoesNotExist, Resolver, merge, remove_dot_segments};
+    use falcon_analyze::RuleAnalysis;
 
     #[test]
     fn project_fixture_matches_expectations() {
@@ -326,7 +332,7 @@ mod tests {
 
     #[test]
     fn shared_environment_resolves_configured_package_queries() {
-        use falcon_analyze::{AnalysisEnvironment, AnalyzeContext, Rule};
+        use falcon_analyze::{AnalysisEnvironment, AnalyzeContext};
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/conditional-uri-does-not-exist/project");
         let file = root.join("lib/good_package_uris.dart");

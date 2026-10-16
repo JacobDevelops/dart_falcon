@@ -30,8 +30,8 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, SemanticModel,
-    SignatureIndex, Truth, TypeParameterScope,
+    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
+    SemanticModel, SignatureIndex, Truth, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -54,9 +54,13 @@ const DEBUG_PREFIX: &str = "debug";
 pub struct DiagnosticDescribeAllProperties;
 
 impl Rule for DiagnosticDescribeAllProperties {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let checker = Checker {
@@ -70,7 +74,7 @@ impl Rule for DiagnosticDescribeAllProperties {
                 checker.check_class(class, &mut diags);
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

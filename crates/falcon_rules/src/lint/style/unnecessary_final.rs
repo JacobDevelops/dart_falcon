@@ -24,7 +24,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Feature;
 use falcon_syntax::ast::*;
@@ -40,7 +40,11 @@ const MESSAGE: &str = "Local variables should not be marked as 'final'.";
 pub struct UnnecessaryFinal;
 
 impl Rule for UnnecessaryFinal {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             ctx,
             // With primary constructors `final` on a parameter declares a
@@ -52,7 +56,7 @@ impl Rule for UnnecessaryFinal {
             diagnostics: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 
@@ -175,6 +179,7 @@ impl Visitor for Collector<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;

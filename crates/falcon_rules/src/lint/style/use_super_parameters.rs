@@ -11,25 +11,55 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, LanguageVersion, ResolvedType, Rule, Truth};
+use falcon_analyze::{AnalyzeContext, LanguageVersion, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UseSuperParameters;
 
 impl Rule for UseSuperParameters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if ctx.language_version() < LanguageVersion::new(2, 17) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+        let collector = Collector {
+            ctx,
+            references: HashMap::new(),
+            constructors: Vec::new(),
         };
-        let mut collector = Collector::default();
-        visit_program(&mut collector, program, state);
+        RulePreparation::Semantic(Box::new(collector))
+    }
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    references: HashMap<Span, (Span, bool)>,
+    constructors: Vec<Conversion>,
+}
+
+struct Conversion {
+    anchor: Span,
+    positional: Vec<PositionalCheck>,
+    named: Vec<Span>,
+}
+
+enum PositionalCheck {
+    Invalid,
+    Blocked,
+    Reference(Span),
+}
+
+impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        let collector = *self;
+        let ctx = collector.ctx;
         collector
             .constructors
             .into_iter()
@@ -67,27 +97,6 @@ impl Rule for UseSuperParameters {
             })
             .collect()
     }
-}
-
-#[derive(Default)]
-struct Collector {
-    references: HashMap<Span, (Span, bool)>,
-    constructors: Vec<Conversion>,
-}
-
-struct Conversion {
-    anchor: Span,
-    positional: Vec<PositionalCheck>,
-    named: Vec<Span>,
-}
-
-enum PositionalCheck {
-    Invalid,
-    Blocked,
-    Reference(Span),
-}
-
-impl SemanticRuleVisitor for Collector {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Expr::Ident(identifier) = node
             && let Some(binding) = state.environment.binding_declaration(&identifier.name)

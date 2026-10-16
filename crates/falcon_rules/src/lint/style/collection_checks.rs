@@ -2,7 +2,7 @@ use falcon_analyze::{AnalyzeContext, DeclarationIdentity, MemberResult, Resolved
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 pub(super) fn lacks_collection_member(
     ctx: &AnalyzeContext<'_>,
@@ -113,17 +113,20 @@ impl Emptiness {
     }
 }
 
-pub(super) fn analyze_emptiness(
-    program: &Program,
-    ctx: &AnalyzeContext<'_>,
+pub(super) fn analyze_emptiness<'a>(
+    ctx: &'a AnalyzeContext<'a>,
     emptiness: Emptiness,
-) -> Vec<Diagnostic> {
+) -> Box<dyn SemanticRuleVisitor + 'a> {
     struct Collector<'a> {
         ctx: &'a AnalyzeContext<'a>,
         emptiness: Emptiness,
         diags: Vec<Diagnostic>,
     }
     impl SemanticRuleVisitor for Collector<'_> {
+        fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+            self.diags
+        }
+
         fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
             let Expr::Binary {
                 op,
@@ -149,16 +152,11 @@ pub(super) fn analyze_emptiness(
             }
         }
     }
-    let Some(state) = SemanticState::new(program, ctx) else {
-        return Vec::new();
-    };
-    let mut collector = Collector {
+    Box::new(Collector {
         ctx,
         emptiness,
         diags: Vec::new(),
-    };
-    visit_program(&mut collector, program, state);
-    collector.diags
+    })
 }
 
 #[cfg(test)]
@@ -168,6 +166,7 @@ mod tests {
     use super::super::prefer_iterable_where_type::PreferIterableWhereType;
     use super::*;
     use falcon_analyze::Rule;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;

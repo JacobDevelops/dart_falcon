@@ -7,7 +7,7 @@
 //! one statement of the form `return await <expr>;`. Local functions and
 //! anonymous closures are not checked.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
@@ -16,7 +16,11 @@ use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 pub struct AvoidRedundantAsync;
 
 impl Rule for AvoidRedundantAsync {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
 
         AsyncDeclarations {
@@ -25,7 +29,7 @@ impl Rule for AvoidRedundantAsync {
         }
         .visit_program(program);
 
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

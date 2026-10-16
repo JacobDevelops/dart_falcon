@@ -29,7 +29,7 @@
 //!
 //! Adopted from the official `avoid_field_initializers_in_const_classes` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -40,7 +40,11 @@ const MESSAGE: &str = "Fields in 'const' classes should not have initializers.";
 pub struct AvoidFieldInitializersInConstClasses;
 
 impl Rule for AvoidFieldInitializersInConstClasses {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             let members = match decl {
@@ -50,7 +54,7 @@ impl Rule for AvoidFieldInitializersInConstClasses {
             };
             check_members(members, ctx, &mut diags);
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

@@ -16,7 +16,7 @@
 //!
 //! Adopted from the official `always_put_required_named_parameters_first` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -31,13 +31,17 @@ const MESSAGE: &str = "Required named parameters should be before optional named
 pub struct AlwaysPutRequiredNamedParametersFirst;
 
 impl Rule for AlwaysPutRequiredNamedParametersFirst {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

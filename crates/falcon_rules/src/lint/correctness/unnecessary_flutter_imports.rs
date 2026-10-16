@@ -6,28 +6,52 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_annotation, walk_dart_type};
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UnnecessaryFlutterImports;
 
 impl Rule for UnnecessaryFlutterImports {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut usage = Usage::default();
-        visit_program(&mut usage, program, state);
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Usage {
+            program,
+            ctx,
+            unprefixed: HashSet::new(),
+            prefixed: HashSet::new(),
+            unknown: HashSet::new(),
+        }))
+    }
+}
+
+struct Usage<'a> {
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
+    unprefixed: HashSet<String>,
+    prefixed: HashSet<(String, String)>,
+    unknown: HashSet<String>,
+}
+
+impl SemanticRuleVisitor for Usage<'_> {
+    fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
+        let program = self.program;
+        let ctx = self.ctx;
 
         let Some(identities) = ctx.identities else {
             return Vec::new();
         };
         let model = falcon_analyze::SemanticModel::new(ctx.file_path, identities, ctx.types);
+        let usage = &mut *self;
         let mut type_usage = TypeUsage {
             model: &model,
             unprefixed: &mut usage.unprefixed,
@@ -40,7 +64,7 @@ impl Rule for UnnecessaryFlutterImports {
             .imports
             .iter()
             .filter(|import| import_targets_framework(import))
-            .filter(|import| !import_is_used(import, &usage))
+            .filter(|import| !import_is_used(import, &self))
             .map(|import| {
                 ctx.diagnostic(
                     "unnecessary-flutter-imports",
@@ -50,16 +74,6 @@ impl Rule for UnnecessaryFlutterImports {
             })
             .collect()
     }
-}
-
-#[derive(Default)]
-struct Usage {
-    unprefixed: HashSet<String>,
-    prefixed: HashSet<(String, String)>,
-    unknown: HashSet<String>,
-}
-
-impl SemanticRuleVisitor for Usage {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         match node {
             Expr::Ident(identifier) if !state.environment.is_bound(&identifier.name) => {

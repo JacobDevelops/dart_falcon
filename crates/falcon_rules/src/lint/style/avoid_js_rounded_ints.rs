@@ -11,7 +11,7 @@
 //!
 //! Adopted from the official `avoid_js_rounded_ints` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, parse_int};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, parse_int};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -21,13 +21,17 @@ use falcon_syntax::visitor::{Visitor, walk_expr, walk_program};
 pub struct AvoidJsRoundedInts;
 
 impl Rule for AvoidJsRoundedInts {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diagnostics: Vec::new(),
             ctx,
         };
         walk_program(&mut collector, program);
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 

@@ -1,7 +1,6 @@
 //! Flags unused closure parameters that are not named with underscores.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::for_each_expr_in_program;
 
@@ -11,7 +10,11 @@ use falcon_analyze::resolve::lexical_usage::used_parameters;
 pub struct PreferUnderscoreForUnusedCallbackParameters;
 
 impl Rule for PreferUnderscoreForUnusedCallbackParameters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diagnostics = Vec::new();
         for_each_expr_in_program(program, |node| {
             if let Expr::FuncExpr {
@@ -33,6 +36,6 @@ impl Rule for PreferUnderscoreForUnusedCallbackParameters {
                 }
             }
         });
-        diagnostics
+        RulePreparation::Diagnostics(diagnostics)
     }
 }

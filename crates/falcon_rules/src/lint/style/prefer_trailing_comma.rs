@@ -4,7 +4,7 @@
 //! across lines — when the last significant token sits on an earlier line than
 //! the closing `)`. This mirrors the Dart 3.x tall-style formatter.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
@@ -14,13 +14,17 @@ use falcon_syntax::visitor::{Visitor, walk_annotation, walk_enum_decl, walk_expr
 pub struct PreferTrailingComma;
 
 impl Rule for PreferTrailingComma {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 
@@ -112,6 +116,7 @@ impl Visitor for Collector<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use std::path::Path;
 

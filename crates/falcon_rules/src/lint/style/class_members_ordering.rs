@@ -16,7 +16,7 @@
 //! `methods`, `getters`, and `setters`. A member is ranked by the earliest
 //! token it qualifies for; members matching no token are ignored.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -28,7 +28,11 @@ pub struct ClassMembersOrdering;
 const NAME: &str = "class-members-ordering";
 
 impl Rule for ClassMembersOrdering {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         // A configured `order` option (a list of DCL category tokens) drives the
         // check; otherwise the built-in default order is used.
@@ -49,7 +53,7 @@ impl Rule for ClassMembersOrdering {
                 None => check_members(members, &mut diags, ctx),
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use crate::lint::lexical_usage::NameScopes;
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, SemanticModel,
-    SignatureIndex, Truth,
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation,
+    SemanticModel, SignatureIndex, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -15,9 +15,13 @@ use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_patter
 pub struct ProperControllerDispose;
 
 impl Rule for ProperControllerDispose {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diagnostics = Vec::new();
@@ -32,7 +36,7 @@ impl Rule for ProperControllerDispose {
             }
             check_class(members, &model, ctx, &mut diagnostics);
         }
-        diagnostics
+        RulePreparation::Diagnostics(diagnostics)
     }
 }
 

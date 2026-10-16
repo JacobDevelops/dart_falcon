@@ -1,5 +1,10 @@
-use crate::{AnalyzeContext, FileSuppressions, Rule, RuleLookup};
+use crate::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState, visit_program};
+use crate::{AnalyzeContext, FileSuppressions, Rule, RuleLookup, RulePreparation};
 use falcon_diagnostics::Diagnostic;
+use falcon_syntax::ast::{
+    ArgList, Block, CascadeOp, ConstructorDecl, ConstructorRef, Expr, Pattern, Span, Stmt,
+};
+use std::collections::HashMap;
 use tracing::{debug, debug_span};
 
 /// Without metadata, suppression paths validate as unknown rules.
@@ -81,16 +86,29 @@ impl RuleRegistry {
         program: &falcon_syntax::Program,
         ctx: &AnalyzeContext,
     ) -> Vec<Diagnostic> {
-        let diagnostics: Vec<Diagnostic> = self
-            .rules
-            .iter()
-            .flat_map(|(name, rule)| {
-                let span = debug_span!("run_rule", rule = name);
-                let _enter = span.enter();
-                debug!(rule = name, "running rule");
-                rule.analyze(program, ctx)
-            })
-            .collect();
+        let mut diagnostics_by_rule = Vec::with_capacity(self.rules.len());
+        let mut visitors = SemanticVisitors(Vec::new());
+        for (index, (name, rule)) in self.rules.iter().enumerate() {
+            let span = debug_span!("run_rule", rule = name);
+            let _enter = span.enter();
+            debug!(rule = name, "running rule");
+            match rule.prepare(program, ctx) {
+                RulePreparation::Diagnostics(diagnostics) => diagnostics_by_rule.push(diagnostics),
+                RulePreparation::Semantic(visitor) => {
+                    diagnostics_by_rule.push(Vec::new());
+                    visitors.0.push((index, visitor));
+                }
+            }
+        }
+        if !visitors.0.is_empty() {
+            if let Some(state) = SemanticState::new(program, ctx) {
+                visit_program(&mut visitors, program, state);
+            }
+            for (index, visitor) in visitors.0 {
+                diagnostics_by_rule[index].extend(visitor.finish());
+            }
+        }
+        let diagnostics: Vec<Diagnostic> = diagnostics_by_rule.into_iter().flatten().collect();
 
         // Parse even without rule diagnostics so malformed suppressions are surfaced.
         let mut diagnostics = diagnostics;
@@ -119,5 +137,93 @@ impl RuleRegistry {
             left.rule == right.rule && left.span == right.span && left.message == right.message
         });
         diagnostics
+    }
+}
+
+/// Callback fanout only; the semantic walker owns recursion and shared state.
+struct SemanticVisitors<'a>(Vec<(usize, Box<dyn SemanticRuleVisitor + 'a>)>);
+
+impl SemanticRuleVisitor for SemanticVisitors<'_> {
+    fn visit_program_end(&mut self, state: &SemanticState<'_>) {
+        for (_, visitor) in &mut self.0 {
+            visitor.visit_program_end(state);
+        }
+    }
+
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        for (_, visitor) in &mut self.0 {
+            visitor.visit_expr(node, state);
+        }
+    }
+
+    fn visit_call_arguments(
+        &mut self,
+        args: &ArgList,
+        positional: &[crate::ResolvedType],
+        named: &HashMap<String, crate::ResolvedType>,
+        state: &SemanticState<'_>,
+    ) {
+        for (_, visitor) in &mut self.0 {
+            visitor.visit_call_arguments(args, positional, named, state);
+        }
+    }
+
+    fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
+        for (_, visitor) in &mut self.0 {
+            visitor.visit_stmt(node, state);
+        }
+    }
+
+    fn visit_block_end(&mut self, node: &Block, state: &SemanticState<'_>) {
+        for (_, visitor) in &mut self.0 {
+            visitor.visit_block_end(node, state);
+        }
+    }
+
+    fn visit_constructor(&mut self, node: &ConstructorDecl, state: &SemanticState<'_>) {
+        for (_, visitor) in &mut self.0 {
+            visitor.visit_constructor(node, state);
+        }
+    }
+
+    fn visit_constructor_ref(&mut self, node: ConstructorRef<'_>, state: &SemanticState<'_>) {
+        for (_, visitor) in &mut self.0 {
+            visitor.visit_constructor_ref(node, state);
+        }
+    }
+
+    fn visit_cascade_operation(
+        &mut self,
+        operation: &CascadeOp,
+        receiver: &crate::ResolvedType,
+        section: Span,
+        state: &SemanticState<'_>,
+    ) {
+        for (_, visitor) in &mut self.0 {
+            visitor.visit_cascade_operation(operation, receiver, section, state);
+        }
+    }
+
+    fn visit_cascade_assignment(
+        &mut self,
+        assignment: CascadeAssignment<'_>,
+        receiver: &crate::ResolvedType,
+        section: Span,
+        state: &SemanticState<'_>,
+    ) {
+        for (_, visitor) in &mut self.0 {
+            visitor.visit_cascade_assignment(assignment, receiver, section, state);
+        }
+    }
+
+    fn visit_pattern(
+        &mut self,
+        node: &Pattern,
+        matched: Option<&crate::ResolvedType>,
+        state: &SemanticState<'_>,
+    ) {
+        for (_, visitor) in &mut self.0 {
+            visitor.visit_pattern(node, matched, state);
+        }
     }
 }

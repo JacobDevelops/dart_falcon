@@ -13,8 +13,8 @@
 //!
 //! Adopted from the official `use_decorated_box` lint.
 
-use crate::lint::semantic_scope::{self, SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -22,16 +22,15 @@ use falcon_syntax::ast::*;
 pub struct UseDecoratedBox;
 
 impl Rule for UseDecoratedBox {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             ctx,
             diags: Vec::new(),
-        };
-        semantic_scope::visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -41,6 +40,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Some((identity, "new", args)) =
             crate::lint::flutter::scoped_constructor_invocation(node, state)

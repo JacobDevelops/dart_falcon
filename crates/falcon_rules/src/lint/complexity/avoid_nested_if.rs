@@ -7,7 +7,7 @@
 //! body nests two further `if`s is reported. Local functions and closures count
 //! as part of the then-branch subtree, and closures anywhere in the file are checked.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_stmt};
@@ -20,14 +20,18 @@ pub struct AvoidNestedIf;
 const MAX_NESTING_LEVEL: usize = 2;
 
 impl Rule for AvoidNestedIf {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         NestedIf {
             diags: &mut diags,
             ctx,
         }
         .visit_program(program);
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

@@ -1,10 +1,10 @@
 //! Flags an `is` check whose result is already guaranteed by the resolved static type.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_syntax::ast::Program;
 
-use crate::lint::semantic_type_operations::{TypeOperationKind, collect};
+use crate::lint::semantic_type_operations::{TypeOperation, TypeOperationKind, TypeOperations};
+use falcon_analyze::semantic_scope::SemanticState;
 
 #[derive(Default)]
 pub struct AvoidUnnecessaryTypeAssertions;
@@ -23,14 +23,14 @@ fn same_type_or_raw_target(operand: &ResolvedType, target: &ResolvedType) -> boo
 }
 
 impl Rule for AvoidUnnecessaryTypeAssertions {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(analysis) = collect(program, ctx) else {
-            return Vec::new();
-        };
-        analysis
-            .operations
-            .into_iter()
-            .filter_map(|operation| {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(TypeOperations {
+            diagnostics: Vec::new(),
+            report: move |operation: TypeOperation, _state: &SemanticState<'_>| {
                 if !matches!(operation.kind, TypeOperationKind::Is { negated: false })
                     || !same_type_or_raw_target(&operation.operand, &operation.target)
                     || operation.operand.nullable()
@@ -46,7 +46,7 @@ impl Rule for AvoidUnnecessaryTypeAssertions {
                     "Unnecessary type assertion — variable is already known to be this type",
                     operation.span,
                 ))
-            })
-            .collect()
+            },
+        }))
     }
 }

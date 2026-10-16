@@ -44,25 +44,28 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, LibraryId, MemberKind, ResolvedType, Rule,
+    AnalyzeContext, DeclarationIdentity, LibraryId, MemberKind, ResolvedType, Rule, RulePreparation,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, for_each_stmt_list, walk_expr};
 
 use crate::lint::const_eval::mentions_type_parameter;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::resolve::lexical_usage::local_declarations;
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct CascadeInvocations;
 
 impl Rule for CascadeInvocations {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut statements = Statements {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Statements {
+            program,
+            ctx,
             locals: local_declarations(program),
             prefixes: program
                 .imports
@@ -71,13 +74,7 @@ impl Rule for CascadeInvocations {
                 .map(|prefix| prefix.name.clone())
                 .collect(),
             facts: HashMap::new(),
-        };
-        visit_program(&mut statements, program, state);
-        let mut diags = Vec::new();
-        for_each_stmt_list(program, &mut |list, _| {
-            check_statements(list, &statements.facts, ctx, &mut diags);
-        });
-        diags
+        }))
     }
 }
 
@@ -184,7 +181,9 @@ impl Cascadable {
 
 /// Cascade facts of every expression and declaration statement, keyed by the
 /// statement's start.
-struct Statements {
+struct Statements<'a> {
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
     /// Local declarations keyed by their identifier uses.
     locals: HashMap<usize, usize>,
     /// Import prefixes of this file.
@@ -192,7 +191,15 @@ struct Statements {
     facts: HashMap<usize, Cascadable>,
 }
 
-impl SemanticRuleVisitor for Statements {
+impl SemanticRuleVisitor for Statements<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        let mut diags = Vec::new();
+        for_each_stmt_list(self.program, &mut |list, _| {
+            check_statements(list, &self.facts, self.ctx, &mut diags);
+        });
+        diags
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         let scope = Scope {
             state,
@@ -709,6 +716,7 @@ fn report(start: usize, end: usize, ctx: &AnalyzeContext, diags: &mut Vec<Diagno
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_analyze::{IdentityIndex, IdentitySource, LibrarySource, SignatureIndex, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

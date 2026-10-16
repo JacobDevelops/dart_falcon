@@ -16,8 +16,8 @@
 
 use std::sync::LazyLock;
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::Program;
 use falcon_syntax::token::TokenKind;
 use regex::Regex;
@@ -35,23 +35,31 @@ static EXPECTED_TODO: LazyLock<Regex> = LazyLock::new(|| {
 pub struct FlutterStyleTodos;
 
 impl Rule for FlutterStyleTodos {
-    fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        comment_tokens(ctx)
-            .filter(|token| matches!(token.kind, TokenKind::LineComment | TokenKind::DocComment))
-            .filter(|token| {
-                let comment = token.text(ctx.source);
-                TODO.is_match(comment) && !EXPECTED_TODO.is_match(comment)
-            })
-            .map(|token| {
-                ctx.diagnostic(
-                    "flutter-style-todos",
-                    "To-do comment doesn't follow the Flutter style.",
-                    DiagSpan {
-                        start: token.offset(),
-                        end: token.offset() + token.len(),
-                    },
-                )
-            })
-            .collect()
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Diagnostics(
+            comment_tokens(ctx)
+                .filter(|token| {
+                    matches!(token.kind, TokenKind::LineComment | TokenKind::DocComment)
+                })
+                .filter(|token| {
+                    let comment = token.text(ctx.source);
+                    TODO.is_match(comment) && !EXPECTED_TODO.is_match(comment)
+                })
+                .map(|token| {
+                    ctx.diagnostic(
+                        "flutter-style-todos",
+                        "To-do comment doesn't follow the Flutter style.",
+                        DiagSpan {
+                            start: token.offset(),
+                            end: token.offset() + token.len(),
+                        },
+                    )
+                })
+                .collect(),
+        )
     }
 }

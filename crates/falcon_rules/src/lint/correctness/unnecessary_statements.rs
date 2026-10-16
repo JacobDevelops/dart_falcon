@@ -34,12 +34,14 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{AnalyzeContext, MemberKind, MemberResult, ResolvedType, Rule};
+use falcon_analyze::{
+    AnalyzeContext, MemberKind, MemberResult, ResolvedType, Rule, RulePreparation,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 const RULE: &str = "unnecessary-statements";
 const MESSAGE: &str = "Unnecessary statement.";
@@ -48,17 +50,17 @@ const MESSAGE: &str = "Unnecessary statement.";
 pub struct UnnecessaryStatements;
 
 impl Rule for UnnecessaryStatements {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let collector = Collector {
             ctx,
             declarations: Declarations::new(program),
             diagnostics: Vec::new(),
         };
-        visit_program(&mut collector, program, state);
-        collector.diagnostics
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 
@@ -234,6 +236,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         match node {
             Stmt::Expr(statement) => self.check(&statement.expr, state),

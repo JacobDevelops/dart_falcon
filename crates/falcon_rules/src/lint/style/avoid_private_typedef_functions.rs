@@ -17,8 +17,7 @@
 //!
 //! Adopted from the official `avoid_private_typedef_functions` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_dart_type};
 
@@ -26,7 +25,11 @@ use falcon_syntax::visitor::{Visitor, walk_dart_type};
 pub struct AvoidPrivateTypedefFunctions;
 
 impl Rule for AvoidPrivateTypedefFunctions {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let candidates: Vec<&Identifier> = program
             .declarations
             .iter()
@@ -36,37 +39,39 @@ impl Rule for AvoidPrivateTypedefFunctions {
             })
             .collect();
         if candidates.is_empty() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
 
         let has_parts = !program.part_directives.is_empty() || program.part_of_directive.is_some();
         let siblings: &[&Program] = match ctx.library {
             Some(library) if !library.has_unresolved_parts() => library.siblings(),
-            _ if has_parts => return Vec::new(),
+            _ if has_parts => return RulePreparation::Diagnostics(Vec::new()),
             _ => &[],
         };
 
-        candidates
-            .into_iter()
-            .filter(|name| {
-                let mut counter = UseCounter {
-                    name: &name.name,
-                    count: 0,
-                };
-                counter.visit_program(program);
-                for sibling in siblings {
-                    counter.visit_program(sibling);
-                }
-                counter.count <= 1
-            })
-            .map(|name| {
-                ctx.diagnostic(
-                    "avoid-private-typedef-functions",
-                    "The typedef is unnecessary because it is only used in one place.",
-                    name.span,
-                )
-            })
-            .collect()
+        RulePreparation::Diagnostics(
+            candidates
+                .into_iter()
+                .filter(|name| {
+                    let mut counter = UseCounter {
+                        name: &name.name,
+                        count: 0,
+                    };
+                    counter.visit_program(program);
+                    for sibling in siblings {
+                        counter.visit_program(sibling);
+                    }
+                    counter.count <= 1
+                })
+                .map(|name| {
+                    ctx.diagnostic(
+                        "avoid-private-typedef-functions",
+                        "The typedef is unnecessary because it is only used in one place.",
+                        name.span,
+                    )
+                })
+                .collect(),
+        )
     }
 }
 

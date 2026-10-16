@@ -8,7 +8,7 @@
 //! wildcard is fine; only uses in expression position are reported. Give the
 //! binding a real name if you actually need its value.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -17,13 +17,17 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 pub struct NoWildcardVariableUses;
 
 impl Rule for NoWildcardVariableUses {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut visitor = WildcardUseVisitor {
             diags: Vec::new(),
             ctx,
         };
         visitor.visit_program(program);
-        visitor.diags
+        RulePreparation::Diagnostics(visitor.diags)
     }
 }
 

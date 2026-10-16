@@ -16,7 +16,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, for_each_declared_body, walk_expr, walk_stmt};
@@ -29,7 +29,11 @@ const RULE: &str = "prefer-final-in-for-each";
 pub struct PreferFinalInForEach;
 
 impl Rule for PreferFinalInForEach {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mutated = ctx.mutated_declarations(program);
         let mut bodies = Vec::new();
         for_each_declared_body(program, ctx.source, &mut |body, _, _| {
@@ -42,7 +46,7 @@ impl Rule for PreferFinalInForEach {
             bodies,
         };
         collector.visit_program(program);
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 

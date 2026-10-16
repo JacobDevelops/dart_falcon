@@ -24,8 +24,7 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule, library_doc_imports};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, library_doc_imports};
 use falcon_syntax::ast::*;
 
 use super::conditional_uri_does_not_exist::uri_value;
@@ -43,7 +42,11 @@ struct Namespace {
 }
 
 impl Rule for DirectivesOrdering {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let imports: Vec<Namespace> = program
             .imports
             .iter()
@@ -173,7 +176,7 @@ impl Rule for DirectivesOrdering {
             }
         }
 
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

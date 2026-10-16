@@ -24,15 +24,15 @@
 //!
 //! Adopted from the official `type_annotate_public_apis` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
 use crate::lint::declarations::documented_node_span;
-use crate::lint::semantic_scope::SemanticState;
 use crate::lint::style::always_declare_return_types::operator_span;
 use crate::lint::style::always_specify_types::setter_parameter_span;
+use falcon_analyze::semantic_scope::SemanticState;
 
 const RULE: &str = "type-annotate-public-apis";
 const MESSAGE: &str = "Missing type annotation on a public API.";
@@ -41,9 +41,13 @@ const MESSAGE: &str = "Missing type annotation on a public API.";
 pub struct TypeAnnotatePublicApis;
 
 impl Rule for TypeAnnotatePublicApis {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let mut checker = Checker {
             ctx,
@@ -53,7 +57,7 @@ impl Rule for TypeAnnotatePublicApis {
         for declaration in &program.declarations {
             checker.declaration(declaration);
         }
-        checker.diags
+        RulePreparation::Diagnostics(checker.diags)
     }
 }
 

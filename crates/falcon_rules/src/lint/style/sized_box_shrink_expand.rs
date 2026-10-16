@@ -14,8 +14,8 @@
 //!
 //! Adopted from the official `sized_box_shrink_expand` lint.
 
-use crate::lint::semantic_scope::{self, SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, parse_int};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, RulePreparation, parse_int};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -25,17 +25,16 @@ use crate::lint::expressions::is_parenthesized;
 pub struct SizedBoxShrinkExpand;
 
 impl Rule for SizedBoxShrinkExpand {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             sized_box: DeclarationIdentity::flutter("SizedBox"),
             ctx,
             diags: Vec::new(),
-        };
-        semantic_scope::visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -46,6 +45,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Some((identity, "new", args)) =
             crate::lint::flutter::scoped_constructor_invocation(node, state)

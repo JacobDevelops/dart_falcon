@@ -12,7 +12,7 @@
 //!
 //! Adopted from the official `avoid_multiple_declarations_per_line` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_stmt, walk_top_level_decl};
@@ -21,13 +21,17 @@ use falcon_syntax::visitor::{Visitor, walk_field_decl, walk_stmt, walk_top_level
 pub struct AvoidMultipleDeclarationsPerLine;
 
 impl Rule for AvoidMultipleDeclarationsPerLine {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

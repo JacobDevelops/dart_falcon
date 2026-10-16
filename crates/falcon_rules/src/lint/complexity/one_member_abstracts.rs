@@ -12,8 +12,7 @@
 //!
 //! Adopted from the official `one_member_abstracts` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
@@ -21,40 +20,44 @@ use falcon_syntax::ast::*;
 pub struct OneMemberAbstracts;
 
 impl Rule for OneMemberAbstracts {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        program
-            .declarations
-            .iter()
-            .filter_map(|declaration| match declaration {
-                TopLevelDecl::Class(class)
-                    if class.modifiers.is_abstract
-                        && class.extends.is_none()
-                        && class.with_clause.is_empty()
-                        && class.implements.is_empty() =>
-                {
-                    Some((&class.name, class.members.as_slice()))
-                }
-                TopLevelDecl::MixinClass(class)
-                    if class.is_abstract
-                        && class.extends.is_none()
-                        && class.with_clause.is_empty()
-                        && class.implements.is_empty() =>
-                {
-                    Some((&class.name, class.members.as_slice()))
-                }
-                _ => None,
-            })
-            .filter_map(|(name, members)| {
-                let method = single_abstract_method(members)?;
-                Some(ctx.diagnostic(
-                    "one-member-abstracts",
-                    format!(
-                        "Unnecessary use of an abstract class; make '{method}' a top-level function and remove the class."
-                    ),
-                    name.span,
-                ))
-            })
-            .collect()
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Diagnostics(program
+        .declarations
+        .iter()
+        .filter_map(|declaration| match declaration {
+            TopLevelDecl::Class(class)
+                if class.modifiers.is_abstract
+                    && class.extends.is_none()
+                    && class.with_clause.is_empty()
+                    && class.implements.is_empty() =>
+            {
+                Some((&class.name, class.members.as_slice()))
+            }
+            TopLevelDecl::MixinClass(class)
+                if class.is_abstract
+                    && class.extends.is_none()
+                    && class.with_clause.is_empty()
+                    && class.implements.is_empty() =>
+            {
+                Some((&class.name, class.members.as_slice()))
+            }
+            _ => None,
+        })
+        .filter_map(|(name, members)| {
+            let method = single_abstract_method(members)?;
+            Some(ctx.diagnostic(
+                "one-member-abstracts",
+                format!(
+                    "Unnecessary use of an abstract class; make '{method}' a top-level function and remove the class."
+                ),
+                name.span,
+            ))
+        })
+        .collect())
     }
 }
 

@@ -5,9 +5,8 @@ mod inference;
 
 use std::path::Path;
 
-use falcon_analyze::{AnalyzeContext, Rule, RuleRegistry};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, RuleRegistry};
 use falcon_config::FalconConfig;
-use falcon_diagnostics::Diagnostic;
 use falcon_rules::all_rules;
 use falcon_rules::lint::performance::noop_primitive_operations::NoopPrimitiveOperations;
 use falcon_syntax::Program;
@@ -15,8 +14,12 @@ use falcon_syntax::Program;
 struct RegisteredRules(RuleRegistry);
 
 impl Rule for RegisteredRules {
-    fn analyze(&self, program: &Program, context: &AnalyzeContext) -> Vec<Diagnostic> {
-        self.0.run_all(program, context)
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        context: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Diagnostics(self.0.run_all(program, context))
     }
 }
 

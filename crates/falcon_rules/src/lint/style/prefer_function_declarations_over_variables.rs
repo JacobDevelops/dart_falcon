@@ -9,7 +9,7 @@
 //! since proving it is never reassigned requires dataflow this syntax-only pass
 //! does not perform.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -19,13 +19,17 @@ use falcon_syntax::visitor::{self, Visitor};
 pub struct PreferFunctionDeclarationsOverVariables;
 
 impl Rule for PreferFunctionDeclarationsOverVariables {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

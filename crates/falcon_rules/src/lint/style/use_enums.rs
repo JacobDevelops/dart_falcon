@@ -24,8 +24,7 @@
 //!
 //! Adopted from the official `use_enums` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
@@ -33,18 +32,24 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 pub struct UseEnums;
 
 impl Rule for UseEnums {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        program
-            .declarations
-            .iter()
-            .enumerate()
-            .filter_map(|(index, decl)| match decl {
-                TopLevelDecl::Class(class) if behaves_like_enum(class, index, program) => {
-                    Some(ctx.diagnostic("use-enums", "Class should be an enum.", class.name.span))
-                }
-                _ => None,
-            })
-            .collect()
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Diagnostics(
+            program
+                .declarations
+                .iter()
+                .enumerate()
+                .filter_map(|(index, decl)| match decl {
+                    TopLevelDecl::Class(class) if behaves_like_enum(class, index, program) => Some(
+                        ctx.diagnostic("use-enums", "Class should be an enum.", class.name.span),
+                    ),
+                    _ => None,
+                })
+                .collect(),
+        )
     }
 }
 

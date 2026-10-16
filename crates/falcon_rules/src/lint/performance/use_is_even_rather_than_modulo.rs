@@ -10,30 +10,29 @@
 //!
 //! Adopted from the official `use_is_even_rather_than_modulo` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, parse_int};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, parse_int};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 use crate::lint::const_eval::ConstContexts;
 use crate::lint::const_eval::ConstructorConstContexts as ConstConstructorAsserts;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UseIsEvenRatherThanModulo;
 
 impl Rule for UseIsEvenRatherThanModulo {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
             contexts: ConstContexts::of(program),
             asserts: ConstConstructorAsserts::new(program),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -52,6 +51,10 @@ fn int_literal(expr: &Expr) -> Option<i128> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::Binary {
             op: BinaryOp::EqEq,

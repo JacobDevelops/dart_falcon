@@ -31,14 +31,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{
-    CascadeAssignment, SemanticRuleVisitor, SemanticState, visit_program,
-};
+#[cfg(test)]
+use falcon_analyze::semantic_scope::visit_program;
+use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
 /// Members that exist on every object, even one typed `Object?`.
 const ALLOWED_MEMBERS: [&str; 4] = ["hashCode", "noSuchMethod", "runtimeType", "toString"];
@@ -47,18 +47,18 @@ const ALLOWED_MEMBERS: [&str; 4] = ["hashCode", "noSuchMethod", "runtimeType", "
 pub struct AvoidDynamicCalls;
 
 impl Rule for AvoidDynamicCalls {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
             callees: HashSet::new(),
             cascade_sections: HashMap::new(),
         };
-        visit_program(&mut collector, program, state);
-        collector.diagnostics
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 
@@ -100,6 +100,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_cascade_operation(
         &mut self,
         operation: &CascadeOp,
@@ -348,7 +352,9 @@ fn is_user_definable(op: BinaryOp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_analyze::{IdentityIndex, IdentitySource, SemanticModel, SignatureIndex};
+    use falcon_analyze::{
+        IdentityIndex, IdentitySource, RuleAnalysis, SemanticModel, SignatureIndex,
+    };
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;

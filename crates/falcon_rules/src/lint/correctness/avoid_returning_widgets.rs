@@ -11,7 +11,7 @@
 //! members are exempt, as is any return type naming a concrete widget subclass
 //! such as `Container`.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -19,7 +19,11 @@ use falcon_syntax::ast::*;
 pub struct AvoidReturningWidgets;
 
 impl Rule for AvoidReturningWidgets {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
 
         for decl in &program.declarations {
@@ -39,7 +43,7 @@ impl Rule for AvoidReturningWidgets {
             }
         }
 
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

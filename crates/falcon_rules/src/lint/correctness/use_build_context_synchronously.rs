@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::{Program, ast::*, visitor::*};
 
@@ -15,67 +15,81 @@ mod semantics;
 pub struct UseBuildContextSynchronously;
 
 impl Rule for UseBuildContextSynchronously {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if is_test_file(ctx.file_path) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        let mut semantics = semantics::collect(program, ctx);
-        if semantics.uses.is_empty() {
-            return Vec::new();
-        }
-        let mut tree = Tree {
-            never: std::mem::take(&mut semantics.never),
-            ..Tree::default()
+        let Some(semantics) = semantics::prepare(program, ctx) else {
+            return RulePreparation::Diagnostics(Vec::new());
         };
-        tree.visit_program(program);
-        let mut diagnostics = Vec::with_capacity(semantics.uses.len());
-        let mut visitor = AsyncStateVisitor {
-            tree: &tree,
-            semantics: &semantics,
-            mounted: false,
-            reference: Key(0, 0),
-            cache: HashMap::new(),
+        RulePreparation::Semantic(Box::new(semantics))
+    }
+}
+
+fn analyze_semantics(
+    program: &Program,
+    ctx: &AnalyzeContext,
+    mut semantics: semantics::Semantics,
+) -> Vec<Diagnostic> {
+    if semantics.uses.is_empty() {
+        return Vec::new();
+    }
+    let mut tree = Tree {
+        never: std::mem::take(&mut semantics.never),
+        ..Tree::default()
+    };
+    tree.visit_program(program);
+    let mut diagnostics = Vec::with_capacity(semantics.uses.len());
+    let mut visitor = AsyncStateVisitor {
+        tree: &tree,
+        semantics: &semantics,
+        mounted: false,
+        reference: Key(0, 0),
+        cache: HashMap::new(),
+    };
+    for (&expression, &mounted) in &semantics.uses {
+        let key = Key(expression, 0);
+        let Some(node) = tree.nodes.get(&key) else {
+            continue;
         };
-        for (&expression, &mounted) in &semantics.uses {
-            let key = Key(expression, 0);
-            let Some(node) = tree.nodes.get(&key) else {
-                continue;
-            };
-            visitor.mounted = mounted;
-            visitor.reference = key;
-            visitor.cache.clear();
-            let mut child = key;
-            let mut report = false;
-            while let Some(parent) = tree.nodes.get(&child).and_then(|n| n.parent) {
-                if matches!(tree.nodes[&parent].kind, Kind::Body) {
-                    if let Some(callback) = tree.nodes[&parent].parent {
-                        report = semantics.protected_callbacks.contains(&callback.0);
-                    }
+        visitor.mounted = mounted;
+        visitor.reference = key;
+        visitor.cache.clear();
+        let mut child = key;
+        let mut report = false;
+        while let Some(parent) = tree.nodes.get(&child).and_then(|n| n.parent) {
+            if matches!(tree.nodes[&parent].kind, Kind::Body) {
+                if let Some(callback) = tree.nodes[&parent].parent {
+                    report = semantics.protected_callbacks.contains(&callback.0);
+                }
+                break;
+            }
+            visitor.reference = child;
+            let state = visitor.state(parent);
+            visitor.cache.insert(parent, state);
+            match state {
+                Some(AsyncState::Mounted | AsyncState::NotMounted) => break,
+                Some(AsyncState::Async) => {
+                    report = true;
                     break;
                 }
-                visitor.reference = child;
-                let state = visitor.state(parent);
-                visitor.cache.insert(parent, state);
-                match state {
-                    Some(AsyncState::Mounted | AsyncState::NotMounted) => break,
-                    Some(AsyncState::Async) => {
-                        report = true;
-                        break;
-                    }
-                    None => child = parent,
-                }
-            }
-            if report {
-                diagnostics.push(ctx.diagnostic(
-                    "use-build-context-synchronously",
-                    "Do not use a BuildContext across an async gap without a matching mounted check.",
-                    node.span,
-                ));
+                None => child = parent,
             }
         }
-        diagnostics.sort_by_key(|diagnostic| diagnostic.span.start);
-        diagnostics
+        if report {
+            diagnostics.push(ctx.diagnostic(
+                "use-build-context-synchronously",
+                "Do not use a BuildContext across an async gap without a matching mounted check.",
+                node.span,
+            ));
+        }
     }
+    diagnostics.sort_by_key(|diagnostic| diagnostic.span.start);
+    diagnostics
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -990,7 +1004,7 @@ fn is_test_file(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod test_directories {
     use super::is_test_file;
-    use falcon_analyze::{AnalyzeContext, Rule};
+    use falcon_analyze::{AnalyzeContext, RuleAnalysis};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
 

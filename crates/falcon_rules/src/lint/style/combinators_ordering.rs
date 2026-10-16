@@ -12,15 +12,18 @@
 //!
 //! Adopted from the official `combinators_ordering` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct CombinatorsOrdering;
 
 impl Rule for CombinatorsOrdering {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let combinators = program
             .imports
             .iter()
@@ -31,7 +34,7 @@ impl Rule for CombinatorsOrdering {
                     .iter()
                     .flat_map(|export| &export.combinators),
             );
-        combinators
+        RulePreparation::Diagnostics(combinators
             .filter_map(|combinator| {
                 let (ImportCombinator::Show(names, span) | ImportCombinator::Hide(names, span)) =
                     combinator;
@@ -46,7 +49,7 @@ impl Rule for CombinatorsOrdering {
                     )
                 })
             })
-            .collect()
+            .collect())
     }
 }
 

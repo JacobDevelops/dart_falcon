@@ -20,7 +20,7 @@
 //!
 //! Adopted from the official `avoid_null_checks_in_equality_operators` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_pattern, walk_stmt};
@@ -31,7 +31,11 @@ const MESSAGE: &str = "Unnecessary null comparison in implementation of '=='.";
 pub struct AvoidNullChecksInEqualityOperators;
 
 impl Rule for AvoidNullChecksInEqualityOperators {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             let Some(members) = crate::lint::declarations::members_of(decl) else {
@@ -43,7 +47,7 @@ impl Rule for AvoidNullChecksInEqualityOperators {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 
@@ -217,6 +221,7 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::*;
+    use falcon_analyze::RuleAnalysis;
 
     #[test]
     fn includes_method_arguments_without_extending_property_accesses() {

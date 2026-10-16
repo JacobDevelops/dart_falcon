@@ -20,7 +20,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Feature, Rule};
+use falcon_analyze::{AnalyzeContext, Feature, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
@@ -35,10 +35,14 @@ const RULE: &str = "prefer-final-parameters";
 pub struct PreferFinalParameters;
 
 impl Rule for PreferFinalParameters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let version = ctx.language_version();
         if version.supports(Feature::PrimaryConstructors) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let mutated = ctx.mutated_declarations(program);
         let mut collector = Collector {
@@ -49,7 +53,7 @@ impl Rule for PreferFinalParameters {
             diagnostics: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 

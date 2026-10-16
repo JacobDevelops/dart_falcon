@@ -18,30 +18,29 @@
 //!
 //! Adopted from the official `unnecessary_await_in_return` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UnnecessaryAwaitInReturn;
 
 impl Rule for UnnecessaryAwaitInReturn {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             diagnostics: Vec::new(),
             ctx,
             bodies: FunctionBodies::new(program),
             closure_returns: Vec::new(),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diagnostics
+        }))
     }
 }
 
@@ -118,6 +117,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         if let Stmt::Return(statement) = node
             && let Some(Expr::Await { expr, span }) =

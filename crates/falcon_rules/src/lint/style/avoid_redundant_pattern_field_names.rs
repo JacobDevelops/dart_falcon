@@ -6,7 +6,7 @@
 //! Only a field whose label matches its bound variable is flagged; a genuine
 //! rename such as `Point(x: px)` is left alone.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::token::TokenKind;
@@ -16,13 +16,17 @@ use falcon_syntax::visitor::{Visitor, walk_pattern};
 pub struct AvoidRedundantPatternFieldNames;
 
 impl Rule for AvoidRedundantPatternFieldNames {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

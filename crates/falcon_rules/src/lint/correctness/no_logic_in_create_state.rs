@@ -6,18 +6,22 @@
 //! constructor identity is not guessed from a name suffix.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    SignatureIndex, Truth,
 };
-use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct NoLogicInCreateState;
 
 impl Rule for NoLogicInCreateState {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let stateful_widget = DeclarationIdentity::flutter("StatefulWidget");
@@ -66,7 +70,7 @@ impl Rule for NoLogicInCreateState {
                 ));
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

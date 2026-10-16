@@ -16,28 +16,27 @@
 //!
 //! Adopted from the official `cast_nullable_to_non_nullable` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule, Truth};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use crate::lint::semantic_type_operations::nullability;
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct CastNullableToNonNullable;
 
 impl Rule for CastNullableToNonNullable {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             ctx,
             diagnostics: Vec::new(),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diagnostics
+        }))
     }
 }
 
@@ -47,6 +46,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let Expr::As {
             expr,

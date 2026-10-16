@@ -9,7 +9,7 @@
 //! declared name's spelling only, so it does not enforce interior capitalization
 //! such as an acronym written in all caps.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -17,7 +17,11 @@ use falcon_syntax::ast::*;
 pub struct PreferCorrectTypeName;
 
 impl Rule for PreferCorrectTypeName {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             match decl {
@@ -47,7 +51,7 @@ impl Rule for PreferCorrectTypeName {
                 _ => {}
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

@@ -17,8 +17,7 @@
 //!
 //! Adopted from the official `test_types_in_equals` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
 
@@ -28,7 +27,11 @@ use crate::lint::expressions::is_parenthesized;
 pub struct TestTypesInEquals;
 
 impl Rule for TestTypesInEquals {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             let Some(members) = crate::lint::declarations::members_of(decl) else {
@@ -69,7 +72,7 @@ impl Rule for TestTypesInEquals {
                 }));
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

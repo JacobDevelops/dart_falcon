@@ -8,7 +8,7 @@
 //! Wrap such type references in backticks so they survive rendering. Fenced code blocks,
 //! indented code, and inline code spans are skipped.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
@@ -16,7 +16,11 @@ use falcon_syntax::ast::*;
 pub struct UnintendedHtmlInDocComment;
 
 impl Rule for UnintendedHtmlInDocComment {
-    fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
 
         let mut byte_offset = 0;
@@ -40,7 +44,7 @@ impl Rule for UnintendedHtmlInDocComment {
 
             byte_offset += chunk.len();
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 
@@ -217,6 +221,7 @@ const HTML_TAGS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::PathBuf;

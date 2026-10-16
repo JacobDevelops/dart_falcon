@@ -1,4 +1,4 @@
-use falcon_analyze::{AnalyzeContext, Rule, RuleRegistry};
+use falcon_analyze::{AnalyzeContext, Rule, RuleAnalysis, RulePreparation, RuleRegistry};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
 use falcon_syntax::Program;
@@ -8,38 +8,52 @@ use std::path::Path;
 
 struct NoOpRule;
 impl Rule for NoOpRule {
-    fn analyze(&self, _program: &Program, _ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        vec![]
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        _ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Diagnostics(vec![])
     }
 }
 
 struct AlwaysErrorRule;
 impl Rule for AlwaysErrorRule {
-    fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        vec![Diagnostic::new(
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Diagnostics(vec![Diagnostic::new(
             "always_error",
             Severity::Error,
             "test error",
             ctx.file_path.to_string_lossy().to_string(),
             Span { start: 0, end: 0 },
-        )]
+        )])
     }
 }
 
 struct CountFunctionDeclsRule(u32);
 impl Rule for CountFunctionDeclsRule {
-    fn analyze(&self, _program: &Program, _ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        (0..self.0)
-            .map(|i| {
-                Diagnostic::new(
-                    "count_functions",
-                    Severity::Info,
-                    format!("function {}", i),
-                    "test.dart",
-                    Span { start: 0, end: 1 },
-                )
-            })
-            .collect()
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        _ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Diagnostics(
+            (0..self.0)
+                .map(|i| {
+                    Diagnostic::new(
+                        "count_functions",
+                        Severity::Info,
+                        format!("function {}", i),
+                        "test.dart",
+                        Span { start: 0, end: 1 },
+                    )
+                })
+                .collect(),
+        )
     }
 }
 

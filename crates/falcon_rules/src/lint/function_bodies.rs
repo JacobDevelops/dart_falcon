@@ -1,7 +1,7 @@
 //! Span index of function bodies, for rules that need the innermost enclosing
 //! function of a node the semantic walker hands them.
 //!
-//! [`crate::lint::semantic_scope`] reports expressions and statements without
+//! [`falcon_analyze::semantic_scope`] reports expressions and statements without
 //! their enclosing declaration. Bodies nest strictly, so the innermost body
 //! containing a node is the containing entry with the greatest start offset.
 

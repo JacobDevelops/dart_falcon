@@ -3,8 +3,8 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, DeclarationIdentity, Rule, SemanticModel, SignatureIndex,
-    evaluate_constant,
+    AnalyzeContext, ConstantValue, DeclarationIdentity, Rule, RulePreparation, SemanticModel,
+    SignatureIndex, evaluate_constant,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -14,9 +14,13 @@ use falcon_syntax::visitor::{Visitor, walk_class_decl, walk_expr, walk_function_
 pub struct NoDuplicateCaseValues;
 
 impl Rule for NoDuplicateCaseValues {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut collector = Collector {
@@ -28,7 +32,7 @@ impl Rule for NoDuplicateCaseValues {
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

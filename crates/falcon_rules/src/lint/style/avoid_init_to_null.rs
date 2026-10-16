@@ -7,7 +7,7 @@
 //! non-nullable type are left alone, since for them the `null` is either
 //! required or meaningful.
 
-use falcon_analyze::{AnalyzeContext, ParameterDefault, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, ParameterDefault, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -15,13 +15,17 @@ use falcon_syntax::visitor::{
     walk_top_level_decl,
 };
 
-use crate::lint::semantic_scope::SemanticState;
+use falcon_analyze::semantic_scope::SemanticState;
 
 #[derive(Default)]
 pub struct AvoidInitToNull;
 
 impl Rule for AvoidInitToNull {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let state = SemanticState::new(program, ctx);
         let mut collector = Collector {
             diags: Vec::new(),
@@ -30,7 +34,7 @@ impl Rule for AvoidInitToNull {
             superclass: None,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

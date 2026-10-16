@@ -15,8 +15,7 @@
 //!
 //! Adopted from the official `sort_unnamed_constructors_first` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 
 use super::sort_constructors_first::{constructor_container, constructor_name_range};
@@ -25,7 +24,11 @@ use super::sort_constructors_first::{constructor_container, constructor_name_ran
 pub struct SortUnnamedConstructorsFirst;
 
 impl Rule for SortUnnamedConstructorsFirst {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for members in program
             .declarations
@@ -52,6 +55,6 @@ impl Rule for SortUnnamedConstructorsFirst {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }

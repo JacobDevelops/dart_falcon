@@ -8,7 +8,7 @@
 //! is private (has a leading underscore). Metadata on either accessor exempts
 //! the pair.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -18,14 +18,18 @@ use std::collections::HashMap;
 pub struct UnnecessaryGettersSetters;
 
 impl Rule for UnnecessaryGettersSetters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             if let Some(members) = crate::lint::declarations::members_of(decl) {
                 check_members(members, ctx, &mut diags);
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

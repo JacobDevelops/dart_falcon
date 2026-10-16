@@ -14,8 +14,7 @@
 //! A `_` name on either side is skipped when the library's language version
 //! enables wildcard variables (3.7+).
 
-use falcon_analyze::{AnalyzeContext, Feature, Rule, SemanticModel};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Feature, Rule, RulePreparation, SemanticModel};
 use falcon_syntax::{Token, ast::*};
 
 use crate::lint::inherited_members::{inherited_concrete_member, inheriting_declarations};
@@ -26,12 +25,16 @@ use crate::lint::style::public_member_api_docs::documented;
 pub struct AvoidRenamingMethodParameters;
 
 impl Rule for AvoidRenamingMethodParameters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         if !is_in_lib_dir(ctx.file_path) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let wildcards = ctx.language_version().supports(Feature::WildcardVariables);
@@ -99,7 +102,7 @@ impl Rule for AvoidRenamingMethodParameters {
                 }));
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

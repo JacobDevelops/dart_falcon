@@ -2,18 +2,21 @@
 //! `State` subclass's `initState` override.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel, Truth,
 };
-use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct ProperSuperInitState;
 
 impl Rule for ProperSuperInitState {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let state = DeclarationIdentity::flutter("State");
@@ -60,7 +63,7 @@ impl Rule for ProperSuperInitState {
                 ));
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

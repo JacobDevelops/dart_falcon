@@ -6,26 +6,30 @@
 //! underscores included. Names with an inner dot before `.dart` (generated
 //! suffixes like `.g.dart`) are not checked.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::Program;
 
 #[derive(Default)]
 pub struct FileNames;
 
 impl Rule for FileNames {
-    fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(file_name) = ctx.file_path.file_name().and_then(|name| name.to_str()) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         if valid_file_name(file_name) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        vec![ctx.diagnostic(
+        RulePreparation::Diagnostics(vec![ctx.diagnostic(
             "file-names",
             "Name source files using lowercase_with_underscores.",
             DiagSpan { start: 0, end: 0 },
-        )]
+        )])
     }
 }
 

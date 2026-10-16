@@ -18,26 +18,52 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::{Expr, Span};
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct AvoidBoolLiteralsInConditionalExpressions;
 
 impl Rule for AvoidBoolLiteralsInConditionalExpressions {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let collector = Collector {
+            ctx,
             conditionals: Vec::new(),
             branches: HashMap::new(),
         };
-        visit_program(&mut collector, program, state);
+        RulePreparation::Semantic(Box::new(collector))
+    }
+}
+
+struct Conditional {
+    span: Span,
+    bool_branches: usize,
+}
+
+struct Collector<'a> {
+    ctx: &'a AnalyzeContext<'a>,
+    conditionals: Vec<Conditional>,
+    /// Branches are typed when the shared visitor reaches their promoted scope.
+    branches: HashMap<*const Expr, usize>,
+}
+
+fn non_nullable_bool(expression: &Expr, state: &SemanticState<'_>) -> bool {
+    let ty = state.infer(expression);
+    ty.interface("dart:core", "bool") && !ty.nullable()
+}
+
+impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        let collector = *self;
+        let ctx = collector.ctx;
         collector
             .conditionals
             .into_iter()
@@ -52,25 +78,6 @@ impl Rule for AvoidBoolLiteralsInConditionalExpressions {
             })
             .collect()
     }
-}
-
-struct Conditional {
-    span: Span,
-    bool_branches: usize,
-}
-
-struct Collector {
-    conditionals: Vec<Conditional>,
-    /// Branches are typed when the shared visitor reaches their promoted scope.
-    branches: HashMap<*const Expr, usize>,
-}
-
-fn non_nullable_bool(expression: &Expr, state: &SemanticState<'_>) -> bool {
-    let ty = state.infer(expression);
-    ty.interface("dart:core", "bool") && !ty.nullable()
-}
-
-impl SemanticRuleVisitor for Collector {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         if let Some(index) = self.branches.remove(&std::ptr::from_ref(node))
             && non_nullable_bool(node, state)

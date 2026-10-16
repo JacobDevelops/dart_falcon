@@ -467,6 +467,8 @@ pub fn build_reference_graph(
 
 #[cfg(test)]
 use crate::inference;
+#[cfg(test)]
+use falcon_analyze::RuleAnalysis;
 
 /// Test support for per-file rules whose behaviour depends on the enclosing
 /// package: runs a rule over every Dart file of `corpus/<rule>/project/` at its

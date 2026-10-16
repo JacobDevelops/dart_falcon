@@ -7,7 +7,7 @@
 //! bangs. Despite the rule's name, it targets only stacked negations — it does
 //! not rewrite `!(a == b)` into `a != b`.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -16,13 +16,17 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 pub struct AvoidInvertedBooleanExpressions;
 
 impl Rule for AvoidInvertedBooleanExpressions {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

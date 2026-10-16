@@ -19,7 +19,7 @@
 //!
 //! Adopted from the official `no_self_assignments` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -30,13 +30,17 @@ use crate::lint::expressions::identifier_name;
 pub struct NoSelfAssignments;
 
 impl Rule for NoSelfAssignments {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut finder = Finder {
             ctx,
             diagnostics: Vec::new(),
         };
         finder.visit_program(program);
-        finder.diagnostics
+        RulePreparation::Diagnostics(finder.diagnostics)
     }
 }
 

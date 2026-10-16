@@ -30,24 +30,25 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
 use crate::lint::declarations::declaration_initializers as all_declaration_initializers;
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct UnnecessaryNullChecks;
 
 impl Rule for UnnecessaryNullChecks {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
             bodies: FunctionBodies::new(program),
@@ -55,9 +56,7 @@ impl Rule for UnnecessaryNullChecks {
             fixed: HashMap::new(),
             pattern_assignments: Vec::new(),
             locals: locally_bound_identifiers(program),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -296,6 +295,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         match node {
             Stmt::LocalVar(declaration) => {

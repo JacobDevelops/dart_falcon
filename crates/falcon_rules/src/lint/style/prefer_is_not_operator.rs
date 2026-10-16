@@ -6,8 +6,7 @@
 //! fires on a logical-not applied to a non-negated `is` expression; a test that
 //! already uses `is!` produces no negation to flag.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::for_each_expr_in_program;
 
@@ -15,7 +14,11 @@ use falcon_syntax::visitor::for_each_expr_in_program;
 pub struct PreferIsNotOperator;
 
 impl Rule for PreferIsNotOperator {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for_each_expr_in_program(program, |node| {
             if let Expr::Unary {
@@ -32,6 +35,6 @@ impl Rule for PreferIsNotOperator {
                 ));
             }
         });
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }

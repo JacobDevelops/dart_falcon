@@ -18,15 +18,19 @@
 //!
 //! Adopted from the official `sort_constructors_first` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct SortConstructorsFirst;
 
 impl Rule for SortConstructorsFirst {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for members in program
             .declarations
@@ -41,7 +45,7 @@ impl Rule for SortConstructorsFirst {
                             diags.push(ctx.diagnostic(
                                 "sort-constructors-first",
                                 "Constructor declarations should be before non-constructor \
-                                 declarations.",
+                         declarations.",
                                 constructor_name_range(constructor),
                             ));
                         }
@@ -51,7 +55,7 @@ impl Rule for SortConstructorsFirst {
                             diags.push(ctx.diagnostic(
                                 "sort-constructors-first",
                                 "Constructor declarations should be before non-constructor \
-                                 declarations.",
+                         declarations.",
                                 body.this_span,
                             ));
                         }
@@ -60,7 +64,7 @@ impl Rule for SortConstructorsFirst {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

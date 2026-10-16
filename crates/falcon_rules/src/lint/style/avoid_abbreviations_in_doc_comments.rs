@@ -7,7 +7,7 @@
 //! doc-comment lines are scanned, and the first occurrence of each abbreviation
 //! on a line is reported.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
@@ -15,10 +15,14 @@ use falcon_syntax::ast::*;
 pub struct AvoidAbbreviationsInDocComments;
 
 impl Rule for AvoidAbbreviationsInDocComments {
-    fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         scan_source(ctx.source, &mut diags, ctx);
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

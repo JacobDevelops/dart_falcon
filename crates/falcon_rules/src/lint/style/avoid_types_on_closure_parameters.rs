@@ -26,29 +26,34 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, SemanticModel};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{self, Visitor};
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct AvoidTypesOnClosureParameters;
 
 impl Rule for AvoidTypesOnClosureParameters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let Some(identities) = ctx.identities else {
+            return RulePreparation::Diagnostics(Vec::new());
         };
+        let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut returns = ReturnedClosures {
-            model: &state.model,
+            model: &model,
             frames: Vec::new(),
             returned: HashMap::new(),
         };
         returns.visit_program(program);
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
             uncontextual: HashSet::new(),
@@ -56,8 +61,7 @@ impl Rule for AvoidTypesOnClosureParameters {
             future_closures: HashSet::new(),
             expression_contexts: HashMap::new(),
         };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 
@@ -257,6 +261,9 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
     fn visit_call_arguments(
         &mut self,
         args: &ArgList,

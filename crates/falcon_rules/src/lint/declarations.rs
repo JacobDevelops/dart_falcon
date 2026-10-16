@@ -204,6 +204,7 @@ pub(crate) fn first_token_after_annotations(
 
 #[cfg(test)]
 mod tests {
+    use falcon_analyze::RuleAnalysis;
     use falcon_dart_parser::parse;
 
     use super::*;

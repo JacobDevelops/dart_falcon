@@ -5,7 +5,8 @@ use std::path::Path;
 
 use falcon_analyze::{
     AnalysisEnvironment, AnalyzeContext, ExternalLibraries, ExternalSources, IdentityIndex,
-    IdentitySource, LibrarySource, Rule, SignatureIndex, TypeIndex, canonical_or_lexical,
+    IdentitySource, LibrarySource, Rule, RuleAnalysis, SignatureIndex, TypeIndex,
+    canonical_or_lexical,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;

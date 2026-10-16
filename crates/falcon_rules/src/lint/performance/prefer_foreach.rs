@@ -17,22 +17,23 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{AnalyzeContext, NameIdentity, QualifiedName, Rule};
+use falcon_analyze::{AnalyzeContext, NameIdentity, QualifiedName, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct PreferForeach;
 
 impl Rule for PreferForeach {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
             import_prefixes: program
@@ -41,9 +42,7 @@ impl Rule for PreferForeach {
                 .filter_map(|import| import.as_name.as_ref().map(|name| name.name.clone()))
                 .collect(),
             pending: HashMap::new(),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -177,6 +176,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         if let Stmt::For(statement) = node {
             self.check(statement, state);

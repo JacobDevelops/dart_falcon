@@ -19,7 +19,7 @@ use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
 
-use crate::lint::semantic_scope::{self, SemanticRuleVisitor, SemanticState};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub(super) struct Semantics {
@@ -30,10 +30,11 @@ pub(super) struct Semantics {
     pub never: HashSet<usize>,
 }
 
-pub(super) fn collect(program: &Program, ctx: &AnalyzeContext<'_>) -> Semantics {
-    let Some(state) = SemanticState::new(program, ctx) else {
-        return Semantics::default();
-    };
+pub(super) fn prepare<'a>(
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
+) -> Option<Collector<'a>> {
+    let state = SemanticState::new(program, ctx)?;
     let global_count = program
         .declarations
         .iter()
@@ -44,6 +45,8 @@ pub(super) fn collect(program: &Program, ctx: &AnalyzeContext<'_>) -> Semantics 
         })
         .sum();
     let mut collector = Collector {
+        program,
+        ctx,
         semantics: Semantics::default(),
         globals: HashMap::with_capacity(global_count),
     };
@@ -75,13 +78,26 @@ pub(super) fn collect(program: &Program, ctx: &AnalyzeContext<'_>) -> Semantics 
             _ => {}
         }
     }
-    semantic_scope::visit_program(&mut collector, program, state);
-    collector.semantics
+    Some(collector)
 }
 
-struct Collector<'a> {
+pub(super) struct Collector<'a> {
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
     semantics: Semantics,
     globals: HashMap<&'a str, ResolvedType>,
+}
+
+#[cfg(test)]
+fn collect(program: &Program, ctx: &AnalyzeContext<'_>) -> Semantics {
+    let Some(mut collector) = prepare(program, ctx) else {
+        return Semantics::default();
+    };
+    let Some(state) = SemanticState::new(program, ctx) else {
+        return Semantics::default();
+    };
+    falcon_analyze::semantic_scope::visit_program(&mut collector, program, state);
+    collector.semantics
 }
 
 fn key(expression: &Expr) -> usize {
@@ -459,6 +475,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<falcon_diagnostics::Diagnostic> {
+        super::analyze_semantics(self.program, self.ctx, self.semantics)
+    }
+
     fn visit_expr(&mut self, expression: &Expr, state: &SemanticState<'_>) {
         if matches!(expression, Expr::Paren { .. }) {
             return;
@@ -626,17 +646,20 @@ use crate::inference;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_analyze::Rule;
+    use falcon_analyze::{Rule, RulePreparation};
     use falcon_config::FalconConfig;
-    use falcon_diagnostics::Diagnostic;
     use std::path::Path;
 
     struct CheckProtectedCallbacks;
 
     impl Rule for CheckProtectedCallbacks {
-        fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        fn prepare<'a>(
+            &self,
+            program: &'a Program,
+            ctx: &'a AnalyzeContext<'a>,
+        ) -> RulePreparation<'a> {
             assert_eq!(collect(program, ctx).protected_callbacks.len(), 3);
-            Vec::new()
+            RulePreparation::Diagnostics(Vec::new())
         }
     }
 
@@ -661,11 +684,15 @@ void callbacks() {
     struct CheckCascadeCallbacks;
 
     impl Rule for CheckCascadeCallbacks {
-        fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        fn prepare<'a>(
+            &self,
+            program: &'a Program,
+            ctx: &'a AnalyzeContext<'a>,
+        ) -> RulePreparation<'a> {
             let semantics = collect(program, ctx);
             assert_eq!(semantics.protected_callbacks.len(), 2);
             assert_eq!(semantics.uses.len(), 2);
-            Vec::new()
+            RulePreparation::Diagnostics(Vec::new())
         }
     }
 

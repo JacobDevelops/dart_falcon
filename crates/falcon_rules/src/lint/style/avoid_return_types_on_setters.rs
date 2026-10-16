@@ -6,7 +6,7 @@
 //! setters and setters declared in classes, mixins, enums, and extensions are
 //! checked.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
@@ -16,14 +16,18 @@ use falcon_syntax::{Program, TokenKind};
 pub struct AvoidReturnTypesOnSetters;
 
 impl Rule for AvoidReturnTypesOnSetters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
 
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

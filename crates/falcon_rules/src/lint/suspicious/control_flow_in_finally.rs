@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
@@ -19,7 +19,11 @@ use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 pub struct ControlFlowInFinally;
 
 impl Rule for ControlFlowInFinally {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut finder = Finder {
             diags: Vec::new(),
             ctx,
@@ -31,7 +35,7 @@ impl Rule for ControlFlowInFinally {
         finder
             .diags
             .dedup_by_key(|diagnostic| diagnostic.span.start);
-        finder.diags
+        RulePreparation::Diagnostics(finder.diags)
     }
 }
 

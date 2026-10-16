@@ -14,7 +14,7 @@
 //! `max_nesting` (integer, default: 5) — flag when the nesting depth exceeds
 //! this.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::for_each_declared_body;
@@ -24,12 +24,16 @@ use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body, walk_stmt};
 pub struct MaximumNestingLevel;
 
 impl Rule for MaximumNestingLevel {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for_each_declared_body(program, ctx.source, &mut |body, name, _| {
             check_function(body, name, &mut diags, ctx);
         });
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

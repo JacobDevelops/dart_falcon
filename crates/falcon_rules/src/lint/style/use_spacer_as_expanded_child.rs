@@ -10,7 +10,7 @@
 //! with `Spacer()`, moving any `flex:` across.
 //! Checks constructions throughout the program, including initializers and closures.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -18,7 +18,11 @@ use falcon_syntax::ast::*;
 pub struct UseSpacerAsExpandedChild;
 
 impl Rule for UseSpacerAsExpandedChild {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         falcon_syntax::visitor::for_each_expr_in_program(program, |expr| {
             if is_unqualified_construction(expr)
@@ -27,7 +31,7 @@ impl Rule for UseSpacerAsExpandedChild {
                 check_expanded(name, args, span, &mut diags, ctx);
             }
         });
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

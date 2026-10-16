@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -15,9 +15,13 @@ use falcon_syntax::ast::*;
 pub struct ImplementationImports;
 
 impl Rule for ImplementationImports {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(own_package) = source_package(ctx.file_path) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let mut diags = Vec::new();
         for import in &program.imports {
@@ -26,7 +30,7 @@ impl Rule for ImplementationImports {
                 check_uri(&configurable.uri, &own_package, ctx, &mut diags);
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

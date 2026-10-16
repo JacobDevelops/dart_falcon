@@ -2,15 +2,19 @@
 //! Line docs stay grouped across blank lines and ordinary comments; declarations
 //! report the doc token immediately before the first internal gap.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct DanglingLibraryDocComments;
 
 impl Rule for DanglingLibraryDocComments {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let limit = first_directive(program, ctx)
             .map(|(offset, _)| offset)
             .or_else(|| {
@@ -23,15 +27,15 @@ impl Rule for DanglingLibraryDocComments {
             .unwrap_or(ctx.source.len());
         let comments = documentation_blocks(ctx, limit);
         let starts = dangling_starts(program, ctx, &comments);
-        starts
-            .into_iter()
-            .map(|start| {
-                ctx.diagnostic("dangling-library-doc-comments", "Dangling library doc comment. Add a 'library' directive or attach it to a declaration.", DiagSpan {
-                    start,
-                    end: start + 3,
-                })
-            })
-            .collect()
+        RulePreparation::Diagnostics(starts
+    .into_iter()
+    .map(|start| {
+        ctx.diagnostic("dangling-library-doc-comments", "Dangling library doc comment. Add a 'library' directive or attach it to a declaration.", DiagSpan {
+            start,
+            end: start + 3,
+        })
+    })
+    .collect())
     }
 }
 
@@ -244,8 +248,10 @@ fn documentation_blocks(ctx: &AnalyzeContext, limit: usize) -> Vec<DocBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
+    use falcon_diagnostics::Diagnostic;
     use std::path::PathBuf;
 
     fn diags(source: &str) -> Vec<Diagnostic> {

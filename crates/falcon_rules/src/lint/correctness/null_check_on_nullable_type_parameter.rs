@@ -27,7 +27,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -35,10 +35,8 @@ use falcon_syntax::visitor::{Visitor, walk_expr, walk_stmt};
 
 use crate::lint::expressions::identifier_name;
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
-use crate::lint::semantic_scope::{
-    SemanticRuleVisitor, SemanticState, returned_expressions, visit_program,
-};
 use crate::lint::style::unnecessary_null_checks::declaration_initializers;
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, returned_expressions};
 
 const RULE: &str = "null-check-on-nullable-type-parameter";
 const MESSAGE: &str = "Avoid a null assertion on a nullable type parameter.";
@@ -47,11 +45,12 @@ const MESSAGE: &str = "Avoid a null assertion on a nullable type parameter.";
 pub struct NullCheckOnNullableTypeParameter;
 
 impl Rule for NullCheckOnNullableTypeParameter {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
             bodies: FunctionBodies::new(program),
@@ -59,8 +58,7 @@ impl Rule for NullCheckOnNullableTypeParameter {
             initializers: HashSet::new(),
             expected: HashMap::new(),
         };
-        visit_program(&mut collector, program, state);
-        collector.diagnostics
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 
@@ -371,6 +369,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_call_arguments(
         &mut self,
         args: &ArgList,

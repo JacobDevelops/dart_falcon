@@ -23,7 +23,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, Feature, Rule};
+use falcon_analyze::{AnalyzeContext, Feature, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -40,7 +40,11 @@ const MESSAGE: &str = "Local variables should be final.";
 pub struct PreferFinalLocals;
 
 impl Rule for PreferFinalLocals {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mutated = ctx.mutated_declarations(program);
         let mut collector = Collector {
             ctx,
@@ -51,7 +55,7 @@ impl Rule for PreferFinalLocals {
             diagnostics: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 
@@ -421,6 +425,7 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::*;
+    use falcon_analyze::RuleAnalysis;
 
     fn lines(source: &str) -> Vec<usize> {
         let falcon_dart_parser::ParseResult {

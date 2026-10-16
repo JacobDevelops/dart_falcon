@@ -14,14 +14,14 @@
 //!
 //! Adopted from the official `comment_references` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::ast::*;
 
 use crate::lint::doc_comments::{
     DocLookup, DocResolver, DocScopes, keyword_references, references,
 };
-use crate::lint::semantic_scope::SemanticState;
+use falcon_analyze::semantic_scope::SemanticState;
 
 const ID: &str = "comment-references";
 
@@ -29,9 +29,13 @@ const ID: &str = "comment-references";
 pub struct CommentReferences;
 
 impl Rule for CommentReferences {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let sdk_loaded = ctx
             .identities
@@ -77,6 +81,6 @@ impl Rule for CommentReferences {
                 }
             }
         }
-        diagnostics
+        RulePreparation::Diagnostics(diagnostics)
     }
 }

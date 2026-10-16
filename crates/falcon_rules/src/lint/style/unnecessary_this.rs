@@ -1,7 +1,7 @@
 //! Flags a redundant `this.` qualifier on member access.
 
 use crate::lint::lexical_usage::NameScopes;
-use falcon_analyze::{AnalyzeContext, DocName, Rule, SemanticModel};
+use falcon_analyze::{AnalyzeContext, DocName, Rule, RulePreparation, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -12,7 +12,11 @@ use falcon_syntax::visitor::{
 pub struct UnnecessaryThis;
 
 impl Rule for UnnecessaryThis {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diagnostics = Vec::new();
         let model = ctx
             .identities
@@ -43,7 +47,7 @@ impl Rule for UnnecessaryThis {
                 check_member(member, ctx, &library_shadows, &mut diagnostics);
             }
         }
-        diagnostics
+        RulePreparation::Diagnostics(diagnostics)
     }
 }
 

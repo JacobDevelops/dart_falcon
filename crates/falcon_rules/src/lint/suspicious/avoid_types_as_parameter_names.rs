@@ -1,7 +1,9 @@
 //! Flags implicit formal parameters, catch variables, and type parameters that
 //! shadow a type in their enclosing scope.
 
-use falcon_analyze::{AnalyzeContext, IdentityIndex, LibraryId, NameIdentity, Rule};
+use falcon_analyze::{
+    AnalyzeContext, IdentityIndex, LibraryId, NameIdentity, Rule, RulePreparation,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::*;
@@ -10,12 +12,16 @@ use falcon_syntax::visitor::*;
 pub struct AvoidTypesAsParameterNames;
 
 impl Rule for AvoidTypesAsParameterNames {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some((identities, file)) = ctx
             .identities
             .and_then(|identities| Some((identities, identities.file(ctx.file_path)?)))
         else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let mut collector = Collector {
             diags: Vec::new(),
@@ -27,7 +33,7 @@ impl Rule for AvoidTypesAsParameterNames {
             representation_constructor: false,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

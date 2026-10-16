@@ -20,8 +20,7 @@
 //! An override exemption requires a combined inherited member, not merely a
 //! same-named declaration among incompatible inherited interface signatures.
 
-use falcon_analyze::{AnalyzeContext, MemberKind, Rule, SemanticModel};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, MemberKind, Rule, RulePreparation, SemanticModel};
 use falcon_syntax::{TokenKind, ast::*};
 
 use crate::lint::declarations::has_meta_annotation;
@@ -308,9 +307,13 @@ fn candidate<'a>(
 }
 
 impl Rule for PublicMemberApiDocs {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if crate::cross_file::lib_dir_package(ctx.file_path).is_none() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let model = ctx
             .identities
@@ -388,13 +391,14 @@ impl Rule for PublicMemberApiDocs {
         // A type and its unnamed primary header are consecutive declarations
         // at the same token. Analyzer reports that diagnostic only once.
         diagnostics.dedup_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
-        diagnostics
+        RulePreparation::Diagnostics(diagnostics)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
 
     #[test]
     fn carriage_return_line_comments_do_not_hide_public_declarations() {

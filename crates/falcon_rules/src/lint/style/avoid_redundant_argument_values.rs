@@ -32,8 +32,8 @@ use falcon_analyze::constant_value::{
 };
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, LibraryId, ParameterDefault, QualifiedName,
-    ResolvedSignature, ResolvedType, Rule, evaluate_constant_in_library, expression_segments,
-    resolve_call_constructor,
+    ResolvedSignature, ResolvedType, Rule, RulePreparation, evaluate_constant_in_library,
+    expression_segments, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -41,31 +41,29 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 
 use crate::lint::const_eval::ConstructorConstContexts as ConstContexts;
 use crate::lint::const_eval::mentions_type_parameter;
-use crate::lint::semantic_scope::{
-    SemanticRuleVisitor, SemanticState, explicit_call_receiver, visit_program,
-};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, explicit_call_receiver};
 
 #[derive(Default)]
 pub struct AvoidRedundantArgumentValues;
 
 impl Rule for AvoidRedundantArgumentValues {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        if ctx.identities.is_none() {
+            return RulePreparation::Diagnostics(Vec::new());
+        }
+        RulePreparation::Semantic(Box::new(Collector {
+            program,
             diags: Vec::new(),
             targets: Targets {
                 ctx,
                 contexts: ConstContexts::new(program),
                 locals: HashMap::new(),
             },
-        };
-        let state = visit_program(&mut collector, program, state);
-        collector
-            .targets
-            .visit_declarations(program, &state, &mut collector.diags);
-        collector.diags
+        }))
     }
 }
 
@@ -106,6 +104,7 @@ impl Target<'_> {
 }
 
 struct Collector<'a> {
+    program: &'a Program,
     diags: Vec<Diagnostic>,
     targets: Targets<'a>,
 }
@@ -695,6 +694,14 @@ impl Visitor for AnnotationVisitor<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
+    fn visit_program_end(&mut self, state: &SemanticState<'_>) {
+        self.targets
+            .visit_declarations(self.program, state, &mut self.diags);
+    }
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         match node {
             Stmt::LocalFunc(function) => {
@@ -778,6 +785,7 @@ impl SemanticRuleVisitor for Collector<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_analyze::{IdentityIndex, IdentitySource, SignatureIndex, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

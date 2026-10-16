@@ -7,7 +7,7 @@
 //! Switch-case statement lists are not blocks. A blank line is any run of
 //! whitespace containing two or more newlines; spaces and tabs do not matter.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{StatementListKind, for_each_stmt_list};
@@ -16,14 +16,18 @@ use falcon_syntax::visitor::{StatementListKind, for_each_stmt_list};
 pub struct NewlineBeforeReturn;
 
 impl Rule for NewlineBeforeReturn {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for_each_stmt_list(program, &mut |stmts, kind| {
             if kind == StatementListKind::Block {
                 check_stmts_for_return(stmts, &mut diags, ctx);
             }
         });
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

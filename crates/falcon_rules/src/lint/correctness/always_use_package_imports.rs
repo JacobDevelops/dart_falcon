@@ -10,8 +10,7 @@
 //! reach into `lib/` from outside it belong to `avoid_relative_lib_imports`.
 //! Incompatible with `prefer-relative-imports`.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::Program;
 
 use crate::lint::string_lit::decode_escapes;
@@ -22,31 +21,37 @@ pub struct AlwaysUsePackageImports;
 const NAME: &str = "always-use-package-imports";
 
 impl Rule for AlwaysUsePackageImports {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if program.imports.is_empty() || crate::cross_file::lib_dir_package(ctx.file_path).is_none()
         {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        program
-            .imports
-            .iter()
-            .filter(|import| {
-                let uri = &import.uri;
-                let value = if uri.has_raw_segment {
-                    uri.value.as_str().into()
-                } else {
-                    decode_escapes(&uri.value)
-                };
-                uri_scheme(&value) == Some("")
-            })
-            .map(|import| {
-                ctx.diagnostic(
-                    NAME,
-                    "Use 'package:' imports for files in the 'lib' directory.",
-                    import.uri.span,
-                )
-            })
-            .collect()
+        RulePreparation::Diagnostics(
+            program
+                .imports
+                .iter()
+                .filter(|import| {
+                    let uri = &import.uri;
+                    let value = if uri.has_raw_segment {
+                        uri.value.as_str().into()
+                    } else {
+                        decode_escapes(&uri.value)
+                    };
+                    uri_scheme(&value) == Some("")
+                })
+                .map(|import| {
+                    ctx.diagnostic(
+                        NAME,
+                        "Use 'package:' imports for files in the 'lib' directory.",
+                        import.uri.span,
+                    )
+                })
+                .collect(),
+        )
     }
 }
 

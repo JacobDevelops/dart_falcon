@@ -4,22 +4,25 @@
 //! The legacy `dart:html`, `dart:js`, and `dart:js_util` imports are checked;
 //! modern JS interop libraries are allowed by the upstream lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct AvoidWebLibrariesInFlutter;
 
 impl Rule for AvoidWebLibrariesInFlutter {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if !program
             .imports
             .iter()
             .any(|import| is_web_library(&import.uri.value))
             || !checks_web_imports(ctx.file_path)
         {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let mut diags = Vec::new();
         for import in &program.imports {
@@ -27,7 +30,7 @@ impl Rule for AvoidWebLibrariesInFlutter {
                 diags.push(ctx.diagnostic("avoid-web-libraries-in-flutter", "Avoid using web-only libraries in Flutter code; they are not portable across platforms.", import.span));
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 
@@ -52,6 +55,7 @@ fn checks_web_imports(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;

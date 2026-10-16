@@ -10,7 +10,8 @@ mod inference;
 use std::path::Path;
 
 use falcon_analyze::{
-    AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, SignatureIndex, TypeIndex,
+    AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, RuleAnalysis, SignatureIndex,
+    TypeIndex,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;

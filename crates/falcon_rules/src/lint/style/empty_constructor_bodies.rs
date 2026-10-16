@@ -5,7 +5,7 @@
 //! Prefer `Foo();` over `Foo() {}`. Only a block body containing no statements
 //! is reported; a constructor whose body does something is left alone.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 
@@ -13,7 +13,11 @@ use falcon_syntax::ast::*;
 pub struct EmptyConstructorBodies;
 
 impl Rule for EmptyConstructorBodies {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             let Some(members) = crate::lint::declarations::members_of(decl) else {
@@ -25,7 +29,7 @@ impl Rule for EmptyConstructorBodies {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

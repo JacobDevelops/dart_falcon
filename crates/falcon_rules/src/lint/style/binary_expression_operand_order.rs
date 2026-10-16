@@ -10,15 +10,18 @@
 //! Checks each comparison once throughout the program, including parenthesized
 //! expressions, initializers, and collections.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct BinaryExpressionOperandOrder;
 
 impl Rule for BinaryExpressionOperandOrder {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         falcon_syntax::visitor::for_each_expr_in_program(program, |expr| {
             if let Expr::Binary {
@@ -38,14 +41,14 @@ impl Rule for BinaryExpressionOperandOrder {
                     && !(left_is_null && right_is_literal)
                 {
                     diags.push(ctx.diagnostic(
-                        "binary-expression-operand-order",
-                        "Avoid placing literal or constant operand on the left side of a binary expression",
-                        *span,
-                    ));
+                "binary-expression-operand-order",
+                "Avoid placing literal or constant operand on the left side of a binary expression",
+                *span,
+            ));
                 }
             }
         });
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

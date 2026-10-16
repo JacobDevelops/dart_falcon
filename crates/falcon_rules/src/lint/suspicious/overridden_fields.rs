@@ -11,8 +11,7 @@
 //! Declaring `var`/`final` primary constructor parameters are instance fields
 //! too; forwarding formals and ordinary header parameters are not declarations.
 
-use falcon_analyze::{AnalyzeContext, MemberKind, Rule, SemanticModel};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, MemberKind, Rule, RulePreparation, SemanticModel};
 use falcon_syntax::ast::*;
 
 use crate::lint::inherited_members::{inherited_concrete_member, inheriting_declarations};
@@ -21,9 +20,13 @@ use crate::lint::inherited_members::{inherited_concrete_member, inheriting_decla
 pub struct OverriddenFields;
 
 impl Rule for OverriddenFields {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
@@ -80,6 +83,6 @@ impl Rule for OverriddenFields {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }

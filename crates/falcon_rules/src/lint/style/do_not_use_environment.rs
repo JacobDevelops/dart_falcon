@@ -8,11 +8,11 @@
 //!
 //! Adopted from the official `do_not_use_environment` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, expression_segments};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, expression_segments};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
-use crate::lint::semantic_scope::{self, SemanticRuleVisitor, SemanticState};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct DoNotUseEnvironment;
@@ -21,19 +21,18 @@ const NAME: &str = "do-not-use-environment";
 const MESSAGE: &str = "Invalid use of an environment declaration.";
 
 impl Rule for DoNotUseEnvironment {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if !ctx.source.contains("Environment") {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+        RulePreparation::Semantic(Box::new(Collector {
             ctx,
             diags: Vec::new(),
-        };
-        semantic_scope::visit_program(&mut collector, program, state);
-        collector.diags
+        }))
     }
 }
 
@@ -51,6 +50,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let (ty, constructor, span) = match node {
             Expr::Call { callee, .. } => {

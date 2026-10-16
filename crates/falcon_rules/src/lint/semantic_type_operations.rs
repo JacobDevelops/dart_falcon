@@ -1,13 +1,9 @@
-use std::borrow::Cow;
-
 use falcon_analyze::resolve::TypeKind;
-use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, SemanticModel, SignatureIndex, Truth,
-    TypeIndex,
-};
+use falcon_analyze::{DeclarationIdentity, ResolvedType, SignatureIndex, Truth, TypeIndex};
 use falcon_syntax::ast::*;
 
-use super::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use falcon_diagnostics::Diagnostic;
 
 pub(crate) enum TypeOperationKind {
     Is { negated: bool },
@@ -21,33 +17,19 @@ pub(crate) struct TypeOperation {
     pub(crate) span: Span,
 }
 
-pub(crate) struct TypeOperationAnalysis<'a> {
-    pub(crate) model: SemanticModel<'a>,
-    pub(crate) signatures: Cow<'a, SignatureIndex>,
-    pub(crate) operations: Vec<TypeOperation>,
+pub(crate) struct TypeOperations<F> {
+    pub(crate) report: F,
+    pub(crate) diagnostics: Vec<Diagnostic>,
 }
 
-pub(crate) fn collect<'a>(
-    program: &Program,
-    ctx: &'a AnalyzeContext<'a>,
-) -> Option<TypeOperationAnalysis<'a>> {
-    let state = SemanticState::new(program, ctx)?;
-    let mut collector = Collector {
-        operations: Vec::new(),
-    };
-    let state = visit_program(&mut collector, program, state);
-    Some(TypeOperationAnalysis {
-        model: state.model,
-        signatures: state.signatures,
-        operations: collector.operations,
-    })
-}
+impl<F> SemanticRuleVisitor for TypeOperations<F>
+where
+    F: FnMut(TypeOperation, &SemanticState<'_>) -> Option<Diagnostic>,
+{
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
 
-struct Collector {
-    operations: Vec<TypeOperation>,
-}
-
-impl SemanticRuleVisitor for Collector {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let (kind, expr, dart_type, span) = match node {
             Expr::Is {
@@ -68,14 +50,17 @@ impl SemanticRuleVisitor for Collector {
             } => (TypeOperationKind::As, expr, dart_type, span),
             _ => return,
         };
-        self.operations.push(TypeOperation {
+        let operation = TypeOperation {
             kind,
             operand: state.infer(expr),
             target: state
                 .model
                 .resolve_type_in(dart_type, &state.type_parameters),
             span: *span,
-        });
+        };
+        if let Some(diagnostic) = (self.report)(operation, state) {
+            self.diagnostics.push(diagnostic);
+        }
     }
 }
 

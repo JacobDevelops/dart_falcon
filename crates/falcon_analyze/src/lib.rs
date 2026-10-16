@@ -10,6 +10,7 @@ pub mod parallel;
 pub mod registry;
 pub mod resolve;
 pub mod rule;
+pub mod semantic_scope;
 pub mod source;
 pub mod suppressions;
 
@@ -43,5 +44,5 @@ pub use resolve::{
     has_immutable_annotation, import_path, library_doc_imports, library_unit, null_shorted,
     resolve_call_constructor, resolve_new_constructor,
 };
-pub use rule::Rule;
+pub use rule::{Rule, RuleAnalysis, RulePreparation};
 pub use suppressions::{FileSuppressions, RuleLookup};

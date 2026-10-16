@@ -12,7 +12,7 @@
 //! Constants (see `constant-identifier-names`) are covered by a separate rule.
 
 use crate::lint::naming::is_lower_camel_case;
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -24,14 +24,18 @@ use falcon_syntax::visitor::{
 pub struct NonConstantIdentifierNames;
 
 impl Rule for NonConstantIdentifierNames {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
             in_extension_type: false,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 
@@ -195,6 +199,7 @@ impl Visitor for Collector<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::PathBuf;

@@ -13,8 +13,9 @@
 //! Declaring `var`/`final` primary-constructor parameters are also instance
 //! fields and are checked as such.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, MemberKind, Rule, SemanticModel};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, MemberKind, Rule, RulePreparation, SemanticModel,
+};
 use falcon_syntax::ast::*;
 
 use crate::lint::declarations::annotation;
@@ -25,9 +26,13 @@ use crate::lint::inherited_members::inheriting_declarations;
 pub struct AnnotateOverrides;
 
 impl Rule for AnnotateOverrides {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
@@ -129,6 +134,6 @@ impl Rule for AnnotateOverrides {
                 );
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }

@@ -22,8 +22,9 @@
 //!
 //! Adopted from the official `prefer_constructors_over_static_methods` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
 
@@ -31,9 +32,13 @@ use falcon_syntax::visitor::{Visitor, walk_expr, walk_function_body};
 pub struct PreferConstructorsOverStaticMethods;
 
 impl Rule for PreferConstructorsOverStaticMethods {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
@@ -126,7 +131,7 @@ impl Rule for PreferConstructorsOverStaticMethods {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

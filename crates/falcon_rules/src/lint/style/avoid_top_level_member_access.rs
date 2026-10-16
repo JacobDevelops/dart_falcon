@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -21,7 +21,11 @@ use falcon_syntax::visitor::{
 pub struct AvoidTopLevelMemberAccess;
 
 impl Rule for AvoidTopLevelMemberAccess {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let top_level_vars = program
             .declarations
             .iter()
@@ -45,7 +49,7 @@ impl Rule for AvoidTopLevelMemberAccess {
             bindings: scopes.bindings,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

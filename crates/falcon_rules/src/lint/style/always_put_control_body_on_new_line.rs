@@ -17,7 +17,7 @@
 //!
 //! Adopted from the official `always_put_control_body_on_new_line` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::token::Token;
@@ -27,7 +27,11 @@ use falcon_syntax::visitor::{Visitor, walk_stmt};
 pub struct AlwaysPutControlBodyOnNewLine;
 
 impl Rule for AlwaysPutControlBodyOnNewLine {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let tokens: Vec<Token> = ctx
             .tokens()
             .iter()
@@ -40,7 +44,7 @@ impl Rule for AlwaysPutControlBodyOnNewLine {
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

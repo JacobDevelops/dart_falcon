@@ -11,7 +11,7 @@
 //! All explicit type positions are checked, including record fields, type
 //! aliases, generic bounds, patterns, and types inside initializers.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -22,13 +22,17 @@ use falcon_syntax::visitor::{
 pub struct AvoidDynamic;
 
 impl Rule for AvoidDynamic {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut visitor = DynamicVisitor {
             diagnostics: Vec::new(),
             ctx,
         };
         visitor.visit_program(program);
-        visitor.diagnostics
+        RulePreparation::Diagnostics(visitor.diagnostics)
     }
 }
 

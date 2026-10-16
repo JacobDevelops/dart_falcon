@@ -13,7 +13,7 @@ use falcon_syntax::visitor::{
     walk_switch_case, walk_top_level_decl,
 };
 
-use crate::lint::semantic_scope::SemanticState;
+use falcon_analyze::semantic_scope::SemanticState;
 
 /// Source ranges that Dart evaluates in a constant context.
 #[derive(Default)]

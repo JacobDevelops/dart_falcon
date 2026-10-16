@@ -20,8 +20,7 @@
 //!
 //! Adopted from the official `unawaited_futures` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::Program;
 
 use crate::lint::correctness::discarded_futures::{UnusedFuturesRule, unused_futures};
@@ -30,8 +29,12 @@ use crate::lint::correctness::discarded_futures::{UnusedFuturesRule, unused_futu
 pub struct UnawaitedFutures;
 
 impl Rule for UnawaitedFutures {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        unused_futures(
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        RulePreparation::Semantic(unused_futures(
             program,
             ctx,
             &UnusedFuturesRule {
@@ -40,6 +43,6 @@ impl Rule for UnawaitedFutures {
                 future_message: "Missing an 'await' for the 'Future' computed by this expression.",
                 future_or_message: None,
             },
-        )
+        ))
     }
 }

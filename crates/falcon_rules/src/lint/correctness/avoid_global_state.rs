@@ -9,7 +9,7 @@
 //! declarations, and thread mutable state explicitly through constructors or
 //! parameters rather than hanging it off globals.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -17,7 +17,11 @@ use falcon_syntax::ast::*;
 pub struct AvoidGlobalState;
 
 impl Rule for AvoidGlobalState {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             match decl {
@@ -35,7 +39,7 @@ impl Rule for AvoidGlobalState {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

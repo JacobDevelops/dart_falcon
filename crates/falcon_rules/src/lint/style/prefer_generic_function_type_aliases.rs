@@ -7,8 +7,7 @@
 //! aliases. Legacy declarations retain their written formal parameter list in
 //! the AST, distinguishing them from modern aliases.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::{Program, TopLevelDecl};
 use falcon_syntax::token::TokenKind;
 
@@ -16,7 +15,11 @@ use falcon_syntax::token::TokenKind;
 pub struct PreferGenericFunctionTypeAliases;
 
 impl Rule for PreferGenericFunctionTypeAliases {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for declaration in &program.declarations {
             let TopLevelDecl::TypeAlias(alias) = declaration else {
@@ -49,13 +52,14 @@ impl Rule for PreferGenericFunctionTypeAliases {
             }
         }
 
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
 
     #[test]
     fn incomplete_alias_without_parameter_list_is_not_a_legacy_function_alias() {

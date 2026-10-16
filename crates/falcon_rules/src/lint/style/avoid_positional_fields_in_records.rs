@@ -7,7 +7,7 @@
 //! and nested record and function types, so a positional field buried inside a
 //! generic is still reported.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -18,13 +18,17 @@ use falcon_syntax::visitor::{
 pub struct AvoidPositionalFieldsInRecords;
 
 impl Rule for AvoidPositionalFieldsInRecords {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut visitor = Collector {
             diags: Vec::new(),
             ctx,
         };
         visitor.visit_program(program);
-        visitor.diags
+        RulePreparation::Diagnostics(visitor.diags)
     }
 }
 

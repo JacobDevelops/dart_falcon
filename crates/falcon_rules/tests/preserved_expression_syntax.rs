@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use falcon_analyze::{AnalyzeContext, IdentityIndex, IdentitySource, Rule};
+use falcon_analyze::{AnalyzeContext, IdentityIndex, IdentitySource, Rule, RuleAnalysis};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;
 use falcon_rules::lint::correctness::avoid_unused_parameters::AvoidUnusedParameters;

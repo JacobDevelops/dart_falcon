@@ -7,15 +7,18 @@
 //! it `const` or `final`; when a value genuinely must change over time, hold it
 //! in an object with a clear owner rather than a free-floating global.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct AvoidMutableGlobalVariables;
 
 impl Rule for AvoidMutableGlobalVariables {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
 
         for decl in &program.declarations {
@@ -32,6 +35,6 @@ impl Rule for AvoidMutableGlobalVariables {
             }
         }
 
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }

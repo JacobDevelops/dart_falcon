@@ -18,7 +18,7 @@
 //!
 //! Adopted from the official `avoid_unused_constructor_parameters` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
@@ -31,13 +31,17 @@ use falcon_analyze::resolve::lexical_usage::{
 pub struct AvoidUnusedConstructorParameters;
 
 impl Rule for AvoidUnusedConstructorParameters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             ctx,
             diagnostics: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 

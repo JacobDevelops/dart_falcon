@@ -12,18 +12,22 @@
 //!
 //! Adopted from the official `eol_at_end_of_file` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::Program;
 
 #[derive(Default)]
 pub struct EolAtEndOfFile;
 
 impl Rule for EolAtEndOfFile {
-    fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let source = ctx.source;
         if source.is_empty() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let message = if ["\n\n", "\r\r", "\r\n\r\n"]
             .iter()
@@ -33,14 +37,18 @@ impl Rule for EolAtEndOfFile {
         } else if !source.ends_with(['\n', '\r']) {
             "Missing a newline at the end of the file."
         } else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let start = source.trim_end().len();
         let end = source[start..]
             .chars()
             .next()
             .map_or(start + 1, |character| start + character.len_utf8());
-        vec![ctx.diagnostic("eol-at-end-of-file", message, DiagSpan { start, end })]
+        RulePreparation::Diagnostics(vec![ctx.diagnostic(
+            "eol-at-end-of-file",
+            message,
+            DiagSpan { start, end },
+        )])
     }
 }
 
@@ -52,6 +60,7 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::*;
+    use falcon_analyze::RuleAnalysis;
 
     #[test]
     fn reports_one_character_even_past_eof() {

@@ -8,7 +8,7 @@
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, ParameterContract, ResolvedType, Rule,
-    SemanticModel, SignatureIndex,
+    RulePreparation, SemanticModel, SignatureIndex,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -17,10 +17,14 @@ use falcon_syntax::ast::*;
 pub struct UnnecessaryOverrides;
 
 impl Rule for UnnecessaryOverrides {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return diags;
+            return RulePreparation::Diagnostics(diags);
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let docs = ctx.syntax.doc_blocks(ctx.source).collect::<Vec<_>>();
@@ -44,7 +48,7 @@ impl Rule for UnnecessaryOverrides {
                 );
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

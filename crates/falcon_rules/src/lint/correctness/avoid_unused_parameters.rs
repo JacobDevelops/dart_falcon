@@ -4,7 +4,7 @@
 pub use dcl::AvoidUnusedParameters;
 
 mod dcl {
-    use falcon_analyze::{AnalyzeContext, Rule};
+    use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
     use falcon_diagnostics::Diagnostic;
     use falcon_syntax::ast::*;
     use falcon_syntax::visitor::{Visitor, walk_function_decl, walk_method_decl, walk_stmt};
@@ -15,13 +15,17 @@ mod dcl {
     pub struct AvoidUnusedParameters;
 
     impl Rule for AvoidUnusedParameters {
-        fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+        fn prepare<'a>(
+            &self,
+            program: &'a Program,
+            ctx: &'a AnalyzeContext<'a>,
+        ) -> RulePreparation<'a> {
             let mut collector = Collector {
                 ctx,
                 diagnostics: Vec::new(),
             };
             collector.visit_program(program);
-            collector.diagnostics
+            RulePreparation::Diagnostics(collector.diagnostics)
         }
     }
 

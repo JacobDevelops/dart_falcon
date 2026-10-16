@@ -11,8 +11,8 @@
 //! `max_lines` (integer, default: 200) — flag files with more than this many
 //! lines.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
@@ -28,7 +28,11 @@ fn max_lines_option(ctx: &AnalyzeContext) -> usize {
 }
 
 impl Rule for MaxLinesForFile {
-    fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
 
         let line_count = ctx.source.lines().count();
@@ -43,6 +47,6 @@ impl Rule for MaxLinesForFile {
             ));
         }
 
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }

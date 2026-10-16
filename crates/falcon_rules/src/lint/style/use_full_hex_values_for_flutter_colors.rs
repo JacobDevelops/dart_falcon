@@ -1,7 +1,9 @@
 //! Require an eight-digit hexadecimal integer for the canonical Flutter Color
 //! default constructor.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, Rule, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, QualifiedName, Rule, RulePreparation, SemanticModel,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -10,9 +12,13 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 pub struct UseFullHexValuesForFlutterColors;
 
 impl Rule for UseFullHexValuesForFlutterColors {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut collector = Collector {
@@ -21,7 +27,7 @@ impl Rule for UseFullHexValuesForFlutterColors {
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

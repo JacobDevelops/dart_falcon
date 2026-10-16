@@ -7,7 +7,7 @@
 //! misbehaves as a `Map` key or `Set` element — lookups miss and duplicates slip
 //! through. Override both and derive them from the same fields.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -15,7 +15,11 @@ use falcon_syntax::ast::*;
 pub struct HashAndEquals;
 
 impl Rule for HashAndEquals {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             let members = match decl {
@@ -25,7 +29,7 @@ impl Rule for HashAndEquals {
             };
             check_members(members, ctx, &mut diags);
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

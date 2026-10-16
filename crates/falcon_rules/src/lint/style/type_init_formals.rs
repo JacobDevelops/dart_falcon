@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -41,7 +41,11 @@ struct ClassInfo<'a> {
 type ClassTable<'a> = HashMap<&'a str, ClassInfo<'a>>;
 
 impl Rule for TypeInitFormals {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut classes: ClassTable = HashMap::new();
         for decl in &program.declarations {
             if let Some((name, info)) = class_info(decl) {
@@ -58,7 +62,7 @@ impl Rule for TypeInitFormals {
                 check_ctor(&classes, info, ctor, ctx, &mut diags);
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

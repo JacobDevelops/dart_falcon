@@ -17,7 +17,7 @@
 //!
 //! Adopted from the official `avoid_final_parameters` lint.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Feature;
 use falcon_syntax::ast::*;
@@ -31,21 +31,25 @@ const MESSAGE: &str = "Parameters should not be marked as 'final'.";
 pub struct AvoidFinalParameters;
 
 impl Rule for AvoidFinalParameters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         // With primary constructors `final` declares a field, not a final
         // parameter; the official rule does not run.
         if ctx
             .language_version()
             .supports(Feature::PrimaryConstructors)
         {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let mut collector = Collector {
             ctx,
             diags: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

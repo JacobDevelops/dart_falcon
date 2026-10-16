@@ -9,15 +9,18 @@
 //! identical types. Import files under `lib/` through their `package:` URI
 //! instead.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct AvoidRelativeLibImports;
 
 impl Rule for AvoidRelativeLibImports {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for import in &program.imports {
             if reaches_into_lib(&import.uri.value) {
@@ -28,7 +31,7 @@ impl Rule for AvoidRelativeLibImports {
                 ));
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

@@ -15,7 +15,7 @@
 //! accepted boolean-name prefixes. User-provided entries extend the defaults
 //! rather than replacing them.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -26,14 +26,18 @@ use falcon_syntax::visitor::{
 pub struct BooleanPrefixes;
 
 impl Rule for BooleanPrefixes {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut visitor = Collector {
             diags: Vec::new(),
             ctx,
             prefixes: resolve_prefixes(ctx),
         };
         visitor.visit_program(program);
-        visitor.diags
+        RulePreparation::Diagnostics(visitor.diags)
     }
 }
 

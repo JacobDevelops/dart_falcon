@@ -13,31 +13,31 @@
 //!
 //! Adopted from the official `invalid_case_patterns` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, Rule};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Feature;
 use falcon_syntax::ast::*;
 
 use crate::lint::flutter::scoped_constructor_invocation;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct InvalidCasePatterns;
 
 impl Rule for InvalidCasePatterns {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if ctx.language_version().supports(Feature::Patterns) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+        let collector = Collector {
             diags: Vec::new(),
             ctx,
         };
-        visit_program(&mut collector, program, state);
-        collector.diags
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 
@@ -47,6 +47,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         if let Stmt::Switch(switch) = node {
             for case in &switch.cases {

@@ -5,7 +5,8 @@
 //! alone; spelling, capitalization, and import-prefix shape are not evidence.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    SignatureIndex, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
@@ -32,9 +33,13 @@ fn cfg(ctx: &AnalyzeContext) -> Cfg {
 }
 
 impl Rule for PreferExtractingCallbacks {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let widget = DeclarationIdentity::flutter("Widget");
@@ -67,7 +72,7 @@ impl Rule for PreferExtractingCallbacks {
                 collector.visit_class_member(member);
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

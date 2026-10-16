@@ -27,10 +27,12 @@
 //!
 //! Adopted from the official `use_late_for_private_fields_and_variables` lint.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Truth, TypeParameterScope,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
@@ -42,34 +44,37 @@ use falcon_syntax::visitor::{
 use crate::lint::declarations::declaration_key;
 use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
 use crate::lint::expressions::is_parenthesized;
-use crate::lint::semantic_scope::{
+use crate::lint::semantic_type_operations::nullability;
+use falcon_analyze::semantic_scope::{
     CascadeAssignment, SemanticRuleVisitor, SemanticState, visit_program,
 };
-use crate::lint::semantic_type_operations::nullability;
 
 #[derive(Default)]
 pub struct UseLateForPrivateFieldsAndVariables;
 
 impl Rule for UseLateForPrivateFieldsAndVariables {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let has_part_directives =
             !program.part_directives.is_empty() || program.part_of_directive.is_some();
         match ctx.library {
-            Some(library) if library.has_unresolved_parts() => return Vec::new(),
-            None if has_part_directives => return Vec::new(),
+            Some(library) if library.has_unresolved_parts() => {
+                return RulePreparation::Diagnostics(Vec::new());
+            }
+            None if has_part_directives => return RulePreparation::Diagnostics(Vec::new()),
             _ => {}
         }
         let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let candidates = collect_candidates(program, &state, ctx);
         if candidates.is_empty() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        let names: HashSet<&str> = candidates
-            .iter()
-            .map(|candidate| candidate.name.as_str())
-            .collect();
+        let names: HashSet<&str> = candidates.iter().map(|candidate| candidate.name).collect();
 
         let mut scopes = DeclarationScopes::of(program);
         if let Some(library) = ctx.library {
@@ -88,15 +93,7 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
             })
             .collect();
         let mut disqualified = HashSet::new();
-        check_uses(
-            program,
-            ctx,
-            state,
-            &names,
-            &scopes,
-            &owners,
-            &mut disqualified,
-        );
+        check_doc_uses(program, ctx, &state, &names, &owners, &mut disqualified);
         if let Some(library) = ctx.library {
             for ((sibling, source), syntax) in library
                 .siblings()
@@ -127,15 +124,79 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
             }
         }
 
-        candidates
+        RulePreparation::Semantic(Box::new(LateCandidates {
+            program,
+            ctx,
+            candidates,
+            scopes,
+            disqualified,
+            safe: SafeUses {
+                ctx,
+                names: Cow::Owned(names),
+                owners: Cow::Owned(owners),
+                resolved_owners: HashMap::new(),
+                spans: HashSet::new(),
+            },
+        }))
+    }
+}
+
+struct LateCandidates<'a> {
+    program: &'a Program,
+    ctx: &'a AnalyzeContext<'a>,
+    candidates: Vec<Candidate<'a>>,
+    scopes: DeclarationScopes<'a>,
+    disqualified: HashSet<NullableAccess<'a>>,
+    safe: SafeUses<'a, 'a>,
+}
+
+impl SemanticRuleVisitor for LateCandidates<'_> {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        self.safe.visit_expr(node, state);
+    }
+
+    fn visit_cascade_operation(
+        &mut self,
+        operation: &CascadeOp,
+        receiver: &ResolvedType,
+        section: Span,
+        state: &SemanticState<'_>,
+    ) {
+        self.safe
+            .visit_cascade_operation(operation, receiver, section, state);
+    }
+
+    fn visit_cascade_assignment(
+        &mut self,
+        assignment: CascadeAssignment<'_>,
+        receiver: &ResolvedType,
+        section: Span,
+        state: &SemanticState<'_>,
+    ) {
+        self.safe
+            .visit_cascade_assignment(assignment, receiver, section, state);
+    }
+
+    fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
+        check_mentions(
+            self.program,
+            &self.safe.names,
+            &self.scopes,
+            &self.safe,
+            &mut self.disqualified,
+        );
+        self.candidates
             .iter()
             .filter(|candidate| {
-                let name = candidate.name.as_str();
-                !disqualified.contains(&NullableAccess::Unresolved(name))
-                    && !disqualified.contains(&NullableAccess::Resolved(name, candidate.owner))
+                !self
+                    .disqualified
+                    .contains(&NullableAccess::Unresolved(candidate.name))
+                    && !self
+                        .disqualified
+                        .contains(&NullableAccess::Resolved(candidate.name, candidate.owner))
             })
             .map(|candidate| {
-                ctx.diagnostic(
+                self.ctx.diagnostic(
                     "use-late-for-private-fields-and-variables",
                     "Use 'late' for private members with a non-nullable type.",
                     candidate.span,
@@ -156,8 +217,28 @@ fn check_uses<'n>(
     program: &Program,
     ctx: &AnalyzeContext,
     state: SemanticState<'_>,
-    names: &'n HashSet<&'n str>,
+    names: &HashSet<&'n str>,
     scopes: &DeclarationScopes<'_>,
+    owners: &HashMap<DeclarationIdentity, usize>,
+    disqualified: &mut HashSet<NullableAccess<'n>>,
+) {
+    check_doc_uses(program, ctx, &state, names, owners, disqualified);
+    let mut safe = SafeUses {
+        ctx,
+        names: Cow::Borrowed(names),
+        owners: Cow::Borrowed(owners),
+        resolved_owners: HashMap::new(),
+        spans: HashSet::new(),
+    };
+    visit_program(&mut safe, program, state);
+    check_mentions(program, names, scopes, &safe, disqualified);
+}
+
+fn check_doc_uses<'n>(
+    program: &Program,
+    ctx: &AnalyzeContext,
+    state: &SemanticState<'_>,
+    names: &HashSet<&'n str>,
     owners: &HashMap<DeclarationIdentity, usize>,
     disqualified: &mut HashSet<NullableAccess<'n>>,
 ) {
@@ -189,14 +270,15 @@ fn check_uses<'n>(
             }
         }
     }
-    let mut safe = SafeUses {
-        ctx,
-        names,
-        owners,
-        resolved_owners: HashMap::new(),
-        spans: HashSet::new(),
-    };
-    visit_program(&mut safe, program, state);
+}
+
+fn check_mentions<'n>(
+    program: &Program,
+    names: &HashSet<&'n str>,
+    scopes: &DeclarationScopes<'_>,
+    safe: &SafeUses<'_, '_>,
+    disqualified: &mut HashSet<NullableAccess<'n>>,
+) {
     let mut mentions = Mentions {
         names,
         types: &scopes.types,
@@ -226,18 +308,18 @@ fn check_uses<'n>(
     }
 }
 
-struct Candidate {
-    name: String,
+struct Candidate<'a> {
+    name: &'a str,
     span: Span,
     /// The declaring type ([`declaration_key`]); `None` for top-level variables.
     owner: Option<usize>,
 }
 
-fn collect_candidates(
-    program: &Program,
+fn collect_candidates<'a>(
+    program: &'a Program,
     state: &SemanticState<'_>,
     ctx: &AnalyzeContext,
-) -> Vec<Candidate> {
+) -> Vec<Candidate<'a>> {
     let mut candidates = Vec::new();
     for declaration in &program.declarations {
         let (type_params, members, all_fields, static_only) = match declaration {
@@ -320,9 +402,9 @@ fn collect_candidates(
     candidates
 }
 
-fn candidate(declarator: &VarDeclarator, owner: Option<usize>) -> Candidate {
+fn candidate(declarator: &VarDeclarator, owner: Option<usize>) -> Candidate<'_> {
     Candidate {
-        name: declarator.name.name.clone(),
+        name: &declarator.name.name,
         span: declarator.span,
         owner,
     }
@@ -374,15 +456,15 @@ fn potentially_nullable(
 
 /// Records the identifier spans of uses that keep a candidate lateable: a `!`
 /// operand, or the target of a plain `=` of a proven non-nullable value.
-struct SafeUses<'a> {
+struct SafeUses<'s, 'a> {
     ctx: &'a AnalyzeContext<'a>,
-    names: &'a HashSet<&'a str>,
-    owners: &'a HashMap<DeclarationIdentity, usize>,
+    names: Cow<'s, HashSet<&'a str>>,
+    owners: Cow<'s, HashMap<DeclarationIdentity, usize>>,
     resolved_owners: HashMap<usize, Option<usize>>,
     spans: HashSet<usize>,
 }
 
-impl SafeUses<'_> {
+impl SafeUses<'_, '_> {
     fn record_owner(
         &mut self,
         identifier: &Identifier,
@@ -445,7 +527,7 @@ impl SafeUses<'_> {
     }
 }
 
-impl SemanticRuleVisitor for SafeUses<'_> {
+impl SemanticRuleVisitor for SafeUses<'_, '_> {
     fn visit_cascade_operation(
         &mut self,
         operation: &CascadeOp,

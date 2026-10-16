@@ -8,7 +8,7 @@
 //! easily mistake the two unrelated types for the same one, which invites subtle
 //! type errors. Rename the inner parameter to something distinct.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -20,14 +20,18 @@ use falcon_syntax::visitor::{
 pub struct AvoidShadowingTypeParameters;
 
 impl Rule for AvoidShadowingTypeParameters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut checker = Checker {
             diags: Vec::new(),
             ctx,
             scope: Vec::new(),
         };
         checker.visit_program(program);
-        checker.diags
+        RulePreparation::Diagnostics(checker.diags)
     }
 }
 

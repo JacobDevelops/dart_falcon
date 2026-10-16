@@ -26,7 +26,7 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -42,7 +42,11 @@ const RULE: &str = "parameter-assignments";
 pub struct ParameterAssignments;
 
 impl Rule for ParameterAssignments {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut writes: HashMap<usize, Vec<&LocalWrite>> = HashMap::new();
         let mut assignment_targets = HashMap::new();
         for write in ctx.local_writes(program) {
@@ -52,7 +56,7 @@ impl Rule for ParameterAssignments {
             writes.entry(write.declaration).or_default().push(write);
         }
         if writes.is_empty() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let mut assignments = Vec::new();
         for_each_expr_in_program(program, |expr| match expr {
@@ -81,7 +85,7 @@ impl Rule for ParameterAssignments {
             diagnostics: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 

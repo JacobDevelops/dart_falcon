@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-use falcon_analyze::{AnalyzeContext, IdentityIndex, IdentitySource, Rule, TypeIndex};
+use falcon_analyze::{
+    AnalyzeContext, IdentityIndex, IdentitySource, Rule, RuleAnalysis, TypeIndex,
+};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;
 use falcon_rules::lint::complexity::max_switch_cases::MaxSwitchCases;

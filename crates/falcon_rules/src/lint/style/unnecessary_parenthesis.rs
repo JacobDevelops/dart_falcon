@@ -43,7 +43,9 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule, SemanticModel, resolve_call_constructor};
+use falcon_analyze::{
+    AnalyzeContext, Rule, RulePreparation, SemanticModel, resolve_call_constructor,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -59,7 +61,11 @@ use crate::lint::expressions::is_parenthesized;
 pub struct UnnecessaryParenthesis;
 
 impl Rule for UnnecessaryParenthesis {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             ctx,
             model: ctx
@@ -75,7 +81,7 @@ impl Rule for UnnecessaryParenthesis {
             diagnostics: Vec::new(),
         };
         collector.visit_program(program);
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 

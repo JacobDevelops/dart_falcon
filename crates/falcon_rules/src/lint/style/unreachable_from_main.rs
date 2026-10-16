@@ -42,7 +42,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, QualifiedName, Rule};
+use falcon_analyze::{AnalyzeContext, QualifiedName, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
@@ -51,9 +51,9 @@ use falcon_syntax::visitor::{
 };
 
 use crate::lint::declarations::operator_token_span;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use crate::lint::string_lit::{is_ident_body, is_simple_identifier};
 use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
 const RULE: &str = "unreachable-from-main";
 
@@ -67,24 +67,73 @@ const MAX_ALIAS_DEPTH: usize = 8;
 pub struct UnreachableFromMain;
 
 impl Rule for UnreachableFromMain {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(units) = library_units(program, ctx) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let tables = Tables::build(&units, ctx);
         if !tables.executable || tables.conflicting {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
+        RulePreparation::Semantic(Box::new(Reachability {
+            units,
+            tables,
+            ctx,
+            diagnostics: None,
+            primary_types: ExpressionTypes::default(),
+        }))
+    }
+}
+
+struct Reachability<'a> {
+    units: Vec<Unit<'a>>,
+    tables: Tables<'a>,
+    ctx: &'a AnalyzeContext<'a>,
+    diagnostics: Option<Vec<Diagnostic>>,
+    primary_types: ExpressionTypes,
+}
+
+impl SemanticRuleVisitor for Reachability<'_> {
+    fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+        self.primary_types.visit_expr(node, state);
+    }
+
+    fn visit_program_end(&mut self, state: &SemanticState<'_>) {
+        self.diagnostics = Some(self.diagnostics(Some(state)));
+    }
+
+    fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+            .take()
+            .unwrap_or_else(|| self.diagnostics(None))
+    }
+}
+
+impl Reachability<'_> {
+    fn diagnostics(&self, primary_state: Option<&SemanticState<'_>>) -> Vec<Diagnostic> {
+        let ctx = self.ctx;
+        let tables = &self.tables;
 
         let mut deps: Vec<Vec<DeclId>> = vec![Vec::new(); tables.decls.len()];
-        for (index, unit) in units.iter().enumerate() {
+        for (index, unit) in self.units.iter().enumerate() {
             let bound = locally_bound_identifiers(unit.program);
-            let mut types = ExpressionTypes::default();
-            let state = SemanticState::new(unit.program, ctx)
-                .map(|state| visit_program(&mut types, unit.program, state));
+            let mut sibling_types = ExpressionTypes::default();
+            let sibling_state = (index != 0)
+                .then(|| SemanticState::new(unit.program, ctx))
+                .flatten()
+                .map(|state| visit_program(&mut sibling_types, unit.program, state));
+            let (state, types) = if index == 0 {
+                (primary_state, &self.primary_types)
+            } else {
+                (sibling_state.as_ref(), &sibling_types)
+            };
             let mut walker =
-                RefWalker::new(&tables, index, unit.source, unit.syntax, &bound, &mut deps);
-            walker.semantic = state.as_ref().map(|state| (state, &types.0));
+                RefWalker::new(tables, index, unit.source, unit.syntax, &bound, &mut deps);
+            walker.semantic = state.map(|state| (state, &types.0));
             for declaration in &unit.program.declarations {
                 walker.visit_top_level_decl(declaration);
             }
@@ -300,7 +349,7 @@ struct Tables<'a> {
 }
 
 impl<'a> Tables<'a> {
-    fn build(units: &'a [Unit<'a>], ctx: &AnalyzeContext) -> Self {
+    fn build(units: &[Unit<'a>], ctx: &AnalyzeContext) -> Self {
         let mut tables = Tables {
             decls: Vec::new(),
             containers: Vec::new(),
@@ -844,7 +893,7 @@ impl<'a> Tables<'a> {
         self.named_elsewhere = named;
     }
 
-    fn find_entry_points(&mut self, units: &'a [Unit<'a>], ctx: &AnalyzeContext) {
+    fn find_entry_points(&mut self, units: &[Unit<'a>], ctx: &AnalyzeContext) {
         let library = ctx.identities.and_then(|identities| {
             Some((
                 identities,
@@ -2025,7 +2074,8 @@ impl Visitor for RefWalker<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use falcon_analyze::{AnalyzeContext, Rule};
+    use falcon_analyze::AnalyzeContext;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
 
     use super::{UnreachableFromMain, doc_comment_references, doc_start};

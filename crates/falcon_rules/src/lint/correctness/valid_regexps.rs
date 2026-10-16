@@ -4,7 +4,9 @@
 //! constructor's literal `unicode: true` flag, matching the SDK lint.
 
 use crate::lint::string_lit::{has_interpolation, literal_parts, multiline_lead_len};
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr};
@@ -13,9 +15,13 @@ use falcon_syntax::visitor::{Visitor, walk_expr};
 pub struct ValidRegexps;
 
 impl Rule for ValidRegexps {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(identities) = ctx.identities else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let mut collector = Collector {
             diagnostics: Vec::new(),
@@ -23,7 +29,7 @@ impl Rule for ValidRegexps {
             model: SemanticModel::new(ctx.file_path, identities, ctx.types),
         };
         collector.visit_program(program);
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 

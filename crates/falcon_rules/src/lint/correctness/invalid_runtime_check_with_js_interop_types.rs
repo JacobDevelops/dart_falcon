@@ -2,10 +2,10 @@
 
 use std::collections::HashSet;
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex, Truth,
-    TypeParameterId,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    SignatureIndex, Truth, TypeParameterId,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
@@ -15,16 +15,16 @@ use falcon_syntax::ast::*;
 pub struct InvalidRuntimeCheckWithJsInteropTypes;
 
 impl Rule for InvalidRuntimeCheckWithJsInteropTypes {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut visitor = RuntimeChecks {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let visitor = RuntimeChecks {
             ctx,
             diagnostics: Vec::new(),
         };
-        visit_program(&mut visitor, program, state);
-        visitor.diagnostics
+        RulePreparation::Semantic(Box::new(visitor))
     }
 }
 
@@ -444,6 +444,10 @@ struct RuntimeChecks<'a> {
 }
 
 impl SemanticRuleVisitor for RuntimeChecks<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let (expr, target, span, is_check) = match node {
             Expr::Is {
@@ -606,7 +610,7 @@ fn js_subtype(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool {
 mod tests {
     use std::path::Path;
 
-    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_analyze::{IdentityIndex, IdentitySource, RuleAnalysis};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
 

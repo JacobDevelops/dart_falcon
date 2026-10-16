@@ -21,9 +21,9 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, SemanticModel, SignatureIndex,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    SignatureIndex,
 };
-use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::for_each_expr;
@@ -32,15 +32,19 @@ use falcon_syntax::visitor::for_each_expr;
 pub struct PreferAssertsInInitializerLists;
 
 impl Rule for PreferAssertsInInitializerLists {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(model) = ctx
             .identities
             .map(|identities| SemanticModel::new(ctx.file_path, identities, ctx.types))
         else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let Some(signatures) = ctx.signatures else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let constructors = constructor_parameters(program, &model);
         let mut diags = Vec::new();
@@ -134,7 +138,7 @@ impl Rule for PreferAssertsInInitializerLists {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 
@@ -338,6 +342,7 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::*;
+    use falcon_analyze::RuleAnalysis;
 
     #[test]
     fn reports_only_the_assert_keyword() {

@@ -13,7 +13,7 @@
 //! which a repeat is flagged; `2` flags the 2nd and later occurrences, `3` the
 //! 3rd and later. Values below `2` are clamped to `2`.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, for_each_stmt_list};
@@ -22,7 +22,11 @@ use falcon_syntax::visitor::{Visitor, for_each_stmt_list};
 pub struct PreferMovingToVariable;
 
 impl Rule for PreferMovingToVariable {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         let threshold = allowed_duplicated_chains(ctx);
         let mut late = LateDeclarations {
@@ -62,7 +66,7 @@ impl Rule for PreferMovingToVariable {
         for_each_stmt_list(program, &mut |stmts, _| {
             check_stmts(stmts, &mut diags, ctx, threshold, &late, model.as_ref());
         });
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

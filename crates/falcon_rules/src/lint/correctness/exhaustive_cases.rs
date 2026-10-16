@@ -8,11 +8,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationFacts, DeclarationIdentity, ResolvedType, Rule,
-    SemanticModel, SignatureIndex, evaluate_constant, evaluate_constant_in_member_context,
-    evaluate_constant_with_local_values,
+    RulePreparation, SemanticModel, SignatureIndex, evaluate_constant,
+    evaluate_constant_in_member_context, evaluate_constant_with_local_values,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
@@ -23,16 +23,16 @@ use falcon_syntax::visitor::{Visitor, walk_pattern};
 pub struct ExhaustiveCases;
 
 impl Rule for ExhaustiveCases {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
-        let mut collector = Collector {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
         };
-        visit_program(&mut collector, program, state);
-        collector.diagnostics
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 
@@ -182,6 +182,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_stmt(&mut self, node: &Stmt, state: &SemanticState<'_>) {
         if let Stmt::Switch(switch) = node {
             self.check_switch(switch, state);
@@ -281,7 +285,7 @@ fn direct_case_constant(pattern: &Pattern) -> Option<CaseConstant<'_>> {
 mod tests {
     use std::path::Path;
 
-    use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
+    use falcon_analyze::{IdentityIndex, IdentitySource, RuleAnalysis, TypeIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
 

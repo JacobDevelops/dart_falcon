@@ -25,17 +25,22 @@
 //!
 //! Adopted from the official `avoid_implementing_value_types` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, SemanticModel, SignatureIndex};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, Rule, RulePreparation, SemanticModel, SignatureIndex,
+};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct AvoidImplementingValueTypes;
 
 impl Rule for AvoidImplementingValueTypes {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut diags = Vec::new();
@@ -54,7 +59,7 @@ impl Rule for AvoidImplementingValueTypes {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

@@ -6,8 +6,7 @@
 //! start with a lowercase letter and contain only lowercase letters, digits,
 //! and underscores.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 use falcon_syntax::language_version::Feature;
 
@@ -15,7 +14,11 @@ use falcon_syntax::language_version::Feature;
 pub struct LibraryPrefixes;
 
 impl Rule for LibraryPrefixes {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for import in &program.imports {
             if let Some(prefix) = &import.as_name
@@ -26,7 +29,7 @@ impl Rule for LibraryPrefixes {
                 diags.push(ctx.diagnostic("library-prefixes", MESSAGE, prefix.span));
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

@@ -25,7 +25,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -37,7 +37,11 @@ use falcon_syntax::visitor::{
 pub struct NoRuntimeTypeToString;
 
 impl Rule for NoRuntimeTypeToString {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let concrete_classes = program
             .declarations
             .iter()
@@ -62,7 +66,7 @@ impl Rule for NoRuntimeTypeToString {
         for declaration in &program.declarations {
             collector.visit_top_level_decl(declaration);
         }
-        collector.diagnostics
+        RulePreparation::Diagnostics(collector.diagnostics)
     }
 }
 

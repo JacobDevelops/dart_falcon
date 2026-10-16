@@ -25,8 +25,8 @@
 
 use crate::lint::string_lit::decode_escapes;
 use crate::lint::tokens::comment_tokens;
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::Visitor;
 
@@ -36,7 +36,11 @@ const MAX_LENGTH: usize = 80;
 pub struct LinesLongerThan80Chars;
 
 impl Rule for LinesLongerThan80Chars {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let source = ctx.source;
         let lines = Lines::new(source);
         let long_lines: Vec<(usize, usize)> = (0..lines.starts.len())
@@ -47,7 +51,7 @@ impl Rule for LinesLongerThan80Chars {
             })
             .collect();
         if long_lines.is_empty() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
 
         let mut allowed = vec![false; lines.starts.len()];
@@ -59,18 +63,20 @@ impl Rule for LinesLongerThan80Chars {
         strings.visit_program(program);
         allow_comment_lines(ctx, &lines, &mut allowed);
 
-        long_lines
-            .into_iter()
-            .filter(|&(index, _)| !allowed[index])
-            .map(|(index, wrap)| {
-                let (_, end) = lines.content_range(index);
-                ctx.diagnostic(
-                    "lines-longer-than-80-chars",
-                    "The line length exceeds the 80-character limit.",
-                    DiagSpan { start: wrap, end },
-                )
-            })
-            .collect()
+        RulePreparation::Diagnostics(
+            long_lines
+                .into_iter()
+                .filter(|&(index, _)| !allowed[index])
+                .map(|(index, wrap)| {
+                    let (_, end) = lines.content_range(index);
+                    ctx.diagnostic(
+                        "lines-longer-than-80-chars",
+                        "The line length exceeds the 80-character limit.",
+                        DiagSpan { start: wrap, end },
+                    )
+                })
+                .collect(),
+        )
     }
 }
 

@@ -28,40 +28,42 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_class_decl, walk_enum_decl, walk_top_level_decl};
 
 use crate::lint::expressions::is_parenthesized;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use crate::lint::semantic_type_operations::nullability;
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct TightenTypeOfInitializingFormals;
 
 impl Rule for TightenTypeOfInitializingFormals {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
-        };
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
+        if ctx.identities.is_none() {
+            return RulePreparation::Diagnostics(Vec::new());
+        }
         let mut asserts = NonNullAsserts {
             formals: HashMap::new(),
             fields: Vec::new(),
         };
         asserts.visit_program(program);
         if asserts.formals.is_empty() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        let mut collector = Collector {
+        RulePreparation::Semantic(Box::new(Collector {
             ctx,
             formals: asserts.formals,
             reported: HashSet::new(),
             diagnostics: Vec::new(),
-        };
-        visit_program(&mut collector, program, state);
-        collector.diagnostics
+        }))
     }
 }
 
@@ -213,6 +215,10 @@ struct Collector<'a> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         let span = node.span();
         let Some(&(param, syntactically_nullable)) = self.formals.get(&(span.start, span.end))

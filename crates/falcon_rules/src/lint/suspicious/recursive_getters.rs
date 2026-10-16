@@ -8,7 +8,7 @@
 //! is reported; a getter that merely mentions its own name inside a larger
 //! expression is left alone.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 
@@ -16,7 +16,11 @@ use falcon_syntax::ast::*;
 pub struct RecursiveGetters;
 
 impl Rule for RecursiveGetters {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for declaration in &program.declarations {
             if let TopLevelDecl::Function(function) = declaration {
@@ -31,7 +35,7 @@ impl Rule for RecursiveGetters {
                 }
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

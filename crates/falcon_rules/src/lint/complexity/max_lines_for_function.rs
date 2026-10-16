@@ -11,7 +11,7 @@
 //! `max_lines` (integer, default: 100) — flag functions/methods spanning more
 //! than this many lines.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::for_each_declared_body;
@@ -20,12 +20,16 @@ use falcon_syntax::visitor::for_each_declared_body;
 pub struct MaxLinesForFunction;
 
 impl Rule for MaxLinesForFunction {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for_each_declared_body(program, ctx.source, &mut |_, _, span| {
             check_function_lines(span, &mut diags, ctx);
         });
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

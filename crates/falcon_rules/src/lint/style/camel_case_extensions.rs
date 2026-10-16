@@ -7,15 +7,18 @@
 //! no identifier to check and are skipped.
 
 use crate::lint::naming::is_upper_camel_case;
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::ast::*;
 
 #[derive(Default)]
 pub struct CamelCaseExtensions;
 
 impl Rule for CamelCaseExtensions {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         for decl in &program.declarations {
             if let TopLevelDecl::Extension(ext) = decl
@@ -25,7 +28,7 @@ impl Rule for CamelCaseExtensions {
                 diags.push(ctx.diagnostic("camel-case-extensions", MESSAGE, name.span));
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

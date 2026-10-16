@@ -26,9 +26,8 @@ use std::collections::HashSet;
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, MemberKind, QualifiedName, ResolvedType, Rule,
-    SemanticModel, SignatureIndex,
+    RulePreparation, SemanticModel, SignatureIndex,
 };
-use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_dart_type, walk_expr, walk_getter_decl, walk_local_var, walk_method_decl,
@@ -39,9 +38,13 @@ use falcon_syntax::visitor::{
 pub struct PreferVoidToNull;
 
 impl Rule for PreferVoidToNull {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let model = SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut finder = NullTypes {
@@ -52,17 +55,19 @@ impl Rule for PreferVoidToNull {
             spans: Vec::new(),
         };
         finder.visit_program(program);
-        finder
-            .spans
-            .into_iter()
-            .map(|span| {
-                ctx.diagnostic(
-                    "prefer-void-to-null",
-                    "Unnecessary use of the type 'Null'.",
-                    span,
-                )
-            })
-            .collect()
+        RulePreparation::Diagnostics(
+            finder
+                .spans
+                .into_iter()
+                .map(|span| {
+                    ctx.diagnostic(
+                        "prefer-void-to-null",
+                        "Unnecessary use of the type 'Null'.",
+                        span,
+                    )
+                })
+                .collect(),
+        )
     }
 }
 

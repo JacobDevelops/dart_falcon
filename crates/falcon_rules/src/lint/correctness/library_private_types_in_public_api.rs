@@ -11,19 +11,23 @@
 //! or `@internal` classes are exempt. Untyped initializing and super formals
 //! use their resolved semantic types, including declarations in part files.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
 use crate::lint::declarations::has_meta_annotation;
-use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
 pub struct LibraryPrivateTypesInPublicApi;
 
 impl Rule for LibraryPrivateTypesInPublicApi {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if std::iter::once(program)
             .chain(
                 ctx.library
@@ -36,21 +40,21 @@ impl Rule for LibraryPrivateTypesInPublicApi {
                 })
             })
         {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        let Some(state) = SemanticState::new(program, ctx) else {
-            return Vec::new();
+        let Some(identities) = ctx.identities else {
+            return RulePreparation::Diagnostics(Vec::new());
         };
+        let model = falcon_analyze::SemanticModel::new(ctx.file_path, identities, ctx.types);
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
             public_constructors: Vec::new(),
         };
         for declaration in &program.declarations {
-            collector.top_level(declaration, &state.model);
+            collector.top_level(declaration, &model);
         }
-        visit_program(&mut collector, program, state);
-        collector.diags
+        RulePreparation::Semantic(Box::new(collector))
     }
 }
 
@@ -246,6 +250,10 @@ impl Collector<'_> {
 }
 
 impl SemanticRuleVisitor for Collector<'_> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
+
     fn visit_constructor(&mut self, node: &ConstructorDecl, state: &SemanticState<'_>) {
         if !self.public_constructors.contains(&node.span) {
             return;

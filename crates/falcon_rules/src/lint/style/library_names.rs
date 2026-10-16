@@ -15,8 +15,8 @@
 
 use std::sync::LazyLock;
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::ast::*;
 use regex::Regex;
 
@@ -29,12 +29,16 @@ static LOWER_CASE_WITH_DOTS: LazyLock<Regex> = LazyLock::new(|| {
 pub struct LibraryNames;
 
 impl Rule for LibraryNames {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let Some(lib) = &program.library_directive else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let (Some(first), Some(last)) = (lib.name.first(), lib.name.last()) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         let name = lib
             .name
@@ -43,15 +47,15 @@ impl Rule for LibraryNames {
             .collect::<Vec<_>>()
             .join(".");
         if LOWER_CASE_WITH_DOTS.is_match(&name) {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        vec![ctx.diagnostic(
+        RulePreparation::Diagnostics(vec![ctx.diagnostic(
             "library-names",
             format!("The library name '{name}' isn't a lower_case_with_underscores identifier."),
             DiagSpan {
                 start: first.span.start,
                 end: last.span.end,
             },
-        )]
+        )])
     }
 }

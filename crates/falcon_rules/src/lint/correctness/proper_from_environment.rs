@@ -8,7 +8,7 @@
 //! with no error. Prefix the call with `const`, or place it somewhere already
 //! const — a `const` variable initializer or an annotation argument.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_top_level_decl};
@@ -17,14 +17,18 @@ use falcon_syntax::visitor::{Visitor, walk_expr, walk_top_level_decl};
 pub struct ProperFromEnvironment;
 
 impl Rule for ProperFromEnvironment {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
             in_const: false,
         };
         collector.visit_program(program);
-        collector.diags
+        RulePreparation::Diagnostics(collector.diags)
     }
 }
 

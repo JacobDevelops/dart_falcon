@@ -22,7 +22,7 @@
 //! diagnostic for the file is suppressed rather than risk a false positive. A
 //! standalone file with no part directives keeps the exact single-file behavior.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
@@ -33,15 +33,21 @@ use std::collections::HashSet;
 pub struct PreferFinalFields;
 
 impl Rule for PreferFinalFields {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         // Suppress-only: if this file participates in a library whose writes we
         // cannot fully see, stay silent. That is an unresolved part in the known
         // library, or part/part-of directives with no library context at all.
         let has_part_directives =
             !program.part_directives.is_empty() || program.part_of_directive.is_some();
         match ctx.library {
-            Some(lib) if lib.has_unresolved_parts() => return Vec::new(),
-            None if has_part_directives => return Vec::new(),
+            Some(lib) if lib.has_unresolved_parts() => {
+                return RulePreparation::Diagnostics(Vec::new());
+            }
+            None if has_part_directives => return RulePreparation::Diagnostics(Vec::new()),
             _ => {}
         }
 
@@ -66,7 +72,7 @@ impl Rule for PreferFinalFields {
                 check_class(members, &written.names, ctx, &mut diags);
             }
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 
@@ -183,6 +189,7 @@ impl Visitor for Written {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_analyze::{group_libraries, library_unit};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;

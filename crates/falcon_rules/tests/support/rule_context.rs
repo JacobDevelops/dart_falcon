@@ -1,6 +1,6 @@
 use falcon_analyze::{
-    AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, Rule, SemanticModel, SignatureIndex,
-    TypeIndex,
+    AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, Rule, RuleAnalysis, SemanticModel,
+    SignatureIndex, TypeIndex,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;

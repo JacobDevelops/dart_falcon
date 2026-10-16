@@ -16,7 +16,7 @@
 //! `ignored_patterns` (list of regexes, default: `[]`) — a comment matching any
 //! of these patterns is skipped entirely; invalid patterns are ignored.
 
-use falcon_analyze::{AnalyzeContext, Rule};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::ast::*;
 use regex::Regex;
@@ -50,14 +50,18 @@ fn comment_cfg(ctx: &AnalyzeContext) -> CommentCfg {
 }
 
 impl Rule for FormatComment {
-    fn analyze(&self, _program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        _program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         let cfg = comment_cfg(ctx);
         let tokens = collect_comment_tokens(ctx.source);
         for group in group_comments(&tokens) {
             check_group(group, &mut diags, ctx, &cfg);
         }
-        diags
+        RulePreparation::Diagnostics(diags)
     }
 }
 

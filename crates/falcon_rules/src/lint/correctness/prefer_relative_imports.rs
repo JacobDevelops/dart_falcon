@@ -10,8 +10,7 @@
 //! exports, and conditional alternatives are not checked. Incompatible with
 //! `always-use-package-imports`.
 
-use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::Diagnostic;
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::Program;
 
 use crate::lint::correctness::always_use_package_imports::uri_scheme;
@@ -23,36 +22,42 @@ pub struct PreferRelativeImports;
 const NAME: &str = "prefer-relative-imports";
 
 impl Rule for PreferRelativeImports {
-    fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
+    fn prepare<'a>(
+        &self,
+        program: &'a Program,
+        ctx: &'a AnalyzeContext<'a>,
+    ) -> RulePreparation<'a> {
         if program.imports.is_empty() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
         let Some(package) = crate::cross_file::lib_dir_package(ctx.file_path) else {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         };
         if package.name.is_empty() {
-            return Vec::new();
+            return RulePreparation::Diagnostics(Vec::new());
         }
-        program
-            .imports
-            .iter()
-            .filter(|import| {
-                let uri = &import.uri;
-                let value = if uri.has_raw_segment {
-                    uri.value.as_str().into()
-                } else {
-                    decode_escapes(&uri.value)
-                };
-                is_self_package_uri(&value, &package.name)
-            })
-            .map(|import| {
-                ctx.diagnostic(
-                    NAME,
-                    "Use relative imports for files in the 'lib' directory.",
-                    import.uri.span,
-                )
-            })
-            .collect()
+        RulePreparation::Diagnostics(
+            program
+                .imports
+                .iter()
+                .filter(|import| {
+                    let uri = &import.uri;
+                    let value = if uri.has_raw_segment {
+                        uri.value.as_str().into()
+                    } else {
+                        decode_escapes(&uri.value)
+                    };
+                    is_self_package_uri(&value, &package.name)
+                })
+                .map(|import| {
+                    ctx.diagnostic(
+                        NAME,
+                        "Use relative imports for files in the 'lib' directory.",
+                        import.uri.span,
+                    )
+                })
+                .collect(),
+        )
     }
 }
 
