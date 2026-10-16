@@ -1,8 +1,15 @@
-# Falcon 1.0 Rule Catalog
+# Falcon 1.0 checklist
 
-Section 1 has shipped. Sections 2 and 3 track planned DCM-inspired and cross-file additions for falcon 1.0. The registry in `crates/falcon_rules/src/meta.rs` is authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
+Everything here must be resolved before falcon 1.0. Engine items are checked off when they land; a rule row is deleted once the rule ships. `RULE_METADATA` in `crates/falcon_rules/src/meta.rs` is authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
 
-**Priorities**
+## Engine
+
+- [ ] **Per-package-context library identity.** When one repository holds several package contexts that resolve the same `package:` URI to different copies (for example two apps pinned to different versions of a dependency), every file must resolve against the copy from its own package context. Today the lexically last copy wins for all files: deterministic, but a two-app reproduction (`foo` 1.0 vs 2.0) still produces one false positive in the app whose copy loses.
+- [ ] **Don't cache failed parser-thread spawns.** If the parser thread can't start while loading a dependency or companion part, the empty result is cached as a real parse (companion directive cache, external-load "attempted" set). The LSP then keeps that library unresolved until the environment resets, and a part's import/part edges stay empty until its text changes.
+- [ ] **Surface cross-file thread spawn failures in the LSP.** The error is attached to the first collected file only; when that file isn't an open document, the error never shows and cross-file rules silently report nothing.
+- [ ] **Concrete syntax tree.** Replace the AST plus retained token stream with an arena CST that keeps every token and trivia, so new rules read syntax from one tree and never need parser changes.
+
+## Priorities
 
 - **must-have**: blocks 1.0. The rule is either an official preset member or a
   high-signal correctness/idiom check expected of a serious Dart/Flutter linter.
@@ -21,197 +28,18 @@ suspicious`.
 - **needs-full-type-resolution**: element model / SDK type hierarchies.
 - **needs-cross-file/project**: whole-program or pubspec/asset analysis.
 
-## Catalog status and size
+## Rule totals
 
-| Source | shipped | planned must-have | planned nice-to-have | planned post-1.0 | total |
-|---|---:|---:|---:|---:|---:|
-| Official lints (section 1) | 142 | 0 | 0 | 0 | 142 |
-| DCM-inspired | 0 | 75 | 132 | 24 | 231 |
-| Cross-file additions | 0 | 4 | 3 | 4 | 11 |
-| **Total in this catalog** | **142** | **79** | **135** | **28** | **384** |
+| Source | must-have | nice-to-have | post-1.0 | total |
+|---|---:|---:|---:|---:|
+| DCM-inspired | 75 | 132 | 24 | 231 |
+| Cross-file additions | 4 | 3 | 4 | 11 |
+| **Total** | **79** | **135** | **28** | **242** |
 
-This is the catalog's scope, not the full shipped registry. Section 1 ships 142 official lints; its original priorities were 25 must-have and 120 nice-to-have before three removals. The remaining planned additions total 242, including 28 post-1.0 candidates. Count any candidate that overlaps the shipped registry only once.
-
-Six DCM rows were deduplicated against the official-lints and cross-file lists (see
+Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
 
----
-
-# 1. Shipped official lints (142)
-
-**Status: shipped.** All 142 rules in this section are available. The rule column uses the upstream Dart lint id; use its kebab-case id in falcon config. `no_runtimeType_toString` maps to `no-runtime-type-to-string`.
-
-The groups and domains below match the registry. All 142 have `recommended: false`, including the 25 section-1 upstream preset members. Upstream preset membership isn't falcon default enablement. Enable these rules explicitly or migrate rules listed directly under `linter.rules` in an analyzer config; migration doesn't expand `include:` presets. A Flutter domain set to `all` also enables its file rules.
-
-The analysis column preserves the original design estimates, not the shipped engine's execution requirements. The registry records 50 file rules without resolution, 88 resolved file rules, and 4 cross-file rules. The latter are `depend_on_referenced_packages`, `package_names`, `secure_pubspec_urls`, and `sort_pub_dependencies`.
-
-`package_api_docs`, `package_prefixed_library_names`, and `unsafe_html` were removed because Dart 3.13.5 no longer implements or enforces them. Existing config entries produce unknown-rule warnings, and migration from analyzer config reports them as unrecognized without emitting them. Delete suppression comments for these rules too, as they now produce malformed-suppression warnings.
-
-Against `dart analyze` 3.13.5, all 142 section-1 rules match on 34 corpora (421,953 agreements) and 9 additional projects: dio, bloc, riverpod, flame, drift, freezed, get_it, mobx, and jfit (206,914 agreements). Both sets have zero false positives, false negatives, or range mismatches, including UTF-16 columns and diagnostic lengths.
-
-`implicit_reopen` deliberately differs from the analyzer's declaration-order bug: falcon checks the class relationship regardless of declaration order.
-
-The 25 section-1 upstream preset members below were the original 1.0 must-haves. The other 117 shipped rules were nice-to-haves. Upstream `recommended` includes `core`, and `flutter` includes `recommended`; this section doesn't list every rule in those presets.
-
-## 1a. Shipped upstream preset members (25)
-
-| rule | falcon group | domain | analysis estimate | upstream preset | official group | description |
-|---|---|---|---|---|---|---|
-| `avoid_types_as_parameter_names` | suspicious | none | needs-full-type-resolution | core | errors | Avoid types as parameter names. |
-| `collection_methods_unrelated_type` | correctness | none | needs-full-type-resolution | core | errors | Invocation of collection methods with arguments of unrelated types. |
-| `unrelated_type_equality_checks` | correctness | none | needs-full-type-resolution | core | errors | `==` invocation with references of unrelated types. |
-| `use_build_context_synchronously` | correctness | flutter | needs-full-type-resolution | flutter | errors | Do not use BuildContexts across async gaps. |
-| `use_key_in_widget_constructors` | correctness | flutter | needs-full-type-resolution | flutter | errors | Use key in widget constructors. |
-| `depend_on_referenced_packages` | correctness | none | needs-cross-file/project | core | pub | Depend on referenced packages. |
-| `package_names` | style | none | needs-cross-file/project | recommended | pub | Use `lowercase_with_underscores` for package names. |
-| `secure_pubspec_urls` | suspicious | none | needs-cross-file/project | core | pub | Use secure urls in `pubspec.yaml`. |
-| `annotate_overrides` | style | none | needs-full-type-resolution | recommended | style | Annotate overridden members. |
-| `avoid_renaming_method_parameters` | style | none | needs-full-type-resolution | recommended | style | Don't rename parameters of overridden methods. |
-| `await_only_futures` | correctness | none | needs-full-type-resolution | core | style | Await only futures. |
-| `exhaustive_cases` | correctness | none | needs-full-type-resolution | recommended | style | Define case clauses for all constants in enum-like classes. |
-| `file_names` | style | none | syntax-only | core | style | Name source files using `lowercase_with_underscores`. |
-| `implicit_call_tearoffs` | style | none | needs-full-type-resolution | core | style | Explicitly tear-off `call` methods when using an object as a Function. |
-| `library_annotations` | style | none | needs-local-type-inference | core | style | Attach library annotations to library directives. |
-| `library_private_types_in_public_api` | correctness | none | needs-full-type-resolution | recommended | style | Avoid using private types in public APIs. |
-| `null_check_on_nullable_type_parameter` | correctness | none | needs-full-type-resolution | core | style | Don't use null check on a potentially nullable type parameter. |
-| `null_closures` | correctness | none | needs-full-type-resolution | recommended | style | Do not pass `null` as an argument where a closure is expected. |
-| `overridden_fields` | suspicious | none | needs-full-type-resolution | recommended | style | Don't override fields. |
-| `prefer_const_constructors_in_immutables` | style | flutter | needs-full-type-resolution | flutter | style | Prefer declaring const constructors on `@immutable` classes. |
-| `prefer_contains` | performance | none | needs-full-type-resolution | recommended | style | Use `contains` for `List` and `String` instances. |
-| `prefer_interpolation_to_compose_strings` | style | none | needs-local-type-inference | recommended | style | Use interpolation to compose strings and values. |
-| `type_literal_in_constant_pattern` | correctness | none | needs-local-type-inference | core | style | Don't use constant patterns with type literals. |
-| `void_checks` | correctness | none | needs-full-type-resolution | core | style | Don't assign to void. |
-| `invalid_runtime_check_with_js_interop_types` | correctness | none | needs-full-type-resolution | recommended | errors | Avoid is/as runtime checks on JS interop types (unsound). |
-
-Upstream preset breakdown: core 12, recommended 10, flutter 3. These labels describe upstream membership, not falcon's `recommended` flag.
-
-## 1b. Shipped non-preset official lints (117)
-
-| rule | falcon group | domain | analysis estimate | official group | description |
-|---|---|---|---|---|---|
-| `always_declare_return_types` | style | none | needs-local-type-inference | style | Declare method return types. |
-| `always_put_control_body_on_new_line` | style | none | syntax-only | style | Separate the control structure expression from its statement. |
-| `always_put_required_named_parameters_first` | style | none | syntax-only | style | Put required named parameters first. |
-| `always_specify_types` | style | none | needs-local-type-inference | style | Specify type annotations. |
-| `always_use_package_imports` | correctness | none | needs-cross-file/project | errors | Avoid relative imports for files in `lib/`. |
-| `avoid_annotating_with_dynamic` | style | none | needs-local-type-inference | style | Avoid annotating with dynamic when not required. |
-| `avoid_bool_literals_in_conditional_expressions` | style | none | syntax-only | style | Avoid bool literals in conditional expressions. |
-| `avoid_catches_without_on_clauses` | style | none | needs-full-type-resolution | style | Avoid catches without on clauses. |
-| `avoid_catching_errors` | style | none | needs-full-type-resolution | style | Don't explicitly catch Error or types that implement it. |
-| `avoid_classes_with_only_static_members` | complexity | none | needs-full-type-resolution | style | Avoid defining a class that contains only static members. |
-| `avoid_double_and_int_checks` | style | none | needs-full-type-resolution | style | Avoid double and int checks. |
-| `avoid_dynamic_calls` | correctness | none | needs-full-type-resolution | errors | Avoid method calls or property accesses on a `dynamic` target. |
-| `avoid_equals_and_hash_code_on_mutable_classes` | style | none | needs-full-type-resolution | style | Avoid overloading `==` and hashCode on classes not marked `@immutable`. |
-| `avoid_escaping_inner_quotes` | style | none | syntax-only | style | Avoid escaping inner quotes by converting surrounding quotes. |
-| `avoid_field_initializers_in_const_classes` | style | none | needs-full-type-resolution | style | Avoid field initializers in const classes. |
-| `avoid_final_parameters` | style | none | syntax-only | style | Avoid final for parameter declarations. |
-| `avoid_implementing_value_types` | style | none | needs-full-type-resolution | style | Don't implement classes that override `==`. |
-| `avoid_js_rounded_ints` | style | none | needs-full-type-resolution | style | Avoid JavaScript rounded ints. |
-| `avoid_multiple_declarations_per_line` | style | none | syntax-only | style | Don't declare multiple variables on a single line. |
-| `avoid_null_checks_in_equality_operators` | style | none | needs-full-type-resolution | style | Don't check for null in custom `==` operators. |
-| `avoid_positional_boolean_parameters` | style | none | syntax-only | style | Avoid positional boolean parameters. |
-| `avoid_private_typedef_functions` | style | none | syntax-only | style | Avoid private typedef functions. |
-| `avoid_redundant_argument_values` | style | none | needs-full-type-resolution | style | Avoid redundant argument values. |
-| `avoid_returning_this` | style | none | needs-full-type-resolution | style | Avoid returning this from methods just to enable a fluent interface. |
-| `avoid_setters_without_getters` | style | none | syntax-only | style | Avoid setters without getters. |
-| `avoid_slow_async_io` | performance | none | needs-full-type-resolution | errors | Avoid slow async `dart:io` methods. |
-| `avoid_type_to_string` | correctness | none | needs-full-type-resolution | errors | Avoid `<Type>.toString()` in production code since results may be minified. |
-| `avoid_types_on_closure_parameters` | style | none | needs-local-type-inference | style | Avoid annotating types for function expression parameters. |
-| `avoid_unused_constructor_parameters` | style | none | needs-full-type-resolution | style | Avoid defining unused parameters in constructors. |
-| `avoid_void_async` | style | none | needs-full-type-resolution | style | Avoid async functions that return void. |
-| `cancel_subscriptions` | correctness | none | needs-full-type-resolution | errors | Cancel instances of `dart.async.StreamSubscription`. |
-| `cascade_invocations` | complexity | none | needs-full-type-resolution | style | Cascade consecutive method invocations on the same reference. |
-| `cast_nullable_to_non_nullable` | style | none | needs-local-type-inference | style | Don't cast a nullable value to a non-nullable type. |
-| `close_sinks` | correctness | none | needs-full-type-resolution | errors | Close instances of `dart.core.Sink`. |
-| `combinators_ordering` | style | none | syntax-only | style | Sort combinator names alphabetically. |
-| `comment_references` | correctness | none | needs-full-type-resolution | errors | Only reference in scope identifiers in doc comments. |
-| `conditional_uri_does_not_exist` | style | none | needs-cross-file/project | style | Missing conditional import. |
-| `deprecated_consistency` | style | none | needs-full-type-resolution | style | Missing deprecated annotation. |
-| `deprecated_member_use_from_same_package` | correctness | none | needs-cross-file/project | errors | Avoid using deprecated elements from within the declaring package. |
-| `diagnostic_describe_all_properties` | correctness | flutter | needs-full-type-resolution | errors | DO reference all public properties in debug methods. |
-| `directives_ordering` | style | none | syntax-only | style | Adhere to Effective Dart directives sorting conventions. |
-| `discarded_futures` | correctness | none | needs-full-type-resolution | errors | Don't invoke asynchronous functions in non-async blocks. |
-| `do_not_use_environment` | style | none | needs-cross-file/project | style | Do not use environment-declared variables. |
-| `eol_at_end_of_file` | style | none | syntax-only | style | Put a single newline at end of file. |
-| `flutter_style_todos` | style | none | syntax-only | style | Use Flutter TODO format: `// TODO(username): message, https://URL`. |
-| `implicit_reopen` | correctness | none | needs-full-type-resolution | errors | Don't implicitly reopen classes. Shipped, including the deliberate declaration-order divergence noted above. |
-| `invalid_case_patterns` | correctness | none | needs-full-type-resolution | errors | Use case expressions that are valid in Dart 3.0. |
-| `join_return_with_assignment` | complexity | none | needs-full-type-resolution | style | Join return statement with assignment when possible. |
-| `leading_newlines_in_multiline_strings` | style | none | syntax-only | style | Start multiline strings with a newline. |
-| `library_names` | style | none | syntax-only | style | Name libraries using `lowercase_with_underscores`. |
-| `lines_longer_than_80_chars` | style | none | syntax-only | style | Avoid lines longer than 80 characters. |
-| `literal_only_boolean_expressions` | correctness | none | syntax-only | errors | Boolean expression composed only with literals. |
-| `matching_super_parameters` | style | none | needs-full-type-resolution | style | Use matching super parameter names. |
-| `missing_whitespace_between_adjacent_strings` | style | none | syntax-only | style | Missing whitespace between adjacent strings. |
-| `no_adjacent_strings_in_list` | correctness | none | syntax-only | errors | Don't use adjacent strings in list. |
-| `no_default_cases` | style | none | syntax-only | style | No default cases. |
-| `no_literal_bool_comparisons` | style | none | syntax-only | style | Don't compare booleans to boolean literals. |
-| `no_runtimeType_toString` | style | none | needs-full-type-resolution | style | Avoid calling `toString()` on runtimeType. |
-| `no_self_assignments` | correctness | none | needs-full-type-resolution | errors | Don't assign a variable to itself. |
-| `noop_primitive_operations` | performance | none | needs-full-type-resolution | style | Noop primitive operations. |
-| `omit_local_variable_types` | style | none | needs-local-type-inference | style | Omit type annotations for local variables. |
-| `one_member_abstracts` | complexity | none | syntax-only | style | Avoid a one-member abstract class when a simple function will do. |
-| `only_throw_errors` | style | none | needs-full-type-resolution | style | Only throw instances of classes extending Exception or Error. |
-| `parameter_assignments` | style | none | needs-full-type-resolution | style | Don't reassign references to parameters of functions or methods. |
-| `prefer_asserts_in_initializer_lists` | style | none | syntax-only | style | Prefer putting asserts in initializer lists. |
-| `prefer_asserts_with_message` | style | none | syntax-only | style | Prefer asserts with message. |
-| `prefer_const_constructors` | style | none | needs-full-type-resolution | style | Prefer const with constant constructors. |
-| `prefer_const_declarations` | style | none | needs-local-type-inference | style | Prefer const over final for declarations. |
-| `prefer_const_literals_to_create_immutables` | style | none | needs-full-type-resolution | style | Prefer const literals as parameters of constructors on `@immutable` classes. |
-| `prefer_constructors_over_static_methods` | style | none | needs-full-type-resolution | style | Prefer constructors instead of static methods to create instances. |
-| `prefer_double_quotes` | style | none | syntax-only | style | Prefer double quotes where they won't require escape sequences. |
-| `prefer_expression_function_bodies` | complexity | none | syntax-only | style | Use `=>` for short members whose body is a single return statement. |
-| `prefer_final_in_for_each` | style | none | needs-local-type-inference | style | Prefer final in for-each loop variable if not reassigned. |
-| `prefer_final_locals` | style | none | needs-local-type-inference | style | Prefer final for variable declarations if not reassigned. |
-| `prefer_final_parameters` | style | none | needs-local-type-inference | style | Prefer final for parameter declarations if not reassigned. |
-| `prefer_foreach` | performance | none | needs-full-type-resolution | style | Use `forEach` to only apply a function to all elements. |
-| `prefer_if_elements_to_conditional_expressions` | complexity | none | needs-full-type-resolution | style | Prefer if elements to conditional expressions where possible. |
-| `prefer_int_literals` | style | none | syntax-only | style | Prefer int literals over double literals. |
-| `prefer_mixin` | style | none | needs-full-type-resolution | style | Prefer using mixins. |
-| `prefer_null_aware_method_calls` | style | none | needs-full-type-resolution | style | Prefer null aware method calls. |
-| `prefer_relative_imports` | correctness | none | needs-cross-file/project | errors | Prefer relative imports for files in `lib/`. |
-| `prefer_single_quotes` | style | none | syntax-only | style | Only use double quotes for strings containing single quotes. |
-| `prefer_void_to_null` | correctness | none | needs-full-type-resolution | errors | Don't use the Null type, unless you are positive you don't want void. |
-| `public_member_api_docs` | style | none | needs-cross-file/project | style | Document all public members. |
-| `require_trailing_commas` | style | none | syntax-only | style | Use trailing commas for all function calls and declarations. |
-| `sized_box_shrink_expand` | style | flutter | needs-full-type-resolution | style | Use SizedBox shrink and expand named constructors. |
-| `sort_constructors_first` | style | none | syntax-only | style | Sort constructor declarations before other members. |
-| `sort_pub_dependencies` | correctness | none | syntax-only | pub | Sort pub dependencies alphabetically. |
-| `sort_unnamed_constructors_first` | style | none | syntax-only | style | Sort unnamed constructor declarations first. |
-| `test_types_in_equals` | correctness | none | needs-full-type-resolution | errors | Test type arguments in `operator ==(Object other)`. |
-| `throw_in_finally` | correctness | none | needs-full-type-resolution | errors | Avoid `throw` in finally block. |
-| `tighten_type_of_initializing_formals` | style | none | needs-full-type-resolution | style | Tighten type of initializing formal. |
-| `type_annotate_public_apis` | style | none | needs-local-type-inference | style | Type annotate public APIs. |
-| `unawaited_futures` | style | none | needs-full-type-resolution | style | `Future` results in `async` bodies must be awaited or marked `unawaited`. |
-| `unnecessary_await_in_return` | style | none | needs-full-type-resolution | style | Unnecessary await keyword in return. |
-| `unnecessary_breaks` | style | none | syntax-only | style | Don't use explicit `break`s when a break is implied. |
-| `unnecessary_final` | style | none | needs-local-type-inference | style | Don't use `final` for local variables. |
-| `unnecessary_lambdas` | complexity | none | needs-full-type-resolution | style | Don't create a lambda when a tear-off will do. |
-| `unnecessary_library_directive` | style | none | syntax-only | style | Avoid library directives unless documented or annotated. |
-| `unnecessary_null_aware_operator_on_extension_on_nullable` | style | none | needs-full-type-resolution | style | Unnecessary null aware operator on extension on a nullable type. |
-| `unnecessary_null_checks` | style | none | needs-full-type-resolution | style | Unnecessary null checks. |
-| `unnecessary_parenthesis` | style | none | needs-full-type-resolution | style | Unnecessary parentheses can be removed. |
-| `unnecessary_raw_strings` | style | none | syntax-only | style | Unnecessary raw string. |
-| `unnecessary_statements` | correctness | none | needs-full-type-resolution | errors | Avoid using unnecessary statements. |
-| `unreachable_from_main` | style | none | needs-cross-file/project | style | Unreachable top-level members in executable libraries. |
-| `use_colored_box` | style | flutter | needs-full-type-resolution | style | Use `ColoredBox`. |
-| `use_decorated_box` | style | flutter | needs-full-type-resolution | style | Use `DecoratedBox`. |
-| `use_enums` | style | none | needs-full-type-resolution | style | Use enums rather than classes that behave like enums. |
-| `use_if_null_to_convert_nulls_to_bools` | style | none | needs-full-type-resolution | style | Use if-null operators to convert nulls to bools. |
-| `use_is_even_rather_than_modulo` | performance | none | needs-full-type-resolution | style | Prefer `isOdd`/`isEven` over checking the result of `% 2`. |
-| `use_late_for_private_fields_and_variables` | style | none | needs-full-type-resolution | style | Use late for private members with a non-nullable type. |
-| `use_named_constants` | style | none | needs-full-type-resolution | style | Use predefined named constants. |
-| `use_raw_strings` | style | none | syntax-only | style | Use raw string to avoid escapes. |
-| `use_setters_to_change_properties` | style | none | needs-full-type-resolution | style | Use a setter for operations that conceptually change a property. |
-| `use_string_buffers` | performance | none | needs-full-type-resolution | style | Use string buffers to compose strings. |
-| `use_test_throws_matchers` | style | none | needs-full-type-resolution | style | Use `throwsA` matcher instead of `fail()`. |
-| `use_to_and_as_if_applicable` | style | none | needs-full-type-resolution | style | Start method names with to/_to or as/_as if applicable. |
-
-All 117 are registered with `recommended: false`; none are deferred.
-
----
-
-# 2. Planned DCM-inspired rules (231)
+## Planned DCM-inspired rules (231)
 
 These are candidates from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
 
@@ -220,7 +48,7 @@ needs-full-type-resolution, **X** needs-cross-file/project. Domain-rule falcon
 groups (flutter/test/bloc/riverpod/provider/flutter_hooks/equatable) are
 assigned here for the catalog and should be confirmed at implementation time.
 
-## 2a. core: correctness
+### 2a. core: correctness
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -266,7 +94,7 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `pass-correct-accepted-type` | correctness | FT | paid | Argument type mismatch (DCM-style). | post-1.0 |
 | `handle-throwing-invocations` | correctness | FT | paid | Call to throwing API without try/catch. | post-1.0 |
 
-## 2b. core: suspicious
+### 2b. core: suspicious
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -296,7 +124,7 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `avoid-importing-entrypoint-exports` | suspicious | X | paid | Importing from an app entrypoint. | post-1.0 |
 | `avoid-similar-names` | suspicious | S | paid | Confusingly similar identifiers in scope. | post-1.0 |
 
-## 2c. core: style
+### 2c. core: style
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -333,7 +161,7 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `prefer-prefixed-global-constants` | style | S | paid | Global const naming convention. | post-1.0 |
 | `match-class-name-pattern` | style | S | paid | Class names must match a configured regex. | post-1.0 |
 
-## 2d. core: complexity
+### 2d. core: complexity
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -350,7 +178,7 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `avoid-local-functions` | complexity | S | paid | Overuse of local functions. | post-1.0 |
 | `avoid-excessive-expressions` | complexity | S | paid | Expression-length metric. | post-1.0 |
 
-## 2e. core: performance
+### 2e. core: performance
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -362,7 +190,7 @@ assigned here for the catalog and should be confirmed at implementation time.
 | `prefer-return-await` | performance | FT | paid | `return await` needed for correct stack traces. | nice-to-have |
 | `prefer-bytes-builder` | performance | FT | paid | Building byte lists without BytesBuilder. | post-1.0 |
 
-## 2f. core: unnecessary/redundant cleanups (style)
+### 2f. core: unnecessary/redundant cleanups (style)
 
 Not covered by falcon's existing `unnecessary-*` family; verify each against the
 shipped set before implementing. Several are near-twins that should be aliased,
@@ -387,7 +215,7 @@ not re-added.
 | `use-existing-variable` | style | LT | paid | Reuse an existing binding instead of recomputing. | nice-to-have |
 | `use-existing-destructuring` | style | LT | paid | Reuse an existing destructuring binding. | nice-to-have |
 
-## 2g. flutter domain
+### 2g. flutter domain
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -428,7 +256,7 @@ not re-added.
 | `prefer-text-rich` | style | LT | paid | `Text.rich`/RichText guidance. | post-1.0 |
 | `proper-super-calls` | correctness | FT | paid | initState/dispose super-call ordering (verify vs proper-super-init-state). | post-1.0 |
 
-## 2h. test domain (new)
+### 2h. test domain (new)
 
 Activated for `*_test.dart`. Falcon ships none of these today.
 
@@ -447,7 +275,7 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `format-test-name` | style | S | paid | Test description formatting. | post-1.0 |
 | `prefer-test-structure` | style | S | paid | Arrange/act/assert structure. | post-1.0 |
 
-## 2i. bloc domain (new)
+### 2i. bloc domain (new)
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -470,7 +298,7 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `avoid-cubits` | style | LT | paid | Opinionated: prefer Bloc over Cubit. | post-1.0 |
 | `avoid-returning-value-from-cubit-methods` | style | LT | paid | Cubit methods should be void. | post-1.0 |
 
-## 2j. riverpod domain (new)
+### 2j. riverpod domain (new)
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -491,7 +319,7 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `avoid-notifier-constructors` | style | LT | paid | Notifiers shouldn't declare constructors. | post-1.0 |
 | `prefer-single-notifier-per-file` | style | S | paid | One notifier per file. | post-1.0 |
 
-## 2k. provider domain (new)
+### 2k. provider domain (new)
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -502,7 +330,7 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `prefer-multi-provider` | style | LT | paid | Nested providers → MultiProvider. | nice-to-have |
 | `prefer-provider-extensions` | style | LT | paid | Use context extensions over `Provider.of`. | nice-to-have |
 
-## 2l. flutter_hooks domain (new)
+### 2l. flutter_hooks domain (new)
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -513,7 +341,7 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `prefer-use-callback` | performance | FT | paid | Wrap callbacks in `useCallback`. | nice-to-have |
 | `prefer-use-memo` | performance | FT | paid | Wrap values in `useMemo`. | nice-to-have |
 
-## 2m. equatable domain (new)
+### 2m. equatable domain (new)
 
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
@@ -522,7 +350,7 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `extend-equatable` | style | LT | paid | Value class should extend Equatable. | nice-to-have |
 | `prefer-equatable-mixin` | style | LT | paid | Use EquatableMixin where appropriate. | nice-to-have |
 
-## Deduplication notes
+### Deduplication notes
 
 These DCM rows are covered elsewhere and are **not** counted in the DCM totals:
 
@@ -547,7 +375,7 @@ The survey excludes rules already ported by falcon and niche-package rules for f
 
 ---
 
-# 3. Cross-file rules (11)
+## Planned cross-file rules (11)
 
 Whole-project / app-wide rules live in the `cross-file` config section.
 The current shipped set is defined by the cross-file entries in `RULE_METADATA`;
@@ -557,9 +385,9 @@ infrastructure: **A** reuses the resolved directive graph / lexical name index;
 (`dependencies`/`dev_dependencies`/`flutter.assets`); **C** needs a new
 asset/l10n index (filesystem walk and/or `.arb` parsing).
 
-**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The four official lints are counted in section 1, not in the 11 planned additions below.
+**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The four shipped official lints are not counted in the 11 planned additions below.
 
-## 3a. Tier 1: must-have (4)
+### 3a. Tier 1: must-have (4)
 
 | rule | falcon group | analysis | difficulty | description |
 |---|---|---|---|---|
@@ -568,7 +396,7 @@ asset/l10n index (filesystem walk and/or `.arb` parsing).
 | `no-import-cycles` | correctness | needs-cross-file/project | A | Import/export cycle between library files (SCC over the resolved directive graph). |
 | `banned-imports` | correctness | needs-cross-file/project | A | User-configured architecture boundaries: files matching glob X may not import glob Y. |
 
-## 3b. Tier 2: nice-to-have (3)
+### 3b. Tier 2: nice-to-have (3)
 
 | rule | falcon group | analysis | difficulty | description |
 |---|---|---|---|---|
@@ -576,7 +404,7 @@ asset/l10n index (filesystem walk and/or `.arb` parsing).
 | `unused-l10n` | correctness | needs-cross-file/project | C | Generated localization key (`.arb`) never referenced through the generated accessor. |
 | `unexported-public-api` | style | needs-cross-file/project | A | Public declaration used across the package but never surfaced through a barrel/public library. |
 
-## 3c. Tier 3: post-1.0 (4)
+### 3c. Tier 3: post-1.0 (4)
 
 | rule | falcon group | analysis | difficulty | description |
 |---|---|---|---|---|

@@ -4,17 +4,18 @@ falcon is pre-1.0. This tracks shipped milestones and what's left, not a release
 
 ## Toward 1.0
 
-1.0 is a rule-catalog and readiness push. [`docs/rule-catalog-1.0.md`](docs/rule-catalog-1.0.md) records the shipped official lints and planned additions. `RULE_METADATA` in `crates/falcon_rules/src/meta.rs` defines the shipped registry and default enablement.
+1.0 is a rule-catalog and readiness push. [`docs/v1-checklist.md`](docs/v1-checklist.md) is the checklist of engine work and planned rules that must be resolved before 1.0. `RULE_METADATA` in `crates/falcon_rules/src/meta.rs` defines the shipped registry and default enablement.
 
 ### Shipped
 
-All 142 section-1 official lints are registered. Against `dart analyze` 3.13.5, they match on 34 corpora (421,953 agreements) and 9 additional projects: dio, bloc, riverpod, flame, drift, freezed, get_it, mobx, and jfit (206,914 agreements). Both sets have zero false positives, false negatives, or range mismatches, including UTF-16 columns and diagnostic lengths. Three obsolete upstream rules are no longer shipped; see `docs/rule-catalog-1.0.md`. `implicit_reopen` deliberately differs from the analyzer's declaration-order bug.
+All 142 official lints from the 1.0 catalog are registered. Against `dart analyze` 3.13.5, they match on 34 corpora (421,953 agreements) and 9 additional projects: dio, bloc, riverpod, flame, drift, freezed, get_it, mobx, and jfit (206,914 agreements). Both sets have zero false positives, false negatives, or range mismatches, including UTF-16 columns and diagnostic lengths. `package_api_docs`, `package_prefixed_library_names`, and `unsafe_html` are no longer shipped because Dart 3.13.5 no longer implements them; existing config entries produce unknown-rule warnings. `implicit_reopen` deliberately differs from the analyzer's declaration-order bug.
 
-All 142 have `recommended: false` in falcon, including the 25 section-1 upstream preset members. Enable them explicitly or migrate rules listed directly under `linter.rules` in an analyzer config. Migration doesn't expand `include:` presets.
+All 142 have `recommended: false` in falcon, including the 25 upstream preset members. Enable them explicitly or migrate rules listed directly under `linter.rules` in an analyzer config. Migration doesn't expand `include:` presets.
 
 ### Remaining
 
-- **Rule-catalog expansion.** Two sources remain in the catalog:
+- **Engine checklist.** Per-package-context library identity, thread-spawn failure handling, and a concrete syntax tree; see [`docs/v1-checklist.md`](docs/v1-checklist.md#engine).
+- **Rule-catalog expansion.** Two sources remain in the checklist:
   - **DCM-inspired rules: 231** (75 must-have, 132 nice-to-have, 24 post-1.0).
     These are candidates from the DCM survey, not current pricing claims.
   - **Cross-file rules: 11** (see below).
