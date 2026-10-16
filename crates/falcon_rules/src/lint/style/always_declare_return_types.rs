@@ -6,6 +6,7 @@
 //! `typedef F(...)` aliases are checked. Setters and `operator []=` never
 //! declare a return type and are skipped, as are `test_*`/`solo_test_*`
 //! methods in a package-root test directory (reflective test runners).
+//! Operator diagnostics highlight only the operator name, not `operator`.
 //!
 //! ```dart
 //! main() {}      // flagged
@@ -122,19 +123,20 @@ impl Visitor for Collector<'_, '_> {
     }
 }
 
-/// The `operator` keyword through the parameter list (`operator ==`).
+/// The operator name alone, including both tokens of `[]`.
 pub(crate) fn operator_span(operator: &OperatorDecl, syntax: &falcon_syntax::SyntaxStore) -> Span {
     let header_start = operator
         .annotations
         .last()
         .map_or(operator.span.start, |annotation| annotation.span.end);
-    let end = operator.params.span.start;
-    let start = syntax
-        .keywords_in(
-            Span::new(header_start, end),
-            falcon_syntax::TokenKind::Operator,
-        )
-        .next()
-        .map_or(header_start, |token| token.offset());
-    Span::new(start, end)
+    let mut tokens = syntax
+        .tokens_in(Span::new(header_start, operator.params.span.start))
+        .filter(|token| !token.is_trivia())
+        .skip_while(|token| token.kind != falcon_syntax::TokenKind::Operator)
+        .skip(1);
+    let Some(first) = tokens.next() else {
+        return Span::new(header_start, operator.params.span.start);
+    };
+    let last = tokens.last().unwrap_or(first);
+    Span::new(first.offset(), last.offset() + last.len())
 }

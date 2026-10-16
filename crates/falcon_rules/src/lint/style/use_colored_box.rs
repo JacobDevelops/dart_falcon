@@ -6,6 +6,7 @@
 //! the analyzer's nullability-suffix check, a color with a nullable static type
 //! is excluded, but `dynamic` and `Null` still qualify. When the type is unknown,
 //! a constructor invocation or a Flutter `Colors.<name>` access also qualifies.
+//! The diagnostic covers the constructor name, excluding `new` and arguments.
 //!
 //! ```dart
 //! Container(color: Colors.blue, child: child);  // BAD
@@ -55,7 +56,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             self.diags.push(self.ctx.diagnostic(
                 "use-colored-box",
                 "Use a 'ColoredBox' rather than a 'Container' with only a 'Color'.",
-                *node.span(),
+                crate::lint::flutter::constructor_span(node),
             ));
         }
     }
@@ -96,4 +97,45 @@ fn non_nullable_color(color: &Expr, state: &SemanticState<'_>) -> bool {
                     && state.model.resolve_name(&prefix.name)
                         == Some(DeclarationIdentity::flutter("Colors")))
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference as span_test_support;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn reports_constructor_name_including_prefix_but_not_new_or_arguments() {
+        let source = r"
+import 'package:flutter/widgets.dart';
+import 'package:flutter/widgets.dart' as w;
+void build(dynamic color, Widget child) {
+  Container(color: color, child: child);
+  w.Container(color: color, child: child);
+  new Container(color: color, child: child);
+}
+";
+        let diagnostics = span_test_support::analyze(
+            &UseColoredBox,
+            Path::new("test.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        assert_eq!(diagnostics.len(), 3);
+        for (diagnostic, (invocation, expected)) in diagnostics.iter().zip([
+            ("Container(color:", "Container"),
+            ("w.Container(color:", "w.Container"),
+            ("new Container(color:", "Container"),
+        ]) {
+            let start =
+                source.find(invocation).unwrap() + usize::from(invocation.starts_with("new ")) * 4;
+            assert_eq!(diagnostic.span.start, start);
+            assert_eq!(
+                &source[diagnostic.span.start..diagnostic.span.end],
+                expected
+            );
+        }
+    }
 }

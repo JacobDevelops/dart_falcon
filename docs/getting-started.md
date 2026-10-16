@@ -96,6 +96,10 @@ falcon check . --format json
 
 JSON diagnostics no longer include `code` (identical to `rule`; read `rule` instead), or the always-empty `suggestions` and `context_lines` fields.
 
+Diagnostic `line` and `col` are one-based, with columns counted in UTF-16 code units. The half-open `span.start` and `span.end` are UTF-8 byte offsets into the source file, not a column and length. To compare a diagnostic range with `dart analyze --format=machine`, count the UTF-16 code units in the source slice covered by `span`.
+
+The opt-in `eol-at-end-of-file` rule can report a virtual one-character range at EOF. In that case `span.end` is one byte beyond the file; preserve the extra unit when computing the UTF-16 range length.
+
 falcon discovers `falcon.json` automatically — the current directory, then the
 enclosing git root, then `~/.falcon.json`.
 

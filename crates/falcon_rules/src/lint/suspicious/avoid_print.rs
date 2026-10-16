@@ -1,6 +1,7 @@
 //! Flags calls and callback arguments resolving to `dart:core`'s `print`.
 //! Lexical bindings and members declared in the enclosing body shadow it.
 //! Calls guarded by Flutter's `kDebugMode` are exempt within the same function body.
+//! Diagnostics underline the `print` identifier, not the invocation or its arguments.
 
 use crate::lint::declarations::members_of;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
@@ -114,7 +115,7 @@ impl SemanticRuleVisitor for Collector<'_> {
             return;
         };
         if !self.debug_calls.contains(span) {
-            self.check_identifier(identifier, *span, state);
+            self.check_identifier(identifier, identifier.span, state);
         }
     }
 
@@ -185,5 +186,29 @@ impl Collector<'_> {
             "Avoid using print in production code; use a logging framework instead.",
             span,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn calls_report_the_print_identifier_only() {
+        let source = "void f() { print('hello'); print('second'); }";
+        let diagnostics = inference::analyze(
+            &AvoidPrint,
+            Path::new("print_spans.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        assert_eq!(diagnostics.len(), 2);
+        for (diagnostic, (start, _)) in diagnostics.iter().zip(source.match_indices("print")) {
+            assert_eq!(diagnostic.span.start, start);
+            assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "print");
+        }
     }
 }

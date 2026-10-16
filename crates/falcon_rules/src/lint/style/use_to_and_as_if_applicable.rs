@@ -4,6 +4,7 @@
 //! `return Other(this);` — is a conversion. Dart convention names such methods
 //! `toX()` when they copy state into a new object and `asX()` when they return a
 //! view backed by the original, so readers know what the call costs.
+//! The diagnostic covers the method name or operator token.
 //!
 //! ```dart
 //! class Bar {
@@ -69,7 +70,7 @@ impl Rule for UseToAndAsIfApplicable {
                         &operator.params,
                         &operator.return_type,
                         &operator.body,
-                        operator.span,
+                        crate::lint::declarations::operator_token_span(operator, ctx.syntax),
                     ),
                     _ => continue,
                 };
@@ -146,4 +147,37 @@ fn wraps_this(
     is_creation
         && args.named.is_empty()
         && matches!(args.positional.as_slice(), [argument] if matches!(argument.unparenthesized(), Expr::This { .. }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference as span_test_support;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn reports_operator_token_and_method_identifier() {
+        let source = r"
+class Wrapper { Wrapper(Object value); }
+class Convert {
+  Wrapper operator ~() => Wrapper(this);
+  Wrapper wrap() => Wrapper(this);
+}
+";
+        let diagnostics = span_test_support::analyze(
+            &UseToAndAsIfApplicable,
+            Path::new("test.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        assert_eq!(diagnostics.len(), 2);
+        for (diagnostic, expected) in diagnostics.iter().zip(["~", "wrap"]) {
+            assert_eq!(diagnostic.span.start, source.find(expected).unwrap());
+            assert_eq!(
+                &source[diagnostic.span.start..diagnostic.span.end],
+                expected
+            );
+        }
+    }
 }

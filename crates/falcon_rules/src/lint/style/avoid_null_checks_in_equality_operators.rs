@@ -85,6 +85,23 @@ struct NullChecks<'a> {
 
 impl Visitor for NullChecks<'_> {
     fn visit_expr(&mut self, node: &Expr) {
+        if let Expr::Call {
+            callee, args, span, ..
+        } = node
+            && let Expr::Field {
+                object,
+                is_null_safe: true,
+                ..
+            } = callee.as_ref()
+            && is_param(object, self.name)
+        {
+            self.spans.push(*span);
+            // The analyzer's method invocation includes its arguments, not a
+            // separate property-access diagnostic for the method name.
+            walk_expr(self, callee);
+            self.visit_arg_list(args);
+            return;
+        }
         let flagged = match node {
             Expr::Binary {
                 op: BinaryOp::EqEq | BinaryOp::NotEq,
@@ -189,5 +206,34 @@ impl Visitor for Rebinds<'_> {
             self.check(name);
         }
         walk_pattern(self, node);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+
+    use super::*;
+
+    #[test]
+    fn includes_method_arguments_without_extending_property_accesses() {
+        let source = "class Box { bool operator ==(Object? other) => other?.toString() == other?.hashCode.toString(); }";
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &syntax);
+        let diagnostics = AvoidNullChecksInEqualityOperators.analyze(&program, &ctx);
+        let slices: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(slices, ["other?.toString()", "other?.hashCode"]);
     }
 }

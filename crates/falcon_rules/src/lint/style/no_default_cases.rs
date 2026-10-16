@@ -6,6 +6,7 @@
 //! grows. Only switch statements whose subject is provably an enum or an
 //! enum-like class (private non-factory constructors, at least two static
 //! constants of its own type, no subclasses in its library) are checked.
+//! The diagnostic covers the default member including its statement body.
 //!
 //! ```dart
 //! switch (color) {
@@ -62,9 +63,9 @@ impl Collector<'_> {
             .is_some_and(|facts| is_enum_like(facts, identity))
     }
 
-    /// The `default` keyword of the label at `index` in `case`: it follows the
-    /// previous label's pattern (or guard), or opens the case.
-    fn default_keyword(&self, case: &SwitchCase, index: usize) -> Span {
+    /// The default member includes its statements, not just its keyword.
+    /// Skip any preceding case labels grouped with the same statement body.
+    fn default_member_span(&self, case: &SwitchCase, index: usize) -> Span {
         let from = case.cases[..index]
             .iter()
             .rev()
@@ -78,13 +79,31 @@ impl Collector<'_> {
                 SwitchCaseKind::Default => None,
             })
             .unwrap_or(case.span.start);
-        let start = self
+        let keyword = self
             .ctx
             .syntax
             .keywords_in(Span::new(from, case.span.end), TokenKind::Default)
             .next()
             .map_or(case.span.start, |token| token.offset());
-        Span::new(start, start + "default".len())
+        let start = case
+            .labels
+            .iter()
+            .filter(|label| from <= label.span.start && label.span.end <= keyword)
+            .map(|label| label.span.start)
+            .min()
+            .unwrap_or(keyword);
+        let end = if index + 1 == case.cases.len() {
+            case.span.end
+        } else {
+            self.ctx
+                .syntax
+                .tokens_in(Span::new(keyword, case.span.end))
+                .find(|token| token.kind == TokenKind::Colon)
+                .map_or(keyword + "default:".len(), |token| {
+                    token.offset() + token.len()
+                })
+        };
+        Span::new(start, end)
     }
 }
 
@@ -112,12 +131,71 @@ impl SemanticRuleVisitor for Collector<'_> {
             return;
         };
         if self.is_enum_or_enum_like(&identity, state) {
-            let span = self.default_keyword(case, index);
+            let span = self.default_member_span(case, index);
             self.diags.push(self.ctx.diagnostic(
                 "no-default-cases",
                 "Invalid use of 'default' member in a switch.",
                 span,
             ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference as span_test_support;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn reports_default_body_without_preceding_case_label() {
+        let source = r"
+enum E { a, b }
+void use(E e) {
+  switch (e) {
+    case E.a:
+    default:
+      print(e);
+      break;
+  }
+}
+";
+        let diagnostics = span_test_support::analyze(
+            &NoDefaultCases,
+            Path::new("test.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        assert_eq!(diagnostics.len(), 1);
+        let span = diagnostics[0].span;
+        assert_eq!(span.start, source.find("default:").unwrap());
+        assert_eq!(
+            &source[span.start..span.end],
+            "default:\n      print(e);\n      break;"
+        );
+    }
+
+    #[test]
+    fn reports_default_labels_but_not_following_case_members() {
+        for (statement, expected) in [
+            (
+                "switch (e) { case E.a: l: default: break; }",
+                "l: default: break;",
+            ),
+            ("switch (e) { default: case E.a: print(e); }", "default:"),
+        ] {
+            let source = format!("enum E {{ a, b }}\nvoid use(E e) {{ {statement} }}");
+            let diagnostics = span_test_support::analyze(
+                &NoDefaultCases,
+                Path::new("test.dart"),
+                &source,
+                &FalconConfig::default(),
+            );
+            assert_eq!(diagnostics.len(), 1);
+            let span = diagnostics[0].span;
+            assert_eq!(span.start, source.find(expected).unwrap());
+            assert_eq!(&source[span.start..span.end], expected);
         }
     }
 }

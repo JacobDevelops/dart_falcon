@@ -39,7 +39,38 @@ impl Rule for EolAtEndOfFile {
         let end = source[start..]
             .chars()
             .next()
-            .map_or(start, |c| start + c.len_utf8());
+            .map_or(start + 1, |character| start + character.len_utf8());
         vec![ctx.diagnostic("eol-at-end-of-file", message, DiagSpan { start, end })]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+
+    use super::*;
+
+    #[test]
+    fn reports_one_character_even_past_eof() {
+        for (source, suffix) in [
+            ("void f() {}", None),
+            ("void f() {}  ", Some(" ")),
+            ("void f() {}\n\n", Some("\n")),
+            ("void f() {}\r\n\r\n", Some("\r")),
+            ("void f() {}\u{3000}", Some("\u{3000}")),
+        ] {
+            let parsed = parse(source);
+            let config = FalconConfig::default();
+            let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+            let diagnostics = EolAtEndOfFile.analyze(&parsed.program, &ctx);
+            assert_eq!(diagnostics.len(), 1);
+            let span = &diagnostics[0].span;
+            assert_eq!(&source[..span.start], "void f() {}");
+            assert_eq!(span.end - span.start, suffix.map_or(1, str::len));
+            assert_eq!(source.get(span.start..span.end), suffix);
+        }
     }
 }

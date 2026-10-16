@@ -7,6 +7,7 @@
 //! expression on the same variable or property chain that the final `return`
 //! yields. A run of assignments to that same target (`x = a; x += b; return
 //! x;`) is left alone, as are switch-case statement lists, which are not blocks.
+//! Diagnostics cover the expression statement, including its semicolon.
 //!
 //! ```dart
 //! int f(int a) {
@@ -73,7 +74,7 @@ impl SemanticRuleVisitor for Collector<'_, '_> {
             self.diagnostics.push(self.ctx.diagnostic(
                 "join-return-with-assignment",
                 "Assignment could be inlined in 'return' statement.",
-                *statement.expr.span(),
+                statement.span,
             ));
         }
     }
@@ -310,4 +311,27 @@ fn member_owner(
             .signatures
             .resolved_extension_access_owner(receiver, name, write, &state.model)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn assignment_range_includes_the_statement_semicolon() {
+        let source = "int f(int x) { x += 1; return x; }";
+        let diagnostics = inference::analyze(
+            &JoinReturnWithAssignment,
+            Path::new("join_span.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        assert_eq!(diagnostics.len(), 1);
+        let span = diagnostics[0].span;
+        assert_eq!(span.start, source.find("x +=").unwrap());
+        assert_eq!(&source[span.start..span.end], "x += 1;");
+    }
 }

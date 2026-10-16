@@ -8,7 +8,7 @@
 //! and keeps the parameter name in its usual place. The rule detects the old form
 //! by the nested parameter list the parser attaches to it; the modern form parses
 //! as a plain parameter with a function type and is not flagged. Rewrite using
-//! `Function` type syntax.
+//! `Function` type syntax. Diagnostics cover the complete parameter declaration.
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
@@ -41,9 +41,40 @@ impl Visitor for Collector<'_, '_> {
             self.diags.push(self.ctx.diagnostic(
                 "use-function-type-syntax-for-parameters",
                 "Use the generic function type syntax for parameters.".to_string(),
-                node.name.span,
+                node.span,
             ));
         }
         visitor::walk_formal_param(self, node);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::Path;
+
+    #[test]
+    fn reports_the_complete_function_typed_parameter() {
+        let source =
+            "void f(int callback(String s), void other<T>(T x), {required int named(int x)}) {}";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+        let diagnostics = UseFunctionTypeSyntaxForParameters.analyze(&parsed.program, &ctx);
+        let actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                "int callback(String s)",
+                "void other<T>(T x)",
+                "required int named(int x)"
+            ]
+        );
     }
 }

@@ -24,7 +24,8 @@
 //! unannotated alias of that typedef. Member calls, including null-aware
 //! accesses, use the reached receiver branch for annotation lookup, as do
 //! bounded type parameters and flow-promoted `FutureOr` values. Unresolved
-//! types stay silent.
+//! types stay silent. Calls through getters underline the complete callee expression,
+//! while method invocations underline only the method name.
 //!
 //! Adopted from the official `discarded_futures` lint.
 
@@ -149,7 +150,7 @@ impl Collector<'_> {
             return;
         }
         if let Some(message) = self.message(&state.infer(expr), state) {
-            self.report(message, report_span(expr, state));
+            self.report(message, report_span(expr, state, self.ctx));
         }
     }
 
@@ -162,7 +163,7 @@ impl Collector<'_> {
             return;
         }
         if let Some(message) = self.message(&state.infer(expr), state) {
-            self.report(message, report_span(expr, state));
+            self.report(message, report_span(expr, state, self.ctx));
         }
     }
 
@@ -170,12 +171,18 @@ impl Collector<'_> {
         &mut self,
         object: &Expr,
         sections: &[CascadeSection],
+        is_null_aware: bool,
         state: &SemanticState<'_>,
     ) {
         if !self.interesting(object.span()) {
             return;
         }
         let target = state.infer_receiver(object);
+        let target = if is_null_aware {
+            target.non_null()
+        } else {
+            target
+        };
         for section in sections {
             let mut receiver = target.clone();
             let mut reported = None;
@@ -184,13 +191,29 @@ impl Collector<'_> {
                 let previous = std::mem::replace(&mut receiver, ResolvedType::Unknown);
                 (receiver, reported) = match op {
                     CascadeOp::NullAssert { .. } => (previous.non_null(), reported),
-                    CascadeOp::Call(name, _, _) => (
-                        member_return_type(&previous, &name.name, state),
-                        Some((
-                            member_await_not_required(&previous, &name.name, state),
-                            name.span,
-                        )),
-                    ),
+                    CascadeOp::Call(name, type_args, args) => {
+                        let callable = callable_member(&previous, &name.name, state);
+                        let result = if callable {
+                            state.cascade_invoke_return_type(
+                                &field_type(&previous, &name.name, state),
+                                type_args,
+                                args,
+                            )
+                        } else {
+                            member_return_type(&previous, &name.name, state)
+                        };
+                        (
+                            result,
+                            Some((
+                                member_await_not_required(&previous, &name.name, state),
+                                if callable {
+                                    Span::new(section.span.start, name.span.end)
+                                } else {
+                                    name.span
+                                },
+                            )),
+                        )
+                    }
                     CascadeOp::Field { name, .. } => (
                         field_type(&previous, &name.name, state),
                         Some((
@@ -253,8 +276,11 @@ impl SemanticRuleVisitor for Collector<'_> {
     fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
         match node {
             Expr::Cascade {
-                object, sections, ..
-            } => self.check_cascade(object, sections, state),
+                object,
+                sections,
+                is_null_aware,
+                ..
+            } => self.check_cascade(object, sections, *is_null_aware, state),
             Expr::StringLit(literal) => {
                 for interpolation in &literal.interpolations {
                     self.check_interpolation(&interpolation.expr, state);
@@ -292,6 +318,14 @@ fn field_type(receiver: &ResolvedType, name: &str, state: &SemanticState<'_>) ->
         })
         .map(|(ty, substitutions)| state.model.substitute(&ty, &substitutions))
         .unwrap_or(ResolvedType::Unknown)
+}
+
+fn callable_member(receiver: &ResolvedType, name: &str, state: &SemanticState<'_>) -> bool {
+    state.is_callable_value_member(receiver, name)
+        || state
+            .signatures
+            .resolved_extension_getter(receiver, name, &state.model)
+            .is_some()
 }
 
 fn is_await_not_required(annotation: &DeclarationIdentity) -> bool {
@@ -465,65 +499,145 @@ fn map_put_if_absent(expr: &Expr, state: &SemanticState<'_>) -> bool {
 }
 
 /// Method invocations report the method name. Function-expression invocations
-/// report their complete callee, including parentheses and qualified properties.
-fn report_span(expr: &Expr, state: &SemanticState<'_>) -> Span {
+/// report their complete callee; constructors report the complete constructor name.
+fn report_span(expr: &Expr, state: &SemanticState<'_>, ctx: &AnalyzeContext<'_>) -> Span {
     match expr {
-        Expr::Call { callee, .. } => match callee.as_ref() {
-            Expr::Field {
+        Expr::Call { callee, args, .. } => {
+            if state.is_constructor_invocation(callee) {
+                let end = ctx
+                    .syntax
+                    .tokens_in(Span::new(callee.span().start, args.span.start))
+                    .rfind(|token| !token.is_trivia())
+                    .map_or(callee.span().end, |token| token.offset() + token.len());
+                return Span::new(callee.span().start, end);
+            }
+            if let Expr::Field {
                 object,
                 field,
                 is_null_safe,
                 ..
-            } => {
-                let named_property = match object.as_ref() {
-                    Expr::Ident(name) if !state.environment.is_bound(&name.name) => {
-                        state
-                            .model
-                            .resolve_value(QualifiedName::prefixed(&name.name, &field.name))
-                            .is_some_and(|identity| {
-                                state.signatures.value_type(&identity).is_some()
-                            })
-                            || state
-                                .model
-                                .resolve_name(&name.name)
-                                .is_some_and(|identity| {
-                                    state.signatures.field(&identity, &field.name).is_some()
-                                })
-                    }
-                    Expr::Field {
-                        object: prefix,
-                        field: class,
-                        is_null_safe: false,
-                        ..
-                    } => matches!(prefix.as_ref(), Expr::Ident(prefix)
-                        if !state.environment.is_bound(&prefix.name)
-                            && state.model.resolve_name(QualifiedName::prefixed(
-                                &prefix.name, &class.name,
-                            )).is_some_and(|identity|
-                                state.signatures.field(&identity, &field.name).is_some())),
-                    _ => false,
-                };
-                let function_property = named_property || {
-                    let receiver = state.infer_access_receiver(object, &field.name, *is_null_safe);
-                    receiver.record_field(&field.name).is_some()
-                        || state
-                            .signatures
-                            .resolved_field(&receiver, &field.name, &state.model)
-                            .is_some()
-                        || state
-                            .signatures
-                            .resolved_extension_getter(&receiver, &field.name, &state.model)
-                            .is_some()
-                };
-                if function_property {
-                    *callee.span()
-                } else {
-                    field.span
-                }
+            } = callee.as_ref()
+                && !state.is_function_expression_invocation(callee)
+                && !callable_member(
+                    &state.infer_access_receiver(object, &field.name, *is_null_safe),
+                    &field.name,
+                    state,
+                )
+            {
+                field.span
+            } else {
+                *callee.span()
             }
-            other => *other.span(),
-        },
+        }
+        Expr::New {
+            dart_type,
+            constructor_name,
+            ..
+        } => Span::new(
+            dart_type.span().start,
+            constructor_name
+                .as_ref()
+                .map_or(dart_type.span().end, |name| name.span.end),
+        ),
         Expr::Field { field, .. } => field.span,
         other => *other.span(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn callable_getters_report_the_callee_but_methods_report_the_name() {
+        let source = "import 'dart:async'; class C { Future<void> Function() get callback => () async {}; Future<void> method() async {} } void f(C c) { c.callback(); c.method(); (c.method)(); }";
+        let diagnostics = inference::analyze(
+            &DiscardedFutures,
+            Path::new("future_spans.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        let actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(actual, ["c.callback", "method", "(c.method)"]);
+    }
+
+    #[test]
+    fn constructor_calls_report_the_constructor_name_without_arguments_or_new() {
+        let source = "import 'dart:async'; void f() { Future.value(); Future<void>.value(); new Future.value(); new Future<void>.value(); }";
+        let diagnostics = inference::analyze(
+            &DiscardedFutures,
+            Path::new("constructor_spans.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        let actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                "Future.value",
+                "Future<void>.value",
+                "Future.value",
+                "Future<void>.value"
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod reviewed_range_tests {
+    use crate::{all_rules, inference};
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn both_future_rules_preserve_generic_constructor_and_callable_property_ranges() {
+        for (rule_name, marker) in [("discarded-futures", ""), ("unawaited-futures", "async")] {
+            let source = format!(
+                "import 'dart:async' as p;
+                import 'reviewed_future_ranges.dart' as self;
+                class C<T> implements p.Future<T> {{ C(); }}
+                class Callbacks {{ p.Future<void> Function() get callback => () async {{}}; }}
+                extension E on Callbacks {{ p.Future<void> Function() get ext => () async {{}}; }}
+                void f(Callbacks c, Callbacks? nullable) {marker} {{
+                  C<int>();
+                  self.C<int>();
+                  c.ext();
+                  c..callback();
+                  nullable?..callback();
+                }}"
+            );
+            let rules = all_rules();
+            let rule = &rules.iter().find(|(name, _)| *name == rule_name).unwrap().1;
+            let diagnostics = inference::analyze(
+                rule.as_ref(),
+                Path::new("reviewed_future_ranges.dart"),
+                &source,
+                &FalconConfig::default(),
+            );
+            let actual: Vec<_> = diagnostics
+                .iter()
+                .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+                .collect();
+            assert_eq!(
+                actual,
+                [
+                    "C<int>",
+                    "self.C<int>",
+                    "c.ext",
+                    "..callback",
+                    "?..callback"
+                ],
+                "{rule_name}"
+            );
+        }
     }
 }

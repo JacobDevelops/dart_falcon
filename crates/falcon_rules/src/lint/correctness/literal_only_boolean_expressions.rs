@@ -3,7 +3,7 @@
 //! An `if`, `while`, `do`-`while`, or `for` condition (or a pattern `when`
 //! guard) made solely of literals combined with operators always evaluates the
 //! same way, so the branch is either dead or unconditional. `while (true)` is
-//! allowed as the idiomatic infinite loop.
+//! allowed as the idiomatic infinite loop. Guard diagnostics include the `when` keyword.
 //!
 //! ```dart
 //! if (1 > 2) {}          // flagged
@@ -58,7 +58,15 @@ impl Collector<'_, '_> {
 
     fn check_guard(&mut self, guard: Option<&Expr>, state: &SemanticState<'_>) {
         if let Some(guard) = guard {
-            self.report_if_literal(guard, *guard.span(), state);
+            let tokens = self.ctx.tokens();
+            let before = tokens.partition_point(|token| token.offset() < guard.span().start);
+            let start = tokens[..before]
+                .iter()
+                .rev()
+                .find(|token| !token.is_trivia())
+                .filter(|token| token.kind == falcon_syntax::TokenKind::When)
+                .map_or(guard.span().start, |token| token.offset());
+            self.report_if_literal(guard, Span::new(start, guard.span().end), state);
         }
     }
 
@@ -215,5 +223,29 @@ impl SemanticRuleVisitor for Collector<'_, '_> {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn guard_ranges_include_when_and_intervening_comments() {
+        let source = "int f(int x) { switch (x) { case 1 when /* guard */ true: return 1; default: return 0; } } int g(int x) => switch (x) { 1 when 2 > 1 => 1, _ => 0 };";
+        let diagnostics = inference::analyze(
+            &LiteralOnlyBooleanExpressions,
+            Path::new("guard_spans.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        let actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(actual, ["when /* guard */ true", "when 2 > 1"]);
     }
 }

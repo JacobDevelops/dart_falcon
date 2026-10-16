@@ -8,6 +8,7 @@
 //! `final` with an initializer whose inferred type is neither `dynamic` nor
 //! `Null`. Parameters of public constructors of public, non-enum classes are
 //! checked too.
+//! Missing operator return types highlight the operator name alone.
 //!
 //! ```dart
 //! var answer = 42;           // flagged
@@ -28,8 +29,10 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
+use crate::lint::declarations::documented_node_span;
 use crate::lint::semantic_scope::SemanticState;
 use crate::lint::style::always_declare_return_types::operator_span;
+use crate::lint::style::always_specify_types::setter_parameter_span;
 
 const RULE: &str = "type-annotate-public-apis";
 const MESSAGE: &str = "Missing type annotation on a public API.";
@@ -167,7 +170,7 @@ impl Checker<'_> {
                         && setter.param_type.is_none()
                         && !setter.param.name.chars().all(|c| c == '_')
                     {
-                        self.report(setter.param.span);
+                        self.report(setter_parameter_span(setter, self.ctx));
                     }
                 }
                 ClassMember::Operator(operator) => {
@@ -226,7 +229,11 @@ impl Checker<'_> {
                 && param.initializing.is_none()
                 && !param.name.name.chars().all(|c| c == '_')
             {
-                self.report(param.span);
+                self.report(documented_node_span(
+                    param.span,
+                    &param.annotations,
+                    self.ctx,
+                ));
             }
         }
     }

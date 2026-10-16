@@ -5,6 +5,7 @@
 //! hash code and the collection silently loses track of it. Only classes that
 //! are (transitively) annotated with package:meta's `@immutable` should
 //! override them.
+//! The diagnostic covers the first declaration token after metadata.
 //!
 //! ```dart
 //! class Point {                 // not @immutable
@@ -87,10 +88,49 @@ impl Rule for AvoidEqualsAndHashCodeOnMutableClasses {
                     format!(
                         "The method '{member_name}' should not be overridden in classes not annotated with '@immutable'."
                     ),
-                    Span::new(start, span.end),
+                    Span::new(
+                        start,
+                        ctx.syntax
+                            .tokens_in(Span::new(start, span.end))
+                            .next()
+                            .map_or(start, |token| token.offset() + token.len()),
+                    ),
                 ));
             }
         }
         diags
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::Path;
+
+    #[test]
+    fn reports_first_token_after_metadata_not_the_member_body() {
+        let source = r"
+class Mutable {
+  @override
+  /* metadata gap */ bool operator ==(Object other) => true;
+  @override
+  int get hashCode => 0;
+}
+";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+        let diagnostics = AvoidEqualsAndHashCodeOnMutableClasses.analyze(&parsed.program, &ctx);
+        assert_eq!(diagnostics.len(), 2);
+        for (diagnostic, expected) in diagnostics.iter().zip(["bool", "int"]) {
+            assert_eq!(diagnostic.span.start, source.find(expected).unwrap());
+            assert_eq!(
+                &source[diagnostic.span.start..diagnostic.span.end],
+                expected
+            );
+        }
     }
 }

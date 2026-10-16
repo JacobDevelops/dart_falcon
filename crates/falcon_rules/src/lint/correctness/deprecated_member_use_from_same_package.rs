@@ -27,6 +27,8 @@
 //! parameter metadata as direct invocations do.
 //! Null-shortened receiver chains recover reached declaration types until parentheses,
 //! preserving declared nullable members and applicable nullable extensions.
+//! Named constructor uses cover their full qualifier; implicit super uses cover
+//! the complete constructor declaration that makes the implicit call.
 //!
 //! Adopted from the official `deprecated_member_use_from_same_package` lint.
 
@@ -82,6 +84,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
             return Vec::new();
         }
         let mut frontier = Frontier {
+            ctx,
             model: state.model,
             signatures: ctx.signatures,
             identities: ctx.identities,
@@ -296,6 +299,7 @@ fn deprecation(
 }
 
 struct Frontier<'a> {
+    ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     signatures: Option<&'a SignatureIndex>,
     identities: Option<&'a falcon_analyze::IdentityIndex>,
@@ -473,13 +477,16 @@ impl Visitor for Frontier<'_> {
         }
         if !explicit
             && !node.is_factory
+            && !node.is_primary
             && let Some(superclass) = &self.superclass
         {
-            self.types.push(constructor_target(
-                superclass.clone(),
-                "new",
-                node.name_span,
-            ));
+            let span = crate::lint::declarations::documented_node_span(
+                node.span,
+                node.annotations,
+                self.ctx,
+            );
+            self.types
+                .push(constructor_target(superclass.clone(), "new", span));
         }
         if let Some(redirect) = &node.redirect
             && let ResolvedType::Interface { identity, .. } = self
@@ -1199,6 +1206,36 @@ impl<'ctx> Uses<'ctx> {
         self.extension_reference(callee, state)
     }
 
+    /// Resolve a named constructor reference, retaining its complete qualifier.
+    fn constructor_reference<'node>(
+        &self,
+        node: &'node Expr,
+        state: &SemanticState<'_>,
+    ) -> Option<Target<'node>> {
+        let Expr::Field { object, field, .. } = node.unparenthesized() else {
+            return None;
+        };
+        let mut qualifier = object.unparenthesized();
+        while let Expr::GenericInstantiation { target, .. } = qualifier {
+            qualifier = target.unparenthesized();
+        }
+        let qualified = match qualifier {
+            Expr::Ident(name) if !state.environment.is_bound(&name.name) => {
+                QualifiedName::from(name.name.as_str())
+            }
+            Expr::Field { object, field, .. } => match object.unparenthesized() {
+                Expr::Ident(prefix) if !state.environment.is_bound(&prefix.name) => {
+                    QualifiedName::prefixed(&prefix.name, &field.name)
+                }
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let owner = state.model.unaliased(state.model.resolve_name(qualified)?);
+        state.signatures.constructor(&owner, &field.name)?;
+        Some(constructor_target(owner, &field.name, *node.span()))
+    }
+
     fn target<'node>(
         &self,
         node: &'node Expr,
@@ -1208,6 +1245,9 @@ impl<'ctx> Uses<'ctx> {
     where
         'ctx: 'node,
     {
+        if let Some(constructor) = self.constructor_reference(node, state) {
+            return Some(constructor);
+        }
         let mut node = node;
         while let Expr::GenericInstantiation { target, .. } = node.unparenthesized() {
             node = target;
@@ -1383,16 +1423,11 @@ impl<'ctx> Uses<'ctx> {
                     }
                     if let Some(owner) = state.model.resolve_name(&prefix.name) {
                         let owner = state.model.unaliased(owner);
-                        let selector =
-                            if state.signatures.constructor(&owner, &field.name).is_some() {
-                                MemberSelector::new(SelectorKind::Constructor, false, &field.name)
-                                    .into()
-                            } else {
-                                self.ctx
-                                    .identities?
-                                    .static_member_selector(&owner, &field.name, write)?
-                                    .into()
-                            };
+                        let selector = self
+                            .ctx
+                            .identities?
+                            .static_member_selector(&owner, &field.name, write)?
+                            .into();
                         return Some(Target {
                             owner,
                             selector,
@@ -1757,6 +1792,14 @@ impl SemanticRuleVisitor for Uses<'_> {
                             target.owner = owner;
                             target.selector =
                                 MemberSelector::new(SelectorKind::Constructor, false, "new").into();
+                            // Call type arguments live outside the callee span.
+                            let end = self
+                                .ctx
+                                .syntax
+                                .tokens_in(Span::new(callee.span().start, args.span.start))
+                                .rfind(|token| !token.is_trivia())
+                                .map_or(callee.span().end, |token| token.offset() + token.len());
+                            target.span = Span::new(callee.span().start, end);
                             self.report(&target);
                         }
                     }
@@ -1780,15 +1823,7 @@ impl SemanticRuleVisitor for Uses<'_> {
                 if let Some((identity, name)) =
                     resolve_new_constructor(dart_type, constructor_name.as_ref(), &state.model)
                 {
-                    let span = constructor_name.as_ref().map_or_else(
-                        || match dart_type {
-                            DartType::Named(named) if name != "new" => {
-                                named.segments.last().map_or(named.span, |id| id.span)
-                            }
-                            _ => *dart_type.span(),
-                        },
-                        |id| id.span,
-                    );
+                    let span = crate::lint::flutter::constructor_span(node);
                     let target = constructor_target(state.model.unaliased(identity), name, span);
                     self.report(&target);
                     self.arguments(&target, args);
@@ -1841,6 +1876,82 @@ mod tests {
             .with_types(&types)
             .with_signatures(&signatures);
         DeprecatedMemberUseFromSamePackage.analyze(&program, &ctx)
+    }
+
+    #[test]
+    fn deprecated_named_constructors_cover_the_generic_qualifier() {
+        let source = r"
+import 'bad.dart' as p;
+class Old<T> {
+  @Deprecated('old')
+  Old();
+  @Deprecated('old')
+  Old.named();
+}
+void use() {
+  Old<int>.named();
+  new Old<String>.named();
+  Old<double>.named;
+  Old<bool> /* before arguments */ ();
+  p.Old();
+  p.Old<num>();
+  p.Old.named();
+  p.Old<int>.named();
+}
+";
+        let mut diagnostics = analyze(source, fixture_path());
+        diagnostics.sort_unstable_by_key(|diagnostic| diagnostic.span.start);
+        let expected = [
+            "Old<int>.named",
+            "Old<String>.named",
+            "Old<double>.named",
+            "Old<bool>",
+            "p.Old",
+            "p.Old<num>",
+            "p.Old.named",
+            "p.Old<int>.named",
+        ];
+        assert_eq!(diagnostics.len(), expected.len());
+        for (diagnostic, expected) in diagnostics.iter().zip(expected) {
+            assert_eq!(diagnostic.span.start, source.find(expected).unwrap());
+            assert_eq!(
+                &source[diagnostic.span.start..diagnostic.span.end],
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn deprecated_implicit_super_reports_the_complete_constructor() {
+        let source = r"
+class Base {
+  @Deprecated('old')
+  const Base();
+}
+class Child extends Base {
+  /// Creates.
+  const Child();
+  /// Before metadata.
+  @pragma('test')
+  /// After metadata.
+  Child.named();
+}
+class Primary() extends Base;
+";
+        let mut diagnostics = analyze(source, fixture_path());
+        diagnostics.sort_unstable_by_key(|diagnostic| diagnostic.span.start);
+        let expected = [
+            "/// Creates.\n  const Child();",
+            "@pragma('test')\n  /// After metadata.\n  Child.named();",
+        ];
+        assert_eq!(diagnostics.len(), expected.len());
+        for (diagnostic, expected) in diagnostics.iter().zip(expected) {
+            assert_eq!(diagnostic.span.start, source.find(expected).unwrap());
+            assert_eq!(
+                &source[diagnostic.span.start..diagnostic.span.end],
+                expected
+            );
+        }
     }
 
     #[test]

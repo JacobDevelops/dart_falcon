@@ -21,6 +21,11 @@
 //! declaration metadata supplies generic arity; SDK-free analysis retains the
 //! existing identity fallback.
 //!
+//! Diagnostic ranges follow the analyzer's syntax anchors: collection literals
+//! and variable patterns highlight their first token, while unmodified untyped
+//! parameters highlight the entire parameter (including attached documentation,
+//! metadata, and defaults).
+//!
 //! Adopted from the official `always_specify_types` lint.
 
 use std::collections::HashSet;
@@ -39,11 +44,27 @@ use falcon_syntax::visitor::{
 };
 use falcon_syntax::{Program, TokenKind};
 
-use crate::lint::declarations::{member_names, members_of};
+use crate::lint::declarations::{documented_node_span, member_names, members_of};
 use crate::lint::semantic_scope::SemanticState;
 
 const RULE: &str = "always-specify-types";
 const MESSAGE: &str = "Missing type annotation.";
+
+/// Setter ASTs retain the name rather than the complete formal parameter range.
+pub(crate) fn setter_parameter_span(node: &SetterDecl, ctx: &AnalyzeContext) -> Span {
+    let start = ctx
+        .syntax
+        .tokens_in(Span::new(node.name.span.end, node.param.span.end))
+        .skip_while(|token| token.kind != TokenKind::LParen)
+        .skip(1)
+        .find(|token| !token.is_trivia())
+        .map_or(node.param.span.start, |token| token.offset());
+    documented_node_span(
+        Span::new(start, node.param.span.end),
+        &node.param_annotations,
+        ctx,
+    )
+}
 
 #[derive(Default)]
 pub struct AlwaysSpecifyTypes;
@@ -159,6 +180,16 @@ impl Collector<'_> {
         self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, span));
     }
 
+    fn first_token(&self, span: Span) -> Span {
+        self.ctx
+            .syntax
+            .tokens_in(span)
+            .find(|token| !token.is_trivia())
+            .map_or(span, |token| {
+                Span::new(token.offset(), token.offset() + token.len())
+            })
+    }
+
     /// Whether `identity` is generic and does not opt out of its arguments.
     fn is_generic(&self, identity: &DeclarationIdentity) -> bool {
         let Some(state) = &self.state else {
@@ -261,7 +292,7 @@ impl Collector<'_> {
     }
 
     /// The `var`/`final`/`const` keyword within `start..end`.
-    fn keyword(&self, start: usize, end: usize) -> Span {
+    fn keyword(&self, start: usize, end: usize) -> Option<Span> {
         self.ctx
             .syntax
             .tokens_in(Span::new(start, end))
@@ -271,9 +302,7 @@ impl Collector<'_> {
                     TokenKind::Var | TokenKind::Final | TokenKind::Const
                 )
             })
-            .map_or(Span::new(start, end), |token| {
-                Span::new(token.offset(), token.offset() + token.len())
-            })
+            .map(|token| Span::new(token.offset(), token.offset() + token.len()))
     }
 
     fn check_declaration(
@@ -292,7 +321,9 @@ impl Collector<'_> {
         let start = annotations
             .last()
             .map_or(span.start, |annotation| annotation.span.end);
-        let keyword = self.keyword(start, first.name.span.start);
+        let keyword = self
+            .keyword(start, first.name.span.start)
+            .unwrap_or(Span::new(start, first.name.span.start));
         self.report(keyword);
     }
 
@@ -321,7 +352,17 @@ impl Collector<'_> {
             && node.initializing.is_none()
             && !is_just_underscores(&node.name.name)
         {
-            self.report(node.name.span);
+            let span = if node.is_final || node.is_var {
+                let start = node
+                    .annotations
+                    .last()
+                    .map_or(node.span.start, |annotation| annotation.span.end);
+                self.keyword(start, node.name.span.start)
+                    .unwrap_or(node.span)
+            } else {
+                documented_node_span(node.span, &node.annotations, self.ctx)
+            };
+            self.report(span);
         }
     }
 
@@ -418,12 +459,18 @@ impl Visitor for Collector<'_> {
     }
 
     fn visit_local_var(&mut self, node: &LocalVarDecl) {
-        self.check_declaration(
-            &node.annotations,
-            node.range(),
-            node.var_type.as_ref(),
-            &node.declarators,
-        );
+        if node.var_type.is_none()
+            && let Some(keyword) = node.keyword_span
+        {
+            self.report(keyword);
+        } else {
+            self.check_declaration(
+                &node.annotations,
+                node.range(),
+                node.var_type.as_ref(),
+                &node.declarators,
+            );
+        }
         walk_local_var(self, node);
     }
 
@@ -434,7 +481,15 @@ impl Visitor for Collector<'_> {
 
     fn visit_setter_decl(&mut self, node: &SetterDecl) {
         if node.param_type.is_none() && !is_just_underscores(&node.param.name) {
-            self.report(node.param.span);
+            let parameter_span = setter_parameter_span(node, self.ctx);
+            let keyword_start = node
+                .param_annotations
+                .last()
+                .map_or(parameter_span.start, |annotation| annotation.span.end);
+            let span = self
+                .keyword(keyword_start, node.param.span.start)
+                .unwrap_or(parameter_span);
+            self.report(span);
         }
         walk_setter_decl(self, node);
     }
@@ -481,7 +536,7 @@ impl Visitor for Collector<'_> {
             } = node
                 && name.name != "_"
             {
-                self.report(*span);
+                self.report(self.first_token(*span));
             }
             self.check_pattern_shorthands(node);
         }
@@ -555,10 +610,10 @@ impl Visitor for Collector<'_> {
                 type_arg: None,
                 span,
                 ..
-            } => self.report(*span),
+            } => self.report(self.first_token(*span)),
             Expr::Map {
                 type_args, span, ..
-            } if type_args.is_empty() => self.report(*span),
+            } if type_args.is_empty() => self.report(self.first_token(*span)),
             // The tested type of an `is` check may stay raw; its arguments may not.
             Expr::Is { dart_type, .. } => self.is_type_test = Some(*dart_type.span()),
             Expr::Call {

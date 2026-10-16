@@ -18,6 +18,7 @@
 //! Delegation follows an explicit `super` or `this` call, otherwise the
 //! superclass's unnamed constructor (or an extension type's representation
 //! constructor). Implicit default constructors are not `const`.
+//! Ordinary constructor diagnostics cover their first token after metadata.
 //!
 //! Analyzer 3.13 class and mixin-class primary constructors use the same body,
 //! delegation and field-finality checks, but do not reject nonconstant
@@ -105,14 +106,11 @@ impl Rule for PreferConstConstructorsInImmutables {
                         constructor.span,
                         ctx.syntax,
                     );
-                    let end = if members.representation {
-                        ctx.syntax
-                            .tokens_in(Span::new(start, constructor.span.end))
-                            .next()
-                            .map_or(constructor.span.end, |token| token.offset() + token.len())
-                    } else {
-                        constructor.span.end
-                    };
+                    let end = ctx
+                        .syntax
+                        .tokens_in(Span::new(start, constructor.span.end))
+                        .next()
+                        .map_or(start, |token| token.offset() + token.len());
                     diags.push(ctx.diagnostic(
                         "prefer-const-constructors-in-immutables",
                         "Declare a const constructor in an immutable class.",
@@ -331,4 +329,50 @@ fn class_field_initializers(members: &[ClassMember]) -> HashMap<&str, &Expr> {
 /// The constructor a `super`/`this` call names; the unnamed one is `new`.
 fn delegate(name: &Option<Identifier>) -> &str {
     name.as_ref().map_or("new", |name| name.name.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference as span_test_support;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn reports_constructor_first_token_without_named_suffix_or_parameters() {
+        let source = r"
+import 'package:meta/meta.dart';
+@immutable
+class Frozen {
+  Frozen();
+  @Deprecated('old')
+  /* metadata gap */ Frozen.named();
+}
+@immutable
+class External {
+  external External();
+  factory External.named() = Other;
+}
+class Other implements External { const Other(); }
+";
+        let diagnostics = span_test_support::analyze(
+            &PreferConstConstructorsInImmutables,
+            Path::new("test.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        assert_eq!(diagnostics.len(), 4);
+        for (diagnostic, (declaration, expected)) in diagnostics.iter().zip([
+            ("Frozen();", "Frozen"),
+            ("Frozen.named();", "Frozen"),
+            ("external External();", "external"),
+            ("factory External.named()", "factory"),
+        ]) {
+            assert_eq!(diagnostic.span.start, source.find(declaration).unwrap());
+            assert_eq!(
+                &source[diagnostic.span.start..diagnostic.span.end],
+                expected
+            );
+        }
+    }
 }

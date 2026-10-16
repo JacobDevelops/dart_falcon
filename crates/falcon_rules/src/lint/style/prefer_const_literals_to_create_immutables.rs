@@ -9,6 +9,7 @@
 //! annotated `@immutable` or `@Immutable(...)` from `package:meta`.
 //! Literals already in a constant context are implicitly const and are left
 //! alone, as are arguments to classes whose immutability cannot be established.
+//! Diagnostic ranges exclude parentheses surrounding the collection literal.
 //!
 //! ```dart
 //! @immutable
@@ -79,7 +80,7 @@ impl SemanticRuleVisitor for Collector<'_> {
                 self.diags.push(self.ctx.diagnostic(
                     "prefer-const-literals-to-create-immutables",
                     "Use 'const' literals as arguments to constructors of '@immutable' classes.",
-                    *literal.span(),
+                    *literal.unparenthesized().span(),
                 ));
             }
         }
@@ -161,4 +162,28 @@ fn collection_literals(argument: &Expr) -> Vec<&Expr> {
         }
     }
     literals
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference;
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+
+    #[test]
+    fn collection_ranges_exclude_surrounding_parentheses() {
+        let source = "import 'package:meta/meta.dart'; @immutable class Config { final List<Object> values; Config(this.values); } void f() { Config(([1])); Config(([[2]])); }";
+        let diagnostics = inference::analyze(
+            &PreferConstLiteralsToCreateImmutables,
+            Path::new("literal_spans.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        let actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(actual, ["[1]", "[[2]]", "[2]"]);
+    }
 }

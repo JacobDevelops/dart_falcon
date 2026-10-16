@@ -128,7 +128,7 @@ impl Rule for PreferAssertsInInitializerLists {
                         diags.push(ctx.diagnostic(
                             "prefer-asserts-in-initializer-lists",
                             "Assert should be in the initializer list.",
-                            assert.span,
+                            Span::new(assert.span.start, assert.span.start + "assert".len()),
                         ));
                     }
                 }
@@ -327,4 +327,47 @@ fn needs_instance(
             && is_cached_member(name)
             && !scope.initialized_fields.contains(name)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+
+    use super::*;
+
+    #[test]
+    fn reports_only_the_assert_keyword() {
+        let source = "class Box { Box(int value) { assert /* gap */ (value > 0); assert(value < 10, 'limit'); } }";
+        let path = Path::new("/project/lib/test.dart");
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path,
+                program: &program,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let model = SemanticModel::new(path, &identities, None);
+        let signatures = SignatureIndex::from_program(&program, &model);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+            .with_identities(&identities)
+            .with_signatures(&signatures);
+        let diagnostics = PreferAssertsInInitializerLists.analyze(&program, &ctx);
+        let slices: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(slices, ["assert", "assert"]);
+    }
 }

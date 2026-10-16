@@ -4,7 +4,43 @@
 
 use std::collections::HashSet;
 
+use falcon_analyze::AnalyzeContext;
 use falcon_syntax::ast::{Annotation, ClassMember, OperatorDecl, Span, TopLevelDecl};
+
+/// Comments after metadata take precedence over comments before annotations.
+pub(crate) fn documented_node_span(
+    span: Span,
+    annotations: &[Annotation],
+    ctx: &AnalyzeContext,
+) -> Span {
+    let syntax = ctx.syntax.syntax_for_span(span);
+    let documentation_before = |start: usize| {
+        let before = syntax.token_range(Span::new(start, start)).start.index();
+        let gap_start = syntax.tokens()[..before]
+            .iter()
+            .rev()
+            .take_while(|token| token.is_trivia())
+            .last()
+            .map_or(start, |token| token.offset());
+        syntax.documentation_start(Span::new(gap_start, start), ctx.source)
+    };
+    let body_start = annotations.last().map_or(span.start, |annotation| {
+        syntax
+            .tokens_in(Span::new(annotation.span.end, span.end))
+            .find(|token| !token.is_trivia())
+            .map_or(span.start, |token| token.offset())
+    });
+    let documentation = documentation_before(body_start).or_else(|| {
+        annotations
+            .iter()
+            .rev()
+            .find_map(|annotation| documentation_before(annotation.span.start))
+    });
+    Span::new(
+        documentation.map_or(span.start, |start| start.min(span.start)),
+        span.end,
+    )
+}
 
 /// Whether metadata has the given terminal name, for syntax-only consumers.
 pub(crate) fn annotation(annotations: &[Annotation], name: &str) -> bool {

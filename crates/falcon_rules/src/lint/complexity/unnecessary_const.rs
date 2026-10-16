@@ -31,15 +31,17 @@ impl Rule for UnnecessaryConst {
     }
 }
 
-/// An explicit `const` keyword produces one of these nodes with `is_const == true`
-/// (implicit/inferred constants leave the flag false), so their span marks the keyword.
-fn const_marker_span(expr: &Expr) -> Option<&Span> {
+/// An explicit `const` expression starts at the redundant keyword.
+fn const_marker_span(expr: &Expr) -> Option<Span> {
     match expr.unparenthesized() {
         Expr::New { is_const: true, .. }
         | Expr::List { is_const: true, .. }
         | Expr::Map { is_const: true, .. }
         | Expr::Set { is_const: true, .. }
-        | Expr::DotShorthand { is_const: true, .. } => Some(expr.span()),
+        | Expr::DotShorthand { is_const: true, .. } => {
+            let start = expr.unparenthesized().span().start;
+            Some(Span::new(start, start + "const".len()))
+        }
         _ => None,
     }
 }
@@ -93,7 +95,7 @@ impl Visitor for Collector<'_> {
                 self.diags.push(self.ctx.diagnostic(
                     "unnecessary-const",
                     "Unnecessary `const` keyword inside an already-const context.",
-                    *span,
+                    span,
                 ));
             }
             self.const_depth += 1;
@@ -101,6 +103,37 @@ impl Visitor for Collector<'_> {
             self.const_depth -= 1;
         } else {
             walk_expr(self, node);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+    use std::path::Path;
+
+    #[test]
+    fn reports_only_the_redundant_keyword() {
+        let source = "const values = const [const <int>[1], const Duration(seconds: 1)];";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(Path::new("test.dart"), source, &config, &parsed.syntax);
+        let diagnostics = UnnecessaryConst.analyze(&parsed.program, &ctx);
+        let starts: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.span.start)
+            .collect();
+        let expected: Vec<_> = source
+            .match_indices("const")
+            .skip(1)
+            .map(|(start, _)| start)
+            .collect();
+        assert_eq!(starts, expected);
+        for diagnostic in diagnostics {
+            assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "const");
         }
     }
 }

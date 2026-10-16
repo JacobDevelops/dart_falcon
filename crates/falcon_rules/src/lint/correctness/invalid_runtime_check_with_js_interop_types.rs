@@ -492,7 +492,7 @@ impl SemanticRuleVisitor for RuntimeChecks<'_> {
                     checker.diagnostics.push(checker.ctx.diagnostic(
                         "invalid-runtime-check-with-js-interop-types",
                         "JS interop types cannot be used as catch types.",
-                        catch.span,
+                        *exception_type.span(),
                     ));
                 }
             }
@@ -600,4 +600,47 @@ fn js_subtype(left: &DeclarationIdentity, right: &DeclarationIdentity) -> bool {
                 | "JSBigInt64Array"
                 | "JSBigUint64Array"
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_config::FalconConfig;
+    use falcon_dart_parser::parse;
+
+    use super::*;
+
+    #[test]
+    fn catch_diagnostic_covers_only_the_exception_type() {
+        let source = "import 'dart:js_interop'; void f() { try {} on JSAny catch (error) {} }";
+        let path = Path::new("/project/lib/test.dart");
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path,
+                program: &program,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let model = SemanticModel::new(path, &identities, None);
+        let signatures = SignatureIndex::from_program(&program, &model);
+        let config = FalconConfig::default();
+        let ctx = AnalyzeContext::new(path, source, &config, &syntax)
+            .with_identities(&identities)
+            .with_signatures(&signatures);
+        let diagnostics = InvalidRuntimeCheckWithJsInteropTypes.analyze(&program, &ctx);
+        let slices: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect();
+        assert_eq!(slices, ["JSAny"]);
+    }
 }

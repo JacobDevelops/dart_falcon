@@ -151,6 +151,16 @@ impl Collector<'_> {
                     .or_insert(index);
             }
         }
+        // The analyzer reports from `switch` through the closing `)`.
+        let end = self
+            .ctx
+            .syntax
+            .tokens_in(Span::new(node.subject.span().end, node.span.end))
+            .find(|token| !token.is_trivia())
+            .filter(|token| token.kind == falcon_syntax::TokenKind::RParen)
+            .map_or(node.subject.span().end, |token| {
+                token.offset() + token.len()
+            });
         for constant in &facts.static_consts {
             let Some(value) = values.get(&constant.name) else {
                 continue;
@@ -162,11 +172,10 @@ impl Collector<'_> {
                 continue;
             }
             let preferred = &facts.static_consts[preferred];
-            // The analyzer reports from `switch` through the closing `)`.
             self.diagnostics.push(self.ctx.diagnostic(
                 "exhaustive-cases",
                 format!("Add a case for '{}.{}'.", identity.name(), preferred.name),
-                Span::new(node.span.start, node.subject.span().end),
+                Span::new(node.span.start, end),
             ));
         }
     }
@@ -281,6 +290,11 @@ mod tests {
     #[test]
     fn single_file_fallback_preserves_owner_constant_dependencies() {
         let source = include_str!("../../../tests/corpus/exhaustive-cases/owner-dependencies.dart");
+        let source = source.replace(
+            "switch (token)",
+            "switch ( /* before */ (token) /* after */ )",
+        );
+        let source = source.as_str();
         let falcon_dart_parser::ParseResult {
             program,
             errors,
@@ -314,6 +328,11 @@ mod tests {
         let diagnostics = ExhaustiveCases.analyze(&program, &ctx);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].message, "Add a case for 'Token.second'.");
+        let span = &diagnostics[0].span;
+        assert_eq!(
+            &source[span.start..span.end],
+            "switch ( /* before */ (token) /* after */ )"
+        );
     }
 
     #[test]
