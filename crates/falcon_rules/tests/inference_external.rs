@@ -379,3 +379,21 @@ fn extension_static_member_lexical_lookup() {
         1,
     );
 }
+
+#[test]
+fn generic_callbacks_keep_downward_parameter_schemas() {
+    assert_external_lints(
+        "cast-nullable-to-non-nullable",
+        include_str!("corpus/cast-nullable-to-non-nullable/contextual_callbacks.dart"),
+        6,
+    );
+}
+
+#[test]
+fn conditional_generic_method_tearoffs_keep_callback_contracts() {
+    assert_external_lints(
+        "unnecessary-await-in-return",
+        include_str!("corpus/unnecessary-await-in-return/generic_tearoff.dart"),
+        1,
+    );
+}

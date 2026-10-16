@@ -8990,6 +8990,7 @@ impl SignatureIndex {
                 signatures: self,
                 model,
                 poison_unknown: true,
+                partial: None,
             },
         );
         let mut visiting = HashSet::new();
@@ -10634,27 +10635,35 @@ impl TypeEnvironment {
                 signature,
                 &signature.call_parameters,
                 &signature.return_type,
+                owner,
             ),
             args,
             type_args,
             context,
             expected,
-            owner,
+            None,
         )
     }
 
     /// Constructors infer their owner's parameters and instance result while
     /// borrowing the declared parameter types and default-value metadata.
+    /// When requested, records generic closures' downward function contexts by
+    /// expression offset, before upward inference narrows the call's type arguments.
     pub fn infer_signature_substitutions_with_result<F: Fn(&str) -> Option<ResolvedType>>(
         &self,
-        signature: (&ResolvedSignature, &[TypeParameterId], &ResolvedType),
+        signature: (
+            &ResolvedSignature,
+            &[TypeParameterId],
+            &ResolvedType,
+            &HashMap<TypeParameterId, ResolvedType>,
+        ),
         args: &falcon_syntax::ast::ArgList,
         type_args: &[DartType],
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
-        owner: &HashMap<TypeParameterId, ResolvedType>,
+        mut argument_contexts: Option<&mut HashMap<usize, ResolvedType>>,
     ) -> HashMap<TypeParameterId, ResolvedType> {
-        let (signature, call_parameters, return_type) = signature;
+        let (signature, call_parameters, return_type, owner) = signature;
         let mut substitutions = owner.clone();
         if call_parameters.is_empty() {
             return substitutions;
@@ -10672,6 +10681,7 @@ impl TypeEnvironment {
         }
         let mut inferred = HashMap::with_capacity(call_parameters.len());
         let mut upper = HashMap::with_capacity(call_parameters.len());
+        let mut partial = HashMap::new();
         // A dynamic result context supplies no downward type schema. Freezing
         // it here would discard upward constraints from ordinary arguments.
         if let Some(expected) = expected.filter(|ty| !matches!(ty, ResolvedType::Dynamic)) {
@@ -10682,6 +10692,7 @@ impl TypeEnvironment {
                 signatures: context.signatures,
                 model: context.model,
                 poison_unknown: false,
+                partial: Some(&mut partial),
             };
             infer_type_constraints(
                 &context.model.substitute(return_type, owner),
@@ -10754,15 +10765,143 @@ impl TypeEnvironment {
             .filter(|(_, ty)| !has_inference_holes(ty))
             .map(|(id, _)| id.clone())
             .collect::<HashSet<_>>();
-        // Ordinary arguments are inferred once. Closures additionally receive horizontal
-        // constraints from those arguments, without re-evaluating nested invocations.
+        let update_substitutions =
+            |substitutions: &mut HashMap<TypeParameterId, ResolvedType>,
+             argument_context: &mut HashMap<TypeParameterId, ResolvedType>,
+             inferred: &HashMap<TypeParameterId, ResolvedType>,
+             upper: &HashMap<TypeParameterId, ResolvedType>,
+             include_upper: bool| {
+                for id in call_parameters {
+                    if fixed.contains(id) || (!include_upper && !inferred.contains_key(id)) {
+                        continue;
+                    }
+                    if let Some(mut candidate) = inference_candidate(
+                        inferred.get(id),
+                        upper.get(id),
+                        context.signatures,
+                        context.model,
+                    ) {
+                        if !inferred.contains_key(id)
+                            && let Some(bound) = parameter_bound(return_type, id)
+                                .or_else(|| {
+                                    signature
+                                        .positional
+                                        .iter()
+                                        .find_map(|ty| parameter_bound(ty, id))
+                                })
+                                .or_else(|| {
+                                    signature
+                                        .named
+                                        .values()
+                                        .find_map(|ty| parameter_bound(ty, id))
+                                })
+                            && let Some(met) = context.signatures.declared_bound_meet(
+                                id,
+                                &candidate,
+                                &context.model.substitute(bound, substitutions),
+                                call_parameters,
+                            )
+                        {
+                            candidate = met;
+                        }
+                        argument_context.insert(id.clone(), candidate.clone());
+                        substitutions.insert(id.clone(), candidate);
+                    }
+                }
+            };
+        let infer_argument =
+            |parameter: &ResolvedType,
+             argument: &Expr,
+             expected_argument: &ResolvedType,
+             inferred: &mut HashMap<TypeParameterId, ResolvedType>,
+             upper: &mut HashMap<TypeParameterId, ResolvedType>| {
+                let formal = context.model.substitute(parameter, owner);
+                // Preserve partial callable contexts without passing unresolved
+                // schemas to ordinary expressions.
+                let mut actual = self.infer_with_context(
+                    argument,
+                    context.model,
+                    context.signatures,
+                    context.type_parameters,
+                    (matches!(expected_argument, ResolvedType::Function { .. })
+                        || !has_inference_holes(expected_argument))
+                    .then_some(expected_argument),
+                    context.lookup,
+                );
+                if actual == ResolvedType::Unknown
+                    && let Some(fallback) = context.argument_fallback
+                    && let Some(ty) = fallback(argument)
+                {
+                    actual = ty;
+                }
+                let mut constraints = TypeConstraintContext {
+                    parameters: call_parameters,
+                    inferred,
+                    upper,
+                    signatures: context.signatures,
+                    model: context.model,
+                    poison_unknown: true,
+                    partial: None,
+                };
+                infer_type_constraints(&formal, &actual, true, &mut constraints);
+            };
+        let has_unresolved_inputs =
+            |parameter: &ResolvedType,
+             argument: &Expr,
+             substitutions: &HashMap<TypeParameterId, ResolvedType>| {
+                if !call_parameters
+                    .iter()
+                    .any(|id| !substitutions.contains_key(id))
+                {
+                    return false;
+                }
+                let Expr::FuncExpr { params, .. } = argument else {
+                    return false;
+                };
+                let ResolvedType::Function {
+                    positional, named, ..
+                } = parameter
+                else {
+                    return false;
+                };
+                let depends_on_call = |ty: &ResolvedType| {
+                    let ty = if owner.is_empty() {
+                        Cow::Borrowed(ty)
+                    } else {
+                        Cow::Owned(context.model.substitute(ty, owner))
+                    };
+                    call_parameters.iter().any(|id| {
+                        !substitutions.contains_key(id)
+                            && mentions_any(&ty, std::slice::from_ref(id))
+                    })
+                };
+                params
+                    .positional()
+                    .zip(positional.iter())
+                    .any(|(param, ty)| {
+                        param.param_type.is_none()
+                            && param.function_params.is_none()
+                            && depends_on_call(ty)
+                    })
+                    || params.named().any(|param| {
+                        param.param_type.is_none()
+                            && param.function_params.is_none()
+                            && named
+                                .iter()
+                                .find(|(name, _)| name == &param.name.name)
+                                .is_some_and(|(_, ty)| depends_on_call(ty))
+                    })
+            };
+        let mut argument_context = substitutions.clone();
+        for id in call_parameters {
+            argument_context
+                .entry(id.clone())
+                .or_insert(ResolvedType::Unknown);
+        }
+        let mut deferred = Vec::new();
+        // Each stage uses a frozen context. Independent closure results must
+        // join before they contextualize closures that consume those results.
         for closures in [false, true] {
-            let mut argument_context = substitutions.clone();
-            for id in call_parameters {
-                argument_context
-                    .entry(id.clone())
-                    .or_insert(ResolvedType::Unknown);
-            }
             for (parameter, argument) in signature.positional.iter().zip(&args.positional).chain(
                 args.named.iter().filter_map(|argument| {
                     signature
@@ -10774,57 +10913,104 @@ impl TypeEnvironment {
                 if matches!(argument, Expr::FuncExpr { .. }) != closures {
                     continue;
                 }
-                let formal = context.model.substitute(parameter, owner);
                 let expected_argument = context.model.substitute(parameter, &argument_context);
-                // Partial function contexts retain known parameter slots for
-                // closures and generic tear-offs while inferring their return.
-                // Other argument shapes must not consume unresolved type arguments.
-                let mut actual = self.infer_with_context(
-                    argument,
-                    context.model,
-                    context.signatures,
-                    context.type_parameters,
-                    (matches!(expected_argument, ResolvedType::Function { .. })
-                        || !has_inference_holes(&expected_argument))
-                    .then_some(&expected_argument),
-                    context.lookup,
-                );
-                if actual == ResolvedType::Unknown
-                    && let Some(fallback) = context.argument_fallback
-                    && let Some(ty) = fallback(argument)
-                {
-                    actual = ty;
-                }
-                let mut constraints = TypeConstraintContext {
-                    parameters: call_parameters,
-                    inferred: &mut inferred,
-                    upper: &mut upper,
-                    signatures: context.signatures,
-                    model: context.model,
-                    poison_unknown: true,
-                };
-                infer_type_constraints(&formal, &actual, true, &mut constraints);
-            }
-            for id in call_parameters {
-                if fixed.contains(id) {
+                if closures && has_unresolved_inputs(parameter, argument, &substitutions) {
+                    if deferred.capacity() == 0 {
+                        deferred.reserve(args.positional.len() + args.named.len());
+                    }
+                    deferred.push((parameter, argument));
                     continue;
                 }
-                if let Some(candidate) = inference_candidate(
-                    inferred.get(id),
-                    upper.get(id),
-                    context.signatures,
-                    context.model,
-                ) {
-                    substitutions.insert(id.clone(), candidate);
-                }
+                infer_argument(
+                    parameter,
+                    argument,
+                    &expected_argument,
+                    &mut inferred,
+                    &mut upper,
+                );
             }
+            update_substitutions(
+                &mut substitutions,
+                &mut argument_context,
+                &inferred,
+                &upper,
+                false,
+            );
         }
+        let mut complete_unresolved = false;
+        while !deferred.is_empty() {
+            let remaining = deferred.len();
+            deferred.retain(|&(parameter, argument)| {
+                let mut expected_argument = context.model.substitute(parameter, &argument_context);
+                let unresolved = has_unresolved_inputs(parameter, argument, &substitutions);
+                if unresolved && !complete_unresolved {
+                    return true;
+                }
+                if unresolved {
+                    let ResolvedType::Function { return_type, .. } = &expected_argument else {
+                        unreachable!()
+                    };
+                    let return_type = Arc::clone(return_type);
+                    // Cycles and callbacks without producers complete only
+                    // missing input variables to top, not the return schema.
+                    for id in call_parameters {
+                        if !substitutions.contains_key(id) {
+                            argument_context
+                                .insert(id.clone(), context.model.core_type("Object", true));
+                        }
+                    }
+                    expected_argument = context.model.substitute(parameter, &argument_context);
+                    if let ResolvedType::Function {
+                        return_type: result,
+                        ..
+                    } = &mut expected_argument
+                    {
+                        *result = return_type;
+                    }
+                    for id in call_parameters {
+                        if !substitutions.contains_key(id) {
+                            argument_context.insert(id.clone(), ResolvedType::Unknown);
+                        }
+                    }
+                    if let Some(contexts) = argument_contexts.as_deref_mut() {
+                        contexts.insert(argument.span().start, expected_argument.clone());
+                    }
+                }
+                infer_argument(
+                    parameter,
+                    argument,
+                    &expected_argument,
+                    &mut inferred,
+                    &mut upper,
+                );
+                false
+            });
+            update_substitutions(
+                &mut substitutions,
+                &mut argument_context,
+                &inferred,
+                &upper,
+                false,
+            );
+            complete_unresolved = deferred.len() == remaining;
+        }
+        // Pure contravariant evidence constrains the final solution, but must
+        // not supply horizontal input contexts to sibling closures.
+        update_substitutions(
+            &mut substitutions,
+            &mut argument_context,
+            &inferred,
+            &upper,
+            true,
+        );
         for id in call_parameters {
             if substitutions.contains_key(id) {
                 continue;
             }
             let default = if inferred.contains_key(id) || upper.contains_key(id) {
                 ResolvedType::Unknown
+            } else if let Some(schema) = partial.remove(id) {
+                schema
             } else if let Some(default) = context.signatures.owner_defaults.get(id) {
                 context.model.substitute(default, &substitutions)
             } else if context.signatures.bound_declared.get(id) == Some(&false) {
@@ -10957,12 +11143,12 @@ impl TypeEnvironment {
                 .signatures
                 .self_instantiation(identity, parameters, context.model);
         let substitutions = self.infer_signature_substitutions_with_result(
-            (signature, parameters, &return_type),
+            (signature, parameters, &return_type, &HashMap::new()),
             args,
             type_args,
             context,
             expected,
-            &HashMap::new(),
+            None,
         );
         context.model.substitute(&return_type, &substitutions)
     }
@@ -11120,6 +11306,7 @@ impl TypeEnvironment {
         } else if let Some(expected @ ResolvedType::Function { .. }) = expected {
             let mut lower = HashMap::with_capacity(signature.call_parameters.len());
             let mut upper = HashMap::with_capacity(signature.call_parameters.len());
+            let mut partial = HashMap::new();
             infer_type_constraints(
                 &function,
                 expected,
@@ -11131,6 +11318,7 @@ impl TypeEnvironment {
                     signatures: context.signatures,
                     model: context.model,
                     poison_unknown: false,
+                    partial: Some(&mut partial),
                 },
             );
             for id in &signature.call_parameters {
@@ -11155,19 +11343,20 @@ impl TypeEnvironment {
                         })
                         .unwrap_or(candidate),
                     Some(candidate) => candidate,
-                    // Unconstrained, a parameter instantiates to its declared
-                    // bound, or to `dynamic` when the declaration omits one.
-                    None if context.signatures.bound_declared.get(id) == Some(&false) => {
-                        ResolvedType::Dynamic
-                    }
-                    None => bound().unwrap_or(ResolvedType::Unknown),
+                    None => partial.remove(id).unwrap_or_else(|| {
+                        // Truly unconstrained parameters use their declared
+                        // bound, or dynamic when no bound was written.
+                        if context.signatures.bound_declared.get(id) == Some(&false) {
+                            ResolvedType::Dynamic
+                        } else {
+                            bound().unwrap_or(ResolvedType::Unknown)
+                        }
+                    }),
                 };
                 substitutions.insert(id.clone(), ty);
             }
-        } else if !signature.call_parameters.is_empty() {
-            // Generic function types cannot be represented by `Function`.
-            // Do not let uninstantiated callable parameters escape as free types.
-            return ResolvedType::Unknown;
+        } else {
+            return function;
         }
         context.model.substitute(&function, &substitutions)
     }
@@ -11533,7 +11722,7 @@ impl TypeEnvironment {
                         invocation.type_args,
                         &context,
                         expected,
-                        &invocation.owner,
+                        None,
                     );
                     model.substitute(invocation.inference_signature().2, &substitutions)
                 }
@@ -13332,6 +13521,8 @@ struct TypeConstraintContext<'a, 'model> {
     /// Unknown argument evidence survives joins; Unknown downward schema slots
     /// instead mean that no constraint has been supplied yet.
     poison_unknown: bool,
+    /// Partial contextual schemas are fallbacks, not upward constraints.
+    partial: Option<&'a mut HashMap<TypeParameterId, ResolvedType>>,
 }
 
 fn infer_type_constraints(
@@ -13368,6 +13559,21 @@ fn infer_type_constraints(
             } else {
                 actual.clone()
             };
+            // A partial schema cannot fix a whole variable before argument
+            // inference, but remains useful when no argument constrains it.
+            if !context.poison_unknown && has_inference_holes(&actual) {
+                if let Some(partial) = context.partial.as_deref_mut() {
+                    partial
+                        .entry(id.clone())
+                        .and_modify(|previous| {
+                            if *previous != actual {
+                                *previous = ResolvedType::Unknown;
+                            }
+                        })
+                        .or_insert(actual);
+                }
+                return;
+            }
             let candidates = if covariant {
                 &mut *context.inferred
             } else {
@@ -13847,6 +14053,61 @@ fn inference_join_impl(
         },
     ) = (left, right)
     {
+        if let (Some(left_shape), Some(right_shape)) = (left_shape, right_shape)
+            && (!left_shape.type_parameters.is_empty() || !right_shape.type_parameters.is_empty())
+        {
+            if left_shape.type_parameters.len() != right_shape.type_parameters.len() {
+                return model.core_type("Function", nullable);
+            }
+            // Method tear-offs have declaration-local binders. Align those
+            // binders before joining their covariant results and parameter meets.
+            let substitutions: HashMap<_, _> = right_shape
+                .type_parameters
+                .iter()
+                .zip(left_shape.type_parameters.iter())
+                .filter_map(|(right, left)| match (right, left) {
+                    (
+                        ResolvedType::TypeParameter { id: right_id, .. },
+                        ResolvedType::TypeParameter { id: left_id, .. },
+                    ) if right_id != left_id => Some((right_id.clone(), left.clone())),
+                    _ => None,
+                })
+                .collect();
+            if !substitutions.is_empty() {
+                for (left, right) in left_shape
+                    .type_parameters
+                    .iter()
+                    .zip(right_shape.type_parameters.iter())
+                {
+                    let (
+                        ResolvedType::TypeParameter { bound: left, .. },
+                        ResolvedType::TypeParameter { bound: right, .. },
+                    ) = (left, right)
+                    else {
+                        return ResolvedType::Unknown;
+                    };
+                    let right = model.substitute(right, &substitutions);
+                    match (
+                        signatures.subtype(left, &right, model),
+                        signatures.subtype(&right, left, model),
+                    ) {
+                        (Truth::Yes, Truth::Yes) => {}
+                        (Truth::No, _) | (_, Truth::No) => {
+                            return model.core_type("Function", nullable);
+                        }
+                        _ => return ResolvedType::Unknown,
+                    }
+                }
+                let mut right = model.substitute(right, &substitutions);
+                if let ResolvedType::Function { shape, .. } = &mut right {
+                    *shape = Some(FunctionTypeShape::new(
+                        right_shape.required_named.to_vec(),
+                        left_shape.type_parameters.to_vec(),
+                    ));
+                }
+                return inference_join_memoized(left, &right, signatures, model, memo);
+            }
+        }
         // UP requires equal required arity, but retains only the common
         // optional positional prefix when the optional tails differ.
         let left_required = left_positional.len().saturating_sub(*left_optional);
@@ -14998,6 +15259,125 @@ final partial = [first, unresolved];
                     ),
                     model.core_type("int", false),
                 );
+            },
+        );
+    }
+
+    #[test]
+    fn partial_downward_schemas_leave_whole_variables_for_upward_inference() {
+        with_model(
+            "import 'dart:async'; \
+             T identity<T>(T value) => value; \
+             T boundedIdentity<T extends num>(T value) => value; \
+             T empty<T>() => throw 0; \
+             class StateProvider<T> {} \
+             class Ref { T watch<T>(StateProvider<T> provider) => throw 0; } \
+             class FutureProvider<T> { FutureProvider(FutureOr<T> Function(Ref) create); } \
+             class Pair<A, B> { Pair(A first, B second); } \
+             int partial() => identity(1); \
+             num complete() => identity(1); \
+             int bounded() => boundedIdentity(1); \
+             dynamic defaulted() => empty(); \
+             Pair<num, int> nested() => Pair(1, 2); \
+             FutureProvider<int> provider(StateProvider<int> dep) => \
+                 FutureProvider((ref) async => ref.watch(dep));",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let partial = ResolvedType::Interface {
+                    occurrence: Default::default(),
+                    identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
+                    arguments: vec![ResolvedType::Unknown].into(),
+                    nullable: false,
+                    extension_type: false,
+                };
+                let partial_pair = ResolvedType::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Pair").unwrap(),
+                    arguments: vec![model.core_type("num", false), ResolvedType::Unknown].into(),
+                    nullable: false,
+                    extension_type: false,
+                };
+                for declaration in &program.declarations {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        continue;
+                    };
+                    if !function.type_params.is_empty() {
+                        continue;
+                    }
+                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                        continue;
+                    };
+                    let expected = model.resolve_type(function.return_type.as_ref().unwrap());
+                    let context = match function.name.name.as_str() {
+                        "partial" | "bounded" => Some(&partial),
+                        "complete" => Some(&expected),
+                        "nested" => Some(&partial_pair),
+                        _ => None,
+                    };
+                    let scope = TypeParameterScope::default();
+                    let mut environment = TypeEnvironment::new();
+                    environment.bind_params(function.params().unwrap(), model, &scope);
+                    assert_eq!(
+                        environment.infer_with_context(
+                            expression,
+                            model,
+                            &signatures,
+                            &scope,
+                            context,
+                            &|_| None,
+                        ),
+                        expected,
+                        "{}",
+                        function.name.name,
+                    );
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn partial_contexts_remain_fallbacks_for_calls_and_tearoffs_without_evidence() {
+        with_model(
+            "T empty<T>() => throw 0; T identity<T>(T value) => value; \
+             dynamic call() => empty(); dynamic tearoff() => identity;",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let partial = ResolvedType::Interface {
+                    occurrence: Default::default(),
+                    identity: DeclarationIdentity::sdk("dart:core", "List"),
+                    arguments: vec![ResolvedType::Unknown].into(),
+                    nullable: false,
+                    extension_type: false,
+                };
+                let mut signature = ResolvedSignature::returning(partial.clone());
+                signature.positional.push(partial.clone());
+                let function_context = signature.function_type();
+                for declaration in &program.declarations[2..] {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        panic!()
+                    };
+                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                        panic!()
+                    };
+                    let is_call = function.name.name == "call";
+                    let inferred = TypeEnvironment::new().infer_with_context(
+                        expression,
+                        model,
+                        &signatures,
+                        &TypeParameterScope::default(),
+                        Some(if is_call { &partial } else { &function_context }),
+                        &|_| None,
+                    );
+                    if is_call {
+                        assert_eq!(inferred, partial);
+                    } else {
+                        let ResolvedType::Function { positional, .. } = &inferred else {
+                            panic!("expected an instantiated tear-off")
+                        };
+                        assert_eq!(inferred.function_return_type(), Some(partial.clone()));
+                        assert_eq!(positional.as_ref(), std::slice::from_ref(&partial));
+                    }
+                }
             },
         );
     }
@@ -17134,6 +17514,140 @@ final integer = integers.first;
     }
 
     #[test]
+    fn generic_closure_inputs_complete_before_upward_bound_inference() {
+        with_model(
+            "T bounded<T extends Object>(bool Function(T) callback) => throw 0; \
+             T unbounded<T>(bool Function(T) callback) => throw 0; \
+             T typed<T>(void Function(T) first, void Function(T) second) => throw 0; \
+             void consumeNum(num value) {} \
+             Object useBounded() => bounded((value) => true); \
+             Object? useUnbounded() => unbounded((value) => true); \
+             num useTyped() => typed((num value) {}, (value) {}); \
+             num useReverseTyped() => typed((value) {}, (num value) {}); \
+             num useOrdinary() => typed(consumeNum, (value) {}); \
+             num useReverseOrdinary() => typed((value) {}, consumeNum);",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let scope = TypeParameterScope::default();
+                for declaration in &program.declarations[4..] {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        panic!()
+                    };
+                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                        panic!()
+                    };
+                    let Expr::Call {
+                        callee,
+                        type_args,
+                        args,
+                        ..
+                    } = expression.as_ref()
+                    else {
+                        panic!()
+                    };
+                    let environment = TypeEnvironment::new();
+                    let context = InferenceContext {
+                        model,
+                        signatures: &signatures,
+                        type_parameters: &scope,
+                        lookup: &|_| None,
+                        argument_fallback: None,
+                    };
+                    let invocation = environment
+                        .resolved_invocation(callee, type_args, &context)
+                        .unwrap();
+                    let mut argument_contexts = HashMap::new();
+                    let substitutions = environment.infer_signature_substitutions_with_result(
+                        invocation.inference_signature(),
+                        args,
+                        type_args,
+                        &context,
+                        None,
+                        Some(&mut argument_contexts),
+                    );
+                    assert_eq!(
+                        model.substitute(&invocation.signature.return_type, &substitutions),
+                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                    );
+                    assert_eq!(argument_contexts.len(), 1);
+                    let ResolvedType::Function { positional, .. } =
+                        argument_contexts.values().next().unwrap()
+                    else {
+                        panic!()
+                    };
+                    assert_eq!(positional.as_ref(), &[model.core_type("Object", true)]);
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn sibling_closure_results_contextualize_positional_and_named_inputs() {
+        with_model(
+            "class Target {} \
+             class Owner<A> { B method<B>(void Function(A) callback) => throw 0; } \
+             T positional<T>(T Function() create, void Function(T) dispose) => create(); \
+             T named<T>({required T Function() create, required void Function(T) dispose}) => create(); \
+             T reverse<T>(void Function(T) dispose, T Function() create) => create(); \
+             T pick<T>(T Function() first, T Function() second) => first(); \
+             Target usePositional() => positional(() => Target(), (value) {}); \
+             Target useNamed() => named(create: () => Target(), dispose: (value) {}); \
+             Target useReverse() => reverse((value) {}, () => Target()); \
+             Target useReverseNamed() => named(dispose: (value) {}, create: () => Target()); \
+             num independentNumbers() => pick(() => 1.5, () => 2); \
+             List<dynamic> independentLists() => pick(() => <int>[], () => []); \
+             dynamic ownerHole(Owner<Missing> owner) => owner.method((value) {});",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let scope = TypeParameterScope::default();
+                for declaration in &program.declarations[6..] {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        panic!()
+                    };
+                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                        panic!()
+                    };
+                    let Expr::Call {
+                        callee,
+                        type_args,
+                        args,
+                        ..
+                    } = expression.as_ref()
+                    else {
+                        panic!()
+                    };
+                    let mut environment = TypeEnvironment::new();
+                    environment.bind_params(function.params().unwrap(), model, &scope);
+                    let context = InferenceContext {
+                        model,
+                        signatures: &signatures,
+                        type_parameters: &scope,
+                        lookup: &|_| None,
+                        argument_fallback: None,
+                    };
+                    let invocation = environment
+                        .resolved_invocation(callee, type_args, &context)
+                        .unwrap();
+                    let mut argument_contexts = HashMap::new();
+                    let substitutions = environment.infer_signature_substitutions_with_result(
+                        invocation.inference_signature(),
+                        args,
+                        type_args,
+                        &context,
+                        None,
+                        Some(&mut argument_contexts),
+                    );
+                    assert_eq!(
+                        model.substitute(&invocation.signature.return_type, &substitutions),
+                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                    );
+                    assert!(argument_contexts.is_empty(), "{}", function.name.name);
+                }
+            },
+        );
+    }
+
+    #[test]
     fn conditional_callable_and_raw_interface_joins_preserve_inference() {
         with_model(
             "class S<T> { final T data; S(this.data); } class E {} \
@@ -17170,6 +17684,38 @@ final integer = integers.first;
                         function.name.name,
                     );
                 }
+            },
+        );
+    }
+
+    #[test]
+    fn conditional_generic_tearoffs_preserve_alpha_equivalent_binders() {
+        with_model(
+            "T first<T extends num>(T value) => value; \
+             U second<U extends num>(U value) => value; \
+             int joined(bool flag) => (flag ? first : second)(1);",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let TopLevelDecl::Function(function) = &program.declarations[2] else {
+                    panic!()
+                };
+                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    panic!()
+                };
+                let scope = TypeParameterScope::default();
+                let mut environment = TypeEnvironment::new();
+                environment.bind_params(function.params().unwrap(), model, &scope);
+                assert_eq!(
+                    environment.infer_with_context(
+                        expression,
+                        model,
+                        &signatures,
+                        &scope,
+                        None,
+                        &|_| None,
+                    ),
+                    model.core_type("int", false),
+                );
             },
         );
     }
@@ -17826,6 +18372,48 @@ final integer = integers.first;
                     };
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
+                    assert_eq!(
+                        environment.infer_with_signatures(expression, model, &signatures, &scope),
+                        model.resolve_type(function.return_type.as_ref().unwrap()),
+                        "{}",
+                        function.name.name,
+                    );
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn generic_function_values_infer_invocation_binders() {
+        with_model(
+            "class Stub<T> { T value() => throw 0; } \
+             Stub<T> Function<T>(T Function()) get when => throw 0; \
+             class Factory { final Stub<T> Function<T>(T Function()) create; Factory(this.create); } \
+             double nextDouble() => 0; \
+             Stub<double> getterInferred() => when(nextDouble); \
+             Stub<int> getterExplicit() => when<int>(() => 1); \
+             Stub<double> fieldInferred(Factory factory) => factory.create(nextDouble); \
+             Stub<int> fieldExplicit(Factory factory) => factory.create<int>(() => 1); \
+             Stub<int> fieldCall(Factory factory) => factory.create.call<int>(() => 1); \
+             double chained() => when(nextDouble).value();",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let scope = TypeParameterScope::default();
+                for declaration in &program.declarations {
+                    let TopLevelDecl::Function(function) = declaration else {
+                        continue;
+                    };
+                    let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                        continue;
+                    };
+                    if function.name.name == "nextDouble" {
+                        continue;
+                    }
+                    let Some(params) = function.params() else {
+                        continue;
+                    };
+                    let mut environment = TypeEnvironment::new();
+                    environment.bind_params(params, model, &scope);
                     assert_eq!(
                         environment.infer_with_signatures(expression, model, &signatures, &scope),
                         model.resolve_type(function.return_type.as_ref().unwrap()),

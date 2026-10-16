@@ -14,14 +14,22 @@ pub struct ResolvedInvocation<'a> {
 impl ResolvedInvocation<'_> {
     /// Constructors infer owner parameters against their instantiated result;
     /// other invocations infer the callable's own type parameters.
-    pub fn inference_signature(&self) -> (&ResolvedSignature, &[TypeParameterId], &ResolvedType) {
+    pub fn inference_signature(
+        &self,
+    ) -> (
+        &ResolvedSignature,
+        &[TypeParameterId],
+        &ResolvedType,
+        &HashMap<TypeParameterId, ResolvedType>,
+    ) {
         let signature = self.signature.as_ref();
         match &self.constructor_result {
-            Some(result) => (signature, &signature.owner_parameters, result),
+            Some(result) => (signature, &signature.owner_parameters, result, &self.owner),
             None => (
                 signature,
                 &signature.call_parameters,
                 &signature.return_type,
+                &self.owner,
             ),
         }
     }
@@ -309,9 +317,14 @@ impl TypeEnvironment {
                     .function_return_type()
                     .ok_or(ResolvedType::Unknown)?;
                 let local_generic = matches!(target, Expr::Ident(identifier) if self.is_local_function(&identifier.name));
-                // Canonical inference needs no parameter metadata for an
-                // ordinary function value: do not copy its parameter lists.
-                if !metadata && !local_generic {
+                // Non-generic function values need no parameter metadata.
+                // Generic values still infer their binders from this call.
+                if !metadata
+                    && !local_generic
+                    && shape
+                        .as_ref()
+                        .is_none_or(|shape| shape.type_parameters.is_empty())
+                {
                     return Err(return_type);
                 }
                 let mut signature = ResolvedSignature {
@@ -701,7 +714,7 @@ mod tests {
                         invocation.type_args,
                         &context,
                         None,
-                        &invocation.owner,
+                        None,
                     );
                     assert_eq!(
                         model.substitute(&invocation.signature.positional[0], &substitutions),

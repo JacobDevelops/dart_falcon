@@ -4,3 +4,11 @@ abstract class Future<T> {
   external factory Future.value([FutureOr<T>? value]);
 }
 abstract class FutureOr<T> {}
+// Callback signature excerpt pinned to Dart SDK 3.13.5:
+// https://github.com/dart-lang/sdk/blob/3.13.5/sdk/lib/async/future.dart
+extension FutureExtensions<T> on Future<T> {
+  external Future<T> onError<E extends Object>(
+    FutureOr<T> handleError(E error, StackTrace stackTrace), {
+    bool test(E error)?,
+  });
+}

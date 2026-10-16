@@ -104,3 +104,39 @@ void unresolvedAssignment(Provider<dynamic> provider) {
   notifier.state = Box(42); /* expect: prefer-const-constructors */
   notifier.state = AsyncLoading(); /* expect: prefer-const-constructors */
 }
+
+class AsyncData<T> extends AsyncValue<T> {
+  const AsyncData(this.value);
+  final T value;
+}
+
+class AsyncError<T> extends AsyncValue<T> {
+  const AsyncError(this.error);
+  final Object error;
+}
+
+class Notifier<T> {
+  set state(AsyncValue<T> value) {}
+}
+
+class GenericFieldProvider<T> {
+  Notifier<T> get notifier => throw 0;
+}
+
+class Container {
+  T read<T>(T provider) => provider;
+}
+
+class Factory {
+  final GenericFieldProvider<T> Function<T>(T Function() create) deferredProvider;
+  Factory(this.deferredProvider);
+}
+
+// Explicit binders on a generic function field propagate through read/setter chains.
+void genericProviderField(Factory factory, Container container) {
+  final provider = factory.deferredProvider<int>(() => 0);
+  final notifier = container.read(provider.notifier);
+  notifier.state = AsyncData(42); /* expect: prefer-const-constructors */
+  notifier.state = AsyncError('error'); /* expect: prefer-const-constructors */
+  notifier.state = AsyncLoading(); /* expect: prefer-const-constructors */
+}

@@ -10,6 +10,9 @@ class Object {
   external bool operator ==(Object other);
 }
 abstract class Type {}
+// Declaration excerpt pinned to Dart SDK 3.13.5:
+// https://github.com/dart-lang/sdk/blob/3.13.5/sdk/lib/core/stacktrace.dart
+abstract interface class StackTrace {}
 abstract class Comparable<T> {
   int compareTo(T other);
 }

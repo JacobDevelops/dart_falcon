@@ -684,10 +684,10 @@ impl<'a> SemanticState<'a> {
         let target = self.call_target(callee, type_args)?;
         let substitutions = self.signature_substitutions_with_result(
             target.inference_signature(),
-            &target.owner,
             target.type_args,
             args,
             expected,
+            None,
         );
         let return_type = self
             .model
@@ -741,10 +741,10 @@ impl<'a> SemanticState<'a> {
         let target = self.call_target(callee, type_args)?;
         let substitutions = self.signature_substitutions_with_result(
             target.inference_signature(),
-            &target.owner,
             target.type_args,
             args,
             expected,
+            None,
         );
         Some(
             self.model
@@ -760,14 +760,27 @@ impl<'a> SemanticState<'a> {
         expected: Option<&ResolvedType>,
     ) -> Option<(Vec<ResolvedType>, HashMap<String, ResolvedType>)> {
         let target = self.call_target(callee, type_args)?;
+        let mut argument_contexts = HashMap::new();
         let substitutions = self.signature_substitutions_with_result(
             target.inference_signature(),
-            &target.owner,
             target.type_args,
             args,
             expected,
+            Some(&mut argument_contexts),
         );
-        Some(self.substituted_parameters(&target.signature, &substitutions))
+        let (mut positional, mut named) =
+            self.substituted_parameters(&target.signature, &substitutions);
+        for (parameter, argument) in positional.iter_mut().zip(&args.positional) {
+            if let Some(context) = argument_contexts.remove(&argument.span().start) {
+                *parameter = context;
+            }
+        }
+        for argument in &args.named {
+            if let Some(context) = argument_contexts.remove(&argument.value.span().start) {
+                named.insert(argument.name.name.clone(), context);
+            }
+        }
+        Some((positional, named))
     }
 
     fn call_target<'s>(
@@ -822,21 +835,27 @@ impl<'a> SemanticState<'a> {
                 signature,
                 &signature.call_parameters,
                 &signature.return_type,
+                owner,
             ),
-            owner,
             type_args,
             args,
             expected,
+            None,
         )
     }
 
     fn signature_substitutions_with_result(
         &self,
-        signature: (&ResolvedSignature, &[TypeParameterId], &ResolvedType),
-        owner: &HashMap<TypeParameterId, ResolvedType>,
+        signature: (
+            &ResolvedSignature,
+            &[TypeParameterId],
+            &ResolvedType,
+            &HashMap<TypeParameterId, ResolvedType>,
+        ),
         type_args: &[DartType],
         args: &ArgList,
         expected: Option<&ResolvedType>,
+        argument_contexts: Option<&mut HashMap<usize, ResolvedType>>,
     ) -> HashMap<TypeParameterId, ResolvedType> {
         let context = InferenceContext {
             model: &self.model,
@@ -846,7 +865,12 @@ impl<'a> SemanticState<'a> {
             argument_fallback: None,
         };
         self.environment.infer_signature_substitutions_with_result(
-            signature, args, type_args, &context, expected, owner,
+            signature,
+            args,
+            type_args,
+            &context,
+            expected,
+            argument_contexts,
         )
     }
 
@@ -2300,10 +2324,11 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                 signature,
                 &signature.owner_parameters,
                 &signature.return_type,
+                &HashMap::new(),
             ),
-            &HashMap::new(),
             type_args,
             args,
+            None,
             None,
         );
         let (positional, named) = self.state.substituted_parameters(signature, &substitutions);
@@ -3913,6 +3938,86 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::*;
+
+    #[test]
+    fn generic_predicate_closure_keeps_completed_input_context() {
+        use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
+        use falcon_config::FalconConfig;
+        use std::path::PathBuf;
+
+        let source = "bool predicate<T>(bool Function(T) callback) => true; \
+                      void use() { predicate((trace) { trace as StackTrace; return true; }); }";
+        let path = PathBuf::from("/project/lib/main.dart");
+        let falcon_dart_parser::ParseResult {
+            program,
+            errors,
+            syntax,
+        } = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path: &path,
+                program: &program,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let types = TypeIndex::from_resolved_files(
+            [(
+                path.as_path(),
+                falcon_analyze::LibrarySource {
+                    program: &program,
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )],
+            &identities,
+        );
+        let signatures =
+            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
+        let config = FalconConfig::default();
+        let context = AnalyzeContext::new(&path, source, &config, &syntax)
+            .with_identities(&identities)
+            .with_types(&types)
+            .with_signatures(&signatures);
+        struct Observed;
+        impl SemanticRuleVisitor for Observed {
+            fn visit_call_arguments(
+                &mut self,
+                _: &ArgList,
+                positional: &[ResolvedType],
+                _: &HashMap<String, ResolvedType>,
+                state: &SemanticState<'_>,
+            ) {
+                let ResolvedType::Function {
+                    positional: inputs, ..
+                } = &positional[0]
+                else {
+                    panic!("callback context: {positional:?}")
+                };
+                assert_eq!(
+                    inputs[0],
+                    state.model.core_type("Object", true),
+                    "callback context"
+                );
+            }
+
+            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+                if let Expr::As { expr, .. } = node {
+                    assert_eq!(
+                        state.infer(expr),
+                        state.model.core_type("Object", true),
+                        "closure binding",
+                    );
+                }
+            }
+        }
+        visit_program(
+            &mut Observed,
+            &program,
+            SemanticState::new(&program, &context).unwrap(),
+        );
+    }
 
     #[test]
     fn collection_callbacks_and_implicit_function_calls_match_context() {

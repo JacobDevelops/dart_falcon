@@ -76,3 +76,19 @@ class InitializedNumericChild extends NumericBase {
   final int marker;
   const InitializedNumericChild() : marker = 0, super(pressure: 10.0); /* expect: prefer-int-literals */
 }
+
+// Generic function-valued getters infer the result of callback tear-offs.
+class Stub<T> {
+  void thenReturn(T value) {}
+}
+
+Stub<T> Function<T>(T Function()) get when => throw 0;
+
+class RandomValue {
+  double nextDouble() => 0;
+}
+
+void genericGetterInvocation(RandomValue random) {
+  when(random.nextDouble).thenReturn(0.0); /* expect: prefer-int-literals */
+  when(random.nextDouble).thenReturn(1.0); /* expect: prefer-int-literals */
+}

@@ -23,6 +23,12 @@ Resolver-backed rules share the analyzer's member and invocation queries rather 
 Constructor-forwarding and override rules use resolved parameter identities and
 inherited contracts, including covariance and default-expression syntax. Effective
 covariance is resolved when a rule requests a contract, not during type inference.
+Generic function-valued getters and fields retain their type parameters through
+invocation, including explicit type arguments and inferred callback results.
+Partial result contexts leave unresolved inference variables open for argument
+inference, and conditional generic tear-offs align equivalent type parameters.
+Generic callbacks preserve their downward parameter context separately from the
+type arguments inferred after their bodies are analyzed.
 `valid-regexps` checks decoded Dart string literals with ECMAScript regular-expression
 syntax.
 Syntax-sensitive rules use retained lexer tokens and AST spans, so keywords,
