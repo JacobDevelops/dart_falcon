@@ -23,6 +23,7 @@ use std::collections::HashSet;
 use falcon_analyze::{AnalyzeContext, Feature, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::token::TokenKind;
 use falcon_syntax::visitor::{
     Visitor, walk_class_member, walk_expr, walk_function_decl, walk_method_decl, walk_setter_decl,
     walk_stmt,
@@ -39,11 +40,7 @@ impl Rule for PreferFinalParameters {
         if version.supports(Feature::PrimaryConstructors) {
             return Vec::new();
         }
-        let mutated = ctx
-            .local_writes(program)
-            .iter()
-            .map(|write| write.declaration)
-            .collect();
+        let mutated = ctx.mutated_declarations(program);
         let mut collector = Collector {
             ctx,
             docs: ctx.syntax.doc_blocks(ctx.source).collect(),
@@ -59,7 +56,7 @@ impl Rule for PreferFinalParameters {
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
     docs: Vec<falcon_syntax::token::DocBlock<'ctx>>,
-    mutated: HashSet<usize>,
+    mutated: &'a HashSet<usize>,
     wildcards: bool,
     diagnostics: Vec<Diagnostic>,
 }
@@ -120,16 +117,13 @@ impl Visitor for Collector<'_, '_> {
         let before_name = tokens.partition_point(|token| token.offset() < node.param.span.start);
         let open = tokens[..before_anchor]
             .iter()
-            .rposition(|token| {
-                !token.is_trivia()
-                    && &self.ctx.source[token.offset()..token.offset() + token.len()] == "("
-            })
+            .rposition(|token| token.kind == TokenKind::LParen)
             .map_or(before_anchor, |index| index + 1);
         let parameter_tokens = &tokens[open..before_name];
-        if !parameter_tokens.iter().any(|token| {
-            !token.is_trivia()
-                && &self.ctx.source[token.offset()..token.offset() + token.len()] == "final"
-        }) {
+        if !parameter_tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Final)
+        {
             let start = parameter_tokens
                 .iter()
                 .find(|token| !token.is_trivia())
