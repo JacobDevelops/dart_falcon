@@ -107,6 +107,49 @@ fn a_and_b_index_unrequested_part_from_buffered_directives() {
 }
 
 #[test]
+fn unopened_local_declarations_retain_deprecation_annotations() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    fs::create_dir_all(root.join(".dart_tool")).unwrap();
+    fs::create_dir(root.join("lib")).unwrap();
+    fs::write(
+        root.join(".dart_tool/package_config.json"),
+        r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}]}"#,
+    )
+    .unwrap();
+    let a = root.join("lib/a.dart");
+    let b = root.join("lib/b.dart");
+    let source = "import 'b.dart'; void f() { old(); }";
+    fs::write(&a, source).unwrap();
+    fs::write(&b, "@Deprecated('old') void old() {}").unwrap();
+    let environment = AnalysisEnvironment::discover_with_sdk_locator([a.as_path()], |_| None);
+    let (_, _, indexes) = analyze_sequential_collecting_resolving(
+        &RuleRegistry::new(),
+        &[(a.clone(), source.to_owned())],
+        &FalconConfig::default(),
+        true,
+        true,
+        Workspace {
+            packages: &[],
+            environment: Some(&environment),
+        },
+    );
+    let indexes = indexes.unwrap();
+    let model = SemanticModel::new(&a, &indexes.identities, Some(&indexes.types));
+    let identity = model.resolve_value("old").unwrap();
+    let (path, annotations) = indexes
+        .identities
+        .source_annotations(
+            &identity,
+            falcon_analyze::MemberSelector::DECLARATION.into(),
+        )
+        .unwrap();
+    assert_eq!(path, b);
+    assert_eq!(annotations.len(), 1);
+    assert_eq!(annotations[0].name[0].name, "Deprecated");
+}
+
+#[test]
 fn part_only_indexes_uri_owner_siblings_and_imports() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();

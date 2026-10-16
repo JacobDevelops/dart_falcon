@@ -659,9 +659,15 @@ impl IdentityIndex {
             }
         }
         let mut source_annotations = HashMap::new();
-        for (index, file) in files.iter().enumerate() {
+        for (index, (_, program, _)) in all.iter().enumerate() {
+            if matches!(
+                libraries[file_library[index].0].origin,
+                Some(ExternalOrigin::Sdk(_))
+            ) {
+                continue;
+            }
             collect_source_annotations(
-                file.program,
+                program,
                 file_library[index],
                 FileId(index),
                 &mut source_annotations,
@@ -895,12 +901,17 @@ impl IdentityIndex {
         self.file_library[file.0 & !EXTERNAL_ID]
     }
     /// Possible deprecation metadata (`@deprecated`/`@Deprecated(...)`; other
-    /// annotations are not indexed) for a proven project declaration.
+    /// annotations are not indexed) for a proven declaration.
     pub fn source_annotations(
         &self,
         identity: &DeclarationIdentity,
         selector: SourceSelector<'_>,
     ) -> Option<(&Path, &[falcon_syntax::ast::Annotation])> {
+        if self.declaration_library(identity)?.0 & EXTERNAL_ID != 0
+            && let Some(external) = &self.external
+        {
+            return external.source_annotations(identity, selector);
+        }
         let entry = self.member_annotations(identity, selector.member)?;
         let (file, annotations) = match selector.parameter {
             Some(name) => &entry.parameters.get(name)?.1,
@@ -914,12 +925,15 @@ impl IdentityIndex {
         identity: &DeclarationIdentity,
         selector: MemberSelector<'_>,
     ) -> Option<&MemberAnnotations> {
-        let DeclarationIdentity::Project { library, name } = identity else {
-            return None;
-        };
+        let library = self.declaration_library(identity)?;
+        if library.0 & EXTERNAL_ID != 0
+            && let Some(external) = &self.external
+        {
+            return external.member_annotations(identity, selector);
+        }
         self.source_annotations
-            .get(library)?
-            .get(name)?
+            .get(&LibraryId(library.0 & !EXTERNAL_ID))?
+            .get(identity.name())?
             .get(&(selector.kind, selector.is_static))?
             .get(selector.name)
     }

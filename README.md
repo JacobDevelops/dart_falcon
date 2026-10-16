@@ -6,6 +6,8 @@
 
 falcon is a standalone linter for Dart and Flutter, written in Rust. It parses Dart without the Dart analyzer or analysis server. Install the Dart SDK and resolve your dependencies for rules that need SDK or package types.
 
+When separate apps load physical copies of the same package or SDK library, falcon uses the copy with the lexicographically last canonical defining-file path consistently, independent of traversal or editor-open order. This deterministic fallback does not provide version-specific member resolution for each app; check apps separately when dependency versions differ. Unrequested local libraries contribute type and deprecation metadata without becoming lint targets.
+
 falcon ships **290 rules**, with **140 recommended** by default, across five groups: `complexity`, `correctness`, `performance`, `style`, and `suspicious`. These include cross-file checks and 142 official lints from the 1.0 catalog. Those 142 are opt-in, not part of falcon's recommended preset.
 
 Configure rules, severities, options, and per-path overrides in `falcon.json`. Cross-file checks have a separate `cross-file` section. Inline suppressions require a reason: `// falcon-ignore lint/<group>/<rule>: <reason>`.

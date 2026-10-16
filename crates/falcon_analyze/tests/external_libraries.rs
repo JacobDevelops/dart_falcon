@@ -1852,3 +1852,273 @@ fn executable_library_names_preserve_collisions_without_documentation_imports() 
         }
     ));
 }
+
+#[test]
+fn independent_package_configs_choose_the_same_canonical_package_authority_in_every_order() {
+    use falcon_analyze::{MemberKind, MemberResult, MemberSelector, MemberSelectorKind};
+
+    let (dir, _) = workspace();
+    let source = "import 'package:foo/foo.dart';";
+    let flutter = canonical_or_lexical(&dir.path().join("flutter"));
+    let apps: Vec<_> = [
+        (
+            "getter",
+            "@Deprecated('getter type') class Foo { @Deprecated('getter member') int get value => 1; }",
+        ),
+        (
+            "method",
+            "@Deprecated('method type') class Foo { @Deprecated('method member') Foo value(Foo argument) => argument; }",
+        ),
+    ]
+    .into_iter()
+    .map(|(name, declaration)| {
+        let package = dir.path().join(format!("packages/{name}"));
+        write(&package, "lib/foo.dart", declaration);
+        write(
+            dir.path(),
+            &format!("{name}/.dart_tool/package_config.json"),
+            &format!(
+                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
+                    {{"name": "foo", "rootUri": "file://{}", "packageUri": "lib/"}}
+                ]}}"#,
+                flutter.display(),
+                canonical_or_lexical(&package).display(),
+            ),
+        );
+        canonical_or_lexical(&write(
+            dir.path(),
+            &format!("{name}/lib/main.dart"),
+            source,
+        ))
+    })
+    .collect();
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    for order in [[0, 1], [1, 0]] {
+        let paths = order.map(|index| apps[index].as_path());
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);
+        let roots = paths.map(|path| (path, &program, source));
+        let is_project = |path: &Path| apps.iter().any(|app| app == path);
+        for incremental in [false, true] {
+            let externals = if incremental {
+                let mut externals = ExternalLibraries::load(&environment, &roots[..1], is_project);
+                externals.extend(&environment, &roots[1..], is_project);
+                externals
+            } else {
+                ExternalLibraries::load(&environment, &roots, is_project)
+            };
+            let sources = paths.map(|path| IdentitySource {
+                path,
+                program: &program,
+                has_parse_errors: false,
+            });
+            let external = ExternalSources {
+                libraries: &externals,
+                environment: &environment,
+            };
+            let base = std::sync::Arc::new(IdentityIndex::build_external(external));
+            for identities in [
+                IdentityIndex::build(&sources, &[source, source], &[], Some(external)),
+                IdentityIndex::with_external(
+                    &sources,
+                    &[source, source],
+                    &[],
+                    external,
+                    base.clone(),
+                ),
+            ] {
+                let mut types = TypeIndex::from_resolved_files(
+                    paths.map(|path| {
+                        (
+                            path,
+                            LibrarySource {
+                                program: &program,
+                                has_parse_errors: false,
+                                has_unresolved_parts: false,
+                            },
+                        )
+                    }),
+                    &identities,
+                );
+                types.add_external(&externals, &identities);
+                let files = paths.map(|path| (path.to_path_buf(), &program));
+                let signatures =
+                    SignatureIndex::build(&files, Some(&externals), &identities, &types);
+                let expected_path =
+                    canonical_or_lexical(&dir.path().join("packages/method/lib/foo.dart"));
+                let canonical = DeclarationIdentity::package("foo", "Foo");
+                for app in &apps {
+                    let model = SemanticModel::new(app, &identities, Some(&types));
+                    let identity = model.resolve_name("Foo").unwrap();
+                    assert_eq!(identity, canonical);
+                    assert_eq!(
+                        identities.declaration_library(&identity),
+                        Some(identities.library(identities.file(&expected_path).unwrap())),
+                        "order={order:?}, incremental={incremental}",
+                    );
+                    assert_eq!(
+                        types.member_lookup_identity(&identity, "value"),
+                        MemberResult::Found(MemberKind::Method)
+                    );
+                    let receiver = ResolvedType::interface_identity(identity);
+                    let (signature, _) = signatures
+                        .resolved_member(&receiver, "value", &model)
+                        .unwrap();
+                    assert_eq!(signature.return_type, receiver);
+                    assert_eq!(
+                        signature.positional.as_slice(),
+                        std::slice::from_ref(&receiver)
+                    );
+                    assert!(
+                        signatures
+                            .resolved_field(&receiver, "value", &model)
+                            .is_none()
+                    );
+                }
+                for index in [&identities, base.as_ref()] {
+                    assert_eq!(
+                        index.declaration_library(&canonical),
+                        Some(index.library(index.file(&expected_path).unwrap())),
+                    );
+                    for selector in [
+                        MemberSelector::DECLARATION,
+                        MemberSelector::new(MemberSelectorKind::Read, false, "value"),
+                    ] {
+                        let (path, annotations) = index
+                            .source_annotations(&canonical, selector.into())
+                            .unwrap();
+                        assert_eq!(path, expected_path);
+                        assert_eq!(annotations.len(), 1);
+                        assert_eq!(annotations[0].name[0].name, "Deprecated");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn duplicate_sdk_copies_choose_the_same_physical_authority_in_every_load_order() {
+    use falcon_analyze::{MemberKind, MemberResult};
+
+    let (dir, first) = workspace();
+    write(
+        dir.path(),
+        "flutter/bin/cache/dart-sdk/lib/core/core.dart",
+        "class Object {} class int {} class SdkType { int get value => 1; }",
+    );
+    write(
+        dir.path(),
+        "z_flutter/bin/cache/dart-sdk/lib/libraries.json",
+        r#"{"vm": {"libraries": {"core": {"uri": "core/core.dart"}}}}"#,
+    );
+    write(
+        dir.path(),
+        "z_flutter/bin/cache/dart-sdk/lib/core/core.dart",
+        "class Object {} class int {} class SdkType { SdkType value() => this; }",
+    );
+    let flutter = canonical_or_lexical(&dir.path().join("z_flutter"));
+    write(
+        dir.path(),
+        "second/.dart_tool/package_config.json",
+        &format!(
+            r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": []}}"#,
+            flutter.display(),
+        ),
+    );
+    let source = "import 'dart:core';";
+    let second = canonical_or_lexical(&write(dir.path(), "second/lib/main.dart", source));
+    let apps = [first, second];
+    let falcon_dart_parser::ParseResult {
+        program, errors, ..
+    } = parse(source);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    for order in [[0, 1], [1, 0]] {
+        let paths = order.map(|index| apps[index].as_path());
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);
+        let roots = paths.map(|path| (path, &program, source));
+        let is_project = |path: &Path| apps.iter().any(|app| app == path);
+        for incremental in [false, true] {
+            let externals = if incremental {
+                let mut externals = ExternalLibraries::load(&environment, &roots[..1], is_project);
+                externals.extend(&environment, &roots[1..], is_project);
+                externals
+            } else {
+                ExternalLibraries::load(&environment, &roots, is_project)
+            };
+            assert_eq!(
+                externals
+                    .libraries()
+                    .iter()
+                    .filter(|library| library.origin == ExternalOrigin::Sdk("dart:core".into()))
+                    .count(),
+                2
+            );
+            let sources = paths.map(|path| IdentitySource {
+                path,
+                program: &program,
+                has_parse_errors: false,
+            });
+            let external = ExternalSources {
+                libraries: &externals,
+                environment: &environment,
+            };
+            let base = std::sync::Arc::new(IdentityIndex::build_external(external));
+            for identities in [
+                IdentityIndex::build(&sources, &[source, source], &[], Some(external)),
+                IdentityIndex::with_external(&sources, &[source, source], &[], external, base),
+            ] {
+                let mut types = TypeIndex::from_resolved_files(
+                    paths.map(|path| {
+                        (
+                            path,
+                            LibrarySource {
+                                program: &program,
+                                has_parse_errors: false,
+                                has_unresolved_parts: false,
+                            },
+                        )
+                    }),
+                    &identities,
+                );
+                types.add_external(&externals, &identities);
+                let files = paths.map(|path| (path.to_path_buf(), &program));
+                let signatures =
+                    SignatureIndex::build(&files, Some(&externals), &identities, &types);
+                for app in &apps {
+                    let model = SemanticModel::new(app, &identities, Some(&types));
+                    let identity = model.resolve_name("SdkType").unwrap();
+                    assert!(identity.is_sdk("dart:core", "SdkType"));
+                    let expected_path = canonical_or_lexical(
+                        &dir.path()
+                            .join("z_flutter/bin/cache/dart-sdk/lib/core/core.dart"),
+                    );
+                    assert_eq!(
+                        identities.declaration_library(&identity),
+                        Some(identities.library(identities.file(&expected_path).unwrap())),
+                    );
+                    assert_eq!(
+                        types.member_lookup_identity(&identity, "value"),
+                        MemberResult::Found(MemberKind::Method),
+                        "order={order:?}, incremental={incremental}",
+                    );
+                    let receiver = ResolvedType::interface_identity(identity);
+                    let (signature, _) = signatures
+                        .resolved_member(&receiver, "value", &model)
+                        .unwrap();
+                    assert_eq!(signature.return_type, receiver);
+                    assert!(signature.positional.is_empty());
+                    assert!(
+                        signatures
+                            .resolved_field(&receiver, "value", &model)
+                            .is_none()
+                    );
+                }
+            }
+        }
+    }
+}

@@ -197,6 +197,13 @@ impl ExternalLibraries {
             }
         }
         self.load_waves(environment, wave, &is_project);
+        self.libraries
+            .sort_unstable_by(|left, right| left.files[0].path.cmp(&right.files[0].path));
+        if !self.companion_dependencies.is_empty() {
+            let referenced: HashSet<_> = self.project_companions.values().flatten().collect();
+            self.companion_dependencies
+                .retain(|path, _| referenced.contains(path));
+        }
     }
 
     fn companion_dependencies(
@@ -802,6 +809,42 @@ mod tests {
             .unwrap();
         assert!(cached.dependencies.is_empty());
         assert_eq!(cached.parts, [directory.path().join("restored.dart")]);
+    }
+
+    #[test]
+    fn snapshot_rebuild_evicts_unreferenced_companion_sources() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = directory.path().join("owner.dart");
+        let part = directory.path().join("part.dart");
+        let source = "part 'part.dart';";
+        std::fs::write(&owner, source).unwrap();
+        std::fs::write(&part, "part of 'owner.dart';").unwrap();
+        let environment =
+            AnalysisEnvironment::discover_with_sdk_locator([owner.as_path()], |_| None);
+        let parsed = falcon_dart_parser::parse(source);
+        let mut libraries = ExternalLibraries::load(
+            &environment,
+            &[(owner.as_path(), &parsed.program, source)],
+            |path| path == owner,
+        );
+        assert!(libraries.companion_dependencies.contains_key(&part));
+        let cached = libraries.companion_dependencies[&part].source.as_ptr();
+        libraries.extend(
+            &environment,
+            &[(owner.as_path(), &parsed.program, source)],
+            |path| path == owner,
+        );
+        assert_eq!(
+            libraries.companion_dependencies[&part].source.as_ptr(),
+            cached
+        );
+        let parsed = falcon_dart_parser::parse("");
+        libraries.extend(
+            &environment,
+            &[(owner.as_path(), &parsed.program, "")],
+            |path| path == owner,
+        );
+        assert!(libraries.companion_dependencies.is_empty());
     }
 
     #[test]
