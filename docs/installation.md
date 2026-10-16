@@ -86,5 +86,5 @@ channel above first.
 ## Next steps
 
 See [configuration.md](./configuration.md) for configuring rules and options,
-or run `falcon check .`. With no `falcon.json` present, every recommended rule
-runs at its default severity.
+or run `falcon check .`. With no `falcon.json` present, falcon's 165 recommended
+rules out of 290 shipped rules run at their default severity.

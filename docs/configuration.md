@@ -6,8 +6,8 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the enclosing git root
 3. `~/.falcon.json`
 
-If no config is found, falcon runs with defaults: every recommended rule enabled
-at its default severity (warning).
+If no config is found, falcon enables its own recommended set: 165 of 290 shipped
+rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
 a message and exits non-zero rather than silently falling back to defaults. This
@@ -52,7 +52,7 @@ The VS Code extension enables the [published schema](../schema/falcon.schema.jso
     "rules": {
       "recommended": true,
       "complexity": {
-        "max-lines-for-file": "off"
+        "max-lines-for-file": "warn"
       },
       "style": {
         "prefer-trailing-comma": { "level": "error", "options": {} }
@@ -100,7 +100,7 @@ A bare `**` (or `**/*`) entry disables positive filtering entirely.
 - `enabled` (default `true`): when `false`, no file rule runs. Cross-file checks are configured separately.
 - `domains`: per-domain gating. Keys are domain names (currently `flutter`);
   values are `all`, `recommended`, or `none`.
-- `rules`: the recommended preset plus per-group rule levels.
+- `rules`: falcon's recommended set plus per-group rule levels.
 
 ### Language server reloads
 
@@ -110,7 +110,7 @@ Out-of-workspace dependency watches need editor support for LSP 3.17 relative pa
 
 ### `linter.rules`
 
-- `recommended` (default `true`): whether the recommended preset is active.
+- `recommended` (default `true`): whether falcon's recommended set is active.
 - Every other key is a **group** (`a11y`, `complexity`, `correctness`, `performance`, `security`, `style`, or `suspicious`) mapping rule names to a configuration.
 
 > **Rule ids are kebab-case**, for example `max-lines-for-file` and `no-magic-number`. Registered legacy `snake_case` aliases still work in config and suppression comments. Run `falcon migrate --input falcon.json --write` to rewrite them to canonical ids (see [Migrating](#migrating-from-dart_code_linter--pyramid_lint)).
@@ -138,8 +138,8 @@ For each rule falcon resolves an effective severity (or "disabled"):
 
 1. If `linter.enabled` is `false` → disabled.
 2. An **explicit** entry under the rule's group wins and bypasses domain gating.
-3. Otherwise, a domain-scoped rule follows its domain setting (currently `flutter`). `all` enables every rule in that domain; `none` disables them; `recommended` enables only recommended rules when the recommended preset is active. A missing domain setting defaults to `recommended`.
-4. Otherwise, the rule runs only if it is recommended and the recommended preset is active.
+3. Otherwise, a domain-scoped rule follows its domain setting (currently `flutter`). `all` enables every rule in that domain; `none` disables them; `recommended` enables only recommended rules when falcon's recommended set is active. A missing domain setting defaults to `recommended`.
+4. Otherwise, the rule runs only if it is recommended and falcon's recommended set is active.
 
 With no config file, only falcon's recommended rules run, at warning severity.
 
@@ -368,7 +368,7 @@ accepted as deprecated aliases (each warns on load; run `falcon migrate`):
 ```
 
 - `enabled` (default `true`): when `false`, no cross-file rule runs.
-- `rules`: the recommended preset plus per-group rule levels, the **same shape**
+- `rules`: falcon's recommended set plus per-group rule levels, the **same shape**
   as `linter.rules` (level strings or `{ "level", "options" }` objects), but with
   **no `domains`** gating, since cross-file rules are not domain-scoped.
 
@@ -382,12 +382,12 @@ effect.
 
 | Rule                     | Group        | Recommended | Replaces (dart_code_linter)   |
 |--------------------------|--------------|-------------|-------------------------------|
-| `unused-files`           | correctness  | yes         | `check-unused-files`          |
-| `unused-code`            | correctness  | yes         | `check-unused-code`           |
-| `unnecessary-nullable`   | correctness  | yes         | `check-unnecessary-nullable`  |
-| `depend-on-referenced-packages` | correctness | no | |
-| `package-names`          | style        | no          |                              |
-| `secure-pubspec-urls`    | security     | no          |                              |
+| `unused-files`           | correctness  | no          | `check-unused-files`          |
+| `unused-code`            | correctness  | no          | `check-unused-code`           |
+| `unnecessary-nullable`   | correctness  | no          | `check-unnecessary-nullable`  |
+| `depend-on-referenced-packages` | correctness | yes | |
+| `package-names`          | style        | yes         |                              |
+| `secure-pubspec-urls`    | security     | yes         |                              |
 | `sort-pub-dependencies`  | correctness  | no          |                              |
 
 Notes:
@@ -399,7 +399,7 @@ Notes:
   generated code (`lib/gen/**`, `*.pb*.dart`, etc.) via `files.includes` the same
   way you would for any rule.
 - **Package boundaries.** Each `pubspec.yaml` starts a package boundary. An unreadable or invalid manifest doesn't inherit the enclosing package's name.
-- **`unnecessary-nullable`** checks private (`_`-prefixed) declarations whose call sites are visible in the project. It is recommended by default. Use `overrides` to disable it for particular files.
+- **`unnecessary-nullable`** checks private (`_`-prefixed) declarations whose call sites are visible in the project. It is opt-in; enable it under `cross-file.rules.correctness`. Use `overrides` to disable it for particular files.
 
 ## Migrating from dart_code_linter / pyramid_lint
 

@@ -10,7 +10,7 @@ falcon is pre-1.0. This tracks shipped milestones and what's left, not a release
 
 All 142 official lints from the 1.0 catalog are registered. Against `dart analyze` 3.13.5, they match on 34 corpora (421,953 agreements) and 9 additional projects: dio, bloc, riverpod, flame, drift, freezed, get_it, mobx, and jfit (206,914 agreements). Both sets have zero false positives, false negatives, or range mismatches, including UTF-16 columns and diagnostic lengths. `package_api_docs`, `package_prefixed_library_names`, and `unsafe_html` are no longer shipped because Dart 3.13.5 no longer implements them; existing config entries produce unknown-rule warnings. `implicit_reopen` deliberately differs from the analyzer's declaration-order bug.
 
-All 142 have `recommended: false` in falcon, including the 25 upstream preset members. Enable them explicitly or migrate rules listed directly under `linter.rules` in an analyzer config. Migration doesn't expand `include:` presets.
+Falcon's default set has been re-chosen independently of upstream presets, with 165 of 290 shipped rules recommended. Enable other rules explicitly or migrate rules listed directly under `linter.rules` in an analyzer config. Migration doesn't expand `include:` presets.
 
 ### Remaining
 

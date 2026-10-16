@@ -5,6 +5,15 @@ use std::collections::HashSet;
 use falcon_rules::meta::{RULE_METADATA, RuleSource, meta_for};
 
 #[test]
+fn recommended_rules_match_documented_count() {
+    assert_eq!(RULE_METADATA.len(), 290);
+    assert_eq!(
+        RULE_METADATA.iter().filter(|meta| meta.recommended).count(),
+        165
+    );
+}
+
+#[test]
 fn registry_resolution_requirement_uses_registered_names() {
     use falcon_analyze::RuleRegistry;
     use falcon_rules::meta::RuleKind;

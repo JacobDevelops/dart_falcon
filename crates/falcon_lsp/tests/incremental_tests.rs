@@ -31,7 +31,9 @@ fn counts(state: &LspState, uri: &str) -> (u64, u64) {
 #[cfg(unix)]
 #[test]
 fn analyze_refreshes_path_when_file_materializes_under_symlink() {
-    let (mut state, dir) = state_with_config("{}");
+    let (mut state, dir) = state_with_config(
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#,
+    );
     let real = dir.path().join("real");
     fs::create_dir(&real).unwrap();
     let link = dir.path().join("link");
@@ -58,7 +60,9 @@ fn analyze_refreshes_path_when_file_materializes_under_symlink() {
 #[cfg(unix)]
 #[test]
 fn deleted_file_keeps_resolved_path_across_change_and_save() {
-    let (mut state, dir) = state_with_config("{}");
+    let (mut state, dir) = state_with_config(
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#,
+    );
     let real = dir.path().join("real");
     fs::create_dir(&real).unwrap();
     let link = dir.path().join("link");
@@ -792,7 +796,14 @@ fn cross_file_indexes_fall_back_after_unnotified_disk_changes() {
 /// LSP analyze path, just as it does in the CLI pipeline.
 #[test]
 fn inline_ignore_suppresses_in_lsp() {
-    let (mut state, _dir) = state_with_config("{}");
+    let (mut state, _dir) = state_with_config(
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#,
+    );
+    let diagnostics = state.open(URI_B, VIOLATING_SRC.to_string(), Some(1));
+    assert!(
+        diagnostics.iter().any(|d| d.rule == "avoid-dynamic"),
+        "unsuppressed fixture must report avoid-dynamic"
+    );
     let suppressed = "void f() {\n  dynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic: legacy\n  print(x);\n}\n";
     let diagnostics = state.open(URI_A, suppressed.to_string(), Some(1));
     assert!(
@@ -805,7 +816,9 @@ fn inline_ignore_suppresses_in_lsp() {
 /// `malformed-suppression` diagnostic through the LSP path.
 #[test]
 fn malformed_suppression_reported_in_lsp() {
-    let (mut state, _dir) = state_with_config("{}");
+    let (mut state, _dir) = state_with_config(
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#,
+    );
     let src = "void f() {\n  dynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic\n  print(x);\n}\n";
     let diagnostics = state.open(URI_A, src.to_string(), Some(1));
     assert!(
@@ -825,11 +838,13 @@ fn malformed_suppression_reported_in_lsp() {
 /// stale-AST-with-new-config guard from the design doc.
 #[test]
 fn config_reload_reuses_cached_asts() {
-    let (mut state, dir) = state_with_config("{}");
+    let (mut state, dir) = state_with_config(
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#,
+    );
     let diagnostics = state.open(URI_A, VIOLATING_SRC.to_string(), Some(1));
     assert!(
         diagnostics.iter().any(|d| d.rule == "avoid-dynamic"),
-        "violation fires under default config"
+        "violation fires when avoid-dynamic is enabled"
     );
     state.open(URI_B, CLEAN_SRC.to_string(), Some(1));
 
@@ -988,7 +1003,9 @@ fn incremental_reanalyze_meets_latency_gate() {
     }
     source.push_str("}\n");
 
-    let (mut state, _dir) = state_with_config("{}");
+    let (mut state, _dir) = state_with_config(
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#,
+    );
     state.open(URI_A, source.clone(), Some(1));
 
     source.push_str("\nvoid extra() {\n  dynamic z = 1;\n  print(z);\n}\n");

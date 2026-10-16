@@ -367,7 +367,7 @@
     },
     "group": "complexity",
     "name": "avoid-nested-conditional-expressions",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -413,7 +413,7 @@
     },
     "group": "complexity",
     "name": "avoid-nested-if",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -949,7 +949,7 @@
     },
     "group": "complexity",
     "name": "cyclomatic-complexity",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -1077,7 +1077,7 @@
     },
     "group": "complexity",
     "name": "max-lines-for-file",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -1111,7 +1111,7 @@
     },
     "group": "complexity",
     "name": "max-lines-for-function",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -1193,7 +1193,7 @@
     },
     "group": "complexity",
     "name": "max-parameters-for-function",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -1227,7 +1227,7 @@
     },
     "group": "complexity",
     "name": "max-switch-cases",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -1297,7 +1297,7 @@
     },
     "group": "complexity",
     "name": "maximum-nesting-level",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -1559,7 +1559,7 @@
     },
     "group": "complexity",
     "name": "prefer-conditional-expressions",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -1665,7 +1665,7 @@
     },
     "group": "complexity",
     "name": "prefer-extracting-callbacks",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -1717,7 +1717,7 @@
     },
     "group": "complexity",
     "name": "prefer-for-elements-to-map-from-iterable",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -1879,7 +1879,7 @@
     },
     "group": "complexity",
     "name": "prefer-immediate-return",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -2215,7 +2215,7 @@
     },
     "group": "complexity",
     "name": "prefer-moving-to-variable",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -2325,7 +2325,7 @@
     },
     "group": "complexity",
     "name": "unnecessary-const",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -2537,7 +2537,7 @@
     },
     "group": "complexity",
     "name": "unnecessary-lambdas",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -2770,7 +2770,7 @@
     },
     "group": "correctness",
     "name": "avoid-dynamic-calls",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -2840,7 +2840,7 @@
     },
     "group": "correctness",
     "name": "avoid-global-state",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -2892,7 +2892,7 @@
     },
     "group": "correctness",
     "name": "avoid-mutable-global-variables",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -3010,7 +3010,7 @@
     },
     "group": "correctness",
     "name": "avoid-returning-widgets",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -3080,7 +3080,7 @@
     },
     "group": "correctness",
     "name": "avoid-type-to-string",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -3310,7 +3310,7 @@
     },
     "group": "correctness",
     "name": "await-only-futures",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -3536,7 +3536,7 @@
     },
     "group": "correctness",
     "name": "cancel-subscriptions",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -3696,7 +3696,7 @@
     },
     "group": "correctness",
     "name": "close-sinks",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -3826,7 +3826,7 @@
     },
     "group": "correctness",
     "name": "collection-methods-unrelated-type",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -3914,7 +3914,7 @@
     },
     "group": "correctness",
     "name": "comment-references",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -4087,7 +4087,7 @@
     },
     "group": "correctness",
     "name": "depend-on-referenced-packages",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -4381,7 +4381,7 @@
     },
     "group": "correctness",
     "name": "exhaustive-cases",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -4630,7 +4630,7 @@
     },
     "group": "correctness",
     "name": "invalid-case-patterns",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -4718,7 +4718,7 @@
     },
     "group": "correctness",
     "name": "invalid-runtime-check-with-js-interop-types",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -4848,7 +4848,7 @@
     },
     "group": "correctness",
     "name": "library-private-types-in-public-api",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -4954,7 +4954,7 @@
     },
     "group": "correctness",
     "name": "literal-only-boolean-expressions",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -5018,7 +5018,7 @@
     },
     "group": "correctness",
     "name": "no-adjacent-strings-in-list",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -5154,7 +5154,7 @@
     },
     "group": "correctness",
     "name": "no-self-assignments",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -5254,7 +5254,7 @@
     },
     "group": "correctness",
     "name": "null-check-on-nullable-type-parameter",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -5420,7 +5420,7 @@
     },
     "group": "correctness",
     "name": "null-closures",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -5529,7 +5529,7 @@
     },
     "group": "correctness",
     "name": "prefer-void-to-null",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -5928,7 +5928,7 @@
     },
     "group": "correctness",
     "name": "test-types-in-equals",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -5992,7 +5992,7 @@
     },
     "group": "correctness",
     "name": "throw-in-finally",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -6056,7 +6056,7 @@
     },
     "group": "correctness",
     "name": "type-literal-in-constant-pattern",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -6173,7 +6173,7 @@
     },
     "group": "correctness",
     "name": "unnecessary-nullable",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -6225,7 +6225,7 @@
     },
     "group": "correctness",
     "name": "unnecessary-nullable-return-type",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -6445,7 +6445,7 @@
     },
     "group": "correctness",
     "name": "unnecessary-statements",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -6587,7 +6587,7 @@
     },
     "group": "correctness",
     "name": "unrelated-type-equality-checks",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -6652,7 +6652,7 @@
     },
     "group": "correctness",
     "name": "unused-code",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -6713,7 +6713,7 @@
     },
     "group": "correctness",
     "name": "unused-files",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -6941,7 +6941,7 @@
     },
     "group": "correctness",
     "name": "use-build-context-synchronously",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -6983,7 +6983,7 @@
     },
     "group": "correctness",
     "name": "use-key-in-widget-constructors",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -7043,7 +7043,7 @@
     },
     "group": "correctness",
     "name": "use-once-constructors-once-provider",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -7309,7 +7309,7 @@
     },
     "group": "correctness",
     "name": "void-checks",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -7503,7 +7503,7 @@
     },
     "group": "performance",
     "name": "noop-primitive-operations",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -7807,7 +7807,7 @@
     },
     "group": "performance",
     "name": "prefer-contains",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -7999,7 +7999,7 @@
     },
     "group": "performance",
     "name": "prefer-declaring-const-constructor",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -8339,7 +8339,7 @@
     },
     "group": "performance",
     "name": "use-string-buffers",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -8436,7 +8436,7 @@
     },
     "group": "security",
     "name": "secure-pubspec-urls",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -8512,7 +8512,7 @@
     },
     "group": "style",
     "name": "always-declare-return-types",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -8864,7 +8864,7 @@
     },
     "group": "style",
     "name": "annotate-overrides",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -8922,7 +8922,7 @@
     },
     "group": "style",
     "name": "avoid-abbreviations-in-doc-comments",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -9080,7 +9080,7 @@
     },
     "group": "style",
     "name": "avoid-bool-literals-in-conditional-expressions",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -9290,7 +9290,7 @@
     },
     "group": "style",
     "name": "avoid-double-and-int-checks",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -9798,7 +9798,7 @@
     },
     "group": "style",
     "name": "avoid-js-rounded-ints",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -9874,7 +9874,7 @@
     },
     "group": "style",
     "name": "avoid-late-keyword",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -9932,7 +9932,7 @@
     },
     "group": "style",
     "name": "avoid-multiple-declarations-per-line",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -10074,7 +10074,7 @@
     },
     "group": "style",
     "name": "avoid-non-null-assertion",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -10120,7 +10120,7 @@
     },
     "group": "style",
     "name": "avoid-null-checks-in-equality-operators",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -10368,7 +10368,7 @@
     },
     "group": "style",
     "name": "avoid-positional-fields-in-records",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -11065,7 +11065,7 @@
     },
     "group": "style",
     "name": "avoid-single-child-column-or-row",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -11183,7 +11183,7 @@
     },
     "group": "style",
     "name": "avoid-top-level-member-access",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "Falcon",
       "label": "Falcon",
@@ -11495,7 +11495,7 @@
     },
     "group": "style",
     "name": "avoid-void-async",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -11631,7 +11631,7 @@
     },
     "group": "style",
     "name": "binary-expression-operand-order",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -11725,7 +11725,7 @@
     },
     "group": "style",
     "name": "boolean-prefixes",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -11987,7 +11987,7 @@
     },
     "group": "style",
     "name": "class-members-ordering",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -12109,7 +12109,7 @@
     },
     "group": "style",
     "name": "conditional-uri-does-not-exist",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -12395,7 +12395,7 @@
     },
     "group": "style",
     "name": "deprecated-consistency",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -12761,7 +12761,7 @@
     },
     "group": "style",
     "name": "double-literal-format",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -12847,7 +12847,7 @@
     },
     "group": "style",
     "name": "eol-at-end-of-file",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -12868,7 +12868,7 @@
     },
     "group": "style",
     "name": "file-names",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -12978,7 +12978,7 @@
     },
     "group": "style",
     "name": "format-comment",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -13470,7 +13470,7 @@
     },
     "group": "style",
     "name": "library-annotations",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -13498,7 +13498,7 @@
     },
     "group": "style",
     "name": "library-names",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -13784,7 +13784,7 @@
     },
     "group": "style",
     "name": "member-ordering",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -13848,7 +13848,7 @@
     },
     "group": "style",
     "name": "missing-whitespace-between-adjacent-strings",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -13924,7 +13924,7 @@
     },
     "group": "style",
     "name": "newline-before-return",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -14250,7 +14250,7 @@
     },
     "group": "style",
     "name": "no-magic-number",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -14302,7 +14302,7 @@
     },
     "group": "style",
     "name": "no-object-declaration",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -14666,7 +14666,7 @@
     },
     "group": "style",
     "name": "only-throw-errors",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -14775,7 +14775,7 @@
     },
     "group": "style",
     "name": "package-names",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -15125,7 +15125,7 @@
     },
     "group": "style",
     "name": "prefer-async-await",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -15179,7 +15179,7 @@
     },
     "group": "style",
     "name": "prefer-async-callback",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -15261,7 +15261,7 @@
     },
     "group": "style",
     "name": "prefer-collection-literals",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -15845,7 +15845,7 @@
     },
     "group": "style",
     "name": "prefer-const-declarations",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -16187,7 +16187,7 @@
     },
     "group": "style",
     "name": "prefer-correct-identifier-length",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -16263,7 +16263,7 @@
     },
     "group": "style",
     "name": "prefer-correct-type-name",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -16557,7 +16557,7 @@
     },
     "group": "style",
     "name": "prefer-final-in-for-each",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -16669,7 +16669,7 @@
     },
     "group": "style",
     "name": "prefer-final-locals",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -16875,7 +16875,7 @@
     },
     "group": "style",
     "name": "prefer-first",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -17415,7 +17415,7 @@
     },
     "group": "style",
     "name": "prefer-interpolation-to-compose-strings",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -17491,7 +17491,7 @@
     },
     "group": "style",
     "name": "prefer-is-empty",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -17561,7 +17561,7 @@
     },
     "group": "style",
     "name": "prefer-is-not-empty",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -17925,7 +17925,7 @@
     },
     "group": "style",
     "name": "prefer-last",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -17989,7 +17989,7 @@
     },
     "group": "style",
     "name": "prefer-mixin",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -18047,7 +18047,7 @@
     },
     "group": "style",
     "name": "prefer-null-aware-method-calls",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -18215,7 +18215,7 @@
     },
     "group": "style",
     "name": "prefer-trailing-comma",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -18337,7 +18337,7 @@
     },
     "group": "style",
     "name": "prefer-underscore-for-unused-callback-parameters",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "PyramidLint",
       "label": "Pyramid Lint",
@@ -18588,7 +18588,7 @@
     },
     "group": "style",
     "name": "sized-box-shrink-expand",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -19040,7 +19040,7 @@
     },
     "group": "style",
     "name": "type-annotate-public-apis",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -19162,7 +19162,7 @@
     },
     "group": "style",
     "name": "unawaited-futures",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -19436,7 +19436,7 @@
     },
     "group": "style",
     "name": "unnecessary-breaks",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -19692,7 +19692,7 @@
     },
     "group": "style",
     "name": "unnecessary-library-directive",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -20096,7 +20096,7 @@
     },
     "group": "style",
     "name": "unnecessary-nullable-for-final-variable-declarations",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -20262,7 +20262,7 @@
     },
     "group": "style",
     "name": "unnecessary-parenthesis",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -20314,7 +20314,7 @@
     },
     "group": "style",
     "name": "unnecessary-raw-strings",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -20894,7 +20894,7 @@
     },
     "group": "style",
     "name": "use-colored-box",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -20960,7 +20960,7 @@
     },
     "group": "style",
     "name": "use-decorated-box",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -21014,7 +21014,7 @@
     },
     "group": "style",
     "name": "use-design-system-item",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -21278,7 +21278,7 @@
     },
     "group": "style",
     "name": "use-if-null-to-convert-nulls-to-bools",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -21448,7 +21448,7 @@
     },
     "group": "style",
     "name": "use-named-constants",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -21764,7 +21764,7 @@
     },
     "group": "style",
     "name": "use-super-parameters",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -21785,7 +21785,7 @@
     },
     "group": "style",
     "name": "use-test-throws-matchers",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -22033,7 +22033,7 @@
     },
     "group": "suspicious",
     "name": "avoid-dynamic",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -22155,7 +22155,7 @@
     },
     "group": "suspicious",
     "name": "avoid-ignoring-return-values",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -22489,7 +22489,7 @@
     },
     "group": "suspicious",
     "name": "avoid-throw-in-catch-block",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -22577,7 +22577,7 @@
     },
     "group": "suspicious",
     "name": "avoid-types-as-parameter-names",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",
@@ -23069,7 +23069,7 @@
     },
     "group": "suspicious",
     "name": "no-empty-block",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -23199,7 +23199,7 @@
     },
     "group": "suspicious",
     "name": "no-equal-arguments",
-    "recommended": true,
+    "recommended": false,
     "source": {
       "kind": "DartCodeLinter",
       "label": "Dart Code Metrics",
@@ -23491,7 +23491,7 @@
     },
     "group": "suspicious",
     "name": "overridden-fields",
-    "recommended": false,
+    "recommended": true,
     "source": {
       "kind": "Lints",
       "label": "Dart lints",

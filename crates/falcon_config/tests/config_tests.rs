@@ -741,7 +741,7 @@ fn test_cross_file_default_enabled_and_recommended() {
     // Recommended cross-file rule → Warn by default.
     assert_eq!(
         cfg.cross_file
-            .resolve_rule("correctness", "unused-files", true),
+            .resolve_rule("correctness", "depend-on-referenced-packages", true),
         Some(ResolvedSeverity::Warn)
     );
     // Non-recommended cross-file rule (e.g. unnecessary-nullable) → off by default.

@@ -46,7 +46,7 @@ struct TestClient {
 impl TestClient {
     /// Start the server loop on a memory connection and complete the
     /// initialize handshake. `config_json = None` uses an empty config
-    /// (every rule enabled) for hermeticity.
+    /// (recommended rules enabled) for hermeticity.
     fn start(debounce: Duration, config_json: Option<&str>) -> Self {
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("falcon.json");
@@ -228,7 +228,8 @@ fn initialize_shutdown_cycle() {
 /// didOpen publishes diagnostics for a violating file.
 #[test]
 fn did_open_publishes_diagnostics() {
-    let mut client = TestClient::start(Duration::ZERO, None);
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
     client.open(DOC_URI, VIOLATING_SRC, 1);
     let params = client.recv_publish();
     assert_eq!(params.uri.as_str(), DOC_URI);
@@ -248,7 +249,8 @@ fn did_open_publishes_diagnostics() {
 /// clears the diagnostic; the version is echoed.
 #[test]
 fn did_change_republishes() {
-    let mut client = TestClient::start(Duration::ZERO, None);
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
     client.open(DOC_URI, VIOLATING_SRC, 1);
     assert!(has_rule(&client.recv_publish(), "avoid-dynamic"));
 
@@ -637,7 +639,8 @@ fn did_close_refreshes_buffer_and_restored_disk_part_owners() {
 /// didSave re-analyzes (with included text refreshing the cache).
 #[test]
 fn did_save_republishes() {
-    let mut client = TestClient::start(Duration::ZERO, None);
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
     client.open(DOC_URI, CLEAN_SRC, 1);
     client.recv_publish();
 
@@ -658,7 +661,8 @@ fn did_save_republishes() {
 /// didClose publishes an empty diagnostic set to clear the editor.
 #[test]
 fn did_close_clears_diagnostics() {
-    let mut client = TestClient::start(Duration::ZERO, None);
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
     client.open(DOC_URI, VIOLATING_SRC, 1);
     assert!(!client.recv_publish().diagnostics.is_empty());
 
@@ -679,7 +683,8 @@ fn did_close_clears_diagnostics() {
 /// clean code returns null.
 #[test]
 fn hover_reports_diagnostics_under_cursor() {
-    let mut client = TestClient::start(Duration::ZERO, None);
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
     client.open(DOC_URI, VIOLATING_SRC, 1);
     client.recv_publish();
 
@@ -732,9 +737,26 @@ fn unsupported_request_returns_method_not_found() {
 /// Rules disabled in falcon.json never fire in LSP mode.
 #[test]
 fn config_disabled_rule_not_published() {
-    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#;
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;
     let mut client = TestClient::start(Duration::ZERO, Some(config));
     client.open(DOC_URI, VIOLATING_SRC, 1);
+    assert!(has_rule(&client.recv_publish(), "avoid-dynamic"));
+
+    fs::write(
+        client.config_path(),
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#,
+    )
+    .unwrap();
+    let config_uri = format!("file://{}", client.config_path().display());
+    client.notify(
+        lsp_types::notification::DidChangeWatchedFiles::METHOD,
+        DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Uri::from_str(&config_uri).unwrap(),
+                typ: FileChangeType::CHANGED,
+            }],
+        },
+    );
     let params = client.recv_publish();
     assert!(
         !has_rule(&params, "avoid-dynamic"),
@@ -768,7 +790,8 @@ fn config_rule_level_sets_published_severity() {
 /// every open document against its cached AST.
 #[test]
 fn watched_files_change_reloads_config() {
-    let mut client = TestClient::start(Duration::ZERO, None);
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
     client.open(DOC_URI, VIOLATING_SRC, 1);
     assert!(has_rule(&client.recv_publish(), "avoid-dynamic"));
 
@@ -801,7 +824,8 @@ fn watched_files_change_reloads_config() {
 /// analysis/publish reflecting the final text.
 #[test]
 fn debounce_coalesces_rapid_changes() {
-    let mut client = TestClient::start(Duration::from_millis(150), None);
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;
+    let mut client = TestClient::start(Duration::from_millis(150), Some(config));
     client.open(DOC_URI, CLEAN_SRC, 1);
     client.recv_publish();
 
@@ -823,12 +847,18 @@ fn debounce_coalesces_rapid_changes() {
 fn config_override_disables_rule_not_published() {
     // DOC_URI resolves to `/test/a.dart`; `**/a.dart` matches that walked path.
     let config = r#"{
+        "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } },
         "overrides": [ {
             "includes": ["**/a.dart"],
             "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } }
         } ]
     }"#;
     let mut client = TestClient::start(Duration::ZERO, Some(config));
+    client.open("file:///test/b.dart", VIOLATING_SRC, 1);
+    let baseline = client.recv_publish();
+    assert_eq!(baseline.uri.as_str(), "file:///test/b.dart");
+    assert!(has_rule(&baseline, "avoid-dynamic"), "{baseline:?}");
+
     client.open(DOC_URI, VIOLATING_SRC, 1);
     let params = client.recv_publish();
     assert!(
@@ -884,7 +914,8 @@ fn published_positions_count_utf16_code_units() {
 /// alive and still analyzes a subsequent well-formed change.
 #[test]
 fn malformed_did_change_params_do_not_kill_server() {
-    let mut client = TestClient::start(Duration::ZERO, None);
+    let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
     client.open(DOC_URI, CLEAN_SRC, 1);
     client.recv_publish();
 

@@ -250,7 +250,9 @@ fn test_parse_error_surfaces_as_syntax_error() {
         "void main() {\n  print(\"hello\"\n}\n",
     )
     .unwrap();
-    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(&config, "{}").unwrap();
+    let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
 
     let syntax: Vec<_> = out
         .diagnostics
@@ -274,7 +276,7 @@ fn test_syntax_error_listed_before_lints() {
         "void main() {\n  dynamic value = 1;\n  print(\"hello\"\n}\n",
     )
     .unwrap();
-    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+    let out = collect_check(&options_for_dynamic(temp.path())).unwrap();
 
     assert!(
         out.diagnostics.iter().any(|d| d.rule == "avoid-dynamic"),
@@ -307,15 +309,33 @@ fn options_for(dir: &std::path::Path, config: Option<PathBuf>) -> CheckOptions {
     }
 }
 
-/// Baseline: with no config, avoid-dynamic fires on DYNAMIC_SRC.
+fn options_for_dynamic(dir: &std::path::Path) -> CheckOptions {
+    let config = dir.join("falcon.json");
+    fs::write(
+        &config,
+        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#,
+    )
+    .unwrap();
+    options_for(dir, Some(config))
+}
+
+/// An empty config enables recommended rules without inheriting repository settings.
 #[test]
 fn test_collect_check_default_config_rule_fires() {
     let temp = tempdir().unwrap();
     fs::write(temp.path().join("a.dart"), DYNAMIC_SRC).unwrap();
-    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(&config, "{}").unwrap();
+    let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
     assert!(
-        out.diagnostics.iter().any(|d| d.rule == "avoid-dynamic"),
-        "expected avoid-dynamic to fire by default"
+        out.diagnostics
+            .iter()
+            .any(|d| d.rule == "prefer-final-locals"),
+        "expected recommended prefer-final-locals to fire by default"
+    );
+    assert!(
+        out.diagnostics.iter().all(|d| d.rule != "avoid-dynamic"),
+        "opt-in avoid-dynamic must not fire by default"
     );
 }
 
@@ -324,6 +344,13 @@ fn test_collect_check_default_config_rule_fires() {
 fn test_config_disables_rule() {
     let temp = tempdir().unwrap();
     fs::write(temp.path().join("a.dart"), DYNAMIC_SRC).unwrap();
+    let baseline = collect_check(&options_for_dynamic(temp.path())).unwrap();
+    assert!(
+        baseline
+            .diagnostics
+            .iter()
+            .any(|d| d.rule == "avoid-dynamic")
+    );
     let config = temp.path().join("falcon.json");
     fs::write(
         &config,
@@ -388,8 +415,13 @@ class S extends StatelessWidget {\n\
     let temp = tempdir().unwrap();
     fs::write(temp.path().join("a.dart"), FLUTTER_SRC).unwrap();
 
-    // Baseline: both a flutter rule and a non-flutter rule fire.
-    let base = collect_check(&options_for(temp.path(), None)).unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(
+        &config,
+        r#"{ "linter": { "domains": { "flutter": "all" }, "rules": { "recommended": false, "suspicious": { "avoid-dynamic": "warn" } } } }"#,
+    )
+    .unwrap();
+    let base = collect_check(&options_for(temp.path(), Some(config.clone()))).unwrap();
     assert!(
         base.diagnostics
             .iter()
@@ -397,10 +429,9 @@ class S extends StatelessWidget {\n\
     );
     assert!(base.diagnostics.iter().any(|d| d.rule == "avoid-dynamic"));
 
-    let config = temp.path().join("falcon.json");
     fs::write(
         &config,
-        r#"{ "linter": { "domains": { "flutter": "none" } } }"#,
+        r#"{ "linter": { "domains": { "flutter": "none" }, "rules": { "recommended": false, "suspicious": { "avoid-dynamic": "warn" } } } }"#,
     )
     .unwrap();
     let out = collect_check(&options_for(temp.path(), Some(config))).unwrap();
@@ -571,7 +602,8 @@ fn test_inline_suppression_end_to_end() {
         "dynamic a = 1; // falcon-ignore lint/suspicious/avoid-dynamic: legacy\ndynamic b = 2;\n",
     )
     .unwrap();
-    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+    let options = options_for_dynamic(temp.path());
+    let out = collect_check(&options).unwrap();
     let dynamic_hits = out
         .diagnostics
         .iter()
@@ -588,7 +620,7 @@ fn test_inline_suppression_end_to_end() {
         "// falcon-ignore-all lint/suspicious/avoid-dynamic: legacy\ndynamic a = 1;\ndynamic b = 2;\n",
     )
     .unwrap();
-    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+    let out = collect_check(&options).unwrap();
     assert!(
         out.diagnostics.iter().all(|d| d.rule != "avoid-dynamic"),
         "falcon-ignore-all must suppress every avoid-dynamic in the file"
@@ -606,7 +638,7 @@ fn test_malformed_suppression_reported() {
          dynamic b = 2; // ignore: avoid-dynamic\n",
     )
     .unwrap();
-    let out = collect_check(&options_for(temp.path(), None)).unwrap();
+    let out = collect_check(&options_for_dynamic(temp.path())).unwrap();
     // Both occurrences still fire (no-reason comment and the inert Dart comment).
     assert_eq!(
         out.diagnostics
@@ -638,6 +670,7 @@ fn test_override_disables_rule_for_matching_path_only() {
     fs::write(
         &config,
         r#"{
+            "linter": { "rules": { "recommended": false, "suspicious": { "avoid-dynamic": "warn" } } },
             "overrides": [ {
                 "includes": ["**/gen/**"],
                 "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } }
