@@ -4,8 +4,9 @@
 //! whether a simple or import-prefixed name denotes a type, a value, or cannot
 //! be resolved uniquely. Ambiguity and incomplete bindings become
 //! [`NameIdentity::Unknown`] without suppressing unrelated external names.
-//! Missing project part files preserve explicit, unambiguous types unless they
-//! overlap `dart:core`; unresolvable external part URIs remain uncertain.
+//! Missing project part files preserve explicit, unambiguous types both inside
+//! their declaring library and through imports unless they overlap `dart:core`;
+//! unresolvable external part URIs remain uncertain.
 //! A top-level getter and setter share one value identity, including across parts;
 //! repeated accessors and collisions with other declarations remain ambiguous.
 
@@ -1028,8 +1029,23 @@ impl IdentityIndex {
         Some(self.get(library)).filter(|library| !library.incomplete)
     }
 
+    fn missing_part_type(&self, library: LibraryId, name: &str) -> Option<DeclarationIdentity> {
+        let unit = self.get(library);
+        (unit.missing_parts_only
+            && self.implicit_core(unit, name, NameIdentity::Type).is_none()
+            && unit
+                .declarations
+                .get(name)
+                .is_some_and(|(identity, _)| *identity == NameIdentity::Type))
+        .then(|| self.declared(library, name))
+        .flatten()
+    }
+
     /// Classify `name` as it is visible from `library`.
     pub fn resolve(&self, library: LibraryId, name: QualifiedName<'_>) -> NameIdentity {
+        if name.prefix.is_none() && self.missing_part_type(library, name.name).is_some() {
+            return NameIdentity::Type;
+        }
         if self.complete(library).is_none() {
             return NameIdentity::Unknown;
         }
@@ -1385,6 +1401,11 @@ impl IdentityIndex {
         library: LibraryId,
         name: QualifiedName<'_>,
     ) -> Option<DeclarationIdentity> {
+        if name.prefix.is_none()
+            && let Some(identity) = self.missing_part_type(library, name.name)
+        {
+            return Some(identity);
+        }
         self.complete(library)?;
         self.memos
             .declarations
@@ -1602,13 +1623,7 @@ impl IdentityIndex {
         if name.starts_with('_') {
             return false;
         }
-        if unit.missing_parts_only
-            && self.implicit_core(unit, name, NameIdentity::Type).is_none()
-            && unit
-                .declarations
-                .get(name)
-                .is_some_and(|(identity, _)| *identity == NameIdentity::Type)
-        {
+        if self.missing_part_type(library, name).is_some() {
             return false;
         }
         let declares_name = unit.declarations.contains_key(name) || unit.extensions.contains(name);
@@ -1762,14 +1777,9 @@ impl IdentityIndex {
         let declares_name = unit.declarations.contains_key(name) || unit.extensions.contains(name);
         if !name.starts_with('_')
             && namespace == NameIdentity::Type
-            && unit.missing_parts_only
-            && self.implicit_core(unit, name, namespace).is_none()
-            && unit
-                .declarations
-                .get(name)
-                .is_some_and(|(identity, _)| *identity == namespace)
+            && let Some(identity) = self.missing_part_type(library, name)
         {
-            return self.declared(library, name);
+            return Some(identity);
         }
         if name.starts_with('_')
             || (unit.incomplete
@@ -2858,6 +2868,11 @@ mod tests {
         let box_library = library(&index, "/project/lib/box.dart");
         assert!(index.get(box_library).incomplete);
         let expected = index.declared(box_library, "Box").unwrap();
+        assert_eq!(
+            index.resolve_declaration(box_library, "Box".into()),
+            Some(expected.clone())
+        );
+        assert_eq!(index.resolve(box_library, "Box".into()), NameIdentity::Type);
         let main = library(&index, "/project/lib/main.dart");
         for prefix in [None, Some("direct"), Some("later"), Some("barrel")] {
             let name = QualifiedName {

@@ -11030,7 +11030,13 @@ impl TypeEnvironment {
         HashMap<TypeParameterId, ResolvedType>,
     )> {
         let this = self.lookup("this");
-        let ResolvedType::Interface { identity, .. } = &this else {
+        let mut bound = &this;
+        while let ResolvedType::TypeParameter { bound: next, .. }
+        | ResolvedType::NonNullTypeParameter { bound: next, .. } = bound
+        {
+            bound = next;
+        }
+        let ResolvedType::Interface { identity, .. } = bound else {
             return None;
         };
         let declared = signatures.declared_member_facts(identity, name);
@@ -17183,6 +17189,33 @@ final integer = integers.first;
                 assert_eq!(
                     signature.shape.as_ref().unwrap().required_named.as_ref(),
                     &["progress"]
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn generic_calls_infer_from_inherited_method_tearoffs() {
+        with_model(
+            "abstract class Random { double nextDouble(); } \
+             class Mock {} class MockRandom extends Mock implements Random {} \
+             class When<T> { T thenReturn(T value) => value; } \
+             When<T> when<T>(T Function() callback) => throw 0; \
+             double probe(MockRandom random) => when(random.nextDouble).thenReturn(1.0);",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let TopLevelDecl::Function(function) = &program.declarations[5] else {
+                    panic!()
+                };
+                let Some(FunctionBody::Arrow(expression, _)) = &function.body else {
+                    panic!()
+                };
+                let scope = TypeParameterScope::default();
+                let mut environment = TypeEnvironment::new();
+                environment.bind_params(function.params().unwrap(), model, &scope);
+                assert_eq!(
+                    environment.infer_with_signatures(expression, model, &signatures, &scope),
+                    model.core_type("double", false),
                 );
             },
         );

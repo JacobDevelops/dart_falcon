@@ -785,7 +785,8 @@ pub struct TypeAliasDecl {
 pub enum DartType {
     Named(NamedType),
     Function(Box<FunctionType>),
-    Record(RecordType),
+    // Record-only source metadata must not widen every inline type and expression.
+    Record(Box<RecordType>),
     Void { span: Span },
     Dynamic { span: Span },
 }
@@ -831,7 +832,7 @@ pub struct FunctionType {
 
 #[derive(Debug, Clone)]
 pub struct FunctionTypeParam {
-    pub annotations: Vec<Annotation>,
+    pub annotations: Box<[Annotation]>,
     pub name: Option<Identifier>,
     pub param_type: DartType,
     /// True for required positional parameters and explicitly required named parameters.
@@ -1929,5 +1930,18 @@ mod span_tests {
     fn merge_same() {
         let span = Span::new(5, 10);
         assert_eq!(span.merge(&span), span);
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::{DartType, NamedType};
+
+    #[test]
+    fn record_metadata_does_not_widen_inline_types() {
+        assert_eq!(
+            std::mem::size_of::<DartType>(),
+            std::mem::size_of::<NamedType>()
+        );
     }
 }

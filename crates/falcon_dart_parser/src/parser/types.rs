@@ -146,7 +146,7 @@ impl<'src> Parser<'src> {
             let param_type = self.parse_type();
             let name = self.parse_ident();
             params.push(FunctionTypeParam {
-                annotations,
+                annotations: annotations.into_boxed_slice(),
                 name,
                 param_type,
                 is_required,
@@ -206,13 +206,13 @@ impl<'src> Parser<'src> {
         }
         self.expect(TokenKind::RParen);
         let is_nullable = self.eat_type_qmark();
-        let record = DartType::Record(RecordType {
+        let record = DartType::Record(Box::new(RecordType {
             positional,
             positional_names,
             named,
             is_nullable,
             span: self.span_from(start),
-        });
+        }));
         // A record type may itself be the return type of a function type, e.g.
         // `(int, int) Function()` — check for the `Function(...)` suffix here so it
         // parses in specialized type positions (typedef RHS, field/param types).

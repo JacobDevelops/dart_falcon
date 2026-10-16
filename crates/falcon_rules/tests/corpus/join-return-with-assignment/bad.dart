@@ -80,7 +80,7 @@ int pairedAccessors(InheritedState notifier) {
 }
 
 int pairedAccessorChain(List<InheritedState> notifiers) {
-  notifiers.first.state = 1; /* expect: join-return-with-assignment */
+  notifiers.first.state = 1;
   return notifiers.first.state;
 }
 

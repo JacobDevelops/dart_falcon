@@ -22,3 +22,13 @@ void fallback(Callback? callback) {
 void unresolved(dynamic callback) {
   callback(); /* expect: avoid-dynamic-calls */
 }
+
+extension ImplicitCallbackCall on Callback {
+  void implicit(Context value) {
+    call(value); /* expect: avoid-dynamic-calls */
+  }
+
+  void explicit(Context value) {
+    this.call(value);
+  }
+}

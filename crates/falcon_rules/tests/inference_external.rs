@@ -352,3 +352,30 @@ final hiddenValue = 1;
         4,
     );
 }
+
+#[test]
+fn generic_member_canonical_elements_retain_substituted_occurrences() {
+    assert_external_lints(
+        "join-return-with-assignment",
+        include_str!("corpus/join-return-with-assignment/generic_members.dart"),
+        1,
+    );
+}
+
+#[test]
+fn async_closure_future_or_return_context() {
+    assert_external_lints(
+        "unnecessary-await-in-return",
+        include_str!("corpus/unnecessary-await-in-return/bad.dart"),
+        15,
+    );
+}
+
+#[test]
+fn extension_static_member_lexical_lookup() {
+    assert_external_lints(
+        "unnecessary-await-in-return",
+        include_str!("corpus/unnecessary-await-in-return/extension_statics.dart"),
+        1,
+    );
+}

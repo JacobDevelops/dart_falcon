@@ -410,6 +410,23 @@ impl<'a> SemanticState<'a> {
         if let Some(promoted) = self.environment.promoted_this_field(name) {
             return Some(promoted);
         }
+        if let Some(owner) = &self.constant_owner
+            && !matches!(
+                &self.enclosing_type,
+                Some(ResolvedType::Interface { identity, .. }) if identity == owner
+            )
+            && self
+                .signatures
+                .declared_member_facts(owner, name)
+                .iter()
+                .any(|fact| fact.is_static)
+        {
+            return self
+                .signatures
+                .member(owner, name)
+                .map(|signature| signature.function_type())
+                .or_else(|| self.signatures.field(owner, name).map(|(_, ty)| ty.clone()));
+        }
         if let Some(ResolvedType::Interface { identity, .. }) = &self.enclosing_type
             && self
                 .signatures
@@ -424,7 +441,7 @@ impl<'a> SemanticState<'a> {
         let member = || {
             let receiver = self.enclosing_type.as_ref()?;
             if name == "call" && matches!(receiver, ResolvedType::Function { .. }) {
-                return Some(receiver.with_nullable(false));
+                return Some(self.model.core_type("Function", false));
             }
             if let Some(ty) = self
                 .signatures
@@ -3898,7 +3915,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn collection_callbacks_and_implicit_function_calls_preserve_context() {
+    fn collection_callbacks_and_implicit_function_calls_match_context() {
         use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
         use falcon_config::FalconConfig;
         use std::path::PathBuf;
@@ -3920,6 +3937,10 @@ extension on PostMessage {
     this.call(object, transfer);
   }
   void shadowed(void Function(int) call) { call(1); }
+}
+class GenericLookup {
+  static T? maybeFind<T>() => null;
+  int example() => maybeFind<int>()!;
 }
 "#;
         let path = PathBuf::from("/project/lib/main.dart");
@@ -3961,10 +3982,19 @@ extension on PostMessage {
             implicit_call: Option<Vec<ResolvedType>>,
             explicit_call: Option<Vec<ResolvedType>>,
             shadowed: bool,
+            static_generic: bool,
         }
         impl SemanticRuleVisitor for Observed {
             fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
                 match node {
+                    Expr::Call { callee, .. } if matches!(callee.as_ref(), Expr::Ident(name) if name.name == "maybeFind") =>
+                    {
+                        assert!(state.implicit_member_type("maybeFind").is_none());
+                        let result = state.infer(node);
+                        assert!(result.interface("dart:core", "int"));
+                        assert!(result.nullable());
+                        self.static_generic = true;
+                    }
                     Expr::Field { object, field, .. } if field.name == "type" => {
                         self.elements.push(state.infer(object));
                     }
@@ -3976,15 +4006,19 @@ extension on PostMessage {
                     } if matches!(callee.as_ref(), Expr::Ident(name) if name.name == "call")
                         || matches!(callee.as_ref(), Expr::Field { field, .. } if field.name == "call") =>
                     {
-                        let signature =
-                            state.call_signature(callee, type_args, args, None).unwrap();
+                        let signature = state.call_signature(callee, type_args, args, None);
+                        if args.positional.len() == 2 && matches!(callee.as_ref(), Expr::Ident(_)) {
+                            assert!(state.infer(callee).interface("dart:core", "Function"));
+                            assert!(signature.is_none());
+                            self.implicit_call = Some(Vec::new());
+                            return;
+                        }
+                        let signature = signature.unwrap();
                         if args.positional.len() == 1 {
                             assert_eq!(signature.positional.len(), 1);
                             assert!(signature.positional[0].interface("dart:core", "int"));
                             assert!(state.implicit_member_type("call").is_none());
                             self.shadowed = true;
-                        } else if matches!(callee.as_ref(), Expr::Ident(_)) {
-                            self.implicit_call = Some(signature.positional);
                         } else {
                             self.explicit_call = Some(signature.positional);
                         }
@@ -4008,11 +4042,13 @@ extension on PostMessage {
             ]
         );
         let implicit = observed.implicit_call.unwrap();
-        assert_eq!(implicit.len(), 2);
-        assert!(implicit[0].nullable());
-        assert!(implicit[1].nullable());
-        assert_eq!(Some(implicit), observed.explicit_call);
+        assert!(implicit.is_empty());
+        let explicit = observed.explicit_call.unwrap();
+        assert_eq!(explicit.len(), 2);
+        assert!(explicit[0].nullable());
+        assert!(explicit[1].nullable());
         assert!(observed.shadowed);
+        assert!(observed.static_generic);
     }
 
     #[test]

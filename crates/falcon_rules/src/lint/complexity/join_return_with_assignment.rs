@@ -99,8 +99,8 @@ fn assignment_target(stmt: &Stmt) -> Option<(&Expr, bool)> {
 }
 
 /// Mirrors the SDK's canonical identifier comparison. Accessors canonicalize
-/// to their declaring variable, not to the receiver type: an overriding getter
-/// and an inherited setter with the same spelling are different elements.
+/// to their declaring variable, except instantiated members retain their own
+/// occurrence identity rather than canonicalizing to the generic declaration.
 pub(super) fn same_element(
     left: &Expr,
     left_write: bool,
@@ -205,7 +205,7 @@ enum Element<'a> {
     Local(Span),
     Prefix(&'a str),
     Declaration(DeclarationIdentity),
-    Member(DeclarationIdentity, &'a str),
+    Member(DeclarationIdentity, &'a str, Option<Span>),
 }
 
 fn identifier_element<'a>(
@@ -219,12 +219,12 @@ fn identifier_element<'a>(
     if let Some(owner) = &state.constant_owner
         && has_static_member(owner, &identifier.name, state)
     {
-        return Some(Element::Member(owner.clone(), &identifier.name));
+        return Some(Element::Member(owner.clone(), &identifier.name, None));
     }
     if let Some(receiver) = &state.enclosing_type
         && let Some(owner) = member_owner(receiver, &identifier.name, write, state)
     {
-        return Some(Element::Member(owner, &identifier.name));
+        return Some(canonical_member(owner, receiver, identifier, write, state));
     }
     // Within one library, a resolved import prefix is uniquely named, including
     // multiple imports deliberately sharing that prefix.
@@ -265,15 +265,25 @@ fn member_element<'a>(
     if let Some(owner) = static_receiver_owner(object, state)
         && has_static_member(&owner, &field.name, state)
     {
-        return Some(Element::Member(owner, &field.name));
+        return Some(Element::Member(owner, &field.name, None));
     }
-    member_owner(
-        &state.infer_access_receiver(object, &field.name, null_safe),
-        &field.name,
-        write,
-        state,
-    )
-    .map(|owner| Element::Member(owner, &field.name))
+    let receiver = state.infer_access_receiver(object, &field.name, null_safe);
+    member_owner(&receiver, &field.name, write, state)
+        .map(|owner| canonical_member(owner, &receiver, field, write, state))
+}
+
+fn canonical_member<'a>(
+    owner: DeclarationIdentity,
+    receiver: &falcon_analyze::ResolvedType,
+    field: &'a Identifier,
+    write: bool,
+    state: &SemanticState<'_>,
+) -> Element<'a> {
+    let occurrence = state
+        .signatures
+        .member_access_is_substituted(receiver, &field.name, write, &state.model)
+        .then_some(field.span);
+    Element::Member(owner, &field.name, occurrence)
 }
 
 fn has_static_member(owner: &DeclarationIdentity, name: &str, state: &SemanticState<'_>) -> bool {

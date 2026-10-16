@@ -1,3 +1,5 @@
+import 'dart:async';
+
 Future<int> fetch() async => 1;
 
 Future<String> fetchName() async => 'name';
@@ -69,4 +71,9 @@ class AuthSuccess extends AuthResult {}
 void registerAuth(Future<AuthResult> Function() callback) {}
 void subtypeClosure(Future<AuthSuccess> result) {
   registerAuth(() async => await result); /* expect: unnecessary-await-in-return */
+}
+
+void registerPreparation(FutureOr<void> Function() callback) {}
+void futureOrClosure(Future<int> result) {
+  registerPreparation(() async => await result); /* expect: unnecessary-await-in-return */
 }

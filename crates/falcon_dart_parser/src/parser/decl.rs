@@ -1531,7 +1531,7 @@ impl<'src> Parser<'src> {
             .params
             .iter()
             .map(|p| FunctionTypeParam {
-                annotations: p.annotations.clone(),
+                annotations: p.annotations.clone().into_boxed_slice(),
                 name: Some(p.name.clone()),
                 param_type: p
                     .param_type

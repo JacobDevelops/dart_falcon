@@ -12,7 +12,7 @@
 //! grouped expressions) of functions, methods, and closures returning `Future<R>`,
 //! when `e` is a `Future<A>` with `A` provably assignable to `R`. Closures and
 //! local functions infer their return type, flattening nested futures and
-//! respecting a closure's contextual function type. Untyped top-level
+//! respecting a closure's contextual `Future` or `FutureOr` return type. Untyped top-level
 //! declarations do not infer it.
 //! Returns inside a `try` or `finally` block are exempt.
 //!
@@ -88,7 +88,9 @@ impl Collector<'_> {
                     .and_then(|(_, ty)| ty.as_ref());
                 match context {
                     Some(ResolvedType::Unknown) => false,
-                    Some(context) if is_future(context) => {
+                    Some(context)
+                        if is_future(context) || context.interface("dart:async", "FutureOr") =>
+                    {
                         let contextual = future_argument(context);
                         let result = if assignable(&inferred, &contextual, state) {
                             &inferred

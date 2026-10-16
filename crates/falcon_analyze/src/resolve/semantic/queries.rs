@@ -363,6 +363,25 @@ impl TypeEnvironment {
 }
 
 impl SignatureIndex {
+    /// Whether an instance field or accessor has an instantiated element rather
+    /// than the declaration's canonical variable element.
+    pub fn member_access_is_substituted(
+        &self,
+        receiver: &ResolvedType,
+        name: &str,
+        write: bool,
+        model: &SemanticModel<'_>,
+    ) -> bool {
+        let resolved = if write {
+            self.resolved_writable_field(receiver, name, model)
+        } else {
+            self.resolved_field(receiver, name, model)
+        };
+        resolved.is_some_and(|(ty, substitutions)| {
+            SubstitutionMemo::default().is_relevant(&ty, &substitutions, false)
+        })
+    }
+
     /// Reads an instantiated field or getter, excluding method tear-offs.
     pub fn instantiated_data_read(
         &self,
@@ -756,6 +775,37 @@ mod tests {
                 assert!(
                     environment
                         .infer_invocation(body, &context, None)
+                        .interface("dart:core", "int")
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn implicit_methods_follow_generic_extension_receiver_bounds() {
+        with_model(
+            "class Base { int action() => 0; } \
+             dynamic probe<T extends Base>(T receiver) => action();",
+            |program, model, signatures| {
+                let TopLevelDecl::Function(function) = &program.declarations[1] else {
+                    panic!()
+                };
+                let Some(FunctionBody::Arrow(body, _)) = &function.body else {
+                    panic!()
+                };
+                let signature = signatures
+                    .function(&model.resolve_value("probe").unwrap())
+                    .unwrap();
+                let mut environment = TypeEnvironment::new();
+                environment.declare("this", signature.positional[0].clone());
+                assert!(
+                    environment
+                        .infer_with_signatures(
+                            body,
+                            model,
+                            signatures,
+                            &TypeParameterScope::default(),
+                        )
                         .interface("dart:core", "int")
                 );
             },
