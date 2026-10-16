@@ -19,6 +19,8 @@ resolution. Three resolver-backed rules — `no-boolean-literal-compare`,
 sit on a minimal type-resolution layer and are now reliable enough to be **on by
 default**.
 
+Resolver-backed rules share the analyzer's member and invocation queries rather than maintaining a separate semantic resolver.
+
 Configuration is a single biome-shaped `falcon.json`: grouped rules, per-rule
 severities and options, per-path overrides, a `flutter` domain, and a separate
 `cross-file` section for cross-file analysis. Diagnostics are suppressed inline with

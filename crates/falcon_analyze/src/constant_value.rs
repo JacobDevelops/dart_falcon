@@ -120,19 +120,15 @@ pub fn evaluate_constant_in_library(
 }
 
 /// Captured lexical constant values and their static expression types.
-/// Both maps describe the same visible, shadowing bindings.
-#[derive(Clone, Copy)]
-pub struct LocalConstants<'a> {
-    pub values: &'a HashMap<&'a str, &'a Option<ConstantValue>>,
-    pub types: &'a HashMap<&'a str, ResolvedType>,
-}
+/// Each entry describes one visible, shadowing binding.
+pub type LocalConstants<'a> = HashMap<&'a str, (&'a Option<ConstantValue>, ResolvedType)>;
 
 /// Evaluates with already captured lexical local constants. Unknown local
 /// values remain shadowing bindings rather than falling through to globals.
 pub fn evaluate_constant_with_local_values(
     expression: &Expr,
     owner: Option<&DeclarationIdentity>,
-    locals: LocalConstants<'_>,
+    locals: &LocalConstants<'_>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> Option<ConstantValue> {
@@ -145,15 +141,14 @@ pub fn evaluate_constant_with_local_values(
 pub fn evaluate_constant_with_local_values_in_context(
     expression: &Expr,
     owner: Option<&DeclarationIdentity>,
-    locals: LocalConstants<'_>,
+    locals: &LocalConstants<'_>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
     expected: Option<&ResolvedType>,
 ) -> Option<ConstantValue> {
     let fields = HashMap::new();
     let mut evaluator = ConstEvaluator::new(owner, &fields, model, signatures);
-    evaluator.local_values = Some(locals.values);
-    evaluator.local_types = Some(locals.types);
+    evaluator.local_constants = Some(locals);
     evaluator.evaluate_with_context(expression, expected)
 }
 
@@ -205,14 +200,13 @@ pub fn evaluate_construction_with_local_values(
     constructor: &str,
     type_args: &[ResolvedType],
     args: &ArgList,
-    locals: LocalConstants<'_>,
+    locals: &LocalConstants<'_>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> Construction {
     let fields = HashMap::new();
     let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
-    evaluator.local_values = Some(locals.values);
-    evaluator.local_types = Some(locals.types);
+    evaluator.local_constants = Some(locals);
     let value = evaluator.invoke(identity.clone(), constructor, type_args.to_vec(), args);
     Construction {
         fails: evaluator.failed,
@@ -264,8 +258,7 @@ enum ConstantState {
 struct ConstEvaluator<'a, 'model> {
     owner: Option<&'a DeclarationIdentity>,
     fields: &'a HashMap<&'a str, &'a Expr>,
-    local_values: Option<&'a HashMap<&'a str, &'a Option<ConstantValue>>>,
-    local_types: Option<&'a HashMap<&'a str, ResolvedType>>,
+    local_constants: Option<&'a LocalConstants<'a>>,
     owner_model: SemanticModel<'model>,
     model: SemanticModel<'model>,
     unqualified_fields: bool,
@@ -297,8 +290,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         Self {
             owner,
             fields,
-            local_values: None,
-            local_types: None,
+            local_constants: None,
             owner_model: model,
             model,
             unqualified_fields: true,
@@ -682,7 +674,9 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         }
         if names.len() == 1
             && self.parameters.is_empty()
-            && let Some(value) = self.local_values.and_then(|locals| locals.get(*local_name))
+            && let Some((value, _)) = self
+                .local_constants
+                .and_then(|locals| locals.get(*local_name))
         {
             return (**value).clone();
         }
@@ -922,20 +916,9 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             return Some(ty.clone());
         }
         if self.parameters.is_empty()
-            && self
-                .local_values
-                .is_some_and(|locals| locals.contains_key(name))
+            && let Some((_, ty)) = self.local_constants.and_then(|locals| locals.get(name))
         {
-            return self
-                .local_types
-                .and_then(|types| types.get(name))
-                .cloned()
-                .or_else(|| {
-                    self.resolve_name(&[name])
-                        .and_then(|value| value_type(&value))
-                        .map(|ty| resolved_constant_type(&ty))
-                })
-                .or(Some(ResolvedType::Unknown));
+            return Some(ty.clone());
         }
         let parameter = self
             .parameters
@@ -992,7 +975,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             .is_some_and(|scope| scope.contains_key(name))
             || (self.parameters.is_empty()
                 && self
-                    .local_values
+                    .local_constants
                     .is_some_and(|locals| locals.contains_key(name)));
         let value = self
             .resolve_name(&[name])
@@ -2886,15 +2869,12 @@ const futureOrCast = null as FutureOr<int?>;
                     .unwrap()
             };
             let local = Some(ConstantValue::String("local".to_owned()));
-            let locals = HashMap::from([("a", &local)]);
+            let locals = HashMap::from([("a", (&local, model.core_type("String", false)))]);
             assert_eq!(
                 evaluate_constant_with_local_values(
                     expression("capturedList"),
                     None,
-                    LocalConstants {
-                        values: &locals,
-                        types: &HashMap::from([("a", model.core_type("String", false))]),
-                    },
+                    &locals,
                     model,
                     signatures,
                 ),
@@ -2908,10 +2888,7 @@ const futureOrCast = null as FutureOr<int?>;
                 evaluate_constant_with_local_values(
                     expression("capturedList"),
                     None,
-                    LocalConstants {
-                        values: &HashMap::from([("a", &unknown)]),
-                        types: &HashMap::from([("a", ResolvedType::Unknown)]),
-                    },
+                    &HashMap::from([("a", (&unknown, ResolvedType::Unknown))]),
                     model,
                     signatures,
                 ),
@@ -2979,8 +2956,8 @@ const futureOrCast = null as FutureOr<int?>;
                 "{parameter_box:?}"
             );
             let local_value = Some(ConstantValue::Number(Number::Int(1)));
-            let local_values = HashMap::from([("declaredNum", &local_value)]);
-            let local_types = HashMap::from([("declaredNum", model.core_type("num", false))]);
+            let locals =
+                HashMap::from([("declaredNum", (&local_value, model.core_type("num", false)))]);
             let expression = program
                 .declarations
                 .iter()
@@ -2997,15 +2974,7 @@ const futureOrCast = null as FutureOr<int?>;
                 .unwrap();
             assert_eq!(
                 evaluate_constant_with_local_values_in_context(
-                    expression,
-                    None,
-                    LocalConstants {
-                        values: &local_values,
-                        types: &local_types
-                    },
-                    model,
-                    signatures,
-                    None,
+                    expression, None, &locals, model, signatures, None,
                 ),
                 num_values
             );
@@ -3042,10 +3011,7 @@ const futureOrCast = null as FutureOr<int?>;
                 evaluate_constant_with_local_values_in_context(
                     variable.declarators[0].initializer.as_ref().unwrap(),
                     None,
-                    LocalConstants {
-                        values: &HashMap::new(),
-                        types: &HashMap::new()
-                    },
+                    &HashMap::new(),
                     model,
                     signatures,
                     Some(expected),

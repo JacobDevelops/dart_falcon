@@ -1405,7 +1405,7 @@ impl<'ctx> Uses<'ctx> {
                         });
                     }
                 }
-                let receiver = state.infer_access_receiver(object, *is_null_safe);
+                let receiver = state.infer_access_receiver(object, &field.name, *is_null_safe);
                 let mut target = self.member(&receiver, &field.name, *node.span(), state, write)?;
                 target.span = span;
                 Some(target)
@@ -1689,14 +1689,14 @@ impl SemanticRuleVisitor for Uses<'_> {
             };
             let receiver = match node {
                 Expr::Index { is_null_safe, .. } => {
-                    state.infer_access_receiver(receiver, *is_null_safe)
+                    state.infer_access_receiver(receiver, lookup, *is_null_safe)
                 }
                 Expr::Assign { .. }
                 | Expr::PostfixIncDec { .. }
                 | Expr::Unary {
                     op: UnaryOp::PlusPlus | UnaryOp::MinusMinus,
                     ..
-                } => state.infer_access_receiver(receiver, false),
+                } => state.infer_access_receiver(receiver, lookup, false),
                 _ => state.infer(receiver),
             };
             if let Some(owner) = state

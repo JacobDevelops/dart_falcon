@@ -9,7 +9,6 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
-use falcon_analyze::constant_value::LocalConstants;
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationFacts, DeclarationIdentity, ResolvedType, Rule,
     SemanticModel, SignatureIndex, evaluate_constant, evaluate_constant_in_member_context,
@@ -68,8 +67,7 @@ impl Collector<'_> {
         if values.len() < 2 {
             return;
         }
-        let locals = state.local_constant_values();
-        let local_types = state.local_constant_types();
+        let locals = state.visible_local_constants();
         let enclosing = match &state.enclosing_type {
             Some(ResolvedType::Interface { identity, .. }) => Some(identity),
             _ => None,
@@ -82,10 +80,7 @@ impl Collector<'_> {
                         CaseConstant::Expr(expr) => evaluate_constant_with_local_values(
                             expr,
                             enclosing,
-                            LocalConstants {
-                                values: &locals,
-                                types: &local_types,
-                            },
+                            &locals,
                             &state.model,
                             &state.signatures,
                         ),
@@ -102,10 +97,7 @@ impl Collector<'_> {
                             evaluate_constant_with_local_values(
                                 &expr,
                                 enclosing,
-                                LocalConstants {
-                                    values: &locals,
-                                    types: &local_types,
-                                },
+                                &locals,
                                 &state.model,
                                 &state.signatures,
                             )

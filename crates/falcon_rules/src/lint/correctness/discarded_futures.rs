@@ -371,7 +371,7 @@ fn invokes_await_not_required(expr: &Expr, state: &SemanticState<'_>) -> bool {
             return true;
         }
         member_await_not_required(
-            &state.infer_access_receiver(object, is_null_safe),
+            &state.infer_access_receiver(object, name, is_null_safe),
             name,
             state,
         )
@@ -504,7 +504,7 @@ fn report_span(expr: &Expr, state: &SemanticState<'_>) -> Span {
                     _ => false,
                 };
                 let function_property = named_property || {
-                    let receiver = state.infer_access_receiver(object, *is_null_safe);
+                    let receiver = state.infer_access_receiver(object, &field.name, *is_null_safe);
                     receiver.record_field(&field.name).is_some()
                         || state
                             .signatures

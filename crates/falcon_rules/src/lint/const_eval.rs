@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::constant_value::LocalConstants;
 use falcon_analyze::{
     ConstantValue, DeclarationIdentity, MemberFacts, MemberKind, NameIdentity, QualifiedName,
     ResolvedType, SemanticModel, SignatureIndex, evaluate_constant,
@@ -845,10 +844,7 @@ impl ConstantExpressions<'_, '_> {
         evaluate_constant_with_local_values(
             expression,
             self.state.constant_owner.as_ref(),
-            LocalConstants {
-                values: &self.state.local_constant_values(),
-                types: &self.state.local_constant_types(),
-            },
+            &self.state.visible_local_constants(),
             &self.state.model,
             &self.state.signatures,
         )
@@ -976,10 +972,7 @@ impl ConstantExpressions<'_, '_> {
             constructor,
             &type_args,
             args,
-            LocalConstants {
-                values: &state.local_constant_values(),
-                types: &state.local_constant_types(),
-            },
+            &state.visible_local_constants(),
             &state.model,
             &state.signatures,
         )

@@ -126,7 +126,7 @@ pub fn null_shorted(expression: &Expr) -> bool {
 type ArgumentTypeFallback<'a> = dyn Fn(&Expr) -> Option<ResolvedType> + 'a;
 
 /// Shared immutable inputs for generic call inference.
-pub struct InferenceContext<'a, 'model, F: Fn(&str) -> Option<ResolvedType>> {
+pub struct InferenceContext<'a, 'model, 'lookup, F: Fn(&str) -> Option<ResolvedType>> {
     /// Semantic model for type resolution and substitution.
     pub model: &'a SemanticModel<'model>,
     /// Indexed callable signatures.
@@ -134,10 +134,10 @@ pub struct InferenceContext<'a, 'model, F: Fn(&str) -> Option<ResolvedType>> {
     /// Type parameters in lexical scope.
     pub type_parameters: &'a TypeParameterScope,
     /// Resolves unbound identifiers from the caller's lexical context.
-    pub lookup: &'a F,
+    pub lookup: &'lookup F,
     /// Optional exact argument type when ordinary static inference has no
     /// information. Known types, including dynamic, never use this fallback.
-    pub argument_fallback: Option<&'a ArgumentTypeFallback<'a>>,
+    pub argument_fallback: Option<&'lookup ArgumentTypeFallback<'lookup>>,
 }
 
 /// The declaration that introduces a type-parameter list.
@@ -10194,7 +10194,7 @@ impl TypeEnvironment {
         signature: &ResolvedSignature,
         args: &falcon_syntax::ast::ArgList,
         type_args: &[DartType],
-        context: &InferenceContext<'_, '_, F>,
+        context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
         owner: &HashMap<TypeParameterId, ResolvedType>,
     ) -> HashMap<TypeParameterId, ResolvedType> {
@@ -10219,7 +10219,7 @@ impl TypeEnvironment {
         signature: (&ResolvedSignature, &[TypeParameterId], &ResolvedType),
         args: &falcon_syntax::ast::ArgList,
         type_args: &[DartType],
-        context: &InferenceContext<'_, '_, F>,
+        context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
         owner: &HashMap<TypeParameterId, ResolvedType>,
     ) -> HashMap<TypeParameterId, ResolvedType> {
@@ -10426,7 +10426,7 @@ impl TypeEnvironment {
         name: &str,
         type_args: &[DartType],
         args: &falcon_syntax::ast::ArgList,
-        context: &InferenceContext<'_, '_, F>,
+        context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
         if let Some(alias) = context.model.identities.type_alias(&identity) {
@@ -10565,7 +10565,7 @@ impl TypeEnvironment {
         &self,
         object: &Expr,
         name: &str,
-        context: &InferenceContext<'_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
         if matches!(object, Expr::Super { .. }) {
@@ -10656,7 +10656,7 @@ impl TypeEnvironment {
         signature: &ResolvedSignature,
         owner: &HashMap<TypeParameterId, ResolvedType>,
         explicit: &[DartType],
-        context: &InferenceContext<'_, '_, F>,
+        context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
         let function = context.model.substitute(&signature.function_type(), owner);
@@ -10738,7 +10738,7 @@ impl TypeEnvironment {
         identity: DeclarationIdentity,
         name: &str,
         explicit: &[DartType],
-        context: &InferenceContext<'_, '_, F>,
+        context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
     ) -> Option<ResolvedType> {
         let (parameters, result, class, owner) = if let Some(alias) =
@@ -10805,7 +10805,7 @@ impl TypeEnvironment {
         &self,
         target: &Expr,
         explicit: &[DartType],
-        context: &InferenceContext<'_, '_, F>,
+        context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
         cached_receiver: &mut Option<ResolvedType>,
     ) -> Option<ResolvedType> {
@@ -10848,7 +10848,7 @@ impl TypeEnvironment {
     fn infer_in_context(
         &self,
         expr: &Expr,
-        context: InferenceContext<'_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        context: InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
         receiver: Option<ResolvedType>,
     ) -> ResolvedType {
@@ -10866,7 +10866,7 @@ impl TypeEnvironment {
     fn contextual_callable_type(
         &self,
         ty: ResolvedType,
-        context: &InferenceContext<'_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
         if matches!(expected, Some(ResolvedType::Function { .. }))
@@ -10888,7 +10888,7 @@ impl TypeEnvironment {
     fn infer_unshorted(
         &self,
         expr: &Expr,
-        context: InferenceContext<'_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        context: InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
         mut receiver: Option<ResolvedType>,
     ) -> ResolvedType {
@@ -10936,17 +10936,11 @@ impl TypeEnvironment {
             } else {
                 receiver
             };
-            if let Some(ty) = receiver.record_field(&field.name) {
+            if let Some(ty) = signatures.instantiated_data_read(&receiver, &field.name, model) {
                 return ty;
             }
             if matches!(receiver, ResolvedType::Dynamic) {
                 return ResolvedType::Dynamic;
-            }
-            if let Some((original, substitutions)) = signatures
-                .resolved_field(&receiver, &field.name, model)
-                .or_else(|| signatures.resolved_extension_getter(&receiver, &field.name, model))
-            {
-                return model.substitute(&original, &substitutions);
             }
             if field.name == "call" && matches!(receiver, ResolvedType::Function { .. }) {
                 return receiver.with_nullable(false);

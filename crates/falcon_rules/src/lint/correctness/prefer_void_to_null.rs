@@ -16,7 +16,7 @@
 //! the return and parameter types written directly in a function type, type
 //! arguments of empty collection literals (`<Null>[]`), `extension on Null`,
 //! extension type representations, and return types of members overriding a
-//! member that does not return `void`.
+//! member that does not return `void` after substituting inherited type arguments.
 //! Overrides whose external declarations are unavailable are conservatively
 //! exempt; an unresolved source superclass is not evidence of an override.
 //!
@@ -137,15 +137,9 @@ impl<'a> NullTypes<'a> {
         }
         let mut overrides_void = false;
         for supertype in &enclosing.supertypes {
-            let returned = if getter {
-                self.signatures
-                    .resolved_field(supertype, name, self.model)
-                    .map(|(ty, _)| ty)
-            } else {
-                self.signatures
-                    .resolved_member(supertype, name, self.model)
-                    .map(|(signature, _)| signature.return_type.clone())
-            };
+            let returned = self
+                .signatures
+                .instantiated_override_return(supertype, name, getter, self.model);
             match returned {
                 Some(ty) if is_void_like(&ty) => overrides_void = true,
                 Some(_) => return true,

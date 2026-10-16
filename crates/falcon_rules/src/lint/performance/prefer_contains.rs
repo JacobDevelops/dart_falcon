@@ -13,7 +13,7 @@
 //! too. A constant on the right is preferred: when the right operand is an
 //! integer constant the left operand is not considered.
 
-use falcon_analyze::constant_value::{LocalConstants, Number};
+use falcon_analyze::constant_value::Number;
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, ResolvedType, Rule, Truth, evaluate_constant_with_local_values,
     parse_int,
@@ -178,7 +178,7 @@ fn unsigned_int_value(expression: &Expr, state: &SemanticState<'_>) -> Option<i1
     match expression.unparenthesized() {
         Expr::IntLit { value, .. } => parse_int(value),
         Expr::Ident(identifier) => {
-            let constants = state.local_constant_values();
+            let constants = state.visible_local_constants();
             if (state.environment.is_bound(&identifier.name)
                 && !constants.contains_key(identifier.name.as_str()))
                 || !is_int_constant(expression, &identifier.name, state)
@@ -188,10 +188,7 @@ fn unsigned_int_value(expression: &Expr, state: &SemanticState<'_>) -> Option<i1
             match evaluate_constant_with_local_values(
                 expression,
                 None,
-                LocalConstants {
-                    values: &constants,
-                    types: &state.local_constant_types(),
-                },
+                &constants,
                 &state.model,
                 &state.signatures,
             )? {

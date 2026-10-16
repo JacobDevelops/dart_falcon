@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
 use falcon_analyze::constant_value::{
-    LocalConstants, contextual_number, evaluate_constant_with_local_values_in_context,
+    contextual_number, evaluate_constant_with_local_values_in_context,
 };
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, LibraryId, ParameterDefault, QualifiedName,
@@ -235,8 +235,7 @@ impl Targets<'_> {
         let signature =
             ResolvedSignature::local_callable(&scope, type_params, params, &state.model);
         let owner = self.enclosing_type(state);
-        let locals = state.local_constant_values();
-        let local_types = state.local_constant_types();
+        let locals = state.visible_local_constants();
         let defaults = signature
             .defaults
             .iter()
@@ -246,10 +245,7 @@ impl Targets<'_> {
                         evaluate_constant_with_local_values_in_context(
                             expression,
                             owner.as_ref(),
-                            LocalConstants {
-                                values: &locals,
-                                types: &local_types,
-                            },
+                            &locals,
                             &state.model,
                             &state.signatures,
                             parameter_type(&signature, name)
@@ -535,10 +531,7 @@ impl Targets<'_> {
         let Some(value) = evaluate_constant_with_local_values_in_context(
             argument,
             caller_owner,
-            LocalConstants {
-                values: &state.local_constant_values(),
-                types: &state.local_constant_types(),
-            },
+            &state.visible_local_constants(),
             &state.model,
             &state.signatures,
             context,

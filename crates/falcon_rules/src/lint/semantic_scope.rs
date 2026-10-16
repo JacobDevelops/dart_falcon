@@ -79,28 +79,6 @@ pub(crate) trait SemanticRuleVisitor {
     }
 }
 
-/// Indexed signatures stay borrowed until a caller requests owned metadata.
-struct CallTarget<'a> {
-    signature: Cow<'a, ResolvedSignature>,
-    owner: HashMap<TypeParameterId, ResolvedType>,
-    type_args: &'a [DartType],
-    constructor_result: Option<ResolvedType>,
-}
-
-impl CallTarget<'_> {
-    fn inference_signature(&self) -> (&ResolvedSignature, &[TypeParameterId], &ResolvedType) {
-        let signature = self.signature.as_ref();
-        match &self.constructor_result {
-            Some(result) => (signature, &signature.owner_parameters, result),
-            None => (
-                signature,
-                &signature.call_parameters,
-                &signature.return_type,
-            ),
-        }
-    }
-}
-
 pub(crate) struct SemanticState<'a> {
     pub(crate) model: SemanticModel<'a>,
     // Only the single-file fallback owns signatures.
@@ -127,7 +105,6 @@ pub(crate) struct SemanticState<'a> {
     private_field_promotion: bool,
     inference_depth: std::cell::Cell<usize>,
     inference_cache: std::cell::RefCell<HashMap<*const Expr, ResolvedType>>,
-    invocation_cache: std::cell::RefCell<HashMap<*const Expr, ResolvedType>>,
 }
 
 impl<'a> SemanticState<'a> {
@@ -158,7 +135,6 @@ impl<'a> SemanticState<'a> {
             private_field_promotion,
             inference_depth: std::cell::Cell::new(0),
             inference_cache: std::cell::RefCell::new(HashMap::new()),
-            invocation_cache: std::cell::RefCell::new(HashMap::new()),
         })
     }
 
@@ -184,7 +160,6 @@ impl<'a> SemanticState<'a> {
         self.inference_depth.set(depth);
         if depth == 0 {
             self.inference_cache.borrow_mut().clear();
-            self.invocation_cache.borrow_mut().clear();
         }
         result
     }
@@ -194,43 +169,17 @@ impl<'a> SemanticState<'a> {
         expression: &Expr,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
-        if let Expr::Paren { expr, .. } = expression {
-            return self.infer_with_context(expr, expected);
-        }
-        // A cascade has its target's type, including the shared scope's
-        // fallback for implicit method calls such as `_parse(path)`.
-        if let Expr::Cascade { object, .. } = expression {
-            return self.infer_with_context(object, expected);
-        }
-        let inferred = self.environment.infer_with_context(
+        self.environment.infer_invocation(
             expression,
-            &self.model,
-            &self.signatures,
-            &self.type_parameters,
+            &InferenceContext {
+                model: &self.model,
+                signatures: &self.signatures,
+                type_parameters: &self.type_parameters,
+                lookup: &|name| self.implicit_member_type(name),
+                argument_fallback: None,
+            },
             expected,
-            &|name| self.implicit_member_type(name),
-        );
-        if inferred != ResolvedType::Unknown {
-            return inferred;
-        }
-        if let Expr::Call {
-            callee,
-            type_args,
-            args,
-            ..
-        } = expression
-        {
-            return self
-                .call_return_type(callee, type_args, args, expected)
-                .map_or(ResolvedType::Unknown, |return_type| {
-                    if null_shorted_access(expression) {
-                        return_type.with_nullable(true)
-                    } else {
-                        return_type
-                    }
-                });
-        }
-        inferred
+        )
     }
 
     /// Official omission policy distinguishes generic top/local functions from
@@ -267,191 +216,9 @@ impl<'a> SemanticState<'a> {
         }
     }
 
-    /// [`Self::infer`], plus the member accesses expression inference leaves
-    /// unknown: members of receivers typed by this method (`super`,
-    /// implicit-`this` reads, nested calls), calls resolved through
-    /// [`Self::call_signature`] (implicit `this`, static, prefixed, and local
-    /// functions), and implicit-`this` property reads.
+    /// Invocation results include null-chain lifting.
     pub(crate) fn infer_invocation(&self, expression: &Expr) -> ResolvedType {
-        self.inference_query(|| {
-            let key = expression as *const Expr;
-            if let Some(ty) = self.invocation_cache.borrow().get(&key).cloned() {
-                return ty;
-            }
-            let ty = self.infer_invocation_uncached(expression);
-            self.invocation_cache.borrow_mut().insert(key, ty.clone());
-            ty
-        })
-    }
-
-    fn infer_invocation_uncached(&self, expression: &Expr) -> ResolvedType {
-        if let Expr::Paren { expr, .. } = expression {
-            return self.infer_invocation(expr);
-        }
-        let inferred = self.infer(expression);
-        if inferred != ResolvedType::Unknown {
-            return inferred;
-        }
-        if !matches!(
-            expression,
-            Expr::Call { .. }
-                | Expr::Field { .. }
-                | Expr::Index { .. }
-                | Expr::NullAssert { .. }
-                | Expr::GenericInstantiation { .. }
-                | Expr::Conditional { .. }
-        ) {
-            return self.infer_invocation_node(expression, &HashMap::new());
-        }
-        let mut visitor = InvocationInference {
-            state: self,
-            root: expression,
-            receiver_dependency: None,
-            member_callee: None,
-            results: HashMap::new(),
-        };
-        visitor.visit_expr(expression);
-        visitor
-            .results
-            .remove(&(expression as *const Expr))
-            .unwrap()
-            .0
-    }
-
-    fn infer_invocation_node(
-        &self,
-        expression: &Expr,
-        results: &HashMap<*const Expr, (ResolvedType, Option<ResolvedType>, bool)>,
-    ) -> ResolvedType {
-        let invocation = |node: &Expr| results[&(node as *const Expr)].0.clone();
-        let receiver = |node: &Expr| {
-            let (invocation, receiver, _) = &results[&(node as *const Expr)];
-            receiver.as_ref().unwrap_or(invocation).clone()
-        };
-        match expression {
-            Expr::Call {
-                callee,
-                type_args,
-                args,
-                ..
-            } => {
-                let (member, callable) = match callee.as_ref() {
-                    Expr::Field {
-                        object,
-                        field,
-                        is_null_safe,
-                        ..
-                    } => {
-                        let receiver = receiver(object);
-                        let receiver = if *is_null_safe {
-                            receiver.non_null()
-                        } else {
-                            receiver
-                        };
-                        let member = self
-                            .signatures
-                            .resolved_member(&receiver, &field.name, &self.model)
-                            .map(|(signature, owner)| {
-                                self.instantiate_return_type(
-                                    signature, &owner, type_args, args, None,
-                                )
-                            });
-                        let callable = if matches!(receiver, ResolvedType::Dynamic) {
-                            ResolvedType::Dynamic
-                        } else if field.name == "call" {
-                            receiver
-                        } else {
-                            self.member_read(&receiver, &field.name)
-                                .unwrap_or(ResolvedType::Unknown)
-                        };
-                        (member, callable)
-                    }
-                    _ => (None, receiver(callee)),
-                };
-                member
-                    .or_else(|| self.call_return_type(callee, type_args, args, None))
-                    .unwrap_or_else(|| Self::callable_return_type(&callable))
-            }
-            Expr::Ident(identifier) if !self.environment.is_bound(&identifier.name) => self
-                .implicit_member_type(&identifier.name)
-                .unwrap_or(ResolvedType::Unknown),
-            Expr::Field {
-                object,
-                field,
-                is_null_safe,
-                ..
-            } => {
-                let receiver = receiver(object);
-                let receiver = if *is_null_safe {
-                    receiver.non_null()
-                } else {
-                    receiver
-                };
-                if matches!(receiver, ResolvedType::Dynamic) {
-                    ResolvedType::Dynamic
-                } else {
-                    self.member_read(&receiver, &field.name)
-                        .unwrap_or(ResolvedType::Unknown)
-                }
-            }
-            Expr::Index {
-                object,
-                is_null_safe,
-                ..
-            } => {
-                let receiver = receiver(object);
-                let receiver = if *is_null_safe {
-                    receiver.non_null()
-                } else {
-                    receiver
-                };
-                if matches!(receiver, ResolvedType::Dynamic) {
-                    ResolvedType::Dynamic
-                } else {
-                    self.signatures
-                        .resolved_member(&receiver, "[]", &self.model)
-                        .map(|(signature, substitutions)| {
-                            self.model
-                                .substitute(&signature.return_type, &substitutions)
-                        })
-                        .unwrap_or(ResolvedType::Unknown)
-                }
-            }
-            Expr::NullAssert { operand, .. } => invocation(operand).non_null(),
-            // Without a least-upper-bound, only agreeing branches have a type.
-            Expr::Conditional {
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                let then_type = invocation(then_expr);
-                if then_type == invocation(else_expr) {
-                    then_type
-                } else {
-                    ResolvedType::Unknown
-                }
-            }
-            Expr::GenericInstantiation {
-                target, type_args, ..
-            } => {
-                self.call_target(target, type_args)
-                    .map(|target| {
-                        let mut substitutions = target.owner;
-                        substitutions.extend(
-                            target.signature.call_parameters.iter().cloned().zip(
-                                target.type_args.iter().map(|ty| {
-                                    self.model.resolve_type_in(ty, &self.type_parameters)
-                                }),
-                            ),
-                        );
-                        self.model
-                            .substitute(&target.signature.function_type(), &substitutions)
-                    })
-                    .unwrap_or(ResolvedType::Unknown)
-            }
-            Expr::Paren { expr, .. } => self.infer_invocation(expr),
-            _ => ResolvedType::Unknown,
-        }
+        self.infer(expression)
     }
 
     /// The static type of a member access's receiver: `super` is the
@@ -466,60 +233,25 @@ impl<'a> SemanticState<'a> {
         }
     }
 
-    /// The receiver on the reached branch of an access. Null shortening does
-    /// not erase a member's declared nullability, and parentheses end the chain.
-    pub(crate) fn infer_access_receiver(&self, object: &Expr, is_null_safe: bool) -> ResolvedType {
-        let receiver = if null_shorted_access(object) {
-            let mut visitor = InvocationInference {
-                state: self,
-                root: object,
-                receiver_dependency: None,
-                member_callee: None,
-                results: HashMap::new(),
-            };
-            visitor.visit_expr(object);
-            let (ty, receiver, _) = visitor.results.remove(&(object as *const Expr)).unwrap();
-            receiver.unwrap_or(ty)
-        } else {
-            self.infer_receiver(object)
-        };
-        if is_null_safe {
-            receiver.non_null()
-        } else {
-            receiver
-        }
-    }
-
-    /// The signature of a callee whose own static type is a function type: a
-    /// function-typed field, getter, or variable, including `f!` and `f.call`.
-    /// Invocation inference also resolves member chains rooted at `super`.
-    fn function_typed_callee(&self, callee: &Expr) -> Option<ResolvedSignature> {
-        let function = match callee {
-            Expr::Field { object, field, .. } if field.name == "call" => object.as_ref(),
-            other => other,
-        };
-        let inferred = self.infer_invocation(function);
-        let return_type = inferred.function_return_type()?;
-        let mut signature = match inferred {
-            ResolvedType::Function {
-                positional, named, ..
-            } => Some(ResolvedSignature {
-                owner_parameters: Vec::new(),
-                call_parameters: Vec::new(),
-                positional: positional.to_vec(),
-                defaults: HashMap::new(),
-                positional_parameter_names: Vec::new(),
-                non_optional_defaults: Default::default(),
-                named: named.iter().cloned().collect(),
-                return_type,
-            }),
-            _ => None,
-        }?;
-        if matches!(function, Expr::Ident(identifier) if self.environment.is_local_function(&identifier.name))
-        {
-            signature.bind_local_type_parameters(&self.type_parameters);
-        }
-        Some(signature)
+    pub(crate) fn infer_access_receiver(
+        &self,
+        object: &Expr,
+        name: &str,
+        is_null_safe: bool,
+    ) -> ResolvedType {
+        self.environment.infer_access_receiver(
+            object,
+            name,
+            is_null_safe,
+            &InferenceContext {
+                model: &self.model,
+                signatures: &self.signatures,
+                type_parameters: &self.type_parameters,
+                lookup: &|name| self.implicit_member_type(name),
+                argument_fallback: None,
+            },
+            None,
+        )
     }
 
     pub(crate) fn callable_return_type(callable: &ResolvedType) -> ResolvedType {
@@ -545,34 +277,6 @@ impl<'a> SemanticState<'a> {
                 self.instantiate_return_type(signature, &owner, type_args, args, None)
             })
             .unwrap_or_else(|| Self::callable_return_type(receiver))
-    }
-
-    fn member_read(&self, receiver: &ResolvedType, name: &str) -> Option<ResolvedType> {
-        if matches!(
-            receiver,
-            ResolvedType::Record {
-                nullable: false,
-                ..
-            }
-        ) && let Some(ty) = receiver.record_field(name)
-        {
-            return Some(ty);
-        }
-        self.signatures
-            .resolved_field(receiver, name, &self.model)
-            .or_else(|| {
-                self.signatures
-                    .resolved_extension_getter(receiver, name, &self.model)
-            })
-            .map(|(ty, substitutions)| self.model.substitute(&ty, &substitutions))
-            .or_else(|| {
-                self.signatures
-                    .resolved_member(receiver, name, &self.model)
-                    .map(|(signature, substitutions)| {
-                        self.model
-                            .substitute(&signature.function_type(), &substitutions)
-                    })
-            })
     }
 
     /// Whether the enclosing type itself declares a member `name`.
@@ -608,7 +312,10 @@ impl<'a> SemanticState<'a> {
         }
         let member = || {
             let receiver = self.enclosing_type.as_ref()?;
-            if let Some(ty) = self.member_read(receiver, name) {
+            if let Some(ty) = self
+                .signatures
+                .instantiated_data_read(receiver, name, &self.model)
+            {
                 return Some(ty);
             }
             if let ResolvedType::Interface { identity, .. } = receiver
@@ -646,19 +353,8 @@ impl<'a> SemanticState<'a> {
             .map(|constant| &constant.initializer)
     }
 
-    /// Values captured at each `const` declaration before later names shadow it.
-    pub(crate) fn local_constant_values(&self) -> HashMap<&str, &Option<ConstantValue>> {
-        self.local_constants
-            .iter()
-            .filter(|constant| {
-                self.environment.binding_declaration(&constant.name) == Some(constant.declaration)
-            })
-            .map(|constant| (constant.name.as_str(), &constant.value))
-            .collect()
-    }
-
-    /// Promoted static types of the visible local constants.
-    pub(crate) fn local_constant_types(&self) -> HashMap<&str, ResolvedType> {
+    /// Declaration-time values and current promoted types of visible constants.
+    pub(crate) fn visible_local_constants(&self) -> LocalConstants<'_> {
         self.local_constants
             .iter()
             .filter(|constant| {
@@ -667,7 +363,7 @@ impl<'a> SemanticState<'a> {
             .map(|constant| {
                 (
                     constant.name.as_str(),
-                    self.environment.lookup(&constant.name),
+                    (&constant.value, self.environment.lookup(&constant.name)),
                 )
             })
             .collect()
@@ -796,7 +492,7 @@ impl<'a> SemanticState<'a> {
                     return ty.clone();
                 }
                 Some((
-                    self.infer_access_receiver(object, *is_null_safe),
+                    self.infer_access_receiver(object, &field.name, *is_null_safe),
                     field.name.as_str(),
                 ))
             }
@@ -808,7 +504,7 @@ impl<'a> SemanticState<'a> {
                 return self
                     .signatures
                     .resolved_member(
-                        &self.infer_access_receiver(object, *is_null_safe),
+                        &self.infer_access_receiver(object, "[]=", *is_null_safe),
                         "[]=",
                         &self.model,
                     )
@@ -947,210 +643,18 @@ impl<'a> SemanticState<'a> {
         &'s self,
         callee: &'s Expr,
         type_args: &'s [DartType],
-    ) -> Option<CallTarget<'s>> {
-        let mut callee = callee;
-        let mut type_args = type_args;
-        loop {
-            let target = match callee {
-                Expr::GenericInstantiation {
-                    target,
-                    type_args: explicit,
-                    ..
-                } => {
-                    type_args = explicit;
-                    target.as_ref()
-                }
-                target => target,
-            };
-            let Some(receiver) = explicit_call_receiver(target) else {
-                break;
-            };
-            if !matches!(self.infer_receiver(receiver), ResolvedType::Function { .. }) {
-                break;
-            }
-            callee = receiver;
-        }
-        self.call_target_node(callee, type_args)
-    }
-
-    fn call_target_node<'s>(
-        &'s self,
-        callee: &'s Expr,
-        type_args: &'s [DartType],
-    ) -> Option<CallTarget<'s>> {
-        let (target, explicit_type_args) = match callee {
-            Expr::GenericInstantiation {
-                target, type_args, ..
-            } => (target.as_ref(), type_args.as_slice()),
-            Expr::Field { object, .. }
-                if matches!(object.as_ref(), Expr::GenericInstantiation { .. }) =>
-            {
-                let Expr::GenericInstantiation { type_args, .. } = object.as_ref() else {
-                    unreachable!()
-                };
-                (callee, type_args.as_slice())
-            }
-            target => (target, type_args),
-        };
-        let resolved = match target {
-            Expr::Ident(identifier) if !self.environment.is_bound(&identifier.name) => {
-                let name = identifier.name.as_str();
-                let instance_member = || {
-                    self.enclosing_type.as_ref().and_then(|receiver| {
-                        self.signatures
-                            .resolved_member(receiver, name, &self.model)
-                            .or_else(|| {
-                                let ResolvedType::Interface { identity, .. } = receiver else {
-                                    return None;
-                                };
-                                if !self
-                                    .signatures
-                                    .declared_member_facts(identity, name)
-                                    .iter()
-                                    .any(|facts| facts.is_static)
-                                {
-                                    return None;
-                                }
-                                self.signatures
-                                    .member(identity, name)
-                                    .map(|signature| (signature, HashMap::new()))
-                            })
-                    })
-                };
-                // Lexical lookup sees the enclosing type's own members, then
-                // library and imported declarations; inherited members are
-                // reached through implicit `this` only when that lookup fails.
-                let value = self.model.resolve_value(name);
-                let type_name = self.model.resolve_name(name);
-                if self.enclosing_type_declares(name) || (value.is_none() && type_name.is_none()) {
-                    instance_member()
-                } else {
-                    value
-                        .and_then(|identity| self.signatures.function(&identity))
-                        .or_else(|| {
-                            type_name
-                                .and_then(|identity| self.signatures.constructor(&identity, "new"))
-                        })
-                        .map(|signature| (signature, HashMap::new()))
-                }
-            }
-            Expr::Field {
-                object,
-                field,
-                is_null_safe,
-                ..
-            } => {
-                if let Expr::Call {
-                    callee: extension,
-                    type_args: extension_type_args,
-                    args: extension_args,
-                    ..
-                } = object.as_ref()
-                    && extension_args.named.is_empty()
-                    && let [receiver] = extension_args.positional.as_slice()
-                    && let Some(identity) = self.named_extension(extension)
-                    && let Some(signature) = self.signatures.resolved_extension_override_method(
-                        &identity,
-                        &self.infer_receiver(receiver),
-                        &extension_type_args
-                            .iter()
-                            .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
-                            .collect::<Vec<_>>(),
-                        &field.name,
-                        &self.model,
-                    )
-                {
-                    Some(signature)
-                } else if let Expr::Ident(prefix) = object.as_ref()
-                    && !self.environment.is_bound(&prefix.name)
-                    && let Some(identity) = self
-                        .model
-                        .resolve_value(QualifiedName::prefixed(&prefix.name, &field.name))
-                    && let Some(signature) = self.signatures.function(&identity)
-                {
-                    Some((signature, HashMap::new()))
-                } else if let Some(segments) = falcon_analyze::expression_segments(object, true)
-                    && segments
-                        .first()
-                        .is_some_and(|head| !self.environment.is_bound(head))
-                    && let Some(identity) = self.model.resolve_dotted(&segments)
-                    && let Some(signature) = self
-                        .signatures
-                        .constructor(&identity, &field.name)
-                        .or_else(|| self.signatures.member(&identity, &field.name))
-                {
-                    Some((signature, HashMap::new()))
-                } else {
-                    // Also reached for a top-level variable or getter receiver,
-                    // which `resolve_name` resolves without static members.
-                    self.signatures.resolved_member(
-                        &self.infer_access_receiver(object, *is_null_safe),
-                        &field.name,
-                        &self.model,
-                    )
-                }
-            }
-            _ => None,
-        };
-        let resolved = resolved.or_else(|| {
-            falcon_analyze::resolve_call_constructor(target, &self.model, true)
-                .filter(|_| {
-                    falcon_analyze::expression_segments(target, true).is_some_and(|segments| {
-                        segments
-                            .first()
-                            .is_some_and(|name| !self.environment.is_bound(name))
-                    })
-                })
-                .and_then(|(identity, name)| self.signatures.constructor(&identity, name))
-                .map(|signature| (signature, HashMap::new()))
-        });
-        let (signature, owner) = if let Some((signature, owner)) = resolved {
-            (Cow::Borrowed(signature), owner)
-        } else if let Some(signature) = self.function_typed_callee(target) {
-            (Cow::Owned(signature), HashMap::new())
-        } else {
-            let receiver = self.infer(target);
-            let (signature, owner) = matches!(receiver, ResolvedType::Interface { .. })
-                .then(|| {
-                    self.signatures
-                        .resolved_member(&receiver, "call", &self.model)
-                })
-                .flatten()?;
-            (Cow::Borrowed(signature), owner)
-        };
-        // Explicit type arguments instantiate a class's type parameters when
-        // the callee is a constructor (`C<int>(…)`).
-        let constructor = falcon_analyze::resolve_call_constructor(target, &self.model, true)
-            .filter(|(identity, name)| self.signatures.constructor(identity, name).is_some())
-            .filter(|_| {
-                falcon_analyze::expression_segments(target, true).is_some_and(|segments| {
-                    segments.first().is_some_and(|head| {
-                        !self.environment.is_bound(head)
-                            && self.implicit_member_type(head).is_none()
-                    })
-                })
-            });
-        let constructor_result = constructor.map(|(identity, _)| ResolvedType::Interface {
-            occurrence: Default::default(),
-            identity,
-            arguments: signature
-                .owner_parameters
-                .iter()
-                .map(|id| ResolvedType::TypeParameter {
-                    id: id.clone(),
-                    bound: self.model.core_type("Object", true).into(),
-                    nullable: false,
-                })
-                .collect(),
-            nullable: false,
-            extension_type: false,
-        });
-        Some(CallTarget {
-            signature,
-            owner,
-            type_args: explicit_type_args,
-            constructor_result,
-        })
+    ) -> Option<falcon_analyze::ResolvedInvocation<'s>> {
+        self.environment.resolved_invocation(
+            callee,
+            type_args,
+            &InferenceContext {
+                model: &self.model,
+                signatures: &self.signatures,
+                type_parameters: &self.type_parameters,
+                lookup: &|name| self.implicit_member_type(name),
+                argument_fallback: None,
+            },
+        )
     }
 
     /// Resolve a constructor on an already instantiated receiver, including
@@ -1248,33 +752,6 @@ impl<'a> SemanticState<'a> {
     }
 }
 
-/// Null shortening follows selectors and calls, never explicit parentheses.
-fn null_shorted_access(mut expression: &Expr) -> bool {
-    loop {
-        match expression {
-            Expr::Field {
-                object,
-                is_null_safe,
-                ..
-            }
-            | Expr::Index {
-                object,
-                is_null_safe,
-                ..
-            } => {
-                if *is_null_safe {
-                    return true;
-                }
-                expression = object;
-            }
-            Expr::Call { callee, .. } => expression = callee,
-            Expr::NullAssert { operand, .. } => expression = operand,
-            Expr::GenericInstantiation { target, .. } => expression = target,
-            _ => return false,
-        }
-    }
-}
-
 /// The receiver of one explicit `.call` access, without traversing other syntax.
 pub(crate) fn explicit_call_receiver(callee: &Expr) -> Option<&Expr> {
     if let Expr::Field { object, field, .. } = callee
@@ -1283,137 +760,6 @@ pub(crate) fn explicit_call_receiver(callee: &Expr) -> Option<&Expr> {
         Some(object)
     } else {
         None
-    }
-}
-
-/// Shared syntax traversal supplies child types before evaluating each node.
-struct InvocationInference<'s, 'a> {
-    state: &'s SemanticState<'a>,
-    root: *const Expr,
-    receiver_dependency: Option<*const Expr>,
-    member_callee: Option<*const Expr>,
-    // The optional type preserves `super` and the reached null-shortening branch.
-    results: HashMap<*const Expr, (ResolvedType, Option<ResolvedType>, bool)>,
-}
-
-impl Visitor for InvocationInference<'_, '_> {
-    fn visit_expr(&mut self, node: &Expr) {
-        let pointer = node as *const Expr;
-        let inferred = if pointer == self.root {
-            ResolvedType::Unknown
-        } else {
-            self.state.infer(node)
-        };
-        let receiver_dependency = self.receiver_dependency == Some(pointer);
-        let reached_access = (receiver_dependency || self.member_callee == Some(pointer))
-            && matches!(
-                node,
-                Expr::Field { .. }
-                    | Expr::Index { .. }
-                    | Expr::Call { .. }
-                    | Expr::GenericInstantiation { .. }
-            );
-        if inferred == ResolvedType::Unknown
-            || self.member_callee == Some(pointer)
-            || (receiver_dependency && matches!(node, Expr::NullAssert { .. }))
-            || reached_access
-        {
-            let saved = (self.receiver_dependency, self.member_callee);
-            self.member_callee = match node {
-                Expr::Call { callee, .. } if matches!(callee.as_ref(), Expr::Field { .. }) => {
-                    Some(callee.as_ref() as *const Expr)
-                }
-                _ => None,
-            };
-            self.receiver_dependency = match node {
-                Expr::Field { object, .. } | Expr::Index { object, .. } => {
-                    Some(object.as_ref() as *const Expr)
-                }
-                Expr::NullAssert { operand, .. } if receiver_dependency => {
-                    Some(operand.as_ref() as *const Expr)
-                }
-                Expr::GenericInstantiation { target, .. } => Some(target.as_ref() as *const Expr),
-                _ => None,
-            };
-            if matches!(
-                node,
-                Expr::Call { .. }
-                    | Expr::Field { .. }
-                    | Expr::Index { .. }
-                    | Expr::NullAssert { .. }
-                    | Expr::GenericInstantiation { .. }
-                    | Expr::Conditional { .. }
-            ) {
-                walk_expr(self, node);
-            }
-            (self.receiver_dependency, self.member_callee) = saved;
-        }
-        let shorted = match node {
-            Expr::Field {
-                object,
-                is_null_safe,
-                ..
-            }
-            | Expr::Index {
-                object,
-                is_null_safe,
-                ..
-            } => {
-                *is_null_safe
-                    || self
-                        .results
-                        .get(&(object.as_ref() as *const Expr))
-                        .is_some_and(|result| result.2)
-            }
-            Expr::Call { callee, .. } => self
-                .results
-                .get(&(callee.as_ref() as *const Expr))
-                .is_some_and(|result| result.2),
-            Expr::NullAssert { operand, .. } => self
-                .results
-                .get(&(operand.as_ref() as *const Expr))
-                .is_some_and(|result| result.2),
-            Expr::GenericInstantiation { target, .. } => self
-                .results
-                .get(&(target.as_ref() as *const Expr))
-                .is_some_and(|result| result.2),
-            _ => false,
-        };
-        let mut exposed_fallback = None;
-        let ty = if inferred != ResolvedType::Unknown && !reached_access {
-            inferred
-        } else {
-            let reached = self.state.infer_invocation_node(node, &self.results);
-            if reached == ResolvedType::Unknown {
-                if shorted {
-                    // Keep the known expression type without treating its
-                    // lifted `?` as evidence about the reached member type.
-                    exposed_fallback = Some(inferred);
-                    reached
-                } else {
-                    inferred
-                }
-            } else {
-                reached
-            }
-        };
-        let receiver = match node {
-            Expr::Super { .. } => Some(
-                self.state
-                    .superclass
-                    .clone()
-                    .unwrap_or(ResolvedType::Unknown),
-            ),
-            Expr::NullAssert { operand, .. } => self
-                .results
-                .get(&(operand.as_ref() as *const Expr))
-                .map(|(ty, receiver, _)| receiver.as_ref().unwrap_or(ty).non_null()),
-            _ if shorted => Some(ty.clone()),
-            _ => None,
-        };
-        let ty =
-            exposed_fallback.unwrap_or_else(|| if shorted { ty.with_nullable(true) } else { ty });
-        self.results.insert(pointer, (ty, receiver, shorted));
     }
 }
 
@@ -1467,14 +813,6 @@ pub(crate) fn resolved_super_param_type(
         .zip(superclass.type_arguments())
         .collect();
     Some(model.substitute(ty, &substitutions))
-}
-
-pub(crate) fn resolved_param_type(
-    param: &FormalParam,
-    model: &SemanticModel<'_>,
-    type_parameters: &TypeParameterScope,
-) -> ResolvedType {
-    model.resolve_formal_parameter_in(param, type_parameters)
 }
 
 struct ScopedWalker<'a, 'model, V> {
@@ -1881,6 +1219,44 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
         self.with_cleared_expected(|walker| walk_type_params(walker, type_parameters));
         let saved_expected = (!contextual).then(|| std::mem::take(&mut self.state.expected));
         let saved_returns = (!contextual).then(|| std::mem::take(&mut self.state.return_type));
+        // Match the context's generic owner once for both parameters and return.
+        let contextual_substitutions = contextual
+            .then(|| {
+                if contextual_parameters.is_empty() {
+                    return Some(HashMap::new());
+                }
+                let expected = self.state.expected()?;
+                if !matches!(expected, ResolvedType::Function { .. }) {
+                    return None;
+                }
+                let mut by_owner = HashMap::new();
+                collect_type_parameter_ids(expected, &mut by_owner);
+                let parameters = by_owner.values().find(|parameters| {
+                    contextual_parameters
+                        .iter()
+                        .enumerate()
+                        .all(|(ordinal, declared)| {
+                            parameters.iter().any(|parameter| {
+                                parameter.ordinal == ordinal
+                                    && parameter.name.as_ref() == declared.name.name
+                            })
+                        })
+                })?;
+                Some(
+                    parameters
+                        .iter()
+                        .filter_map(|parameter| {
+                            contextual_parameters
+                                .get(parameter.ordinal)
+                                .and_then(|declared| {
+                                    self.state.type_parameters.lookup(&declared.name.name)
+                                })
+                                .map(|resolved| (parameter.clone(), resolved))
+                        })
+                        .collect(),
+                )
+            })
+            .flatten();
         let resolved_return = return_type
             .map(|ty| {
                 self.state
@@ -1889,7 +1265,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
             })
             .or_else(|| {
                 contextual.then(|| {
-                    self.contextual_closure_type(contextual_parameters, None)
+                    self.contextual_closure_type(contextual_substitutions.as_ref(), None)
                         .unwrap_or_else(|| self.uncontextual_type())
                 })
             })
@@ -1914,7 +1290,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
         self.state.return_type.push(resolved_return);
         self.with_scope(|walker| {
             if let Some(params) = params {
-                walker.bind_params(params, None, contextual.then_some(contextual_parameters));
+                walker.bind_params(params, None, contextual, contextual_substitutions.as_ref());
                 walker.visit_param_constants(params);
             }
             if let Some(body) = body {
@@ -1953,9 +1329,10 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
 
     fn contextual_closure_type(
         &self,
-        type_parameters: &[TypeParam],
+        substitutions: Option<&HashMap<TypeParameterId, ResolvedType>>,
         parameter: Option<(&FormalParam, usize)>,
     ) -> Option<ResolvedType> {
+        let substitutions = substitutions?;
         let ResolvedType::Function {
             return_type,
             positional,
@@ -1975,39 +1352,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                 _ => positional.get(ordinal)?,
             },
         };
-        let contextual_type = if type_parameters.is_empty() {
-            contextual_type.clone()
-        } else {
-            let mut by_owner: HashMap<ParameterOwner, Vec<TypeParameterId>> = HashMap::new();
-            collect_type_parameter_ids(return_type, &mut by_owner);
-            for parameter in positional.iter() {
-                collect_type_parameter_ids(parameter, &mut by_owner);
-            }
-            for (_, parameter) in named.iter() {
-                collect_type_parameter_ids(parameter, &mut by_owner);
-            }
-            let contextual = by_owner.values().find(|parameters| {
-                type_parameters
-                    .iter()
-                    .enumerate()
-                    .all(|(ordinal, declared)| {
-                        parameters.iter().any(|parameter| {
-                            parameter.ordinal == ordinal
-                                && parameter.name.as_ref() == declared.name.name
-                        })
-                    })
-            })?;
-            let substitutions: HashMap<_, _> = contextual
-                .iter()
-                .filter_map(|parameter| {
-                    type_parameters
-                        .get(parameter.ordinal)
-                        .and_then(|declared| self.state.type_parameters.lookup(&declared.name.name))
-                        .map(|resolved| (parameter.clone(), resolved))
-                })
-                .collect();
-            self.state.model.substitute(contextual_type, &substitutions)
-        };
+        let contextual_type = self.state.model.substitute(contextual_type, substitutions);
         // Uninferred call parameters must not become closure-local types just
         // because an unrelated in-scope parameter has the same name.
         let mut by_owner = HashMap::new();
@@ -2026,11 +1371,15 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
         &mut self,
         params: &FormalParamList,
         super_constructor: Option<&str>,
-        contextual: Option<&[TypeParam]>,
+        contextual: bool,
+        contextual_substitutions: Option<&HashMap<TypeParameterId, ResolvedType>>,
     ) {
         let mut positional_ordinal = 0;
         for param in params.params.iter() {
-            let mut ty = resolved_param_type(param, &self.state.model, &self.state.type_parameters);
+            let mut ty = self
+                .state
+                .model
+                .resolve_formal_parameter_in(param, &self.state.type_parameters);
             if param.param_type.is_none() && param.function_params.is_none() {
                 if param.initializing == Some(InitializingFormal::Super) {
                     ty = super_constructor
@@ -2067,9 +1416,12 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                             .unwrap_or(ResolvedType::Unknown);
                     }
                 }
-                if let Some(type_parameters) = contextual {
+                if contextual {
                     ty = self
-                        .contextual_closure_type(type_parameters, Some((param, positional_ordinal)))
+                        .contextual_closure_type(
+                            contextual_substitutions,
+                            Some((param, positional_ordinal)),
+                        )
                         .unwrap_or_else(|| self.uncontextual_type());
                 }
             }
@@ -2094,7 +1446,10 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
 
     fn declare_fields(&mut self, members: EffectiveMembers<'_>) {
         for param in members.declaring_params() {
-            let ty = resolved_param_type(param, &self.state.model, &self.state.type_parameters);
+            let ty = self
+                .state
+                .model
+                .resolve_formal_parameter_in(param, &self.state.type_parameters);
             self.declare_field(&param.name.name, ty);
         }
         if let Some(primary) = members.primary {
@@ -2116,7 +1471,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                 })
                 .unwrap_or("new");
             self.with_scope(|walker| {
-                walker.bind_params(&primary.params, Some(super_constructor), None);
+                walker.bind_params(&primary.params, Some(super_constructor), false, None);
                 walker.state.environment.declare_unpromotable(
                     "this",
                     walker
@@ -2226,10 +1581,7 @@ impl<V: SemanticRuleVisitor> ScopedWalker<'_, '_, V> {
                     falcon_analyze::constant_value::evaluate_constant_with_local_values_in_context(
                         initializer,
                         self.state.constant_owner.as_ref(),
-                        LocalConstants {
-                            values: &self.state.local_constant_values(),
-                            types: &self.state.local_constant_types(),
-                        },
+                        &self.state.visible_local_constants(),
                         &self.state.model,
                         &self.state.signatures,
                         expected.as_ref(),
@@ -3003,11 +2355,10 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                             {
                                 continue;
                             }
-                            let ty = resolved_param_type(
-                                param,
-                                &walker.state.model,
-                                &walker.state.type_parameters,
-                            );
+                            let ty = walker
+                                .state
+                                .model
+                                .resolve_formal_parameter_in(param, &walker.state.type_parameters);
                             walker
                                 .state
                                 .environment
@@ -3246,7 +2597,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                 .unwrap_or("new")
         });
         self.with_scope(|walker| {
-            walker.bind_params(&node.params, super_constructor, None);
+            walker.bind_params(&node.params, super_constructor, false, None);
             walker.visitor.visit_constructor(node, &walker.state);
             walker.visit_param_constants(&node.params);
             walker.visit_constructor_initializers(&node.initializers);
@@ -3581,7 +2932,7 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                 let mut inferred_return = ResolvedType::Unknown;
                 if function.return_type.is_none() && function.async_marker == AsyncMarker::Sync {
                     self.with_scope(|walker| {
-                        walker.bind_params(&function.params, None, None);
+                        walker.bind_params(&function.params, None, false, None);
                         if let FunctionBody::Arrow(expression, _) = &function.body {
                             inferred_return = walker.state.infer_invocation(expression);
                         }
@@ -3609,11 +2960,9 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                         .params
                         .positional()
                         .map(|param| {
-                            resolved_param_type(
-                                param,
-                                &self.state.model,
-                                &self.state.type_parameters,
-                            )
+                            self.state
+                                .model
+                                .resolve_formal_parameter_in(param, &self.state.type_parameters)
                         })
                         .collect(),
                     named: function
@@ -3622,9 +2971,8 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                         .map(|param| {
                             (
                                 param.name.name.clone(),
-                                resolved_param_type(
+                                self.state.model.resolve_formal_parameter_in(
                                     param,
-                                    &self.state.model,
                                     &self.state.type_parameters,
                                 ),
                             )
@@ -3944,7 +3292,12 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                             CascadeOp::Field { name, .. } => {
                                 current = self
                                     .state
-                                    .member_read(&current, &name.name)
+                                    .signatures
+                                    .instantiated_member_read(
+                                        &current,
+                                        &name.name,
+                                        &self.state.model,
+                                    )
                                     .unwrap_or_else(|| {
                                         if current == ResolvedType::Dynamic {
                                             ResolvedType::Dynamic
@@ -3984,7 +3337,12 @@ impl<V: SemanticRuleVisitor> Visitor for ScopedWalker<'_, '_, V> {
                                     }
                                     current = self
                                         .state
-                                        .member_read(&current, &name.name)
+                                        .signatures
+                                        .instantiated_member_read(
+                                            &current,
+                                            &name.name,
+                                            &self.state.model,
+                                        )
                                         .as_ref()
                                         .map(SemanticState::callable_return_type)
                                         .unwrap_or_else(|| {
@@ -4383,6 +3741,103 @@ mod tests {
     use super::*;
 
     #[test]
+    fn inherited_implicit_generic_method_preserves_call_parameters() {
+        use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
+        use falcon_config::FalconConfig;
+        use std::path::PathBuf;
+
+        let source = r#"
+class Token {}
+class Base { T identity<T>(T value, {bool flag = false}) => value; }
+class Child extends Base {
+  void probe(Token value) {
+    identity<Token>(value);
+    identity(value);
+  }
+}
+class Other {}
+extension OtherMethods on Other {
+  T identity<T>(T value, {bool flag = false}) => value;
+  void probe(Token value) {
+    identity<Token>(value);
+    identity(value);
+  }
+}
+"#;
+        let path = PathBuf::from("/project/lib/main.dart");
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.program;
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path: &path,
+                program: &program,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let types = TypeIndex::from_resolved_files(
+            [(
+                path.as_path(),
+                falcon_analyze::LibrarySource {
+                    program: &program,
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )],
+            &identities,
+        );
+        let signatures =
+            SignatureIndex::from_project_files(&[(path.clone(), &program)], &identities, &types);
+        let config = FalconConfig::default();
+        let context = AnalyzeContext::new(&path, source, &config, &parsed.syntax)
+            .with_identities(&identities)
+            .with_types(&types)
+            .with_signatures(&signatures);
+
+        #[derive(Default)]
+        struct Observed {
+            calls: usize,
+        }
+        impl SemanticRuleVisitor for Observed {
+            fn visit_expr(&mut self, node: &Expr, state: &SemanticState<'_>) {
+                let Expr::Call {
+                    callee,
+                    type_args,
+                    args,
+                    ..
+                } = node
+                else {
+                    return;
+                };
+                if !matches!(callee.as_ref(), Expr::Ident(name) if name.name == "identity") {
+                    return;
+                }
+                let token =
+                    ResolvedType::interface_identity(state.model.resolve_name("Token").unwrap());
+                let target = state.call_target(callee, type_args).unwrap();
+                assert_eq!(target.signature.call_parameters.len(), 1);
+                assert!(target.signature.defaults.contains_key("flag"));
+                let signature = state.call_signature(callee, type_args, args, None).unwrap();
+                assert_eq!(
+                    signature.positional.as_slice(),
+                    std::slice::from_ref(&token)
+                );
+                assert_eq!(signature.return_type, token);
+                assert_eq!(state.infer_invocation(node), token);
+                self.calls += 1;
+            }
+        }
+        let mut observed = Observed::default();
+        visit_program(
+            &mut observed,
+            &program,
+            SemanticState::new(&program, &context).unwrap(),
+        );
+        assert_eq!(observed.calls, 4);
+    }
+
+    #[test]
     fn nullsafe_accesses_preserve_call_and_assignment_contexts_without_an_sdk() {
         use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
         use falcon_config::FalconConfig;
@@ -4489,7 +3944,11 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
                         let Expr::Field { object, .. } = callee.as_ref() else {
                             unreachable!()
                         };
-                        assert_value(state, &state.infer_access_receiver(object, false), false);
+                        assert_value(
+                            state,
+                            &state.infer_access_receiver(object, "echo", false),
+                            false,
+                        );
                         let signature =
                             state.call_signature(callee, type_args, args, None).unwrap();
                         assert!(signature.positional.is_empty());
@@ -4528,7 +3987,11 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
                         ..
                     } if field.name == "$1" || field.name == "slot" => {
                         let nullable = matches!(object.as_ref(), Expr::Ident(identifier) if identifier.name == "maybe");
-                        assert_value(state, &state.infer_access_receiver(node, false), nullable);
+                        assert_value(
+                            state,
+                            &state.infer_access_receiver(node, "", false),
+                            nullable,
+                        );
                         assert_value(state, &state.infer_invocation(node), true);
                         self.record_fields += 1;
                     }
