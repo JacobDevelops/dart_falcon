@@ -87,12 +87,14 @@ impl Visitor for Collector<'_> {
             // Report at the `operator` keyword, standing in for the name token.
             let span = self
                 .ctx
-                .source
-                .get(operator.span.start..operator.span.end)
-                .and_then(|text| text.find("operator"))
-                .map_or(operator.span, |offset| {
-                    let start = operator.span.start + offset;
-                    Span::new(start, start + "operator".len())
+                .syntax
+                .keywords_in(
+                    Span::new(operator.span.start, operator.params.span.start),
+                    falcon_syntax::TokenKind::Operator,
+                )
+                .next()
+                .map_or(operator.span, |token| {
+                    Span::new(token.offset(), token.offset() + token.len())
                 });
             self.check(operator.async_marker, operator.return_type.as_ref(), span);
         }

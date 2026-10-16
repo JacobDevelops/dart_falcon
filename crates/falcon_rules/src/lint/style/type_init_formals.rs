@@ -151,7 +151,7 @@ fn check_param(
     };
     let Some(target) = target else { return };
 
-    if same_type(ctx.source, target, annotation) {
+    if same_type(ctx, target, annotation) {
         diags.push(ctx.diagnostic(
             "type-init-formals",
             "Don't type annotate initializing formals.".to_string(),
@@ -243,15 +243,12 @@ fn find_ctor<'a>(class: &ClassInfo<'a>, name: Option<&str>) -> Option<&'a Constr
 
 /// Compares written type text with whitespace removed, without resolving scope
 /// or substituting type parameters. Equal spellings need not denote equal types.
-fn same_type(source: &str, a: &DartType, b: &DartType) -> bool {
+fn same_type(ctx: &AnalyzeContext, a: &DartType, b: &DartType) -> bool {
     let text = |ty: &DartType| {
-        let span = ty.span();
-        source
-            .get(span.start..span.end)
-            .map(|s| s.split_whitespace().collect::<String>())
+        ctx.syntax
+            .tokens_in(*ty.span())
+            .flat_map(move |token| token.text(ctx.source).chars())
+            .filter(|character| !character.is_whitespace())
     };
-    match (text(a), text(b)) {
-        (Some(a), Some(b)) => a == b,
-        _ => false,
-    }
+    text(a).eq(text(b))
 }

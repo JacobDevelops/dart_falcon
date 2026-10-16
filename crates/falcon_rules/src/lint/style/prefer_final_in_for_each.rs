@@ -21,7 +21,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, for_each_declared_body, walk_expr, walk_stmt};
 
-use crate::lint::lexical_usage::{collection_for_inits, local_writes};
+use crate::lint::lexical_usage::collection_for_inits;
 
 const RULE: &str = "prefer-final-in-for-each";
 
@@ -30,10 +30,7 @@ pub struct PreferFinalInForEach;
 
 impl Rule for PreferFinalInForEach {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mutated = local_writes(program)
-            .into_iter()
-            .map(|write| write.declaration)
-            .collect();
+        let mutated = ctx.mutated_declarations(program);
         let mut bodies = Vec::new();
         for_each_declared_body(program, ctx.source, &mut |body, _, _| {
             bodies.push(*body.span());
@@ -51,7 +48,7 @@ impl Rule for PreferFinalInForEach {
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
-    mutated: HashSet<usize>,
+    mutated: &'a HashSet<usize>,
     diagnostics: Vec<Diagnostic>,
     bodies: Vec<Span>,
 }

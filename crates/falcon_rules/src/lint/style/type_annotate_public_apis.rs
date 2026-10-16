@@ -172,7 +172,7 @@ impl Checker<'_> {
                 }
                 ClassMember::Operator(operator) => {
                     if operator.return_type.is_none() && operator.op != "[]=" {
-                        self.report(operator_span(operator, self.ctx.source));
+                        self.report(operator_span(operator, self.ctx.syntax));
                     }
                     self.params(&operator.params);
                 }

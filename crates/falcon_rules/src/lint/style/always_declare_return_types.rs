@@ -104,7 +104,7 @@ impl Visitor for Collector<'_, '_> {
             ClassMember::Operator(operator)
                 if operator.return_type.is_none() && operator.op != "[]=" =>
             {
-                let span = operator_span(operator, self.ctx.source);
+                let span = operator_span(operator, self.ctx.syntax);
                 self.method(&operator.op, span);
             }
             _ => {}
@@ -123,15 +123,18 @@ impl Visitor for Collector<'_, '_> {
 }
 
 /// The `operator` keyword through the parameter list (`operator ==`).
-pub(crate) fn operator_span(operator: &OperatorDecl, source: &str) -> Span {
+pub(crate) fn operator_span(operator: &OperatorDecl, syntax: &falcon_syntax::SyntaxStore) -> Span {
     let header_start = operator
         .annotations
         .last()
         .map_or(operator.span.start, |annotation| annotation.span.end);
     let end = operator.params.span.start;
-    let start = source
-        .get(header_start..end)
-        .and_then(|header| header.find("operator"))
-        .map_or(header_start, |offset| header_start + offset);
+    let start = syntax
+        .keywords_in(
+            Span::new(header_start, end),
+            falcon_syntax::TokenKind::Operator,
+        )
+        .next()
+        .map_or(header_start, |token| token.offset());
     Span::new(start, end)
 }

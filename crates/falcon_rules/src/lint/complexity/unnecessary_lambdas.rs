@@ -57,8 +57,9 @@ use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_expr, walk_local_var, walk_program, walk_stmt};
 
 use crate::lint::declarations::members_of;
-use crate::lint::lexical_usage::{collection_for_inits, local_declarations};
+use crate::lint::lexical_usage::collection_for_inits;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::resolve::lexical_usage::local_declarations;
 
 #[derive(Default)]
 pub struct UnnecessaryLambdas;

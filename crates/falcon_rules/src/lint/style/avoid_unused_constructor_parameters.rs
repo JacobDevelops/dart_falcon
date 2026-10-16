@@ -23,7 +23,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 
-use crate::lint::lexical_usage::{
+use falcon_analyze::resolve::lexical_usage::{
     used_constructor_parameters, used_primary_constructor_parameters,
 };
 

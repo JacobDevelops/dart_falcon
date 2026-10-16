@@ -28,11 +28,10 @@ use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Feature;
 use falcon_syntax::ast::*;
+use falcon_syntax::token::TokenKind;
 use falcon_syntax::visitor::{
     Visitor, walk_formal_param, walk_pattern, walk_setter_decl, walk_stmt,
 };
-
-use crate::lint::lexical_usage::find_word;
 
 const RULE: &str = "unnecessary-final";
 const MESSAGE: &str = "Local variables should not be marked as 'final'.";
@@ -67,10 +66,14 @@ struct Collector<'a, 'ctx> {
 }
 
 impl Collector<'_, '_> {
-    /// Reports the `final` keyword found in `source[start..end]`.
     fn report_final_in(&mut self, start: usize, end: usize) {
-        if let Some(keyword) = find_word(self.ctx.source, start, end, "final") {
-            self.report_final(keyword);
+        if let Some(token) = self
+            .ctx
+            .syntax
+            .keywords_in(Span::new(start, end), TokenKind::Final)
+            .next()
+        {
+            self.report_final(Span::new(token.offset(), token.offset() + token.len()));
         }
     }
 
@@ -81,7 +84,7 @@ impl Collector<'_, '_> {
         }
     }
 
-    fn check_for_init(&mut self, init: &ForInit) {
+    fn check_for_init(&mut self, init: &ForInit, start: usize) {
         match init {
             ForInit::ForIn {
                 keyword: VarKeyword::Final,
@@ -90,23 +93,17 @@ impl Collector<'_, '_> {
                 name,
                 ..
             } => {
-                // Search from the header's `(`: the declared type itself may
-                // contain parentheses (`final void Function(int) f`).
                 let anchor = var_type
                     .as_ref()
                     .map_or(name.span.start, |ty| ty.span().start);
-                let open = self.ctx.source[..anchor].rfind('(').unwrap_or(anchor);
-                self.report_final_in(open, anchor);
+                self.report_final_in(start, anchor);
             }
             ForInit::PatternForIn {
                 keyword: VarKeyword::Final,
                 pattern,
                 ..
             } => {
-                let open = self.ctx.source[..pattern.span().start]
-                    .rfind('(')
-                    .unwrap_or(pattern.span().start);
-                self.report_final_in(open, pattern.span().start);
+                self.report_final_in(start, pattern.span().start);
             }
             ForInit::ForIn { .. }
             | ForInit::PatternForIn { .. }
@@ -129,11 +126,12 @@ impl Visitor for Collector<'_, '_> {
     }
 
     fn visit_setter_decl(&mut self, node: &SetterDecl) {
-        let open = self.ctx.source[..node.param.span.start]
-            .rfind('(')
-            .unwrap_or(node.param.span.start);
+        let start = node
+            .param_annotations
+            .last()
+            .map_or(node.name.span.end, |annotation| annotation.span.end);
         if self.check_params {
-            self.report_final_in(open, node.param.span.start);
+            self.report_final_in(start, node.param.span.start);
         }
         walk_setter_decl(self, node);
     }
@@ -151,17 +149,24 @@ impl Visitor for Collector<'_, '_> {
         } else if let Stmt::For(statement) = node
             && let Some(init) = &statement.header.init
         {
-            self.check_for_init(init);
+            self.check_for_init(init, statement.span.start);
         }
         walk_stmt(self, node);
     }
 
     fn visit_pattern(&mut self, node: &Pattern) {
         if let Pattern::Variable { name, span, .. } = node
-            && find_word(self.ctx.source, span.start, name.span.start, "final")
-                .is_some_and(|keyword| keyword.start == span.start)
+            && let Some(keyword) = self
+                .ctx
+                .syntax
+                .keywords_in(Span::new(span.start, name.span.start), TokenKind::Final)
+                .next()
+            && keyword.offset() == span.start
         {
-            self.report_final_in(span.start, name.span.start);
+            self.report_final(Span::new(
+                keyword.offset(),
+                keyword.offset() + keyword.len(),
+            ));
         }
         walk_pattern(self, node);
     }

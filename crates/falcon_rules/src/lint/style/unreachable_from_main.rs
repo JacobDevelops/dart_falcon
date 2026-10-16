@@ -51,9 +51,9 @@ use falcon_syntax::visitor::{
 };
 
 use crate::lint::declarations::operator_token_span;
-use crate::lint::lexical_usage::locally_bound_identifiers;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 use crate::lint::string_lit::{is_ident_body, is_simple_identifier};
+use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 
 const RULE: &str = "unreachable-from-main";
 

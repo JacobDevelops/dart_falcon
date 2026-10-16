@@ -8,9 +8,9 @@
 
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
+use falcon_syntax::{Program, TokenKind};
 
 #[derive(Default)]
 pub struct AvoidReturnTypesOnSetters;
@@ -65,7 +65,7 @@ impl Visitor for Collector<'_, '_> {
     }
 
     fn visit_setter_decl(&mut self, node: &SetterDecl) {
-        if setter_has_return_type(node, self.ctx.source) {
+        if setter_has_return_type(node, self.ctx.syntax) {
             self.diags.push(self.ctx.diagnostic(
                 "avoid-return-types-on-setters",
                 "Avoid return types on setters.",
@@ -75,8 +75,7 @@ impl Visitor for Collector<'_, '_> {
     }
 }
 
-// Member setter return types are absent from the AST, so recover the modifier region.
-fn setter_has_return_type(setter: &SetterDecl, source: &str) -> bool {
+fn setter_has_return_type(setter: &SetterDecl, syntax: &falcon_syntax::SyntaxStore) -> bool {
     let ann_end = setter
         .annotations
         .iter()
@@ -84,47 +83,13 @@ fn setter_has_return_type(setter: &SetterDecl, source: &str) -> bool {
         .max()
         .unwrap_or(setter.span.start)
         .max(setter.span.start);
-    let region = match source.get(ann_end..setter.name.span.start) {
-        Some(r) => r,
-        None => return false,
-    };
-    let stripped = strip_comments(region);
-    stripped
-        .split_whitespace()
-        .any(|word| !matches!(word, "static" | "external" | "set"))
-}
-
-// Comments are not return types; keep this scanner aligned with type_init_formals::skip_trivia.
-fn strip_comments(region: &str) -> String {
-    let bytes = region.as_bytes();
-    let mut out = String::with_capacity(region.len());
-    let (mut i, mut kept_from) = (0, 0);
-    while i < bytes.len() {
-        let end = match bytes[i] {
-            b'/' if bytes.get(i + 1) == Some(&b'/') => {
-                let mut j = i + 2;
-                while j < bytes.len() && bytes[j] != b'\n' {
-                    j += 1;
-                }
-                j
-            }
-            b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                let mut j = i + 2;
-                while j < bytes.len() && !(bytes[j] == b'*' && bytes.get(j + 1) == Some(&b'/')) {
-                    j += 1;
-                }
-                (j + 2).min(bytes.len())
-            }
-            _ => {
-                i += 1;
-                continue;
-            }
-        };
-        out.push_str(&region[kept_from..i]);
-        out.push(' ');
-        i = end;
-        kept_from = end;
-    }
-    out.push_str(&region[kept_from..]);
-    out
+    syntax
+        .tokens_in(Span::new(ann_end, setter.name.span.start))
+        .any(|token| {
+            !token.is_trivia()
+                && !matches!(
+                    token.kind,
+                    TokenKind::Static | TokenKind::External | TokenKind::Set
+                )
+        })
 }

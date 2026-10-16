@@ -32,8 +32,8 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 
-use crate::lint::lexical_usage::locally_bound_identifiers;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 
 #[derive(Default)]
 pub struct AvoidDoubleAndIntChecks;

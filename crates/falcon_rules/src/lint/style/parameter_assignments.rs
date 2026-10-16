@@ -34,7 +34,7 @@ use falcon_syntax::visitor::{
     walk_method_decl, walk_setter_decl, walk_stmt,
 };
 
-use crate::lint::lexical_usage::{LocalWrite, LocalWriteKind, local_writes};
+use falcon_analyze::resolve::lexical_usage::{LocalWrite, LocalWriteKind};
 
 const RULE: &str = "parameter-assignments";
 
@@ -43,9 +43,9 @@ pub struct ParameterAssignments;
 
 impl Rule for ParameterAssignments {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mut writes: HashMap<usize, Vec<LocalWrite>> = HashMap::new();
+        let mut writes: HashMap<usize, Vec<&LocalWrite>> = HashMap::new();
         let mut assignment_targets = HashMap::new();
-        for write in local_writes(program) {
+        for write in ctx.local_writes(program) {
             if let LocalWriteKind::Assign(_) = write.kind {
                 assignment_targets.insert(write.span, write.declaration);
             }
@@ -87,7 +87,7 @@ impl Rule for ParameterAssignments {
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
-    writes: HashMap<usize, Vec<LocalWrite>>,
+    writes: HashMap<usize, Vec<&'a LocalWrite>>,
     /// Spans of every assignment expression, sorted by start.
     assignments: Vec<Span>,
     /// The local declaration each assignment writes, when its target is one.
@@ -125,7 +125,7 @@ impl Collector<'_, '_> {
         for write in writes {
             let outside = scope
                 .is_some_and(|scope| write.span.start < scope.start || write.span.end > scope.end);
-            if outside || self.is_hidden(&write, defaults_to_null) {
+            if outside || self.is_hidden(write, defaults_to_null) {
                 continue;
             }
             let report = match write.kind {

@@ -118,6 +118,11 @@ notes, is in
    actual subject. Expression comparisons must preserve literal spelling, not
    strip whitespace from strings.
 
+   For lexical mutation checks, use `ctx.local_writes(program)` or
+   `ctx.mutated_declarations(program)`. These share one declaration-resolved
+   collector per file, including closure shadowing, patterns, and loop bindings.
+   Name-only `flow_writes` facts are not interchangeable with declaration identities.
+
    Source coordinates use compact `u32` byte offsets, so sources may contain at
    most `u32::MAX` (4,294,967,295) UTF-8 bytes. Use
    `falcon_analyze::source::read_source` at disk ingestion boundaries: oversized

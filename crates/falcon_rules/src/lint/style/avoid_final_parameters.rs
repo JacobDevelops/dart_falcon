@@ -18,10 +18,10 @@
 //! Adopted from the official `avoid_final_parameters` lint.
 
 use falcon_analyze::{AnalyzeContext, Rule};
-use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
+use falcon_diagnostics::Diagnostic;
 use falcon_syntax::Feature;
 use falcon_syntax::ast::*;
-use falcon_syntax::token::{Token, TokenKind};
+use falcon_syntax::token::TokenKind;
 use falcon_syntax::visitor::{Visitor, walk_class_member, walk_formal_param};
 
 const RULE: &str = "avoid-final-parameters";
@@ -40,15 +40,8 @@ impl Rule for AvoidFinalParameters {
         {
             return Vec::new();
         }
-        let tokens: Vec<Token> = ctx
-            .tokens()
-            .iter()
-            .copied()
-            .filter(|token| !token.is_trivia())
-            .collect();
         let mut collector = Collector {
             ctx,
-            tokens,
             diags: Vec::new(),
         };
         collector.visit_program(program);
@@ -58,26 +51,22 @@ impl Rule for AvoidFinalParameters {
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
-    tokens: Vec<Token>,
     diags: Vec<Diagnostic>,
 }
 
 impl Collector<'_, '_> {
     /// Reports the first `final` token in `[start, end)`.
     fn report_final_in(&mut self, start: usize, end: usize) {
-        let from = self.tokens.partition_point(|token| token.offset() < start);
-        if let Some(token) = self.tokens[from..]
-            .iter()
-            .take_while(|token| token.offset() < end)
-            .find(|token| token.kind == TokenKind::Final)
+        if let Some(token) = self
+            .ctx
+            .syntax
+            .keywords_in(Span::new(start, end), TokenKind::Final)
+            .next()
         {
             self.diags.push(self.ctx.diagnostic(
                 RULE,
                 MESSAGE,
-                DiagSpan {
-                    start: token.offset(),
-                    end: token.offset() + token.len(),
-                },
+                Span::new(token.offset(), token.offset() + token.len()),
             ));
         }
     }
@@ -85,23 +74,25 @@ impl Collector<'_, '_> {
     /// A class setter's parameter is not modelled as a formal parameter, so
     /// its `final` is found in the tokens of `set name(...)`.
     fn check_setter(&mut self, setter: &SetterDecl) {
-        let from = self
-            .tokens
-            .partition_point(|token| token.offset() < setter.name.span.end);
-        let mut tokens = self.tokens[from..].iter();
+        let mut tokens = self
+            .ctx
+            .syntax
+            .tokens_in(Span::new(setter.name.span.end, setter.span.end))
+            .filter(|token| !token.is_trivia());
         if tokens.next().map(|token| token.kind) != Some(TokenKind::LParen) {
             return;
         }
-        let param: Vec<&Token> = tokens
-            .take_while(|token| token.kind != TokenKind::RParen)
-            .collect();
-        let function_typed = param.iter().any(|token| token.kind == TokenKind::LParen);
-        if !function_typed && let Some(first) = param.first() {
-            let start = first.offset();
-            let end = param
-                .last()
-                .map_or(start, |token| token.offset() + token.len());
-            self.report_final_in(start, end);
+        let mut final_span = None;
+        for token in tokens.take_while(|token| token.kind != TokenKind::RParen) {
+            if token.kind == TokenKind::LParen {
+                return;
+            }
+            if token.kind == TokenKind::Final && final_span.is_none() {
+                final_span = Some(Span::new(token.offset(), token.offset() + token.len()));
+            }
+        }
+        if let Some(span) = final_span {
+            self.diags.push(self.ctx.diagnostic(RULE, MESSAGE, span));
         }
     }
 }

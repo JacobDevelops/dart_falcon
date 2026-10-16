@@ -9,7 +9,7 @@ mod dcl {
     use falcon_syntax::ast::*;
     use falcon_syntax::visitor::{Visitor, walk_function_decl, walk_method_decl, walk_stmt};
 
-    use crate::lint::lexical_usage::{used_constructor_parameters, used_parameters};
+    use falcon_analyze::resolve::lexical_usage::{used_constructor_parameters, used_parameters};
 
     #[derive(Default)]
     pub struct AvoidUnusedParameters;

@@ -59,23 +59,19 @@ impl Rule for PreferConstDeclarations {
                 let start = if group.is_local {
                     group.span.start
                 } else {
-                    let tokens = ctx.tokens();
-                    let from = tokens.partition_point(|token| token.offset() < group.span.start);
-                    let until = tokens.partition_point(|token| token.offset() < group.first_name);
-                    let mut prefix = tokens[from..until]
-                        .iter()
-                        .rev()
-                        .filter(|token| !token.is_trivia());
-                    prefix.find(|token| token.kind == TokenKind::Final).map_or(
-                        group.span.start,
-                        |final_keyword| {
-                            prefix
-                                .next()
-                                .filter(|token| token.kind == TokenKind::Late)
-                                .unwrap_or(final_keyword)
-                                .offset()
-                        },
-                    )
+                    let mut start = group.span.start;
+                    let mut preceding_late = None;
+                    for token in ctx
+                        .syntax
+                        .tokens_in(Span::new(group.span.start, group.first_name))
+                        .filter(|token| !token.is_trivia())
+                    {
+                        if token.kind == TokenKind::Final {
+                            start = preceding_late.unwrap_or(token.offset());
+                        }
+                        preceding_late = (token.kind == TokenKind::Late).then_some(token.offset());
+                    }
+                    start
                 };
                 Some(ctx.diagnostic(
                     "prefer-const-declarations",

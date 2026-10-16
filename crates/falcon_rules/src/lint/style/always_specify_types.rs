@@ -25,21 +25,21 @@
 
 use std::collections::HashSet;
 
+use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, NameIdentity, QualifiedName, ResolvedType, Rule,
     resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::Program;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{
     Visitor, walk_class_member, walk_dart_type, walk_expr, walk_field_decl, walk_for_header,
     walk_formal_param, walk_local_var, walk_pattern, walk_setter_decl, walk_stmt,
     walk_top_level_decl,
 };
+use falcon_syntax::{Program, TokenKind};
 
 use crate::lint::declarations::{member_names, members_of};
-use crate::lint::lexical_usage::locally_bound_identifiers;
 use crate::lint::semantic_scope::SemanticState;
 
 const RULE: &str = "always-specify-types";
@@ -262,22 +262,18 @@ impl Collector<'_> {
 
     /// The `var`/`final`/`const` keyword within `start..end`.
     fn keyword(&self, start: usize, end: usize) -> Span {
-        let text = self.ctx.source.get(start..end).unwrap_or_default();
-        let bytes = text.as_bytes();
-        let boundary = |at: usize| {
-            bytes
-                .get(at)
-                .is_none_or(|b| !(b.is_ascii_alphanumeric() || *b == b'_' || *b == b'$'))
-        };
-        ["var", "final", "const"]
-            .iter()
-            .filter_map(|word| {
-                text.match_indices(word)
-                    .find(|(at, _)| (*at == 0 || boundary(at - 1)) && boundary(at + word.len()))
-                    .map(|(at, _)| Span::new(start + at, start + at + word.len()))
+        self.ctx
+            .syntax
+            .tokens_in(Span::new(start, end))
+            .find(|token| {
+                matches!(
+                    token.kind,
+                    TokenKind::Var | TokenKind::Final | TokenKind::Const
+                )
             })
-            .min_by_key(|span| span.start)
-            .unwrap_or(Span::new(start, end))
+            .map_or(Span::new(start, end), |token| {
+                Span::new(token.offset(), token.offset() + token.len())
+            })
     }
 
     fn check_declaration(
@@ -306,22 +302,15 @@ impl Collector<'_> {
         if var_type.is_some() {
             return;
         }
-        let before = self
-            .ctx
-            .source
-            .get(..name.span.start)
-            .unwrap_or_default()
-            .trim_end();
-        for word in ["var", "final"] {
-            if let Some(head) = before.strip_suffix(word)
-                && head
-                    .chars()
-                    .next_back()
-                    .is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '$'))
-            {
-                self.report(Span::new(head.len(), before.len()));
-                return;
-            }
+        let syntax = self.ctx.syntax.syntax_for_span(name.span);
+        let range = syntax.token_range(name.span);
+        if let Some(token) = syntax.tokens()[..range.start.index()]
+            .iter()
+            .rev()
+            .find(|token| !token.is_trivia())
+            .filter(|token| matches!(token.kind, TokenKind::Var | TokenKind::Final))
+        {
+            self.report(Span::new(token.offset(), token.offset() + token.len()));
         }
     }
 
@@ -431,7 +420,7 @@ impl Visitor for Collector<'_> {
     fn visit_local_var(&mut self, node: &LocalVarDecl) {
         self.check_declaration(
             &node.annotations,
-            node.full_range(),
+            node.range(),
             node.var_type.as_ref(),
             &node.declarators,
         );

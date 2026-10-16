@@ -5,7 +5,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
 use falcon_syntax::visitor::for_each_expr_in_program;
 
-use crate::lint::lexical_usage::used_parameters;
+use falcon_analyze::resolve::lexical_usage::used_parameters;
 
 #[derive(Default)]
 pub struct PreferUnderscoreForUnusedCallbackParameters;

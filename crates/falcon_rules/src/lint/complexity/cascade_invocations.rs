@@ -51,8 +51,8 @@ use falcon_syntax::ast::*;
 use falcon_syntax::visitor::{Visitor, for_each_stmt_list, walk_expr};
 
 use crate::lint::const_eval::mentions_type_parameter;
-use crate::lint::lexical_usage::local_declarations;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::resolve::lexical_usage::local_declarations;
 
 #[derive(Default)]
 pub struct CascadeInvocations;

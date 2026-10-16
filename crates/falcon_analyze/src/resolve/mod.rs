@@ -3,6 +3,7 @@
 pub mod flow;
 pub mod flow_writes;
 mod identity;
+pub mod lexical_usage;
 mod library;
 mod semantic;
 mod type_index;

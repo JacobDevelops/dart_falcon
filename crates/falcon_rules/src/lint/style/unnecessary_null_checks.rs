@@ -36,8 +36,8 @@ use falcon_syntax::ast::*;
 
 use crate::lint::declarations::members_of;
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
-use crate::lint::lexical_usage::locally_bound_identifiers;
 use crate::lint::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
+use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 
 #[derive(Default)]
 pub struct UnnecessaryNullChecks;

@@ -28,8 +28,6 @@ use falcon_syntax::visitor::{
     walk_stmt,
 };
 
-use crate::lint::lexical_usage::local_writes;
-
 const RULE: &str = "prefer-final-parameters";
 
 #[derive(Default)]
@@ -41,8 +39,9 @@ impl Rule for PreferFinalParameters {
         if version.supports(Feature::PrimaryConstructors) {
             return Vec::new();
         }
-        let mutated = local_writes(program)
-            .into_iter()
+        let mutated = ctx
+            .local_writes(program)
+            .iter()
             .map(|write| write.declaration)
             .collect();
         let mut collector = Collector {

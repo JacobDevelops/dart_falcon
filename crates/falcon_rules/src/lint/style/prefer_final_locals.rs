@@ -31,7 +31,7 @@ use falcon_syntax::visitor::{
     walk_top_level_decl,
 };
 
-use crate::lint::lexical_usage::{find_word, local_writes};
+use falcon_syntax::token::TokenKind;
 
 const RULE: &str = "prefer-final-locals";
 const MESSAGE: &str = "Local variables should be final.";
@@ -41,10 +41,7 @@ pub struct PreferFinalLocals;
 
 impl Rule for PreferFinalLocals {
     fn analyze(&self, program: &Program, ctx: &AnalyzeContext) -> Vec<Diagnostic> {
-        let mutated: HashSet<usize> = local_writes(program)
-            .into_iter()
-            .map(|write| write.declaration)
-            .collect();
+        let mutated = ctx.mutated_declarations(program);
         let mut collector = Collector {
             ctx,
             mutated,
@@ -77,7 +74,7 @@ struct CaseRoot {
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
-    mutated: HashSet<usize>,
+    mutated: &'a HashSet<usize>,
     /// Root patterns of `if`-case clauses, `switch` statement cases, and
     /// `switch` expression arms, keyed by address. Pattern declarations and
     /// pattern assignments are never registered, so their variables are not
@@ -329,8 +326,12 @@ impl Visitor for Collector<'_, '_> {
         if let Pattern::Variable { name, span, .. } = node
             && let Some(variables) = self.case_variables.as_mut()
         {
-            let is_final = find_word(self.ctx.source, span.start, name.span.start, "final")
-                .is_some_and(|keyword| keyword.start == span.start);
+            let is_final = self
+                .ctx
+                .syntax
+                .keywords_in(Span::new(span.start, name.span.start), TokenKind::Final)
+                .next()
+                .is_some_and(|keyword| keyword.offset() == span.start);
             let variable = CaseVariable {
                 span: *span,
                 name_start: name.span.start,

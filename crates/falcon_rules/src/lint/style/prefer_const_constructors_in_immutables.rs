@@ -106,11 +106,10 @@ impl Rule for PreferConstConstructorsInImmutables {
                         ctx.syntax,
                     );
                     let end = if members.representation {
-                        ctx.source[start..constructor.span.end]
-                            .find(|character: char| {
-                                !character.is_alphanumeric() && character != '_' && character != '$'
-                            })
-                            .map_or(constructor.span.end, |length| start + length)
+                        ctx.syntax
+                            .tokens_in(Span::new(start, constructor.span.end))
+                            .next()
+                            .map_or(constructor.span.end, |token| token.offset() + token.len())
                     } else {
                         constructor.span.end
                     };

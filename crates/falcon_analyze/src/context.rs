@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
 use falcon_config::FalconConfig;
@@ -8,6 +8,7 @@ use falcon_syntax::token::{SyntaxStore, Token};
 
 use crate::environment::{AnalysisEnvironment, LanguageVersion};
 use crate::resolve::flow_writes::FlowWrites;
+use crate::resolve::lexical_usage::{LocalWrite, local_writes};
 use crate::resolve::{
     IdentityIndex, LibraryUnit, ResolvedType, SemanticModel, SignatureIndex, TypeIndex,
     TypeParameterScope,
@@ -17,7 +18,13 @@ use crate::resolve::{
 #[derive(Default)]
 pub struct AnalysisCache {
     flow_writes: OnceLock<Arc<FlowWrites>>,
+    local_writes: OnceLock<LocalWrites>,
     globals: OnceLock<HashMap<String, ResolvedType>>,
+}
+
+struct LocalWrites {
+    writes: Vec<LocalWrite>,
+    mutated: HashSet<usize>,
 }
 
 /// Per-file analysis context passed to every rule.
@@ -82,6 +89,22 @@ impl<'a> AnalyzeContext<'a> {
                 .and_then(|file| self.signatures?.flow_writes(file))
                 .cloned()
                 .unwrap_or_else(|| Arc::new(FlowWrites::program(program)))
+        })
+    }
+
+    pub fn local_writes(&self, program: &Program) -> &[LocalWrite] {
+        &self.lexical_writes(program).writes
+    }
+
+    pub fn mutated_declarations(&self, program: &Program) -> &HashSet<usize> {
+        &self.lexical_writes(program).mutated
+    }
+
+    fn lexical_writes(&self, program: &Program) -> &LocalWrites {
+        self.cache.local_writes.get_or_init(|| {
+            let writes = local_writes(program);
+            let mutated = writes.iter().map(|write| write.declaration).collect();
+            LocalWrites { writes, mutated }
         })
     }
 

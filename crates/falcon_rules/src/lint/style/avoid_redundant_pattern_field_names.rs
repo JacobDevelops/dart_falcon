@@ -9,6 +9,7 @@
 use falcon_analyze::{AnalyzeContext, Rule};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::ast::*;
+use falcon_syntax::token::TokenKind;
 use falcon_syntax::visitor::{Visitor, walk_pattern};
 
 #[derive(Default)]
@@ -19,7 +20,6 @@ impl Rule for AvoidRedundantPatternFieldNames {
         let mut collector = Collector {
             diags: Vec::new(),
             ctx,
-            source: ctx.source,
         };
         collector.visit_program(program);
         collector.diags
@@ -29,7 +29,6 @@ impl Rule for AvoidRedundantPatternFieldNames {
 struct Collector<'s> {
     diags: Vec<Diagnostic>,
     ctx: &'s AnalyzeContext<'s>,
-    source: &'s str,
 }
 
 impl Visitor for Collector<'_> {
@@ -37,7 +36,7 @@ impl Visitor for Collector<'_> {
         match node {
             Pattern::Object(obj) => {
                 for field in &obj.fields {
-                    if is_redundant_field_source(self.source, &field.span) {
+                    if field.source_name().is_some() && is_redundant_field(self.ctx, field.span) {
                         self.diags.push(self.ctx.diagnostic(
                             "avoid-redundant-pattern-field-names",
                             "Redundant field name in pattern; use the shorthand (e.g. `:x`).",
@@ -48,9 +47,7 @@ impl Visitor for Collector<'_> {
             }
             Pattern::Record(rec) => {
                 for field in &rec.fields {
-                    // A record shorthand `(:x)` parses with `name: None`; only an
-                    // explicitly named field can be redundant.
-                    if field.name.is_some() && is_redundant_field_source(self.source, &field.span) {
+                    if field.source_name().is_some() && is_redundant_field(self.ctx, field.span) {
                         self.diags.push(self.ctx.diagnostic(
                             "avoid-redundant-pattern-field-names",
                             "Redundant field name in pattern; use the shorthand (e.g. `:x`).",
@@ -65,25 +62,19 @@ impl Visitor for Collector<'_> {
     }
 }
 
-/// True when a pattern field's source reads `name: name` with equal identifiers
-/// on both sides (e.g. `x: x`). The colon shorthand `:x` has an empty left side
-/// and is intentionally excluded, as is anything with a nested/typed pattern on
-/// the right (`x: var x`, `x: Foo(...)`).
-fn is_redundant_field_source(source: &str, span: &Span) -> bool {
-    let text = &source[span.start..span.end];
-    let Some(idx) = text.find(':') else {
+fn is_redundant_field(ctx: &AnalyzeContext, span: Span) -> bool {
+    let mut tokens = ctx
+        .syntax
+        .tokens_in(span)
+        .filter(|token| !matches!(token.kind, TokenKind::Whitespace | TokenKind::Newline));
+    let (Some(left), Some(colon), Some(right)) = (tokens.next(), tokens.next(), tokens.next())
+    else {
         return false;
     };
-    let left = text[..idx].trim();
-    let right = text[idx + 1..].trim();
-    !left.is_empty() && left == right && is_ident(left)
-}
-
-fn is_ident(s: &str) -> bool {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    colon.kind == TokenKind::Colon
+        && tokens.next().is_none()
+        && left.text(ctx.source) == right.text(ctx.source)
+        && left.kind.is_identifier_like()
+        && left.text(ctx.source).is_ascii()
+        && !left.text(ctx.source).contains('$')
 }
