@@ -14,7 +14,7 @@ Falcon's default set has been re-chosen independently of upstream presets, with 
 
 Falcon uses an arena concrete syntax tree that retains every token and trivia, so syntax rules read from one tree without parser changes.
 
-- **Engine checklist complete.** Per-package-context library identity and the concrete syntax tree are shipped; see [`docs/v1-checklist.md`](docs/v1-checklist.md#engine).
+- **Engine checklist complete.** Per-package-context library identity and the concrete syntax tree are shipped.
 
 ### Remaining
 
