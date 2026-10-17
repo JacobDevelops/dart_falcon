@@ -12,47 +12,36 @@ permissions:
   contents: read
 
 jobs:
+  changesets:
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: check
+        run: echo "present=${{ hashFiles('.changeset/*.md') != '' }}" >> "$GITHUB_OUTPUT"
+
   prepare-release:
+    needs: changesets
+    if: needs.changesets.outputs.present == 'true'
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
-      MBX_GC_MAX_TOTAL_SIZE: 2GiB
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PAT }}
-      - name: Check for changesets
-        id: changesets
-        run: |
-          shopt -s nullglob
-          changesets=(.changeset/*.md)
-          echo "present=$([ "${#changesets[@]}" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - name: Configure Git
-        if: steps.changesets.outputs.present == 'true'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
-        if: steps.changesets.outputs.present == 'true'
+      # Restore-only: the lint snapshot is the closest prebuilt match for building xtask.
+      - uses: ./.github/actions/mbx-setup
         with:
-          install_args: cargo-make mr-boxington knope
-          cache: true
-      - name: Restore main compiler snapshot
-        if: steps.changesets.outputs.present == 'true'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/mbx
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: mbx-v1-lint-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
-          restore-keys: |
-            mbx-v1-lint-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
-            mbx-v1-lint-${{ runner.arch }}-
+          tools: cargo-make mr-boxington knope
+          snapshot: lint
       - run: makers ci_rustup_show
-        if: steps.changesets.outputs.present == 'true'
       - run: knope prepare-release
-        if: steps.changesets.outputs.present == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
