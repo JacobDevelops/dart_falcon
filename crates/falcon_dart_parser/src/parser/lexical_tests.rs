@@ -205,17 +205,63 @@ fn lexical_tree_retains_manifest_interpolation_identifiers() {
 }
 
 #[test]
-fn lexical_tree_uses_scanned_interpolation_boundaries() {
-    for source in [r"x: '${\{}'", r"x: '${a\}b}'"] {
-        let tree = crate::lex_tree(source);
+fn lexical_tree_does_not_escape_braces_in_interpolation_expressions() {
+    for source in [
+        r"void f() { var x = '${\{}}b}'; }",
+        r"void f() { var x = '${a\}b}'; }",
+    ] {
+        for tree in [crate::lex_tree(source), crate::parse(source).tree] {
+            assert!(tree.is_lossless(source));
+            let close = source.find("}b").unwrap();
+            let opening = tree
+                .tokens(source)
+                .find(|token| token.kind() == TokenKind::InterpolationStart)
+                .unwrap();
+            let closing = tree.closing_delimiter(source, opening.id()).unwrap();
+            assert_eq!(closing.offset(), close);
+            assert_eq!(opening.parent().span().end, close + 1);
+            assert_eq!(tree.opening_delimiter(source, closing.id()), Some(opening));
+            assert_eq!(
+                tree.token_at(source, source.find("b}").unwrap() + 1)
+                    .unwrap()
+                    .kind(),
+                TokenKind::StringPart
+            );
+        }
+    }
+}
+
+#[test]
+fn escaped_interpolation_brace_is_an_expression_error() {
+    let source = r"void f() { var x = '${a\}b}'; }";
+    let parsed = crate::parse(source);
+    assert_eq!(parsed.errors.len(), 1);
+    assert_eq!(parsed.errors[0].offset, source.find('\\').unwrap());
+    assert_eq!(
+        parsed.errors[0].message,
+        "expected '}' after interpolation expression"
+    );
+    assert!(parsed.tree.is_lossless(source));
+}
+
+#[test]
+fn interpolation_braces_in_quoted_strings_and_comments_remain_isolated() {
+    for source in [
+        r#"void f() { var x = '${'\}'}'; }"#,
+        r#"void f() { var x = '${r'\}'}'; }"#,
+        r#"void f() { var x = '${/* \} */ 1}'; }"#,
+    ] {
+        let parsed = crate::parse(source);
+        assert!(parsed.errors.is_empty(), "{source}: {:?}", parsed.errors);
+        let tree = parsed.tree;
         assert!(tree.is_lossless(source));
-        let closing = tree
+        let opening = tree
             .tokens(source)
-            .find(|token| {
-                token.kind() == TokenKind::RBrace && token.offset() == source.rfind('}').unwrap()
-            })
+            .find(|token| token.kind() == TokenKind::InterpolationStart)
             .unwrap();
-        assert_eq!(closing.parent().kind(), NodeKind::StringInterpolation);
+        let closing = tree.closing_delimiter(source, opening.id()).unwrap();
+        assert_eq!(closing.offset(), source.find("}';").unwrap());
+        assert_eq!(tree.opening_delimiter(source, closing.id()), Some(opening));
     }
 }
 

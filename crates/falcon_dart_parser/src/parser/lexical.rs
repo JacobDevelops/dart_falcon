@@ -250,6 +250,9 @@ impl super::Parser<'_> {
                     sub.depth = self.depth;
                     sub.depth_limit_hit = self.depth_limit_hit;
                     let expr = sub.parse_expr();
+                    if sub.at(TokenKind::Error) {
+                        sub.error("expected '}' after interpolation expression");
+                    }
                     if sub.errors.is_empty()
                         && sub.at(TokenKind::Eof)
                         && expr.kind != NodeKind::ErrorExpr

@@ -33,10 +33,6 @@ pub(crate) fn interp_close(bytes: &[u8], open_brace: usize, end: usize) -> Optio
     let mut pos = open_brace + 1;
     while pos < end {
         match bytes[pos] {
-            b'\\' => {
-                pos += 2;
-                continue;
-            }
             b'{' => depth += 1,
             b'}' => {
                 depth -= 1;

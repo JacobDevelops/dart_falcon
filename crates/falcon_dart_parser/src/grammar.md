@@ -624,4 +624,8 @@ independent of the enclosing field, top-level variable, or local declaration.
   with the enclosing async or generator body marker. Grammar-local context flags
   (such as constructor-initializer ambiguity) do not cross the string boundary.
   Interpolation expressions that fail parsing report errors without adding a region.
+  Backslashes escape characters in string text, not in `${...}` expression code;
+  an unquoted `\}` still terminates the interpolation and reports the invalid
+  expression token. Quoted strings and comments inside the expression keep their
+  own lexical rules.
 - Pattern matching (section 8) requires Dart 3.x.
