@@ -1,11 +1,9 @@
-# Rust is managed by rustup through rust-toolchain.toml.
-[tool_alias]
-cargo-nextest = "github:nextest-rs/nextest"
-cargo-watch   = "github:watchexec/cargo-watch"
+#:schema https://mise.jdx.dev/schema/mise.json
 
+# Rust comes from rustup via rust-toolchain.toml; mise installs every other tool at latest.
 [tools]
-"aqua:sagiegurari/cargo-make" = "0.37.24"
-cargo-nextest                 = { version = "cargo-nextest-0.9.148", matching = "cargo-nextest" }
-cargo-watch                   = "8.5.3"
-"aqua:tamasfe/taplo"          = "0.10.0"
-bun                           = "1.4.3"
+bun                   = "latest"
+cargo-make            = "latest"
+taplo                 = "latest"
+"cargo:cargo-nextest" = { version = "latest", locked = true }
+"cargo:cargo-watch"   = { version = "latest", locked = true }
