@@ -26,7 +26,7 @@ falcon ships as a single binary.
 are attached to every [GitHub Release](https://github.com/JacobDevelops/dart_falcon/releases):
 
 ```sh
-curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.4.0/falcon-0.4.0-x86_64-linux.tar.gz | tar -xz
+curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.4.1/falcon-0.4.1-x86_64-linux.tar.gz | tar -xz
 sudo mv falcon /usr/local/bin/
 ```
 
@@ -47,7 +47,7 @@ wrapper is MIT/Apache-2.0 licensed; bundled jemalloc is
 
 ```toml
 [tools]
-"github:JacobDevelops/dart_falcon" = { version = "0.4.0", matching = "falcon-" }
+"github:JacobDevelops/dart_falcon" = { version = "0.4.1", matching = "falcon-" }
 ```
 
 Run `mise exec -- falcon check .`, or use `falcon` directly with mise activated.

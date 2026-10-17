@@ -23,7 +23,7 @@ tarball contains a single `falcon` executable.
 ```sh
 # Substitute the release version in both the tag and archive name, and your platform:
 #   x86_64-linux | aarch64-linux | x86_64-darwin | aarch64-darwin
-curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.4.0/falcon-0.4.0-x86_64-linux.tar.gz \
+curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/download/v0.4.1/falcon-0.4.1-x86_64-linux.tar.gz \
   | tar -xz
 sudo mv falcon /usr/local/bin/   # or anywhere on your PATH
 
@@ -52,7 +52,7 @@ Add the GitHub release backend to your project's `mise.toml`:
 
 ```toml
 [tools]
-"github:JacobDevelops/dart_falcon" = { version = "0.4.0", matching = "falcon-" }
+"github:JacobDevelops/dart_falcon" = { version = "0.4.1", matching = "falcon-" }
 ```
 
 Install the pinned release and run it:
