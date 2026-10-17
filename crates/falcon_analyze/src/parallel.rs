@@ -40,6 +40,7 @@ fn analyze_file(
         program,
         errors: parse_errors,
         syntax,
+        ..
     } = parse_for_package(source, package_version);
     let ctx = AnalyzeContext {
         environment: workspace.environment,
@@ -108,6 +109,7 @@ fn parse_one<'src>(path: &'src Path, source: &'src str, workspace: Workspace<'_>
         program,
         errors: parse_errors,
         syntax,
+        ..
     } = parse_for_package(source, workspace.package_language_version(path));
     Parsed {
         path,

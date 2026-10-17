@@ -227,6 +227,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let TopLevelDecl::Function(function) = &program.declarations[0] else {

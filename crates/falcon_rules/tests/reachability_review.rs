@@ -78,6 +78,7 @@ fn assert_without_external_sources(rule_name: &str, source: &str) {
         program,
         errors,
         syntax,
+        ..
     } = falcon_dart_parser::parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::build(

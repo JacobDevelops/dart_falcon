@@ -381,6 +381,7 @@ void use(dynamic value) {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
@@ -458,6 +459,7 @@ void use(dynamic value) {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
@@ -503,6 +505,7 @@ void use(dynamic value) {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
@@ -595,6 +598,7 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
@@ -689,6 +693,7 @@ void cases(dynamic d, Function fn, Holder h) {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(

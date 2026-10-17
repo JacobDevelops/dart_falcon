@@ -471,6 +471,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();
@@ -499,6 +500,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let mut declarations = Vec::with_capacity(program.declarations.len() * 2);
@@ -546,6 +548,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();
@@ -577,6 +580,7 @@ int get top => 0;
             program,
             errors,
             syntax,
+            ..
         } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();

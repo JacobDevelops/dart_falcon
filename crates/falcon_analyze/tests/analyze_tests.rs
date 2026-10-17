@@ -243,6 +243,7 @@ fn test_end_to_end_parse_analyze_serialize() {
         program,
         errors: parse_errors,
         syntax,
+        ..
     } = falcon_dart_parser::parse(source);
     assert!(
         parse_errors.is_empty(),
@@ -290,6 +291,7 @@ fn context_reuses_per_file_analysis_facts() {
         program,
         errors,
         syntax,
+        ..
     } = falcon_dart_parser::parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let config = FalconConfig::default();

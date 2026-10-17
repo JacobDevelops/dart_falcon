@@ -415,6 +415,7 @@ mod tests {
                     program,
                     errors,
                     syntax,
+                    ..
                 } = parse(&source);
                 assert!(errors.is_empty(), "{name}/{kind}: {errors:?}");
                 let ctx =

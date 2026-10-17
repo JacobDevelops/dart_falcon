@@ -521,6 +521,9 @@ pub enum TokenKind {
     IntLit,
     DoubleLit,
     StringLit,
+    StringPart,
+    InterpolationStart,
+    InterpolationDollar,
 
     Ident,
 

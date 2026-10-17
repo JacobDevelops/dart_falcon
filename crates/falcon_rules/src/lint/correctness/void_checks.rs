@@ -537,6 +537,7 @@ void use(Value value) {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
@@ -583,6 +584,7 @@ void use() {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(
@@ -696,6 +698,7 @@ void use() {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let environment =
@@ -784,6 +787,7 @@ void cases(Factory owner, Object value) {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let identities = IdentityIndex::from_project_files(

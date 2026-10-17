@@ -167,6 +167,7 @@ class Child extends Values {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("self_comparisons.dart");

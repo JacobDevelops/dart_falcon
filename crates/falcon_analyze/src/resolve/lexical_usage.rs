@@ -739,6 +739,7 @@ mod tests {
             program,
             syntax,
             errors,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();

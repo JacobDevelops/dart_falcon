@@ -3,6 +3,8 @@
 //! Produces a [`falcon_syntax`] AST from Dart source text.
 //! No external grammar dependencies (no tree-sitter, no Dart SDK).
 
+#[cfg(feature = "cst-differential")]
+mod differential;
 pub mod lexer;
 pub mod parser;
 

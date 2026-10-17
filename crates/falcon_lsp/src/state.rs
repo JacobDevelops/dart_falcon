@@ -384,6 +384,7 @@ impl LspState {
                 program,
                 errors,
                 syntax,
+                ..
             } = parse_for_package(&doc.text, Some(language_version));
             doc.program = program;
             doc.syntax = syntax;
@@ -448,6 +449,7 @@ impl LspState {
             program,
             errors: parse_errors,
             syntax,
+            ..
         } = parse_for_package(&text, package_version);
         let language_version = self.environment.language_version(&path, &text);
         let mut syntax_diagnostics = syntax_error_diagnostics(&path, &parse_errors);
@@ -516,6 +518,7 @@ impl LspState {
             program,
             errors: parse_errors,
             syntax,
+            ..
         } = parse_for_package(&text, package_version);
         doc.syntax_diagnostics = syntax_error_diagnostics(&doc.path, &parse_errors);
         doc.source_rejected = source_error.is_some();
@@ -958,6 +961,7 @@ impl LspState {
                         program,
                         errors,
                         syntax,
+                        ..
                     } = parse_for_package(&source, self.environment.package_language_version(path));
                     files.push(ProjectFile {
                         path: path.to_path_buf(),
@@ -1211,10 +1215,17 @@ impl LspState {
                             program,
                             errors,
                             syntax,
+                            ..
                         } = if is_dart {
                             let package_version = self.environment.package_language_version(path);
                             parse_for_package(&source, package_version)
                         } else {
+                            let syntax = lex_syntax(&source);
+                            let tree = falcon_syntax::cst::SyntaxTree::build(
+                                &source,
+                                syntax.tokens(),
+                                Vec::new(),
+                            );
                             falcon_dart_parser::ParseResult {
                                 program: Program {
                                     library_directive: None,
@@ -1226,7 +1237,8 @@ impl LspState {
                                     span: Span::new(0, 0),
                                 },
                                 errors: Vec::new(),
-                                syntax: lex_syntax(&source),
+                                syntax,
+                                tree,
                             }
                         };
                         files.push(ProjectFile {
@@ -1668,6 +1680,7 @@ mod dependency_tests {
             program,
             errors,
             syntax,
+            ..
         } = falcon_dart_parser::parse("");
         let files = [ProjectFile {
             path: path.clone(),

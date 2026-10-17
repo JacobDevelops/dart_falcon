@@ -23,6 +23,7 @@ fn reports(rule: &dyn Rule, source: &str) -> Vec<String> {
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let path = Path::new("syntax.dart");
@@ -250,6 +251,7 @@ void pattern<T>(T? value) {
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let path = Path::new("syntax.dart");

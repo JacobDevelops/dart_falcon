@@ -109,6 +109,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let falcon_dart_parser::ParseResult {

@@ -231,6 +231,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let imports: Vec<_> = library_doc_imports(&program, source, &syntax).collect();
@@ -280,6 +281,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let imports: Vec<_> = library_doc_imports(&program, source, &syntax).collect();

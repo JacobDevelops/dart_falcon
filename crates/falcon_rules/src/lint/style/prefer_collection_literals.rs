@@ -438,6 +438,7 @@ mod tests {
                 program,
                 errors,
                 syntax,
+                ..
             } = parse(source);
             assert!(errors.is_empty());
             let path = PathBuf::from("/project/t.dart");

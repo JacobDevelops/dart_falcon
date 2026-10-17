@@ -303,6 +303,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("owner-dependencies.dart");
@@ -347,6 +348,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("review_declaration_order.dart");

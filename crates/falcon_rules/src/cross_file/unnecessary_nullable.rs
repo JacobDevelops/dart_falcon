@@ -608,6 +608,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         UnnecessaryNullable
@@ -687,6 +688,7 @@ mod tests {
                 program,
                 errors,
                 syntax,
+                ..
             } = parse("");
             assert!(errors.is_empty());
             files.push(ProjectFile {

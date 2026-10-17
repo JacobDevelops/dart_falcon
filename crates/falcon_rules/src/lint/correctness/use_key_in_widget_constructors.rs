@@ -350,6 +350,7 @@ abstract class StatelessWidget extends Widget { const StatelessWidget({super.key
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         assert!(errors.is_empty(), "parse errors: {errors:?}");
         let environment = AnalysisEnvironment::discover([path.as_path()]);

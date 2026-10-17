@@ -403,6 +403,7 @@ dependencies = [
  "falcon_syntax",
  "insta",
  "tracing",
+ "walkdir",
 ]
 
 [[package]]

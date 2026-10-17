@@ -88,6 +88,7 @@ mod tests {
             program,
             syntax,
             errors,
+            ..
         } = falcon_dart_parser::parse(source);
         assert!(!errors.is_empty());
         let config = falcon_config::FalconConfig::default();

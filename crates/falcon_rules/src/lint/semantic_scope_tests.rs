@@ -18,6 +18,7 @@ fn generic_predicate_closure_keeps_completed_input_context() {
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::from_project_files(
@@ -119,6 +120,7 @@ class GenericLookup {
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::from_project_files(
@@ -367,6 +369,7 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::from_project_files(
@@ -518,6 +521,7 @@ fn legacy_switch_case_expressions_reach_semantic_visitors() {
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::from_project_files(
@@ -576,6 +580,7 @@ extension type E(int? y) {
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::from_project_files(
@@ -676,6 +681,7 @@ void run(Numeric number) {
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::from_project_files(
@@ -743,6 +749,7 @@ void assertedCascade(C value) {
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::from_project_files(

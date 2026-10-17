@@ -1,11 +1,9 @@
+use falcon_syntax::Feature;
 use falcon_syntax::ast::*;
-use falcon_syntax::token::{SyntaxStore, Token, TokenKind};
-use falcon_syntax::{Feature, LanguageVersion};
+use falcon_syntax::cst::NodeKind;
+use falcon_syntax::token::{Token, TokenKind};
 
-use super::{
-    ParseError, Parser,
-    lexical::{InterpolationRegion, visit_interpolations},
-};
+use super::Parser;
 
 #[derive(Clone, Copy, Default)]
 struct MemberModifiers {
@@ -31,6 +29,7 @@ impl<'src> Parser<'src> {
         if self.peek_kind_after_annotations() != TokenKind::Library {
             return None;
         }
+        let marker = self.start();
         let start = self.cur().offset();
         let annotations = self.parse_annotations();
         self.advance(); // library
@@ -43,6 +42,7 @@ impl<'src> Parser<'src> {
             }
         }
         self.expect(TokenKind::Semicolon);
+        marker.complete(self, NodeKind::LibraryDirective);
         Some(LibraryDirective {
             annotations,
             name,
@@ -60,6 +60,7 @@ impl<'src> Parser<'src> {
         if !is_part_of {
             return None;
         }
+        let marker = self.start();
         let start = self.cur().offset();
         let annotations = self.parse_annotations();
         self.advance(); // part
@@ -74,6 +75,7 @@ impl<'src> Parser<'src> {
             (None, segs)
         };
         self.expect(TokenKind::Semicolon);
+        marker.complete(self, NodeKind::PartOfDirective);
         Some(PartOfDirective {
             annotations,
             uri,
@@ -83,15 +85,19 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn try_parse_part(&mut self) -> Option<PartDirective> {
+        let marker = self.start();
         let start = self.cur().offset();
         let annotations = self.parse_annotations();
         self.expect(TokenKind::Part);
         if !matches!(self.cur().kind, TokenKind::StringLit) {
             self.error("expected string literal in part directive");
+            self.missing(NodeKind::Error);
+            marker.complete(self, NodeKind::Error);
             return None;
         }
         let uri = self.parse_adjacent_strings();
         self.expect(TokenKind::Semicolon);
+        marker.complete(self, NodeKind::PartDirective);
         Some(PartDirective {
             annotations,
             uri,
@@ -100,6 +106,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_import(&mut self) -> ImportDirective {
+        let marker = self.start();
         let start = self.cur().offset();
         let annotations = self.parse_annotations();
         self.expect(TokenKind::Import);
@@ -109,6 +116,7 @@ impl<'src> Parser<'src> {
         let as_name = self.eat(TokenKind::As).map(|_| self.expect_ident());
         let combinators = self.parse_import_combinators();
         self.expect(TokenKind::Semicolon);
+        marker.complete(self, NodeKind::ImportDirective);
         ImportDirective {
             annotations,
             uri,
@@ -121,6 +129,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_export(&mut self) -> ExportDirective {
+        let marker = self.start();
         let start = self.cur().offset();
         let annotations = self.parse_annotations();
         self.expect(TokenKind::Export);
@@ -128,6 +137,7 @@ impl<'src> Parser<'src> {
         let configurable_uris = self.parse_configurable_uris();
         let combinators = self.parse_import_combinators();
         self.expect(TokenKind::Semicolon);
+        marker.complete(self, NodeKind::ExportDirective);
         ExportDirective {
             annotations,
             uri,
@@ -142,6 +152,7 @@ impl<'src> Parser<'src> {
     fn parse_configurable_uris(&mut self) -> Vec<ConfigurableUri> {
         let mut uris = Vec::new();
         while self.at(TokenKind::If) {
+            let marker = self.start();
             let start = self.cur().offset();
             self.advance(); // if
             self.expect(TokenKind::LParen);
@@ -158,6 +169,7 @@ impl<'src> Parser<'src> {
                 uri,
                 span: self.span_from(start),
             });
+            marker.complete(self, NodeKind::ConfigurableUri);
         }
         uris
     }
@@ -166,15 +178,19 @@ impl<'src> Parser<'src> {
         let mut combinators = Vec::new();
         loop {
             if self.at(TokenKind::Show) {
+                let marker = self.start();
                 let start = self.cur().offset();
                 self.advance();
                 let names = self.parse_ident_list();
                 combinators.push(ImportCombinator::Show(names, self.span_from(start)));
+                marker.complete(self, NodeKind::Combinator);
             } else if self.at(TokenKind::Hide) {
+                let marker = self.start();
                 let start = self.cur().offset();
                 self.advance();
                 let names = self.parse_ident_list();
                 combinators.push(ImportCombinator::Hide(names, self.span_from(start)));
+                marker.complete(self, NodeKind::Combinator);
             } else {
                 break;
             }
@@ -193,6 +209,29 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_top_level_decl(&mut self) -> Option<TopLevelDecl> {
+        let marker = self.start();
+        let declaration = self.parse_top_level_decl_inner();
+        let kind = match &declaration {
+            Some(TopLevelDecl::Class(_)) => NodeKind::ClassDecl,
+            Some(TopLevelDecl::ClassTypeAlias(_)) => NodeKind::ClassTypeAliasDecl,
+            Some(TopLevelDecl::Mixin(_)) => NodeKind::MixinDecl,
+            Some(TopLevelDecl::MixinClass(_)) => NodeKind::MixinClassDecl,
+            Some(TopLevelDecl::Enum(_)) => NodeKind::EnumDecl,
+            Some(TopLevelDecl::Extension(_)) => NodeKind::ExtensionDecl,
+            Some(TopLevelDecl::ExtensionType(_)) => NodeKind::ExtensionTypeDecl,
+            Some(TopLevelDecl::TypeAlias(_)) => NodeKind::TypeAliasDecl,
+            Some(TopLevelDecl::Function(_)) => NodeKind::FunctionDecl,
+            Some(TopLevelDecl::Variable(_)) => NodeKind::TopLevelVarDecl,
+            _ => {
+                marker.abandon(self);
+                return declaration;
+            }
+        };
+        marker.complete(self, kind);
+        declaration
+    }
+
+    fn parse_top_level_decl_inner(&mut self) -> Option<TopLevelDecl> {
         let annotations = self.parse_annotations();
         let start = self.cur().offset();
 
@@ -291,11 +330,15 @@ impl<'src> Parser<'src> {
 
         // Mixin-application class: `class MA = Super with M [implements I];`
         if primary_constructor.is_none() && self.eat(TokenKind::Eq).is_some() {
+            let superclass_marker = self.start();
             let superclass = self.parse_type();
+            superclass_marker.complete(self, NodeKind::ExtendsClause);
             // A mixin-application class requires a `with` clause; without it this is
             // not a valid class type alias.
+            let with_marker = self.start();
             self.expect(TokenKind::With);
             let with_clause = self.parse_type_list();
+            with_marker.complete(self, NodeKind::WithClause);
             let implements = self.parse_type_clause(TokenKind::Implements);
             self.expect(TokenKind::Semicolon);
             return TopLevelDecl::ClassTypeAlias(ClassTypeAliasDecl {
@@ -310,7 +353,7 @@ impl<'src> Parser<'src> {
             });
         }
 
-        let extends = self.eat(TokenKind::Extends).map(|_| self.parse_type());
+        let extends = self.parse_extends_clause();
         let with_clause = self.parse_type_clause(TokenKind::With);
         let implements = self.parse_type_clause(TokenKind::Implements);
         let members = self.parse_class_body_in(Some(&self.src[name.span.start..name.span.end]));
@@ -345,6 +388,7 @@ impl<'src> Parser<'src> {
         if !representation && !self.version.supports(Feature::PrimaryConstructors) {
             self.error("This requires the 'primary-constructors' language feature");
         }
+        let marker = self.start();
         let constructor_name = named.then(|| {
             self.advance(); // .
             self.expect_ctor_name()
@@ -358,6 +402,7 @@ impl<'src> Parser<'src> {
             params,
             span,
         };
+        marker.complete(self, NodeKind::PrimaryConstructor);
         (name, type_params, Some(primary_constructor))
     }
 
@@ -394,7 +439,7 @@ impl<'src> Parser<'src> {
     ) -> MixinClassDecl {
         self.expect(TokenKind::Class);
         let (name, type_params, primary_constructor) = self.parse_name_maybe_primary(false);
-        let extends = self.eat(TokenKind::Extends).map(|_| self.parse_type());
+        let extends = self.parse_extends_clause();
         let with_clause = self.parse_type_clause(TokenKind::With);
         let implements = self.parse_type_clause(TokenKind::Implements);
         let members = self.parse_class_body_in(Some(&self.src[name.span.start..name.span.end]));
@@ -413,9 +458,30 @@ impl<'src> Parser<'src> {
         }
     }
 
+    fn parse_extends_clause(&mut self) -> Option<DartType> {
+        if !self.at(TokenKind::Extends) {
+            return None;
+        }
+        let marker = self.start();
+        self.advance();
+        let ty = self.parse_type();
+        marker.complete(self, NodeKind::ExtendsClause);
+        Some(ty)
+    }
+
     fn parse_type_clause(&mut self, keyword: TokenKind) -> Vec<DartType> {
-        if self.eat(keyword).is_some() {
-            self.parse_type_list()
+        if self.at(keyword) {
+            let marker = self.start();
+            self.advance();
+            let types = self.parse_type_list();
+            let kind = match keyword {
+                TokenKind::With => NodeKind::WithClause,
+                TokenKind::Implements => NodeKind::ImplementsClause,
+                TokenKind::On => NodeKind::OnClause,
+                _ => unreachable!("type clause keyword"),
+            };
+            marker.complete(self, kind);
+            types
         } else {
             Vec::new()
         }
@@ -585,6 +651,23 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_class_member(&mut self) -> ClassMember {
+        let marker = self.start();
+        let member = self.parse_class_member_inner();
+        let kind = match &member {
+            ClassMember::Field(_) => NodeKind::FieldDecl,
+            ClassMember::Method(_) => NodeKind::MethodDecl,
+            ClassMember::Getter(_) => NodeKind::GetterDecl,
+            ClassMember::Setter(_) => NodeKind::SetterDecl,
+            ClassMember::Operator(_) => NodeKind::OperatorDecl,
+            ClassMember::Constructor(_) => NodeKind::ConstructorDecl,
+            ClassMember::PrimaryConstructorBody(_) => NodeKind::PrimaryConstructorBody,
+            ClassMember::Error(_) => NodeKind::ErrorNode,
+        };
+        marker.complete(self, kind);
+        member
+    }
+
+    fn parse_class_member_inner(&mut self) -> ClassMember {
         let start = self.cur().offset();
         let annotations = self.parse_annotations();
         let modifiers = self.parse_member_modifiers();
@@ -697,7 +780,9 @@ impl<'src> Parser<'src> {
 
     pub(super) fn expect_ctor_name(&mut self) -> Identifier {
         if self.at(TokenKind::New) {
+            let marker = self.start();
             let tok = self.advance();
+            marker.complete(self, NodeKind::Identifier);
             return self.tok_ident(&tok);
         }
         self.expect_ident()
@@ -753,6 +838,7 @@ impl<'src> Parser<'src> {
         // A setter's single value parameter accepts the same leading modifiers as
         // any formal (`set x(covariant final T v)`) and a trailing comma
         // (`set x(int a,)`), which method parameter lists already allow.
+        let parameter_marker = self.start();
         let param_annotations = self.parse_annotations();
         let is_covariant = self.eat(TokenKind::Covariant).is_some();
         let _ = self.eat(TokenKind::Final);
@@ -778,6 +864,7 @@ impl<'src> Parser<'src> {
                 span: self.span_from(type_start),
             })));
         }
+        parameter_marker.complete(self, NodeKind::SetterParameter);
         self.eat(TokenKind::Comma); // optional trailing comma
         self.expect(TokenKind::RParen);
         let body = self.parse_function_body(AsyncMarker::Sync);
@@ -934,10 +1021,12 @@ impl<'src> Parser<'src> {
 
     /// Parse a redirecting-factory target after `=`: `Type[.name]`.
     fn parse_redirected_constructor(&mut self) -> RedirectedConstructor {
+        let marker = self.start();
         let start = self.cur().offset();
         self.expect(TokenKind::Eq);
         let type_ = self.parse_type();
         let constructor_name = self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
+        marker.complete(self, NodeKind::RedirectedConstructor);
         RedirectedConstructor {
             type_,
             constructor_name,
@@ -961,7 +1050,7 @@ impl<'src> Parser<'src> {
             is_async: outer_is_async,
             ..
         } = modifiers;
-        let saved = self.pos;
+        let saved = self.checkpoint();
 
         if is_final || is_const || is_late {
             // Const constructor: `const ClassName(` or `const ClassName.name(`.
@@ -977,9 +1066,11 @@ impl<'src> Parser<'src> {
                 let is_ctor =
                     self.ctx.ctor_name == Some(name_text) && (dotted || p1 == TokenKind::LParen);
                 if is_ctor {
-                    let ctor_saved = self.pos;
+                    let ctor_saved = self.checkpoint();
                     let name_tok = *self.cur();
+                    let name_marker = self.start();
                     self.advance();
+                    name_marker.complete(self, NodeKind::Identifier);
                     let name = self.tok_ident(&name_tok);
                     let constructor_name =
                         self.eat(TokenKind::Dot).map(|_| self.expect_ctor_name());
@@ -1002,7 +1093,7 @@ impl<'src> Parser<'src> {
                         });
                     }
                     // Not a constructor (e.g. `const qualified.Type field = ...`) — rollback
-                    self.rewind_to(ctor_saved);
+                    self.restore_cursor(ctor_saved);
                 }
             }
             let field_type = self.try_parse_type_followed_by(TokenKind::is_identifier_like);
@@ -1044,7 +1135,9 @@ impl<'src> Parser<'src> {
 
             if self.cur().kind.is_identifier_like() {
                 let name_tok = *self.cur();
+                let name_marker = self.start();
                 self.advance();
+                name_marker.complete(self, NodeKind::Identifier);
                 // Method
                 if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
                     let name = self.tok_ident(&name_tok);
@@ -1081,7 +1174,7 @@ impl<'src> Parser<'src> {
                     start,
                 ));
             }
-            self.rewind_to(saved);
+            self.restore_cursor(saved);
         }
 
         // No type prefix — `name(...)`, `name.ctor(...)`, or `name<T>(...)`.
@@ -1093,7 +1186,9 @@ impl<'src> Parser<'src> {
         if self.cur().kind.is_identifier_like() {
             let name_tok = *self.cur();
             let name_text = self.tok_text(&name_tok);
+            let name_marker = self.start();
             self.advance();
+            name_marker.complete(self, NodeKind::Identifier);
             let has_ctor_dot = self.at(TokenKind::Dot) && self.is_ctor_name_at_offset(1);
             if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) || has_ctor_dot {
                 let name = self.tok_ident(&name_tok);
@@ -1150,14 +1245,17 @@ impl<'src> Parser<'src> {
                     });
                 }
             }
-            self.rewind_to(saved);
+            self.restore_cursor(saved);
         }
 
         // Give up — emit error node and skip to next member
         let span = self.cur_span();
+        let recovery = self.start();
+        self.missing(NodeKind::Identifier);
         self.error("could not parse class member");
         self.synchronize(&[TokenKind::Semicolon, TokenKind::RBrace]);
         self.eat(TokenKind::Semicolon);
+        recovery.complete(self, NodeKind::Error);
         ClassMember::Error(ErrorNode {
             message: "could not parse class member".into(),
             span,
@@ -1224,6 +1322,7 @@ impl<'src> Parser<'src> {
         }
         let mut inits = Vec::new();
         loop {
+            let marker = self.start();
             let start = self.cur().offset();
             let init = match self.cur().kind {
                 TokenKind::Super => {
@@ -1248,8 +1347,10 @@ impl<'src> Parser<'src> {
                         }
                     } else {
                         // this.field = value
-                        let field = call_name
-                            .unwrap_or_else(|| Identifier::new("<error>", self.cur_span()));
+                        let field = call_name.unwrap_or_else(|| {
+                            self.missing(NodeKind::Identifier);
+                            Identifier::new("<error>", self.cur_span())
+                        });
                         self.expect(TokenKind::Eq);
                         let value = self.parse_ctor_init_value();
                         ConstructorInitializer::FieldInit {
@@ -1290,6 +1391,13 @@ impl<'src> Parser<'src> {
                     }
                 }
             };
+            let kind = match &init {
+                ConstructorInitializer::SuperCall { .. } => NodeKind::SuperCallInitializer,
+                ConstructorInitializer::ThisCall { .. } => NodeKind::ThisCallInitializer,
+                ConstructorInitializer::FieldInit { .. } => NodeKind::FieldInitializer,
+                ConstructorInitializer::Assert { .. } => NodeKind::AssertInitializer,
+            };
+            marker.complete(self, kind);
             inits.push(init);
             if self.eat(TokenKind::Comma).is_none() {
                 break;
@@ -1333,9 +1441,11 @@ impl<'src> Parser<'src> {
         let mut members = Vec::new();
 
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let marker = self.start();
             let v_start = self.cur().offset();
             let v_annotations = self.parse_annotations();
             if !self.cur().kind.is_identifier_like() {
+                marker.complete(self, NodeKind::Error);
                 break;
             }
             let v_name = self.expect_ident();
@@ -1361,6 +1471,7 @@ impl<'src> Parser<'src> {
                 args,
                 span: self.span_from(v_start),
             });
+            marker.complete(self, NodeKind::EnumVariant);
             let has_comma = self.eat(TokenKind::Comma).is_some();
             if self.eat(TokenKind::Semicolon).is_some() {
                 members = self.parse_class_body();
@@ -1381,8 +1492,10 @@ impl<'src> Parser<'src> {
             None
         };
         let type_params = self.parse_type_params();
+        let on_marker = self.start();
         self.eat(TokenKind::On);
         let on_type = self.parse_type();
+        on_marker.complete(self, NodeKind::OnClause);
         let members = self.parse_class_body_in(None);
         ExtensionDecl {
             annotations,
@@ -1405,6 +1518,12 @@ impl<'src> Parser<'src> {
         // The representation constructor is mandatory; recover with an empty one.
         let primary_constructor = primary_constructor.unwrap_or_else(|| {
             self.error("expected representation constructor");
+            let marker = self.start();
+            self.missing(NodeKind::Identifier);
+            let params_marker = self.start();
+            self.missing(NodeKind::Identifier);
+            params_marker.complete(self, NodeKind::FormalParamList);
+            marker.complete(self, NodeKind::PrimaryConstructor);
             PrimaryConstructor {
                 is_const: false,
                 name_span: name.span,
@@ -1431,7 +1550,7 @@ impl<'src> Parser<'src> {
 
     fn parse_typedef(&mut self, annotations: Vec<Annotation>, start: usize) -> TypeAliasDecl {
         self.expect(TokenKind::Typedef);
-        let saved = self.pos;
+        let saved = self.checkpoint();
 
         // Modern form: `typedef Name<T> = Type;`
         if self.cur().kind.is_identifier_like() {
@@ -1449,11 +1568,12 @@ impl<'src> Parser<'src> {
                     span: self.span_from(start),
                 };
             }
-            self.rewind_to(saved);
+            self.restore_cursor(saved);
         }
 
         // Legacy form: `typedef [returnType] Name<T>(params);` — synthesize a
         // function type from the return type and parameter list.
+        let legacy_marker = self.start();
         let leading = self.parse_type();
         let ty_start = leading.span().start;
         let (return_type, name, type_params) = if self.cur().kind.is_identifier_like() {
@@ -1467,6 +1587,7 @@ impl<'src> Parser<'src> {
             (None, name, type_params)
         };
         let params = self.parse_formal_param_list();
+        legacy_marker.complete(self, NodeKind::LegacyTypedef);
         self.expect(TokenKind::Semicolon);
         let fn_span = Span::new(ty_start, params.span.end);
         let aliased = DartType::Function(Box::new(FunctionType {
@@ -1651,6 +1772,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_string_lit(&mut self) -> StringLitNode {
+        let marker = self.start();
         let tok = *self.cur();
         let raw = self.tok_text(&tok);
         let span = Self::tok_span(&tok);
@@ -1659,10 +1781,10 @@ impl<'src> Parser<'src> {
             self.advance();
         } else {
             self.error("expected string literal");
+            self.missing(NodeKind::Error);
         }
         let interpolations = if is_string_lit {
-            let (interps, interp_errors) =
-                scan_interpolations(self.syntax, self.src, tok.offset(), raw, self.version);
+            let (interps, interp_errors) = self.scan_string_interpolations(&tok);
             // Surface any interpolation sub-parse diagnostics to the enclosing
             // program (their offsets are already absolute).
             self.errors.extend(interp_errors);
@@ -1683,65 +1805,7 @@ impl<'src> Parser<'src> {
             .delimiter()
             .map_or_else(|| raw.strip_prefix('r').unwrap_or(raw), |lit| lit.content)
             .to_owned();
+        marker.complete(self, NodeKind::StringLitNode);
         node
     }
-}
-
-/// Scan a single string literal's raw text for interpolation regions and parse
-/// each into an expression with an absolute source span.
-///
-/// `lit_start` is the absolute byte offset of `raw` within `src`. Raw strings
-/// (`r'...'`) yield no interpolations. A `${expr}` whose inner slice fails to
-/// parse cleanly records no interpolation, but its parse diagnostics (with
-/// absolute source offsets) are returned alongside so the enclosing program can
-/// surface them.
-fn scan_interpolations(
-    syntax: &SyntaxStore,
-    src: &str,
-    lit_start: usize,
-    raw: &str,
-    version: LanguageVersion,
-) -> (Vec<StringInterpolation>, Vec<ParseError>) {
-    let mut out = Vec::new();
-    let mut errs = Vec::new();
-    visit_interpolations(raw, lit_start, |region| match region {
-        InterpolationRegion::Expression(span) => {
-            let (interp, interp_errs) = parse_interp_expr(syntax, src, span, version);
-            if let Some(interp) = interp {
-                out.push(interp);
-            }
-            errs.extend(interp_errs);
-        }
-        InterpolationRegion::Identifier(span) => out.push(StringInterpolation {
-            expr: if &src[span.start..span.end] == "this" {
-                Expr::This { span }
-            } else {
-                Expr::Ident(Identifier::new(&src[span.start..span.end], span))
-            },
-            span,
-        }),
-    });
-    (out, errs)
-}
-
-/// Parse a retained interpolation stream as one standalone expression. Invalid
-/// expressions keep their absolute diagnostics but do not become interpolations.
-fn parse_interp_expr(
-    syntax: &SyntaxStore,
-    src: &str,
-    span: Span,
-    version: LanguageVersion,
-) -> (Option<StringInterpolation>, Vec<ParseError>) {
-    if span.start >= span.end {
-        return (None, Vec::new());
-    }
-    let retained = syntax
-        .interpolation(span)
-        .expect("retained interpolation stream");
-    let mut sub = Parser::new(retained, src, version);
-    let expr = sub.parse_expr();
-    if !sub.errors.is_empty() || !sub.at(TokenKind::Eof) || matches!(expr, Expr::Error { .. }) {
-        return (None, sub.errors);
-    }
-    (Some(StringInterpolation { expr, span }), Vec::new())
 }

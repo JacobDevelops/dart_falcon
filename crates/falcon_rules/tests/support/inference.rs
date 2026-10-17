@@ -47,6 +47,7 @@ pub fn analyze(
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |config| {
         let root = config?.flutter_root.as_ref()?;

@@ -1,7 +1,8 @@
 use falcon_syntax::ast::*;
+use falcon_syntax::cst::NodeKind;
 use falcon_syntax::token::TokenKind;
 
-use super::Parser;
+use super::{Marker, Parser};
 
 #[derive(Clone, Copy)]
 pub(super) enum Brackets {
@@ -76,6 +77,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_adjacent_strings(&mut self) -> StringLitNode {
+        let marker = self.start();
         let mut node = self.parse_string_lit();
         while self.at(TokenKind::StringLit) {
             let next = self.parse_string_lit();
@@ -90,6 +92,11 @@ impl<'src> Parser<'src> {
             node.span = node.span.merge(&next.span);
             node.interpolations.extend(next.interpolations);
         }
+        if node.is_adjacent {
+            marker.complete(self, NodeKind::AdjacentStrings);
+        } else {
+            marker.abandon(self);
+        }
         node
     }
 
@@ -98,8 +105,14 @@ impl<'src> Parser<'src> {
         let mut arms = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let start = self.cur().offset();
+            let arm = self.start();
             let pattern = self.parse_pattern();
-            let guard = self.eat(TokenKind::When).map(|_| self.parse_expr());
+            let guard = self.eat(TokenKind::When).map(|_| {
+                let marker = self.start();
+                let expr = self.parse_expr();
+                marker.complete(self, NodeKind::ExprGuard);
+                expr
+            });
             self.expect(TokenKind::Arrow);
             let body = self.parse_expr();
             arms.push(SwitchExprArm {
@@ -108,21 +121,23 @@ impl<'src> Parser<'src> {
                 body,
                 span: self.span_from(start),
             });
+            arm.complete(self, NodeKind::SwitchExprArm);
             self.eat(TokenKind::Comma);
         }
         self.expect(TokenKind::RBrace);
         arms
     }
 
-    fn parse_typed_collection(&mut self, is_const: bool, start: usize) -> Expr {
+    fn parse_typed_collection(&mut self, is_const: bool, start: usize, marker: Marker) -> Expr {
         let type_args = self.parse_type_args();
         match self.cur().kind {
             TokenKind::LBracket => {
-                self.parse_list_literal(is_const, type_args.into_iter().next(), start)
+                self.parse_list_literal(is_const, type_args.into_iter().next(), start, marker)
             }
-            TokenKind::LBrace => self.parse_map_or_set_literal(is_const, type_args, start),
+            TokenKind::LBrace => self.parse_map_or_set_literal(is_const, type_args, start, marker),
             _ => {
                 self.error("expected '[' or '{' after type arguments in collection literal");
+                marker.complete(self, NodeKind::ErrorExpr);
                 Expr::Error {
                     span: self.span_from(start),
                 }
@@ -186,13 +201,16 @@ impl<'src> Parser<'src> {
 
     fn parse_assign(&mut self) -> Expr {
         let start = self.cur().offset();
+        let marker = self.start();
         let lhs = self.parse_cascade();
 
         let Some(op) = self.try_parse_assign_op() else {
+            marker.abandon(self);
             return lhs;
         };
         let rhs = self.parse_assign(); // right-associative
         let span = self.span_from(start);
+        marker.complete(self, NodeKind::AssignExpr);
         Expr::Assign {
             target: Box::new(lhs),
             op,
@@ -207,10 +225,12 @@ impl<'src> Parser<'src> {
     /// rather than in `parse_postfix`, which only ever sees a primary target.
     fn parse_cascade(&mut self) -> Expr {
         let start = self.cur().offset();
+        let marker = self.start();
         let object = self.parse_conditional();
         if matches!(self.cur().kind, TokenKind::DotDot | TokenKind::DotDotQmark) {
             let is_null_aware = self.at(TokenKind::DotDotQmark);
             let sections = self.parse_cascade_sections();
+            marker.complete(self, NodeKind::CascadeExpr);
             return Expr::Cascade {
                 object: Box::new(object),
                 sections,
@@ -218,11 +238,13 @@ impl<'src> Parser<'src> {
                 span: self.span_from(start),
             };
         }
+        marker.abandon(self);
         object
     }
 
     fn parse_conditional(&mut self) -> Expr {
         let start = self.cur().offset();
+        let marker = self.start();
         let cond = self.parse_null_coalesce();
         if self.eat(TokenKind::Qmark).is_some() {
             // Both branches are `expressionWithoutCascade` in the Dart grammar,
@@ -233,6 +255,7 @@ impl<'src> Parser<'src> {
             self.expect(TokenKind::Colon);
             let else_expr = self.parse_expr_without_cascade();
             let span = self.span_from(start);
+            marker.complete(self, NodeKind::ConditionalExpr);
             return Expr::Conditional {
                 condition: Box::new(cond),
                 then_expr: Box::new(then_expr),
@@ -240,6 +263,7 @@ impl<'src> Parser<'src> {
                 span,
             };
         }
+        marker.abandon(self);
         cond
     }
 
@@ -248,11 +272,14 @@ impl<'src> Parser<'src> {
     /// where Dart permits assignment but not a bare cascade.
     fn parse_expr_without_cascade(&mut self) -> Expr {
         let start = self.cur().offset();
+        let marker = self.start();
         let lhs = self.parse_conditional();
         let Some(op) = self.try_parse_assign_op() else {
+            marker.abandon(self);
             return lhs;
         };
         let rhs = self.parse_expr_without_cascade(); // right-associative
+        marker.complete(self, NodeKind::AssignExpr);
         Expr::Assign {
             target: Box::new(lhs),
             op,
@@ -268,6 +295,7 @@ impl<'src> Parser<'src> {
         operator: fn(TokenKind) -> Option<BinaryOp>,
     ) -> Expr {
         let start = self.cur().offset();
+        let mut marker = self.start();
         let mut lhs = next(self);
         while let Some(op) = operator(self.cur().kind) {
             let op_span = self.cur_span();
@@ -280,7 +308,9 @@ impl<'src> Parser<'src> {
                 right: Box::new(rhs),
                 span: self.span_from(start),
             };
+            marker = marker.complete(self, NodeKind::BinaryExpr).precede(self);
         }
+        marker.abandon(self);
         lhs
     }
 
@@ -307,15 +337,20 @@ impl<'src> Parser<'src> {
 
     fn parse_equality(&mut self) -> Expr {
         let start = self.cur().offset();
+        let marker = self.start();
         let lhs = self.parse_relational();
         let op = match self.cur().kind {
             TokenKind::EqEq => BinaryOp::EqEq,
             TokenKind::BangEq => BinaryOp::NotEq,
-            _ => return lhs,
+            _ => {
+                marker.abandon(self);
+                return lhs;
+            }
         };
         let op_span = self.cur_span();
         self.advance();
         let rhs = self.parse_relational();
+        marker.complete(self, NodeKind::BinaryExpr);
         Expr::Binary {
             op,
             op_span,
@@ -455,17 +490,22 @@ impl<'src> Parser<'src> {
 
     fn parse_relational(&mut self) -> Expr {
         let start = self.cur().offset();
+        let marker = self.start();
         let lhs = self.parse_cast();
         let op = match self.cur().kind {
             TokenKind::Lt => BinaryOp::Lt,
             TokenKind::Gt => BinaryOp::Gt,
             TokenKind::LtEq => BinaryOp::LtEq,
             TokenKind::GtEq => BinaryOp::GtEq,
-            _ => return lhs,
+            _ => {
+                marker.abandon(self);
+                return lhs;
+            }
         };
         let op_span = self.cur_span();
         self.advance();
         let r = self.parse_cast();
+        marker.complete(self, NodeKind::BinaryExpr);
         Expr::Binary {
             op,
             op_span,
@@ -480,6 +520,7 @@ impl<'src> Parser<'src> {
     /// `x as int <= y` is `(x as int) <= y`. Loops to allow chains (`a as B as C`).
     fn parse_cast(&mut self) -> Expr {
         let start = self.cur().offset();
+        let mut marker = self.start();
         let mut lhs = self.parse_bitwise_or();
         loop {
             match self.cur().kind {
@@ -493,6 +534,7 @@ impl<'src> Parser<'src> {
                         negated,
                         span: self.span_from(start),
                     };
+                    marker = marker.complete(self, NodeKind::IsExpr).precede(self);
                 }
                 TokenKind::As => {
                     self.advance();
@@ -502,10 +544,12 @@ impl<'src> Parser<'src> {
                         dart_type,
                         span: self.span_from(start),
                     };
+                    marker = marker.complete(self, NodeKind::AsExpr).precede(self);
                 }
                 _ => break,
             }
         }
+        marker.abandon(self);
         lhs
     }
 
@@ -559,9 +603,13 @@ impl<'src> Parser<'src> {
 
     fn parse_unary(&mut self) -> Expr {
         self.guarded(
-            |p| Expr::Error { span: p.cur_span() },
+            |p| {
+                p.missing(NodeKind::ErrorExpr);
+                Expr::Error { span: p.cur_span() }
+            },
             |p| {
                 let start = p.cur().offset();
+                let marker = p.start();
                 let op = match p.cur().kind {
                     TokenKind::Minus => Some(UnaryOp::Minus),
                     TokenKind::Bang => Some(UnaryOp::Bang),
@@ -573,6 +621,7 @@ impl<'src> Parser<'src> {
                 if let Some(op) = op {
                     p.advance();
                     let operand = p.parse_unary();
+                    marker.complete(p, NodeKind::UnaryExpr);
                     return Expr::Unary {
                         op,
                         operand: Box::new(operand),
@@ -586,6 +635,7 @@ impl<'src> Parser<'src> {
                     TokenKind::Await if p.ctx.body.is_async() || p.await_operand_ahead() => {
                         p.advance();
                         let operand = p.parse_unary();
+                        marker.complete(p, NodeKind::AwaitExpr);
                         Expr::Await {
                             expr: Box::new(operand),
                             span: p.span_from(start),
@@ -594,12 +644,16 @@ impl<'src> Parser<'src> {
                     TokenKind::Throw => {
                         p.advance();
                         let operand = p.parse_expr();
+                        marker.complete(p, NodeKind::ThrowExpr);
                         Expr::Throw {
                             expr: Box::new(operand),
                             span: p.span_from(start),
                         }
                     }
-                    _ => p.parse_postfix(),
+                    _ => {
+                        marker.abandon(p);
+                        p.parse_postfix()
+                    }
                 }
             },
         )
@@ -607,9 +661,13 @@ impl<'src> Parser<'src> {
 
     fn parse_postfix(&mut self) -> Expr {
         self.guarded(
-            |p| Expr::Error { span: p.cur_span() },
+            |p| {
+                p.missing(NodeKind::ErrorExpr);
+                Expr::Error { span: p.cur_span() }
+            },
             |p| {
                 let start = p.cur().offset();
+                let mut marker = p.start();
                 let mut expr = p.parse_primary();
 
                 loop {
@@ -621,6 +679,7 @@ impl<'src> Parser<'src> {
                                 operand: Box::new(expr),
                                 span: p.span_from(start),
                             };
+                            marker = marker.complete(p, NodeKind::PostfixIncDecExpr).precede(p);
                         }
                         TokenKind::MinusMinus => {
                             p.advance();
@@ -629,6 +688,7 @@ impl<'src> Parser<'src> {
                                 operand: Box::new(expr),
                                 span: p.span_from(start),
                             };
+                            marker = marker.complete(p, NodeKind::PostfixIncDecExpr).precede(p);
                         }
                         TokenKind::Bang => {
                             p.advance();
@@ -636,6 +696,7 @@ impl<'src> Parser<'src> {
                                 operand: Box::new(expr),
                                 span: p.span_from(start),
                             };
+                            marker = marker.complete(p, NodeKind::NullAssertExpr).precede(p);
                         }
                         TokenKind::Dot | TokenKind::QmarkDot => {
                             let is_null_safe = p.cur().kind == TokenKind::QmarkDot;
@@ -647,6 +708,7 @@ impl<'src> Parser<'src> {
                                 is_null_safe,
                                 span: p.span_from(start),
                             };
+                            marker = marker.complete(p, NodeKind::FieldExpr).precede(p);
                         }
                         TokenKind::LBracket | TokenKind::QmarkLBracket => {
                             let is_null_safe = p.cur().kind == TokenKind::QmarkLBracket;
@@ -659,6 +721,7 @@ impl<'src> Parser<'src> {
                                 is_null_safe,
                                 span: p.span_from(start),
                             };
+                            marker = marker.complete(p, NodeKind::IndexExpr).precede(p);
                         }
                         TokenKind::LParen => {
                             let args = p.parse_arg_list();
@@ -668,6 +731,7 @@ impl<'src> Parser<'src> {
                                 args,
                                 span: p.span_from(start),
                             };
+                            marker = marker.complete(p, NodeKind::CallExpr).precede(p);
                         }
                         TokenKind::Lt => {
                             // A balanced `<...>` closed immediately before `(`, `.`, or
@@ -692,6 +756,11 @@ impl<'src> Parser<'src> {
                                 let Some((type_args, args)) = parsed else {
                                     break;
                                 };
+                                let kind = if args.is_some() {
+                                    NodeKind::CallExpr
+                                } else {
+                                    NodeKind::GenericInstantiationExpr
+                                };
                                 expr = match args {
                                     Some(args) => Expr::Call {
                                         callee: Box::new(expr),
@@ -705,6 +774,7 @@ impl<'src> Parser<'src> {
                                         span: p.span_from(start),
                                     },
                                 };
+                                marker = marker.complete(p, kind).precede(p);
                             } else if p.is_generic_instantiation() {
                                 // Bare generic tear-off: `identity<int>` with no call/`.`
                                 // following. Preserve the target and its type arguments.
@@ -714,6 +784,9 @@ impl<'src> Parser<'src> {
                                     type_args,
                                     span: p.span_from(start),
                                 };
+                                marker = marker
+                                    .complete(p, NodeKind::GenericInstantiationExpr)
+                                    .precede(p);
                             } else {
                                 break;
                             }
@@ -726,10 +799,12 @@ impl<'src> Parser<'src> {
                                 arms,
                                 span: p.span_from(start),
                             };
+                            marker = marker.complete(p, NodeKind::SwitchExpr).precede(p);
                         }
                         _ => break,
                     }
                 }
+                marker.abandon(p);
                 expr
             },
         )
@@ -739,18 +814,21 @@ impl<'src> Parser<'src> {
         let mut sections = Vec::new();
         while matches!(self.cur().kind, TokenKind::DotDot | TokenKind::DotDotQmark) {
             let start = self.cur().offset();
+            let marker = self.start();
             // A `?..` section is reached null-awarely; that shorting also covers a
             // `?[` null-aware index selector on the section's first selector.
             let section_null_aware = self.at(TokenKind::DotDotQmark);
             self.advance();
             let ops = self.parse_cascade_section_ops(section_null_aware);
             if ops.is_empty() {
+                marker.abandon(self);
                 break;
             }
             sections.push(CascadeSection {
                 ops,
                 span: self.span_from(start),
             });
+            marker.complete(self, NodeKind::CascadeSection);
         }
         sections
     }
@@ -763,6 +841,7 @@ impl<'src> Parser<'src> {
     fn parse_cascade_section_ops(&mut self, section_null_aware: bool) -> Vec<CascadeOp> {
         let mut ops = Vec::new();
         // First selector after `..`: bare identifier or `[index]`, no leading dot.
+        let marker = self.start();
         let first = if self.at(TokenKind::LBracket) || self.at(TokenKind::QmarkLBracket) {
             let selector_start = self.cur().offset();
             let index_null_aware = section_null_aware || self.at(TokenKind::QmarkLBracket);
@@ -772,6 +851,7 @@ impl<'src> Parser<'src> {
             let selector_span = self.span_from(selector_start);
             if let Some(assign_op) = self.try_parse_assign_op() {
                 let rhs = self.parse_expr_without_cascade();
+                marker.complete(self, NodeKind::CascadeIndexAssign);
                 ops.push(CascadeOp::IndexAssign(
                     Box::new(idx),
                     assign_op,
@@ -779,6 +859,7 @@ impl<'src> Parser<'src> {
                 ));
                 return ops; // assignment terminates the section
             }
+            marker.complete(self, NodeKind::CascadeIndex);
             CascadeOp::Index {
                 index: Box::new(idx),
                 is_null_aware: index_null_aware,
@@ -789,9 +870,11 @@ impl<'src> Parser<'src> {
             if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
                 let type_args = self.parse_type_args();
                 let args = self.parse_arg_list();
+                marker.complete(self, NodeKind::CascadeCall);
                 CascadeOp::Call(name, type_args, args)
             } else if let Some(assign_op) = self.try_parse_assign_op() {
                 let rhs = self.parse_expr_without_cascade();
+                marker.complete(self, NodeKind::CascadeAssign);
                 ops.push(CascadeOp::Assign(
                     Box::new(Expr::Ident(name)),
                     assign_op,
@@ -799,27 +882,32 @@ impl<'src> Parser<'src> {
                 ));
                 return ops;
             } else {
+                marker.complete(self, NodeKind::CascadeField);
                 CascadeOp::Field {
                     name,
                     is_null_aware: section_null_aware,
                 }
             }
         } else {
+            marker.abandon(self);
             return ops; // empty section
         };
         ops.push(first);
         loop {
             match self.cur().kind {
                 TokenKind::Dot | TokenKind::QmarkDot => {
+                    let marker = self.start();
                     let is_null_safe = self.at(TokenKind::QmarkDot);
                     self.advance();
                     let name = self.expect_ctor_name();
                     if self.at(TokenKind::LParen) || self.at(TokenKind::Lt) {
                         let type_args = self.parse_type_args();
                         let args = self.parse_arg_list();
+                        marker.complete(self, NodeKind::CascadeCall);
                         ops.push(CascadeOp::Call(name, type_args, args));
                     } else if let Some(assign_op) = self.try_parse_assign_op() {
                         let rhs = self.parse_expr_without_cascade();
+                        marker.complete(self, NodeKind::CascadeAssign);
                         ops.push(CascadeOp::Assign(
                             Box::new(Expr::Ident(name)),
                             assign_op,
@@ -827,6 +915,7 @@ impl<'src> Parser<'src> {
                         ));
                         break;
                     } else {
+                        marker.complete(self, NodeKind::CascadeField);
                         ops.push(CascadeOp::Field {
                             name,
                             is_null_aware: is_null_safe,
@@ -834,6 +923,7 @@ impl<'src> Parser<'src> {
                     }
                 }
                 TokenKind::LBracket | TokenKind::QmarkLBracket => {
+                    let marker = self.start();
                     let selector_start = self.cur().offset();
                     let is_null_safe = self.at(TokenKind::QmarkLBracket);
                     self.advance();
@@ -842,6 +932,7 @@ impl<'src> Parser<'src> {
                     let selector_span = self.span_from(selector_start);
                     if let Some(assign_op) = self.try_parse_assign_op() {
                         let rhs = self.parse_expr_without_cascade();
+                        marker.complete(self, NodeKind::CascadeIndexAssign);
                         ops.push(CascadeOp::IndexAssign(
                             Box::new(idx),
                             assign_op,
@@ -849,6 +940,7 @@ impl<'src> Parser<'src> {
                         ));
                         break;
                     }
+                    marker.complete(self, NodeKind::CascadeIndex);
                     ops.push(CascadeOp::Index {
                         index: Box::new(idx),
                         is_null_aware: is_null_safe,
@@ -857,21 +949,30 @@ impl<'src> Parser<'src> {
                 }
                 TokenKind::Bang => {
                     let start = self.cur().offset();
+                    let marker = self.start();
                     self.advance();
+                    marker.complete(self, NodeKind::CascadeNullAssert);
                     ops.push(CascadeOp::NullAssert {
                         span: self.span_from(start),
                     });
                 }
                 TokenKind::LParen => {
+                    let marker = self.start();
                     let args = self.parse_arg_list();
+                    marker.complete(self, NodeKind::CascadeInvoke);
                     ops.push(CascadeOp::Invoke(Vec::new(), args));
                 }
                 TokenKind::Lt if self.is_generic_invocation() => {
                     let invocation = self.speculate(|parser| {
+                        let marker = parser.start();
                         let type_args = parser.parse_type_args();
-                        parser
-                            .at(TokenKind::LParen)
-                            .then(|| (type_args, parser.parse_arg_list()))
+                        if parser.at(TokenKind::LParen) {
+                            let args = parser.parse_arg_list();
+                            marker.complete(parser, NodeKind::CascadeInvoke);
+                            Some((type_args, args))
+                        } else {
+                            None
+                        }
                     });
                     let Some((type_args, args)) = invocation else {
                         break;
@@ -908,21 +1009,28 @@ impl<'src> Parser<'src> {
 
     pub(super) fn parse_primary(&mut self) -> Expr {
         self.guarded(
-            |p| Expr::Error { span: p.cur_span() },
+            |p| {
+                p.missing(NodeKind::ErrorExpr);
+                Expr::Error { span: p.cur_span() }
+            },
             |p| {
                 let start = p.cur().offset();
                 match p.cur().kind {
                     TokenKind::IntLit => {
+                        let marker = p.start();
                         let text = p.cur_text().to_string();
                         p.advance();
+                        marker.complete(p, NodeKind::IntLitExpr);
                         Expr::IntLit {
                             value: text,
                             span: p.span_from(start),
                         }
                     }
                     TokenKind::DoubleLit => {
+                        let marker = p.start();
                         let text = p.cur_text().to_string();
                         p.advance();
+                        marker.complete(p, NodeKind::DoubleLitExpr);
                         Expr::DoubleLit {
                             value: text,
                             span: p.span_from(start),
@@ -930,33 +1038,43 @@ impl<'src> Parser<'src> {
                     }
                     TokenKind::StringLit => Expr::StringLit(p.parse_adjacent_strings()),
                     TokenKind::True => {
+                        let marker = p.start();
                         p.advance();
+                        marker.complete(p, NodeKind::BoolLitExpr);
                         Expr::BoolLit {
                             value: true,
                             span: p.span_from(start),
                         }
                     }
                     TokenKind::False => {
+                        let marker = p.start();
                         p.advance();
+                        marker.complete(p, NodeKind::BoolLitExpr);
                         Expr::BoolLit {
                             value: false,
                             span: p.span_from(start),
                         }
                     }
                     TokenKind::Null => {
+                        let marker = p.start();
                         p.advance();
+                        marker.complete(p, NodeKind::NullLitExpr);
                         Expr::NullLit {
                             span: p.span_from(start),
                         }
                     }
                     TokenKind::This => {
+                        let marker = p.start();
                         p.advance();
+                        marker.complete(p, NodeKind::ThisExpr);
                         Expr::This {
                             span: p.span_from(start),
                         }
                     }
                     TokenKind::Super => {
+                        let marker = p.start();
                         p.advance();
+                        marker.complete(p, NodeKind::SuperExpr);
                         Expr::Super {
                             span: p.span_from(start),
                         }
@@ -971,8 +1089,12 @@ impl<'src> Parser<'src> {
                             // parse cleanly, roll back and treat it as a paren/record.
                             p.speculate(|p| {
                                 let errors = p.errors.len();
-                                let expr =
-                                    p.parse_function_expr_with_type_params(Vec::new(), start);
+                                let marker = p.start_at(start);
+                                let expr = p.parse_function_expr_with_type_params(
+                                    Vec::new(),
+                                    start,
+                                    marker,
+                                );
                                 let is_plain_block_lambda = matches!(
                                     &expr,
                                     Expr::FuncExpr { async_marker: AsyncMarker::Sync, body, .. }
@@ -994,6 +1116,7 @@ impl<'src> Parser<'src> {
                     TokenKind::Lt => p
                         .speculate(|p| {
                             let errors = p.errors.len();
+                            let marker = p.start_at(start);
                             let type_params = p.parse_type_params();
                             if p.errors.len() != errors
                                 || !p.at(TokenKind::LParen)
@@ -1001,18 +1124,29 @@ impl<'src> Parser<'src> {
                             {
                                 return None;
                             }
-                            Some(p.parse_function_expr_with_type_params(type_params, start))
+                            Some(p.parse_function_expr_with_type_params(type_params, start, marker))
                         })
-                        .unwrap_or_else(|| p.parse_typed_collection(false, start)),
-                    TokenKind::LBracket => p.parse_list_literal(false, None, start),
-                    TokenKind::LBrace => p.parse_map_or_set_literal(false, Vec::new(), start),
+                        .unwrap_or_else(|| {
+                            let marker = p.start_at(start);
+                            p.parse_typed_collection(false, start, marker)
+                        }),
+                    TokenKind::LBracket => {
+                        let marker = p.start();
+                        p.parse_list_literal(false, None, start, marker)
+                    }
+                    TokenKind::LBrace => {
+                        let marker = p.start();
+                        p.parse_map_or_set_literal(false, Vec::new(), start, marker)
+                    }
                     // Dot shorthand (Dart 3.9): `.name` / `.new` in a context position.
                     TokenKind::Dot => p.parse_dot_shorthand(false, start),
                     TokenKind::Const => {
+                        let marker = p.start();
                         p.advance();
-                        p.parse_const_expr(start)
+                        p.parse_const_expr(start, marker)
                     }
                     TokenKind::New => {
+                        let marker = p.start();
                         p.advance();
                         let dart_type = p.parse_type();
                         let constructor_name = if p.eat(TokenKind::Dot).is_some() {
@@ -1021,6 +1155,7 @@ impl<'src> Parser<'src> {
                             None
                         };
                         let args = p.parse_arg_list();
+                        marker.complete(p, NodeKind::NewExpr);
                         Expr::New {
                             is_const: false,
                             dart_type,
@@ -1035,11 +1170,13 @@ impl<'src> Parser<'src> {
                         Expr::Ident(id)
                     }
                     _ => {
+                        let marker = p.start();
                         p.error(format!(
                             "unexpected token in expression: {:?}",
                             p.cur().kind
                         ));
                         p.advance();
+                        marker.complete(p, NodeKind::ErrorExpr);
                         Expr::Error {
                             span: p.span_from(start),
                         }
@@ -1050,11 +1187,22 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_paren_or_record(&mut self, is_const: bool, start: usize) -> Expr {
+        let marker = self.start_at(start);
+        self.parse_paren_or_record_inner(is_const, start, marker)
+    }
+
+    pub(super) fn parse_paren_or_record_inner(
+        &mut self,
+        is_const: bool,
+        start: usize,
+        marker: Marker,
+    ) -> Expr {
         self.advance();
         // Within these parens a trailing `{` never opens the constructor body.
         self.ctx.in_ctor_init_value = false;
         if self.at(TokenKind::RParen) {
             self.advance();
+            marker.complete(self, NodeKind::RecordExpr);
             return Expr::Record {
                 is_const,
                 fields: Vec::new(),
@@ -1062,6 +1210,7 @@ impl<'src> Parser<'src> {
             };
         }
         // Detect named first field before calling parse_expr, so `:` stays in stream.
+        let field = self.start();
         let (first_name, first_value) =
             if self.cur().kind.is_identifier_like() && self.peek(1).kind == TokenKind::Colon {
                 let name = self.expect_ident();
@@ -1073,11 +1222,15 @@ impl<'src> Parser<'src> {
             };
         if let Some(close) = self.eat(TokenKind::RParen) {
             if first_name.is_none() {
+                field.abandon(self);
+                marker.complete(self, NodeKind::ParenExpr);
                 return Expr::Paren {
                     expr: Box::new(first_value),
                     span: Span::new(start, close.offset() + close.len()),
                 };
             }
+            field.complete(self, NodeKind::RecordField);
+            marker.complete(self, NodeKind::RecordExpr);
             let fields = vec![RecordField {
                 name: first_name,
                 value: first_value,
@@ -1089,6 +1242,7 @@ impl<'src> Parser<'src> {
                 span: self.span_from(start),
             };
         }
+        field.complete(self, NodeKind::RecordField);
         let mut fields = vec![RecordField {
             name: first_name,
             value: first_value,
@@ -1096,6 +1250,7 @@ impl<'src> Parser<'src> {
         }];
         while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RParen) {
             let f_start = self.cur().offset();
+            let field = self.start();
             if self.cur().kind.is_identifier_like() && self.peek(1).kind == TokenKind::Colon {
                 let name = self.expect_ident();
                 self.advance();
@@ -1113,9 +1268,11 @@ impl<'src> Parser<'src> {
                     span: self.span_from(f_start),
                 });
             }
+            field.complete(self, NodeKind::RecordField);
         }
         self.eat(TokenKind::Comma);
         self.expect(TokenKind::RParen);
+        marker.complete(self, NodeKind::RecordExpr);
         Expr::Record {
             is_const,
             fields,
@@ -1156,6 +1313,7 @@ impl<'src> Parser<'src> {
         &mut self,
         type_params: Vec<TypeParam>,
         start: usize,
+        marker: Marker,
     ) -> Expr {
         let params = self.parse_formal_param_list();
         let async_marker = self.parse_async_marker();
@@ -1163,19 +1321,23 @@ impl<'src> Parser<'src> {
         let body = self.with_body(async_marker, |p| match p.cur().kind {
             TokenKind::Arrow => {
                 let bstart = p.cur().offset();
+                let marker = p.start();
                 p.advance();
                 let e = p.parse_expr();
+                marker.complete(p, NodeKind::ArrowBody);
                 FunctionBody::Arrow(Box::new(e), p.span_from(bstart))
             }
             TokenKind::LBrace => FunctionBody::Block(p.parse_block()),
             _ => {
                 p.error("expected function body after parameter list");
+                p.missing(NodeKind::Block);
                 FunctionBody::Block(Block {
                     stmts: Vec::new(),
                     span: p.span_from(start),
                 })
             }
         });
+        marker.complete(self, NodeKind::FuncExpr);
         Expr::FuncExpr {
             type_params,
             params,
@@ -1186,11 +1348,13 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_switch_expr_primary(&mut self, start: usize) -> Expr {
+        let marker = self.start_at(start);
         self.advance();
         self.expect(TokenKind::LParen);
         let subject = self.parse_expr();
         self.expect(TokenKind::RParen);
         let arms = self.parse_switch_expr_arms();
+        marker.complete(self, NodeKind::SwitchExpr);
         Expr::Switch {
             subject: Box::new(subject),
             arms,
@@ -1203,6 +1367,7 @@ impl<'src> Parser<'src> {
         is_const: bool,
         type_arg: Option<DartType>,
         start: usize,
+        marker: Marker,
     ) -> Expr {
         self.advance();
         // Inside a list literal a trailing `{` never opens the constructor body.
@@ -1215,6 +1380,7 @@ impl<'src> Parser<'src> {
             }
         }
         self.expect(TokenKind::RBracket);
+        marker.complete(self, NodeKind::ListExpr);
         Expr::List {
             is_const,
             type_arg,
@@ -1228,6 +1394,7 @@ impl<'src> Parser<'src> {
         is_const: bool,
         type_args: Vec<DartType>,
         start: usize,
+        marker: Marker,
     ) -> Expr {
         self.advance();
         // Inside a set/map literal a trailing `{` never opens the constructor body.
@@ -1237,6 +1404,7 @@ impl<'src> Parser<'src> {
             // Empty braces: a single type arg (`<int>{}`) is a Set; no type args
             // (`{}`) or two (`<K, V>{}`) is a Map.
             if type_args.len() == 1 {
+                marker.complete(self, NodeKind::SetExpr);
                 return Expr::Set {
                     is_const,
                     type_arg: type_args.into_iter().next(),
@@ -1244,6 +1412,7 @@ impl<'src> Parser<'src> {
                     span: self.span_from(start),
                 };
             }
+            marker.complete(self, NodeKind::MapExpr);
             return Expr::Map {
                 is_const,
                 type_args,
@@ -1266,6 +1435,7 @@ impl<'src> Parser<'src> {
                 }
             }
             self.expect(TokenKind::RBrace);
+            marker.complete(self, NodeKind::MapExpr);
             Expr::Map {
                 is_const,
                 type_args,
@@ -1281,6 +1451,7 @@ impl<'src> Parser<'src> {
                 }
             }
             self.expect(TokenKind::RBrace);
+            marker.complete(self, NodeKind::SetExpr);
             let type_arg = type_args.into_iter().next();
             Expr::Set {
                 is_const,
@@ -1359,9 +1530,11 @@ impl<'src> Parser<'src> {
     /// `for`/`if`/spread wrapping such entries).
     fn parse_map_element(&mut self) -> MapElement {
         let start = self.cur().offset();
+        let marker = self.start();
         match self.cur().kind {
             TokenKind::DotDotDot | TokenKind::DotDotDotQmark => {
                 let (expr, is_null_aware) = self.parse_spread();
+                marker.complete(self, NodeKind::MapSpreadElement);
                 MapElement::Spread {
                     expr,
                     is_null_aware,
@@ -1370,13 +1543,16 @@ impl<'src> Parser<'src> {
             }
             TokenKind::If => {
                 self.advance();
+                let condition_marker = self.start();
                 let condition = self.parse_if_condition();
+                condition_marker.complete(self, NodeKind::ExprCondition);
                 let then_entry = Box::new(self.parse_map_element());
                 let else_entry = if self.eat(TokenKind::Else).is_some() {
                     Some(Box::new(self.parse_map_element()))
                 } else {
                     None
                 };
+                marker.complete(self, NodeKind::MapIfElement);
                 MapElement::If {
                     condition,
                     then_entry,
@@ -1387,11 +1563,15 @@ impl<'src> Parser<'src> {
             TokenKind::Await if self.peek(1).kind == TokenKind::For => {
                 self.advance();
                 self.advance();
-                self.finish_for_map_element(true, start)
+                let element = self.finish_for_map_element(true, start);
+                marker.complete(self, NodeKind::MapForElement);
+                element
             }
             TokenKind::For => {
                 self.advance();
-                self.finish_for_map_element(false, start)
+                let element = self.finish_for_map_element(false, start);
+                marker.complete(self, NodeKind::MapForElement);
+                element
             }
             _ => {
                 // Dart 3.0 null-aware key `?k: v` and/or value `k: ?v`.
@@ -1400,6 +1580,7 @@ impl<'src> Parser<'src> {
                 self.expect(TokenKind::Colon);
                 let value_null_aware = self.eat(TokenKind::Qmark).is_some();
                 let value = self.parse_expr();
+                marker.complete(self, NodeKind::MapEntry);
                 MapElement::Entry(MapEntry {
                     key,
                     value,
@@ -1413,11 +1594,13 @@ impl<'src> Parser<'src> {
 
     fn parse_collection_element(&mut self) -> CollectionElement {
         let start = self.cur().offset();
+        let marker = self.start();
         match self.cur().kind {
             // Dart 3.0 null-aware element `?expr`
             TokenKind::Qmark => {
                 self.advance();
                 let expr = self.parse_expr();
+                marker.complete(self, NodeKind::NullAwareElement);
                 CollectionElement::NullAware {
                     expr,
                     span: self.span_from(start),
@@ -1425,6 +1608,7 @@ impl<'src> Parser<'src> {
             }
             TokenKind::DotDotDot | TokenKind::DotDotDotQmark => {
                 let (expr, is_null_aware) = self.parse_spread();
+                marker.complete(self, NodeKind::SpreadElement);
                 CollectionElement::Spread {
                     expr,
                     is_null_aware,
@@ -1433,13 +1617,16 @@ impl<'src> Parser<'src> {
             }
             TokenKind::If => {
                 self.advance();
+                let condition_marker = self.start();
                 let condition = self.parse_if_condition();
+                condition_marker.complete(self, NodeKind::ExprCondition);
                 let then_elem = Box::new(self.parse_collection_element());
                 let else_elem = if self.eat(TokenKind::Else).is_some() {
                     Some(Box::new(self.parse_collection_element()))
                 } else {
                     None
                 };
+                marker.complete(self, NodeKind::IfElement);
                 CollectionElement::If {
                     condition,
                     then_elem,
@@ -1451,13 +1638,20 @@ impl<'src> Parser<'src> {
             TokenKind::Await if self.peek(1).kind == TokenKind::For => {
                 self.advance();
                 self.advance();
-                self.finish_for_collection_element(true, start)
+                let element = self.finish_for_collection_element(true, start);
+                marker.complete(self, NodeKind::ForElement);
+                element
             }
             TokenKind::For => {
                 self.advance();
-                self.finish_for_collection_element(false, start)
+                let element = self.finish_for_collection_element(false, start);
+                marker.complete(self, NodeKind::ForElement);
+                element
             }
-            _ => CollectionElement::Expr(self.parse_expr()),
+            _ => {
+                marker.abandon(self);
+                CollectionElement::Expr(self.parse_expr())
+            }
         }
     }
 
@@ -1484,6 +1678,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_if_condition(&mut self) -> IfCondition {
+        let marker = self.start();
         self.expect(TokenKind::LParen);
         let scrutinee = self.parse_expr();
         let condition = if self.eat(TokenKind::Case).is_some() {
@@ -1493,8 +1688,10 @@ impl<'src> Parser<'src> {
             } else {
                 None
             };
+            marker.complete(self, NodeKind::CaseCondition);
             IfCondition::Case(scrutinee, Box::new(pattern), guard)
         } else {
+            marker.abandon(self);
             IfCondition::Expr(scrutinee)
         };
         self.expect(TokenKind::RParen);
@@ -1507,10 +1704,14 @@ impl<'src> Parser<'src> {
             self.cur().kind,
             TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
         ) {
+            let header = self.start();
+            let init = self.start();
             let pattern = Box::new(self.parse_binding_pattern());
             self.expect(TokenKind::In);
             let iterable = Box::new(self.parse_expr());
+            init.complete(self, NodeKind::PatternForInInit);
             self.expect(TokenKind::RParen);
+            header.complete(self, NodeKind::ForHeader);
             return ForHeader {
                 init: Some(ForInit::PatternForIn {
                     annotations: Vec::new(),
@@ -1548,8 +1749,14 @@ impl<'src> Parser<'src> {
     /// recorded `start`; the leading `.` is still current. Any trailing
     /// invocation or selector is left for `parse_postfix`.
     pub(super) fn parse_dot_shorthand(&mut self, is_const: bool, start: usize) -> Expr {
+        let marker = self.start_at(start);
+        self.parse_dot_shorthand_inner(is_const, start, marker)
+    }
+
+    fn parse_dot_shorthand_inner(&mut self, is_const: bool, start: usize, marker: Marker) -> Expr {
         self.advance();
         let name = self.expect_ctor_name();
+        marker.complete(self, NodeKind::DotShorthandExpr);
         Expr::DotShorthand {
             is_const,
             name,
@@ -1563,6 +1770,7 @@ impl<'src> Parser<'src> {
     /// source so it always includes the `#` and exact operator spelling.
     pub(super) fn parse_symbol_literal(&mut self, start: usize) -> Expr {
         use TokenKind::*;
+        let marker = self.start_at(start);
         let hash = self.advance();
         let mut end = hash.offset() + hash.len();
         if self.cur().kind.is_identifier_like() || self.at(Void) {
@@ -1593,6 +1801,7 @@ impl<'src> Parser<'src> {
         } else {
             self.error("expected symbol name after '#'");
         }
+        marker.complete(self, NodeKind::SymbolLitExpr);
         let raw = self.src[start..end].to_string();
         Expr::SymbolLit {
             raw,
@@ -1600,17 +1809,17 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_const_expr(&mut self, start: usize) -> Expr {
+    fn parse_const_expr(&mut self, start: usize, marker: Marker) -> Expr {
         // const can prefix a constructor call, collection literal, or (Dart 3.9)
         // a dot shorthand: `const .fromLtrb(...)`.
         match self.cur().kind {
-            TokenKind::Dot => self.parse_dot_shorthand(true, start),
+            TokenKind::Dot => self.parse_dot_shorthand_inner(true, start, marker),
             // `const ('', X)` — a const record literal. Without this the `_` arm
             // would demand a type name after `const` and choke on the `(`.
-            TokenKind::LParen => self.parse_paren_or_record(true, start),
-            TokenKind::LBracket => self.parse_list_literal(true, None, start),
-            TokenKind::LBrace => self.parse_map_or_set_literal(true, Vec::new(), start),
-            TokenKind::Lt => self.parse_typed_collection(true, start),
+            TokenKind::LParen => self.parse_paren_or_record_inner(true, start, marker),
+            TokenKind::LBracket => self.parse_list_literal(true, None, start, marker),
+            TokenKind::LBrace => self.parse_map_or_set_literal(true, Vec::new(), start, marker),
+            TokenKind::Lt => self.parse_typed_collection(true, start, marker),
             _ => {
                 let dart_type = self.parse_type();
                 // A named constructor may be `.new` (`const C.new()`); `new` is a
@@ -1621,6 +1830,7 @@ impl<'src> Parser<'src> {
                     None
                 };
                 let args = self.parse_arg_list();
+                marker.complete(self, NodeKind::NewExpr);
                 Expr::New {
                     is_const: true,
                     dart_type,
@@ -1629,6 +1839,27 @@ impl<'src> Parser<'src> {
                     span: self.span_from(start),
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod cst_tests {
+    #[test]
+    fn expression_recovery_views_match_ast() {
+        for source in [
+            "f() { x?..; }",
+            "f() { x..a?..; }",
+            "var f = () sync => 1;",
+            "f() { x..a. = 1; }",
+            "f() { f(a: value); var r = (value, name: other); }",
+        ] {
+            let result = super::super::parse(source);
+            assert_eq!(
+                format!("{:#?}", result.program),
+                format!("{:#?}", result.tree.program(source)),
+                "{source}",
+            );
         }
     }
 }

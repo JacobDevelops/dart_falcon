@@ -67,6 +67,7 @@ fn run_rule(
             program,
             errors,
             syntax,
+            ..
         } = parse(source);
         let resolver_dependent = rule_requires_resolution(rule_name);
         let identity_sources = [IdentitySource {
@@ -560,6 +561,7 @@ Widget build(BuildContext context) {
         program,
         errors: _errors,
         syntax,
+        ..
     } = parse(src);
     let rule = UseDesignSystemItem;
 
@@ -609,6 +611,7 @@ Widget build(BuildContext context) {
         program: static_program,
         errors: _e,
         syntax,
+        ..
     } = parse(static_src);
     let ctx = AnalyzeContext::new(Path::new("t.dart"), static_src, &configured, &syntax);
     assert!(
@@ -638,6 +641,7 @@ class Bar {
         program,
         errors: _errors,
         syntax,
+        ..
     } = parse(src);
     let rule = ClassMembersOrdering;
 
@@ -723,6 +727,7 @@ fn cross_file_corpus_matches_expectations() {
                         program,
                         errors,
                         syntax,
+                        ..
                     } = parse(source);
                     ProjectFile {
                         path: path.clone(),

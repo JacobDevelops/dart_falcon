@@ -218,6 +218,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = falcon_dart_parser::parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("/project/lib/api.dart");

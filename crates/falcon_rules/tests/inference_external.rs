@@ -273,6 +273,7 @@ void shadowed() {
         program,
         errors,
         syntax,
+        ..
     } = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {

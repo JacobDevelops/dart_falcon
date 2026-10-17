@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 description       = "Hand-rolled Dart 3.x recursive-descent parser for falcon"
 
+[features]
+cst-differential = [  ]
+
 [dependencies]
 falcon_syntax     = { path = "../falcon_syntax" }
 tracing.workspace = true
@@ -11,6 +14,11 @@ tracing.workspace = true
 [dev-dependencies]
 insta     = { workspace = true }
 criterion = { workspace = true }
+walkdir   = { workspace = true }
+
+[[example]]
+name              = "cst_differential"
+required-features = [ "cst-differential" ]
 
 [[bench]]
 name    = "parser_bench"

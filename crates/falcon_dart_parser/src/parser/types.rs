@@ -1,29 +1,41 @@
 use falcon_syntax::ast::*;
+use falcon_syntax::cst::NodeKind;
 use falcon_syntax::language_version::Feature;
 use falcon_syntax::token::TokenKind;
 
-use super::Parser;
+use super::{CompletedMarker, Parser};
 
 impl<'src> Parser<'src> {
     pub(super) fn parse_type(&mut self) -> DartType {
         let start = self.cur().offset();
 
         if matches!(self.cur().kind, TokenKind::Void | TokenKind::Dynamic) {
+            let marker = self.start();
             let kind = self.advance().kind;
             let builtin = |span| match kind {
                 TokenKind::Void => DartType::Void { span },
                 _ => DartType::Dynamic { span },
             };
+            let node_kind = match kind {
+                TokenKind::Void => NodeKind::VoidType,
+                _ => NodeKind::DynamicType,
+            };
             if self.at_function_type_start() {
-                return self.parse_function_type(Some(builtin(self.span_from(start))), start);
+                let completed = marker.complete(self, node_kind);
+                return self.parse_function_type(
+                    Some(builtin(self.span_from(start))),
+                    start,
+                    Some(completed),
+                );
             }
             self.eat_type_qmark();
+            marker.complete(self, node_kind);
             return builtin(self.span_from(start));
         }
 
         // Function type starting with `Function(` or `Function<T>(`
         if self.at_function_type_start() {
-            return self.parse_function_type(None, start);
+            return self.parse_function_type(None, start, None);
         }
 
         // Record type: (type, name: type) — must precede is_type_start() since LParen is in it
@@ -33,6 +45,7 @@ impl<'src> Parser<'src> {
 
         // Named type: Identifier [. Identifier] [< ... >] [?]
         if self.is_type_start() {
+            let marker = self.start();
             let first = self.expect_ident();
             let mut segments = vec![first];
 
@@ -55,16 +68,18 @@ impl<'src> Parser<'src> {
                 is_nullable,
                 span: self.span_from(start),
             });
+            let completed = marker.complete(self, NodeKind::NamedType);
             // Could be `Function(...)` / `Function<T>(...)` after a (possibly
             // nullable) return type.
             if self.at_function_type_start() {
-                return self.parse_function_type(Some(named), start);
+                return self.parse_function_type(Some(named), start, Some(completed));
             }
             return named;
         }
 
         // Fallback: produce dynamic
         self.error(format!("expected type, got {:?}", self.cur().kind));
+        self.missing(NodeKind::DynamicType);
         DartType::Dynamic {
             span: self.span_from(start),
         }
@@ -82,8 +97,17 @@ impl<'src> Parser<'src> {
             && matches!(self.peek(1).kind, TokenKind::LParen | TokenKind::Lt)
     }
 
-    fn parse_function_type(&mut self, return_type: Option<DartType>, start: usize) -> DartType {
-        let keyword = self.pos;
+    fn parse_function_type(
+        &mut self,
+        return_type: Option<DartType>,
+        start: usize,
+        return_marker: Option<CompletedMarker>,
+    ) -> DartType {
+        let keyword = self.checkpoint();
+        let marker = match return_marker {
+            Some(completed) => completed.precede(self),
+            None => self.start(),
+        };
         self.advance(); // Function keyword
         let type_params = self.parse_type_params();
         self.expect(TokenKind::LParen);
@@ -104,12 +128,13 @@ impl<'src> Parser<'src> {
             is_nullable,
             span,
         }));
+        let completed = marker.complete(self, NodeKind::FunctionType);
         // Curried function type: the function type just parsed may itself be the
         // return type of another, `int Function() Function()` being a function
         // returning `int Function()`. Fold left-to-right so the inner type nests as
         // the return type of the outer.
         if self.at_function_type_start() {
-            return self.parse_function_type(Some(fn_type), start);
+            return self.parse_function_type(Some(fn_type), start, Some(completed));
         }
         fn_type
     }
@@ -137,6 +162,12 @@ impl<'src> Parser<'src> {
                     continue;
                 }
             }
+            let marker = self.start();
+            if in_named {
+                self.missing(NodeKind::NamedTypeParamFlag);
+            } else if in_optional {
+                self.missing(NodeKind::OptionalTypeParamFlag);
+            }
             let annotations = self.parse_annotations();
             let explicit_required = self.eat(TokenKind::Required).is_some();
             let is_required = explicit_required || (!in_named && !in_optional);
@@ -152,6 +183,7 @@ impl<'src> Parser<'src> {
                 is_required,
                 is_named: in_named,
             });
+            marker.complete(self, NodeKind::FunctionTypeParam);
             if !self.at(TokenKind::Comma) {
                 break;
             }
@@ -166,6 +198,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_record_type(&mut self, start: usize) -> DartType {
+        let marker = self.start();
         self.advance(); // (
         let mut positional = Vec::new();
         let mut positional_names = Vec::new();
@@ -175,12 +208,14 @@ impl<'src> Parser<'src> {
             if self.at(TokenKind::LBrace) {
                 self.advance();
                 while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+                    let field_marker = self.start();
                     if self.at(TokenKind::At) {
                         self.parse_annotations();
                     }
                     let field_type = self.parse_type();
                     let name = self.expect_ident();
                     named.push(NamedRecordField { name, field_type });
+                    field_marker.complete(self, NodeKind::NamedRecordField);
                     if self.eat(TokenKind::Comma).is_none() {
                         break;
                     }
@@ -213,11 +248,12 @@ impl<'src> Parser<'src> {
             is_nullable,
             span: self.span_from(start),
         }));
+        let completed = marker.complete(self, NodeKind::RecordType);
         // A record type may itself be the return type of a function type, e.g.
         // `(int, int) Function()` — check for the `Function(...)` suffix here so it
         // parses in specialized type positions (typedef RHS, field/param types).
         if self.at_function_type_start() {
-            return self.parse_function_type(Some(record), start);
+            return self.parse_function_type(Some(record), start, Some(completed));
         }
         record
     }
@@ -230,6 +266,7 @@ impl<'src> Parser<'src> {
         let mut params = Vec::new();
         while !self.at(TokenKind::Gt) && !self.at(TokenKind::GtGt) && !self.at(TokenKind::Eof) {
             let start = self.cur().offset();
+            let marker = self.start();
             let annotations = self.parse_annotations();
             let name = self.expect_ident();
             let bound = if self.eat(TokenKind::Extends).is_some() {
@@ -243,6 +280,7 @@ impl<'src> Parser<'src> {
                 bound,
                 span: self.span_from(start),
             });
+            marker.complete(self, NodeKind::TypeParam);
             if self.eat(TokenKind::Comma).is_none() {
                 break;
             }
@@ -256,6 +294,7 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_formal_param_list(&mut self) -> FormalParamList {
+        let marker = self.start();
         let start = self.cur().offset();
         self.expect(TokenKind::LParen);
 
@@ -292,6 +331,7 @@ impl<'src> Parser<'src> {
         }
 
         self.expect(TokenKind::RParen);
+        marker.complete(self, NodeKind::FormalParamList);
         FormalParamList {
             params,
             span: self.span_from(start),
@@ -299,6 +339,16 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_formal_param(&mut self, mut kind: ParamKind) -> FormalParam {
+        let marker = self.start();
+        match kind {
+            ParamKind::Named { .. } => {
+                self.missing(NodeKind::NamedTypeParamFlag);
+            }
+            ParamKind::OptionalPositional => {
+                self.missing(NodeKind::OptionalTypeParamFlag);
+            }
+            ParamKind::Positional => {}
+        }
         let start = self.cur().offset();
         let mut annotations = Vec::new();
         while self.at(TokenKind::At) {
@@ -374,6 +424,7 @@ impl<'src> Parser<'src> {
             None
         };
 
+        marker.complete(self, NodeKind::FormalParam);
         FormalParam {
             annotations,
             kind,
@@ -419,12 +470,59 @@ impl<'src> Parser<'src> {
             if !ends_param {
                 return None;
             }
-            parser.rewind_to(keyword);
+            parser.restore_cursor(keyword);
+            let marker = parser.start();
             let name_tok = parser.advance(); // Function
+            marker.complete(parser, NodeKind::Identifier);
             Some((
                 function.return_type.map(|ret| *ret),
                 parser.tok_ident(&name_tok),
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn type_cst_debug_matches_ast() {
+        for source in [
+            "typedef F = void?;",
+            "typedef F = dynamic?;",
+            "typedef F = foo.Bar<List<Map<String, int>>>?;",
+            "typedef F<T extends Map<String, List<int>>> = T Function<U>(int x, {required String y, bool z})?;",
+            "typedef F = (int first, String, {bool enabled})?;",
+            "typedef F = int Function(int, [String?]) Function();",
+            "void map(void Function({int? e})) {}",
+            "void g(int Function() Function() h) {}",
+            "typedef Compare<T>(T left, T right);",
+            "typedef int Compare<T>(T left, T right);",
+            "class C { set callback(int f(String value)) {} }",
+        ] {
+            let parsed = crate::parse(source);
+            assert!(parsed.tree.is_lossless(source), "{source}");
+            assert_eq!(
+                format!("{:#?}", parsed.program),
+                format!("{:#?}", parsed.tree.program(source)),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn function_named_formal_keeps_first_pass_errors() {
+        let parsed = crate::parse("void f(void Function(int,,)) {}");
+        assert!(
+            parsed
+                .errors
+                .iter()
+                .any(|error| error.message == "expected type, got Comma")
+        );
+        assert!(
+            parsed
+                .errors
+                .iter()
+                .any(|error| error.message == "expected identifier, got Comma")
+        );
     }
 }

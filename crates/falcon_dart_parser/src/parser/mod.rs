@@ -11,6 +11,7 @@ pub use lexical::lex_syntax;
 
 use falcon_syntax::LanguageVersion;
 use falcon_syntax::ast::*;
+use falcon_syntax::cst::{Event, NodeKind, SyntaxTree};
 use falcon_syntax::token::{SyntaxStore, Token, TokenKind};
 use tracing::debug;
 
@@ -23,6 +24,7 @@ pub struct ParseResult {
     pub program: Program,
     pub errors: Vec<ParseError>,
     pub syntax: SyntaxStore,
+    pub tree: SyntaxTree,
 }
 
 /// Parse Dart into an AST and recoverable errors at the language version of a
@@ -47,21 +49,26 @@ pub fn parse(source: &str) -> ParseResult {
 ///
 /// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
 pub fn parse_for_package(source: &str, package_version: Option<LanguageVersion>) -> ParseResult {
-    try_parse_for_package(source, package_version).unwrap_or_else(|error| ParseResult {
-        program: Program {
-            library_directive: None,
-            part_of_directive: None,
-            part_directives: Vec::new(),
-            imports: Vec::new(),
-            exports: Vec::new(),
-            declarations: Vec::new(),
-            span: Span::new(0, 0),
-        },
-        errors: vec![ParseError {
-            message: format!("could not start parser thread: {error}"),
-            offset: 0,
-        }],
-        syntax: lex_syntax(source),
+    try_parse_for_package(source, package_version).unwrap_or_else(|error| {
+        let syntax = lex_syntax(source);
+        let tree = SyntaxTree::build(source, &lexical::cst_tokens(&syntax, source), Vec::new());
+        ParseResult {
+            program: Program {
+                library_directive: None,
+                part_of_directive: None,
+                part_directives: Vec::new(),
+                imports: Vec::new(),
+                exports: Vec::new(),
+                declarations: Vec::new(),
+                span: Span::new(0, 0),
+            },
+            errors: vec![ParseError {
+                message: format!("could not start parser thread: {error}"),
+                offset: 0,
+            }],
+            syntax,
+            tree,
+        }
     })
 }
 
@@ -85,7 +92,9 @@ pub fn try_parse_for_package(
         let handle = std::thread::Builder::new()
             .stack_size(PARSER_STACK_SIZE)
             .spawn_scoped(scope, || parse_inner(source, version))?;
-        Ok(handle.join().expect("parser thread panicked"))
+        Ok(handle
+            .join()
+            .unwrap_or_else(|payload| std::panic::resume_unwind(payload)))
     })
 }
 
@@ -99,12 +108,20 @@ fn parse_inner(source: &str, version: LanguageVersion) -> ParseResult {
     let syntax = lex_syntax(source);
     let mut p = Parser::new(&syntax, source, version);
     let program = p.parse_program();
+    let tree = SyntaxTree::build(source, &lexical::cst_tokens(&syntax, source), p.events);
+    debug_assert!(
+        tree.is_lossless(source),
+        "CST must retain every source byte"
+    );
+    #[cfg(feature = "cst-differential")]
+    crate::differential::assert_equivalent(source, &program, &tree);
     let errors = p.errors;
     debug!(errors = errors.len(), "parse complete");
     ParseResult {
         program,
         errors,
         syntax,
+        tree,
     }
 }
 
@@ -141,6 +158,48 @@ pub(super) struct Checkpoint {
     pos: usize,
     errors: usize,
     depth_limit_hit: bool,
+    events: usize,
+    forward_parents: usize,
+    retrofitted_names: usize,
+    split: Option<Token>,
+    split_count: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Marker {
+    pos: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct CompletedMarker {
+    pos: usize,
+}
+
+impl Marker {
+    pub(super) fn complete(self, parser: &mut Parser<'_>, kind: NodeKind) -> CompletedMarker {
+        let Event::Start { kind: slot, .. } = &mut parser.events[self.pos] else {
+            panic!("marker must refer to an open node");
+        };
+        *slot = kind;
+        parser.events.push(Event::Finish);
+        CompletedMarker { pos: self.pos }
+    }
+
+    pub(super) fn abandon(self, parser: &mut Parser<'_>) {
+        parser.events[self.pos] = Event::Tombstone;
+    }
+}
+
+impl CompletedMarker {
+    pub(super) fn precede(self, parser: &mut Parser<'_>) -> Marker {
+        let marker = parser.start();
+        let Event::Start { forward_parent, .. } = &mut parser.events[self.pos] else {
+            panic!("completed marker must refer to a node");
+        };
+        parser.forward_parents.push((self.pos, *forward_parent));
+        *forward_parent = Some(marker.pos - self.pos);
+        marker
+    }
 }
 
 /// Temporary dense indices borrowing canonical tokens, not copying them.
@@ -201,6 +260,9 @@ impl std::ops::Index<usize> for SignificantTokens<'_> {
 }
 
 pub(super) struct Parser<'src> {
+    pub(super) events: Vec<Event>,
+    forward_parents: Vec<(usize, Option<usize>)>,
+    retrofitted_names: Vec<(usize, Event)>,
     pub(super) tokens: SignificantTokens<'src>,
     pub(super) syntax: &'src SyntaxStore,
     pub(super) pos: usize,
@@ -220,14 +282,41 @@ pub(super) struct Parser<'src> {
     /// stack and aborting the process.
     pub(super) depth: usize,
     pub(super) depth_limit_hit: bool,
-    /// Token index of the `Function` keyword of the most recently completed
-    /// function type; after a type parse, that of its outermost function type.
-    pub(super) last_function_keyword: Option<usize>,
+    /// Cursor checkpoint at the `Function` keyword of the most recently
+    /// completed function type; after a type parse, its outermost function type.
+    pub(super) last_function_keyword: Option<Checkpoint>,
 }
 
 impl<'src> Parser<'src> {
+    pub(super) fn start(&mut self) -> Marker {
+        self.start_at(self.cur().offset() + self.split_count)
+    }
+
+    pub(super) fn start_at(&mut self, offset: usize) -> Marker {
+        let marker = Marker {
+            pos: self.events.len(),
+        };
+        self.events.push(Event::Start {
+            kind: NodeKind::Error,
+            forward_parent: None,
+            offset,
+        });
+        marker
+    }
+
+    pub(super) fn missing(&mut self, kind: NodeKind) -> CompletedMarker {
+        let marker = self.start();
+        if kind == NodeKind::Identifier {
+            self.events.push(Event::RecoverySpan(self.cur_span()));
+        }
+        marker.complete(self, kind)
+    }
+
     pub(super) fn new(syntax: &'src SyntaxStore, src: &'src str, version: LanguageVersion) -> Self {
         Self {
+            events: Vec::new(),
+            forward_parents: Vec::new(),
+            retrofitted_names: Vec::new(),
             tokens: SignificantTokens::new(syntax),
             syntax,
             pos: 0,
@@ -300,14 +389,37 @@ impl<'src> Parser<'src> {
             pos: self.pos,
             errors: self.errors.len(),
             depth_limit_hit: self.depth_limit_hit,
+            events: self.events.len(),
+            forward_parents: self.forward_parents.len(),
+            retrofitted_names: self.retrofitted_names.len(),
+            split: self.split,
+            split_count: self.split_count,
         }
     }
 
     #[inline]
     pub(super) fn restore(&mut self, checkpoint: Checkpoint) {
-        self.rewind_to(checkpoint.pos);
+        self.restore_cursor(checkpoint);
         self.errors.truncate(checkpoint.errors);
         self.depth_limit_hit = checkpoint.depth_limit_hit;
+    }
+
+    #[inline]
+    pub(super) fn restore_cursor(&mut self, checkpoint: Checkpoint) {
+        self.rewind_to(checkpoint.pos);
+        while self.forward_parents.len() > checkpoint.forward_parents {
+            let (pos, previous) = self.forward_parents.pop().unwrap();
+            if let Event::Start { forward_parent, .. } = &mut self.events[pos] {
+                *forward_parent = previous;
+            }
+        }
+        while self.retrofitted_names.len() > checkpoint.retrofitted_names {
+            let (pos, token) = self.retrofitted_names.pop().unwrap();
+            self.events[pos] = token;
+        }
+        self.events.truncate(checkpoint.events);
+        self.split = checkpoint.split;
+        self.split_count = checkpoint.split_count;
     }
 
     #[inline]
@@ -408,6 +520,11 @@ impl<'src> Parser<'src> {
 
     pub(super) fn advance(&mut self) -> Token {
         let tok = *self.cur();
+        self.events.push(Event::Token {
+            kind: tok.kind,
+            offset: tok.offset() + self.split_count,
+            len: tok.len().saturating_sub(self.split_count),
+        });
         self.split = None;
         self.split_count = 0;
         if self.pos + 1 < self.tokens.len() {
@@ -519,12 +636,30 @@ impl<'src> Parser<'src> {
         let mut name = first;
         loop {
             let start = name.span.start;
+            if matches!(self.events.last(), Some(Event::Token { offset, .. }) if *offset == start) {
+                let token = self.events.pop().unwrap();
+                self.retrofitted_names
+                    .push((self.events.len(), token.clone()));
+                let identifier = self.start_at(start);
+                self.events.push(token);
+                identifier.complete(self, NodeKind::Identifier);
+            }
+            let identifier = self.events.iter().enumerate().rev()
+                .take_while(|(_, event)| !matches!(event, Event::Token { offset, .. } if *offset < start))
+                .find_map(|(index, event)| {
+                    matches!(event, Event::Start { kind: NodeKind::Identifier, offset, .. } if *offset == start).then_some(index)
+                });
+            let marker = match identifier {
+                Some(pos) => CompletedMarker { pos }.precede(self),
+                None => self.start_at(start),
+            };
             let initializer = self.eat(TokenKind::Eq).map(|_| self.parse_expr());
             vars.push(VarDeclarator {
                 name,
                 initializer,
                 span: self.span_from(start),
             });
+            marker.complete(self, NodeKind::VarDeclarator);
             if self.eat(TokenKind::Comma).is_none() {
                 break;
             }
@@ -535,7 +670,9 @@ impl<'src> Parser<'src> {
 
     pub(super) fn parse_ident(&mut self) -> Option<Identifier> {
         if self.cur().kind.is_identifier_like() {
+            let marker = self.start();
             let tok = self.advance();
+            marker.complete(self, NodeKind::Identifier);
             Some(self.tok_ident(&tok))
         } else {
             None
@@ -547,6 +684,7 @@ impl<'src> Parser<'src> {
             id
         } else {
             self.error(format!("expected identifier, got {:?}", self.cur().kind));
+            self.missing(NodeKind::Identifier);
             Identifier::new("<error>", self.cur_span())
         }
     }
@@ -555,6 +693,7 @@ impl<'src> Parser<'src> {
         let mut anns = Vec::new();
         while self.at(TokenKind::At) {
             let start = self.cur().offset();
+            let marker = self.start();
             self.advance(); // @
             // A `.new` reference names the unnamed constructor (`@X.new()`); `new`
             // is a keyword token, so accept it in the dotted-name segments here and
@@ -591,6 +730,7 @@ impl<'src> Parser<'src> {
                 args,
                 span,
             });
+            marker.complete(self, NodeKind::Annotation);
         }
         anns
     }
@@ -598,6 +738,7 @@ impl<'src> Parser<'src> {
     pub(super) fn parse_function_body(&mut self, marker: AsyncMarker) -> Option<FunctionBody> {
         self.with_body(marker, |parser| match parser.cur().kind {
             TokenKind::Arrow => {
+                let node = parser.start();
                 let start = parser.cur().offset();
                 parser.advance();
                 let expr = parser.parse_expr();
@@ -606,6 +747,7 @@ impl<'src> Parser<'src> {
                 // recovery. Function *expressions* (closures) use a separate arrow
                 // path in `expr.rs` that carries no terminator.
                 parser.expect(TokenKind::Semicolon);
+                node.complete(parser, NodeKind::ArrowBody);
                 Some(FunctionBody::Arrow(Box::new(expr), parser.span_from(start)))
             }
             TokenKind::LBrace => Some(FunctionBody::Block(parser.parse_block())),
@@ -617,11 +759,13 @@ impl<'src> Parser<'src> {
             // `void f() native "name";`.
             TokenKind::Ident if parser.cur_text() == "native" => {
                 let start = parser.cur().offset();
+                let node = parser.start();
                 parser.advance();
                 let name = parser
                     .at(TokenKind::StringLit)
                     .then(|| parser.parse_adjacent_strings());
                 let span = parser.span_from(start);
+                node.complete(parser, NodeKind::NativeBody);
                 parser.expect(TokenKind::Semicolon);
                 Some(FunctionBody::Native(name, span))
             }
@@ -631,6 +775,7 @@ impl<'src> Parser<'src> {
 
     pub(super) fn parse_arg_list(&mut self) -> ArgList {
         let start = self.cur().offset();
+        let marker = self.start();
         self.expect(TokenKind::LParen);
         // Inside an argument list a trailing `{` never opens the constructor body.
         self.ctx.in_ctor_init_value = false;
@@ -646,6 +791,7 @@ impl<'src> Parser<'src> {
             // Named arg: name: expr
             if self.cur().kind.is_identifier_like() && self.peek(1).kind == TokenKind::Colon {
                 let arg_start = self.cur().offset();
+                let named_marker = self.start();
                 let name = self.expect_ident();
                 self.advance(); // :
                 let value = self.parse_expr();
@@ -654,6 +800,7 @@ impl<'src> Parser<'src> {
                     value,
                     span: self.span_from(arg_start),
                 });
+                named_marker.complete(self, NodeKind::NamedArg);
             } else {
                 positional.push(self.parse_expr());
             }
@@ -663,6 +810,7 @@ impl<'src> Parser<'src> {
             }
         }
         self.expect(TokenKind::RParen);
+        marker.complete(self, NodeKind::ArgList);
         ArgList {
             positional,
             named,
@@ -674,6 +822,7 @@ impl<'src> Parser<'src> {
         if !self.at(TokenKind::Lt) {
             return Vec::new();
         }
+        let marker = self.start();
         self.advance(); // <
         let mut args = Vec::new();
         while !self.at(TokenKind::Gt) && !self.at(TokenKind::Eof) {
@@ -689,11 +838,17 @@ impl<'src> Parser<'src> {
             _ => None,
         };
         if let Some(kind) = narrowed {
+            self.events.push(Event::Token {
+                kind: TokenKind::Gt,
+                offset: self.cur().offset() + self.split_count,
+                len: 1,
+            });
             self.split = Some(Token::new(kind, self.cur().offset(), self.cur().len()));
             self.split_count += 1;
         } else {
             self.eat(TokenKind::Gt);
         }
+        marker.complete(self, NodeKind::TypeArgs);
         args
     }
 
@@ -793,6 +948,7 @@ impl<'src> Parser<'src> {
 
     pub(super) fn parse_program(&mut self) -> Program {
         let start = 0usize;
+        let marker = self.start();
         let library_directive = self.try_parse_library_directive();
         let part_of_directive = self.try_parse_part_of();
         let mut part_directives = Vec::new();
@@ -815,10 +971,15 @@ impl<'src> Parser<'src> {
                     if let Some(decl) = self.parse_top_level_decl() {
                         declarations.push(decl);
                     } else {
+                        let marker = self.start();
+                        let recovery = self.start();
+                        self.missing(NodeKind::Identifier);
+                        recovery.complete(self, NodeKind::Error);
                         // Recovery: skip one token
                         let span = self.cur_span();
                         self.error(format!("unexpected token {:?}", self.cur().kind));
                         self.advance();
+                        marker.complete(self, NodeKind::ErrorNode);
                         declarations.push(TopLevelDecl::Error(ErrorNode {
                             message: "unexpected token".into(),
                             span,
@@ -828,6 +989,7 @@ impl<'src> Parser<'src> {
             }
         }
 
+        marker.complete(self, NodeKind::Program);
         Program {
             library_directive,
             part_of_directive,
@@ -963,5 +1125,191 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn cst_round_trips_recovery_trivia_generics_and_strings() {
+        for source in [
+            "// comment\n/// docs\nclass C { /* member */ int x = 1; }\n",
+            "Map<String, List<List<int>>> value;",
+            "void f() { print('hello $name ${call(\"nested ${value}\")}'); }",
+            "var text = 'unterminated",
+            "@@@ } ??? \u{2603}",
+        ] {
+            let result = parse(source);
+            let text: String = result
+                .tree
+                .tokens(source)
+                .map(|token| token.text())
+                .collect();
+            assert_eq!(text, source);
+            assert_eq!(result.tree.root(source).kind(), NodeKind::Program);
+        }
+    }
+
+    #[test]
+    fn markers_wrap_abandon_and_restore_forward_parents() {
+        let source = "a + b";
+        let syntax = lex_syntax(source);
+        let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
+        let root = parser.start();
+        let left = parser.start();
+        parser.advance();
+        let left = left.complete(&mut parser, NodeKind::Identifier);
+        let checkpoint = parser.checkpoint();
+        let discarded = left.precede(&mut parser);
+        parser.advance();
+        discarded.complete(&mut parser, NodeKind::BinaryExpr);
+        parser.restore(checkpoint);
+        assert_eq!(parser.events.len(), checkpoint.events);
+        let wrapper = left.precede(&mut parser);
+        parser.advance();
+        let abandoned = parser.start();
+        abandoned.abandon(&mut parser);
+        let right = parser.start();
+        parser.advance();
+        right.complete(&mut parser, NodeKind::Identifier);
+        wrapper.complete(&mut parser, NodeKind::BinaryExpr);
+        root.complete(&mut parser, NodeKind::Program);
+        let tree = SyntaxTree::build(source, syntax.tokens(), parser.events);
+        let binary = tree.root(source).children().next().unwrap();
+        assert_eq!(binary.kind(), NodeKind::BinaryExpr);
+        assert_eq!(binary.children().count(), 2);
+        assert_eq!(binary.text(), source);
+    }
+
+    #[test]
+    fn restore_after_raw_declarator_name_removes_retroactive_wrapper() {
+        let source = "x;";
+        let syntax = lex_syntax(source);
+        let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
+        let root = parser.start();
+        let token = parser.advance();
+        let name = parser.tok_ident(&token);
+        let checkpoint = parser.checkpoint();
+        parser.parse_declarators(name);
+        parser.restore(checkpoint);
+        parser.advance();
+        root.complete(&mut parser, NodeKind::Program);
+        let tree = SyntaxTree::build(source, syntax.tokens(), parser.events);
+        assert_eq!(tree.root(source).children().count(), 0);
+        assert!(tree.is_lossless(source));
+    }
+
+    #[test]
+    fn cst_recovery_leaves_and_program_spans_match_ast() {
+        for source in [
+            "",
+            "// comment only",
+            " \n// header\nvar x = 1; // tail",
+            "\u{feff}",
+            "\u{feff}// comment",
+            "\u{feff}#!/usr/bin/dart\nvar x = 1;",
+        ] {
+            let result = parse(source);
+            assert_eq!(result.tree.program(source).span(), result.program.span);
+            assert!(result.tree.is_lossless(source));
+        }
+        let source = "class C { int x = 1; int y; int get size native; }";
+        let result = parse(source);
+        let root = result.tree.root(source);
+        let names: Vec<_> = root
+            .descendants()
+            .filter(|node| node.kind() == NodeKind::VarDeclarator)
+            .map(|node| node.significant_tokens().next().unwrap().text())
+            .collect();
+        assert_eq!(names, ["x", "y"]);
+        let native = root
+            .descendants()
+            .find(|node| node.kind() == NodeKind::NativeBody)
+            .unwrap();
+        assert_eq!(native.text(), "native");
+        let source = "@;";
+        let result = parse(source);
+        let missing = result
+            .tree
+            .root(source)
+            .descendants()
+            .find(|node| node.kind() == NodeKind::Identifier)
+            .unwrap();
+        let name = falcon_syntax::cst::Identifier::from_node(missing).unwrap();
+        assert_eq!(name.name(), "<error>");
+        assert_eq!(name.span(), Span::new(1, 2));
+        let source = "var x = '${foo(}';";
+        let result = parse(source);
+        assert!(!result.errors.is_empty());
+        assert!(
+            !result
+                .tree
+                .root(source)
+                .descendants()
+                .any(|node| node.kind() == NodeKind::StringInterpolation)
+        );
+    }
+
+    #[test]
+    fn missing_name_preserves_original_string_and_split_token_spans() {
+        for source in ["'$x'", ">>", ""] {
+            let syntax = lex_syntax(source);
+            let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
+            let root = parser.start();
+            if source == ">>" {
+                parser.split = Some(*parser.cur());
+                parser.split_count = 1;
+            }
+            let expected = parser.expect_ident();
+            while !parser.at(TokenKind::Eof) {
+                parser.advance();
+            }
+            root.complete(&mut parser, NodeKind::Program);
+            let tokens = lexical::cst_tokens(&syntax, source);
+            let tree = SyntaxTree::build(source, &tokens, parser.events);
+            let node = tree
+                .root(source)
+                .descendants()
+                .find(|node| node.kind() == NodeKind::Identifier)
+                .unwrap();
+            let identifier = falcon_syntax::cst::Identifier::from_node(node).unwrap();
+            assert!(identifier.is_missing());
+            assert_eq!(identifier.span(), expected.span);
+            assert_eq!(identifier.name(), expected.name);
+            assert_eq!(node.span().start, node.span().end);
+        }
+    }
+
+    #[test]
+    fn missing_identifier_recovery_after_declarations_and_before_interpolation() {
+        for source in ["var x = 1; var", "void f() { a.'$x'; }"] {
+            let result = parse(source);
+            assert!(result.tree.is_lossless(source));
+            assert!(
+                result
+                    .tree
+                    .root(source)
+                    .descendants()
+                    .filter(|node| node.kind() == NodeKind::Identifier)
+                    .filter_map(falcon_syntax::cst::Identifier::from_node)
+                    .all(|identifier| identifier.span().end <= source.len())
+            );
+        }
+    }
+
+    #[test]
+    fn cursor_restore_preserves_diagnostics_and_depth_latch() {
+        let source = "x";
+        let syntax = lex_syntax(source);
+        let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
+        let checkpoint = parser.checkpoint();
+        parser.advance();
+        parser.error("retained recovery diagnostic");
+        parser.depth_limit_hit = true;
+        parser.restore_cursor(checkpoint);
+        assert_eq!(parser.cur_text(), "x");
+        assert!(parser.events.is_empty());
+        assert_eq!(parser.errors.len(), 1);
+        assert!(parser.depth_limit_hit);
+        parser.restore(checkpoint);
+        assert!(parser.errors.is_empty());
+        assert!(!parser.depth_limit_hit);
     }
 }

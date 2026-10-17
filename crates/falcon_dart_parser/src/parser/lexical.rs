@@ -140,6 +140,184 @@ fn is_interp_ident_continue(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
 
+pub(super) fn cst_tokens(syntax: &SyntaxStore, source: &str) -> Vec<Token> {
+    let mut output = Vec::with_capacity(syntax.tokens().len());
+    let mut roots = syntax.tokens().iter().copied();
+    let mut pending = Vec::new();
+    let mut pieces = Vec::new();
+    while let Some((token, store)) = pending
+        .pop()
+        .or_else(|| roots.next().map(|token| (token, syntax)))
+    {
+        if token.kind != TokenKind::StringLit {
+            output.push(token);
+            continue;
+        }
+        let mut cursor = token.offset();
+        visit_interpolations(token.text(source), token.offset(), |region| {
+            let (span, prefix, prefix_len) = match region {
+                InterpolationRegion::Expression(span) => (span, TokenKind::InterpolationStart, 2),
+                InterpolationRegion::Identifier(span) => (span, TokenKind::InterpolationDollar, 1),
+            };
+            let start = span.start - prefix_len;
+            if cursor < start {
+                pieces.push((
+                    Token::new(TokenKind::StringPart, cursor, start - cursor),
+                    store,
+                ));
+            }
+            pieces.push((Token::new(prefix, start, prefix_len), store));
+            if prefix == TokenKind::InterpolationStart {
+                if let Some(nested) = store.interpolation(span) {
+                    pieces.extend(
+                        nested
+                            .tokens()
+                            .iter()
+                            .filter(|t| t.kind != TokenKind::Eof)
+                            .map(|t| (*t, nested)),
+                    );
+                }
+                pieces.push((Token::new(TokenKind::RBrace, span.end, 1), store));
+                cursor = span.end + 1;
+            } else {
+                pieces.push((
+                    Token::new(TokenKind::Ident, span.start, span.end - span.start),
+                    store,
+                ));
+                cursor = span.end;
+            }
+        });
+        if pieces.is_empty() {
+            output.push(token);
+        } else {
+            let end = token.offset() + token.len();
+            if cursor < end {
+                pieces.push((
+                    Token::new(TokenKind::StringPart, cursor, end - cursor),
+                    store,
+                ));
+            }
+            pending.extend(pieces.drain(..).rev());
+        }
+    }
+    output
+}
+
+impl super::Parser<'_> {
+    pub(super) fn scan_string_interpolations(
+        &mut self,
+        token: &Token,
+    ) -> (
+        Vec<falcon_syntax::ast::StringInterpolation>,
+        Vec<super::ParseError>,
+    ) {
+        use falcon_syntax::ast::{Expr, Identifier, StringInterpolation};
+        use falcon_syntax::cst::{Event, NodeKind};
+
+        let mut regions = Vec::new();
+        visit_interpolations(token.text(self.src), token.offset(), |region| {
+            regions.push(region)
+        });
+        if regions.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        assert!(matches!(
+            self.events.pop(),
+            Some(Event::Token {
+                kind: TokenKind::StringLit,
+                ..
+            })
+        ));
+        let mut cursor = token.offset();
+        let mut interpolations = Vec::with_capacity(regions.len());
+        let mut errors = Vec::new();
+        for region in regions {
+            let (span, prefix, prefix_len) = match region {
+                InterpolationRegion::Expression(span) => (span, TokenKind::InterpolationStart, 2),
+                InterpolationRegion::Identifier(span) => (span, TokenKind::InterpolationDollar, 1),
+            };
+            let start = span.start - prefix_len;
+            if cursor < start {
+                self.events.push(Event::Token {
+                    kind: TokenKind::StringPart,
+                    offset: cursor,
+                    len: start - cursor,
+                });
+            }
+            let marker = self.start_at(start);
+            self.events.push(Event::Token {
+                kind: prefix,
+                offset: start,
+                len: prefix_len,
+            });
+            let mut valid = prefix != TokenKind::InterpolationStart;
+            if prefix == TokenKind::InterpolationStart {
+                let retained = self
+                    .syntax
+                    .interpolation(span)
+                    .expect("retained interpolation stream");
+                if span.start < span.end {
+                    let mut sub = super::Parser::new(retained, self.src, self.version);
+                    let expr = sub.parse_expr();
+                    if sub.errors.is_empty()
+                        && sub.at(TokenKind::Eof)
+                        && !matches!(expr, Expr::Error { .. })
+                    {
+                        valid = true;
+                        interpolations.push(StringInterpolation { expr, span });
+                    }
+                    self.events.extend(sub.events);
+                    errors.extend(sub.errors);
+                }
+                self.events.push(Event::Token {
+                    kind: TokenKind::RBrace,
+                    offset: span.end,
+                    len: 1,
+                });
+                cursor = span.end + 1;
+            } else {
+                let name = &self.src[span.start..span.end];
+                let kind = if name == "this" {
+                    NodeKind::ThisExpr
+                } else {
+                    NodeKind::Identifier
+                };
+                let ident = self.start_at(span.start);
+                self.events.push(Event::Token {
+                    kind: TokenKind::Ident,
+                    offset: span.start,
+                    len: span.end - span.start,
+                });
+                ident.complete(self, kind);
+                let expr = if name == "this" {
+                    Expr::This { span }
+                } else {
+                    Expr::Ident(Identifier::new(name, span))
+                };
+                interpolations.push(StringInterpolation { expr, span });
+                cursor = span.end;
+            }
+            marker.complete(
+                self,
+                if valid {
+                    NodeKind::StringInterpolation
+                } else {
+                    NodeKind::Error
+                },
+            );
+        }
+        let end = token.offset() + token.len();
+        if cursor < end {
+            self.events.push(Event::Token {
+                kind: TokenKind::StringPart,
+                offset: cursor,
+                len: end - cursor,
+            });
+        }
+        (interpolations, errors)
+    }
+}
+
 #[cfg(test)]
 #[path = "lexical_tests.rs"]
 mod tests;

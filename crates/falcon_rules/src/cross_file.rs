@@ -739,6 +739,7 @@ mod tests {
             program,
             errors,
             syntax,
+            ..
         } = parse("");
         assert!(errors.is_empty());
         let package = detect_package(&[ProjectFile {

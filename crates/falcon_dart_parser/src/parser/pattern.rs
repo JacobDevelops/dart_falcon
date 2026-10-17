@@ -1,4 +1,5 @@
 use falcon_syntax::ast::*;
+use falcon_syntax::cst::NodeKind;
 use falcon_syntax::token::TokenKind;
 
 use super::{Parser, expr::Brackets};
@@ -16,6 +17,7 @@ impl<'src> Parser<'src> {
 
     fn parse_logical_or_pattern(&mut self) -> Pattern {
         let start = self.cur().offset();
+        let mut marker = self.start();
         let mut left = self.parse_logical_and_pattern();
         while self.eat(TokenKind::PipePipe).is_some() {
             let right = self.parse_logical_and_pattern();
@@ -25,12 +27,19 @@ impl<'src> Parser<'src> {
                 right: Box::new(right),
                 span,
             };
+            let completed = marker.complete(self, NodeKind::LogicalOrPattern);
+            if !self.at(TokenKind::PipePipe) {
+                return left;
+            }
+            marker = completed.precede(self);
         }
+        marker.abandon(self);
         left
     }
 
     fn parse_logical_and_pattern(&mut self) -> Pattern {
         let start = self.cur().offset();
+        let mut marker = self.start();
         let mut left = self.parse_relational_pattern();
         while self.eat(TokenKind::AmpAmp).is_some() {
             let right = self.parse_relational_pattern();
@@ -40,7 +49,13 @@ impl<'src> Parser<'src> {
                 right: Box::new(right),
                 span,
             };
+            let completed = marker.complete(self, NodeKind::LogicalAndPattern);
+            if !self.at(TokenKind::AmpAmp) {
+                return left;
+            }
+            marker = completed.precede(self);
         }
+        marker.abandon(self);
         left
     }
 
@@ -62,11 +77,13 @@ impl<'src> Parser<'src> {
             _ => None,
         };
         if let Some(op) = op {
+            let marker = self.start();
             self.advance();
             // The operand is a `bitwiseOrExpression`: parsing at this tier keeps
             // `&&`/`||` at the pattern level so `> 3 && < 5` is a logical-and
             // pattern rather than the operand swallowing the `&&`.
             let value = self.parse_bitwise_or();
+            marker.complete(self, NodeKind::RelationalPattern);
             return Pattern::Relational {
                 op,
                 value,
@@ -90,6 +107,7 @@ impl<'src> Parser<'src> {
 
     fn parse_postfix_pattern(&mut self) -> Pattern {
         let start = self.cur().offset();
+        let mut marker = self.start();
         let mut inner = self.parse_primary_pattern();
         loop {
             if self.eat(TokenKind::Qmark).is_some() {
@@ -98,12 +116,22 @@ impl<'src> Parser<'src> {
                     inner: Box::new(inner),
                     span,
                 };
+                let completed = marker.complete(self, NodeKind::NullCheckPattern);
+                if !self.at_any(&[TokenKind::Qmark, TokenKind::Bang, TokenKind::As]) {
+                    return inner;
+                }
+                marker = completed.precede(self);
             } else if self.eat(TokenKind::Bang).is_some() {
                 let span = self.span_from(start);
                 inner = Pattern::NullAssert {
                     inner: Box::new(inner),
                     span,
                 };
+                let completed = marker.complete(self, NodeKind::NullAssertPattern);
+                if !self.at_any(&[TokenKind::Qmark, TokenKind::Bang, TokenKind::As]) {
+                    return inner;
+                }
+                marker = completed.precede(self);
             } else if self.eat(TokenKind::As).is_some() {
                 let cast_type = self.parse_type();
                 let span = self.span_from(start);
@@ -112,14 +140,52 @@ impl<'src> Parser<'src> {
                     cast_type,
                     span,
                 };
+                let completed = marker.complete(self, NodeKind::CastPattern);
+                if !self.at_any(&[TokenKind::Qmark, TokenKind::Bang, TokenKind::As]) {
+                    return inner;
+                }
+                marker = completed.precede(self);
             } else {
                 break;
             }
         }
+        marker.abandon(self);
         inner
     }
 
     fn parse_primary_pattern(&mut self) -> Pattern {
+        let marker = self.start();
+        let value_marker = self.start();
+        let pattern = self.parse_primary_pattern_inner();
+        if matches!(
+            &pattern,
+            Pattern::Const(ConstPattern {
+                value: ConstPatternValue::Expr(_),
+                ..
+            })
+        ) {
+            value_marker.complete(self, NodeKind::ConstPatternExpr);
+        } else {
+            value_marker.abandon(self);
+        }
+        let kind = match &pattern {
+            Pattern::Wildcard { .. } => NodeKind::WildcardPattern,
+            Pattern::Variable { .. } => NodeKind::VariablePattern,
+            Pattern::Literal(_) => NodeKind::LiteralPattern,
+            Pattern::Const(_) => NodeKind::ConstPattern,
+            Pattern::List(_) => NodeKind::ListPattern,
+            Pattern::Record(_) => NodeKind::RecordPattern,
+            Pattern::Map(_) => NodeKind::MapPattern,
+            Pattern::Object(_) => NodeKind::ObjectPattern,
+            Pattern::ParenPattern { .. } => NodeKind::ParenPattern,
+            Pattern::Error { .. } => NodeKind::ErrorPattern,
+            _ => unreachable!("primary pattern cannot produce an infix or postfix pattern"),
+        };
+        marker.complete(self, kind);
+        pattern
+    }
+
+    fn parse_primary_pattern_inner(&mut self) -> Pattern {
         let start = self.cur().offset();
 
         // Dot-shorthand constant pattern (Dart 3.x): `.name` / `.new` — an
@@ -253,8 +319,10 @@ impl<'src> Parser<'src> {
         // A member access on it (`"Lax".length`) is a constant expression the
         // front end accepts as a constant pattern too.
         if self.at(TokenKind::StringLit) {
+            let mut field_marker = self.start();
             let node = self.parse_adjacent_strings();
             if !(self.at(TokenKind::Dot) && self.peek(1).kind.is_identifier_like()) {
+                field_marker.abandon(self);
                 return Pattern::Literal(LiteralPattern {
                     value: LiteralPatternValue::String(node),
                     span: self.span_from(start),
@@ -270,6 +338,11 @@ impl<'src> Parser<'src> {
                     is_null_safe: false,
                     span: self.span_from(start),
                 };
+                let completed = field_marker.complete(self, NodeKind::FieldExpr);
+                if !(self.at(TokenKind::Dot) && self.peek(1).kind.is_identifier_like()) {
+                    break;
+                }
+                field_marker = completed.precede(self);
             }
             return Pattern::Const(ConstPattern {
                 value: ConstPatternValue::Expr(Box::new(expr)),
@@ -378,9 +451,11 @@ impl<'src> Parser<'src> {
             return self.parse_record_pattern_body(start);
         }
 
+        let first_marker = self.start();
         let first = self.parse_pattern();
 
         if self.at(TokenKind::Comma) {
+            first_marker.complete(self, NodeKind::RecordPatternField);
             // More elements → record pattern
             let mut fields = vec![RecordPatternField {
                 name: None,
@@ -397,7 +472,11 @@ impl<'src> Parser<'src> {
                 span: self.span_from(start),
             })
         } else {
+            first_marker.abandon(self);
             // Single element → parenthesised pattern
+            if !self.at(TokenKind::RParen) {
+                self.pattern_recovery_span();
+            }
             let close = self.expect(TokenKind::RParen);
             Pattern::ParenPattern {
                 inner: Box::new(first),
@@ -426,11 +505,13 @@ impl<'src> Parser<'src> {
     /// `pattern`.
     fn parse_record_field(&mut self) -> RecordPatternField {
         let fs = self.cur().offset();
+        let marker = self.start();
         if self.at(TokenKind::Colon) {
             self.advance(); // :
             // `:name` (also `:var name` / `:final name`) always binds a variable.
             let pattern = self.parse_binding_pattern();
             let name = binding_pattern_name(&pattern);
+            marker.complete(self, NodeKind::RecordPatternField);
             return RecordPatternField {
                 name,
                 pattern,
@@ -446,6 +527,7 @@ impl<'src> Parser<'src> {
             None
         };
         let pattern = self.parse_pattern();
+        marker.complete(self, NodeKind::RecordPatternField);
         RecordPatternField {
             name,
             pattern,
@@ -460,12 +542,14 @@ impl<'src> Parser<'src> {
         while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
             let es = self.cur().offset();
             if self.at(TokenKind::DotDotDot) {
+                let marker = self.start();
                 self.advance();
                 let rest_pat = if !self.at(TokenKind::RBracket) && !self.at(TokenKind::Comma) {
                     Some(self.parse_pattern())
                 } else {
                     None
                 };
+                marker.complete(self, NodeKind::RestPattern);
                 elements.push(ListPatternElement::Rest(rest_pat, self.span_from(es)));
             } else {
                 elements.push(ListPatternElement::Pattern(self.parse_pattern()));
@@ -497,9 +581,11 @@ impl<'src> Parser<'src> {
                 continue;
             }
             let es = self.cur().offset();
+            let marker = self.start();
             let key = self.parse_expr();
             self.expect(TokenKind::Colon);
             let pattern = self.parse_pattern();
+            marker.complete(self, NodeKind::MapPatternEntry);
             entries.push(MapPatternEntry {
                 key,
                 pattern,
@@ -525,8 +611,9 @@ impl<'src> Parser<'src> {
         // expression for a single element and a const `Expr::Record` when commas
         // make it a record shape.
         if self.peek(1).kind == TokenKind::LParen {
+            let marker = self.start();
             self.advance(); // const
-            let inner = self.parse_paren_or_record(true, start);
+            let inner = self.parse_paren_or_record_inner(true, start, marker);
             return Pattern::Const(ConstPattern {
                 value: ConstPatternValue::Expr(Box::new(inner)),
                 span: self.span_from(start),
@@ -590,6 +677,7 @@ impl<'src> Parser<'src> {
             let mut fields = Vec::new();
             while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
                 let fs = self.cur().offset();
+                let marker = self.start();
                 // Dart 3 colon-shorthand: `:field` binds a variable whose getter
                 // name is the bound name (also `:var x` / `:final x`). Parse in
                 // binding mode so `field` becomes a variable, not a constant
@@ -597,8 +685,11 @@ impl<'src> Parser<'src> {
                 if self.at(TokenKind::Colon) {
                     self.advance(); // :
                     let inner = self.parse_binding_pattern();
-                    let field_name = binding_pattern_name(&inner)
-                        .unwrap_or_else(|| Identifier::new("<shorthand>", self.cur_span()));
+                    let field_name = binding_pattern_name(&inner).unwrap_or_else(|| {
+                        self.pattern_recovery_span();
+                        Identifier::new("<shorthand>", self.cur_span())
+                    });
+                    marker.complete(self, NodeKind::ObjectPatternField);
                     fields.push(ObjectPatternField {
                         name: field_name,
                         pattern: Some(inner),
@@ -623,6 +714,10 @@ impl<'src> Parser<'src> {
                 } else {
                     Some(self.parse_pattern())
                 };
+                if name.is_none() {
+                    self.pattern_recovery_span();
+                }
+                marker.complete(self, NodeKind::ObjectPatternField);
                 fields.push(ObjectPatternField {
                     name: name.unwrap_or_else(|| Identifier::new("<field>", self.cur_span())),
                     pattern,
@@ -695,6 +790,11 @@ impl<'src> Parser<'src> {
         }
     }
 
+    fn pattern_recovery_span(&mut self) {
+        self.events
+            .push(falcon_syntax::cst::Event::RecoverySpan(self.cur_span()));
+    }
+
     fn eat_wildcard(&mut self) -> bool {
         if self.at(TokenKind::Ident) && self.cur_text() == "_" {
             self.advance();
@@ -715,5 +815,85 @@ fn binding_pattern_name(pattern: &Pattern) -> Option<Identifier> {
         | Pattern::NullCheck { inner, .. }
         | Pattern::NullAssert { inner, .. } => binding_pattern_name(inner),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_syntax::{LanguageVersion, cst::SyntaxTree};
+
+    #[test]
+    fn pattern_views_match_legacy_debug() {
+        for source in [
+            "_",
+            "int _",
+            "var x",
+            "final int x",
+            "null",
+            "true",
+            "false",
+            "1",
+            "1.5",
+            "-1",
+            "-1.5",
+            "'a' 'b'",
+            "'a'.length",
+            ".foo",
+            "#foo",
+            "const Foo",
+            "const Foo.bar",
+            "const (foo)",
+            "const (1, 2)",
+            "const Foo()",
+            "const [1]",
+            "[var a, ...var rest]",
+            "<int>[1, ...]",
+            "{'a': var a, ...}",
+            "<String, int>{'a': 1}",
+            "()",
+            "(var a)",
+            "(var a, var b)",
+            "(:x, named: var y)",
+            "(:final x?, :var y as int)",
+            "Foo(:x, named: var y)",
+            "Foo(:1)",
+            "Foo(var x)",
+            "> 3 && < 5 || == 7",
+            "var x?! as int",
+            "(1:",
+            "1 || 2 || 3",
+            "1 && 2 && 3",
+            "'a'.length.isEven",
+            "dynamic?",
+            "( , x)",
+            "Foo(,)",
+            "List<int>",
+            "p.Foo",
+            "Foo?",
+            "(a, b)",
+            "[a, ...rest]",
+        ] {
+            for binding in [false, true] {
+                let syntax = super::super::lex_syntax(source);
+                let mut parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
+                let root = parser.start();
+                let legacy = if binding {
+                    parser.parse_binding_pattern()
+                } else {
+                    parser.parse_pattern()
+                };
+                root.complete(&mut parser, NodeKind::Program);
+                let tokens = super::super::lexical::cst_tokens(&syntax, source);
+                let tree = SyntaxTree::build(source, &tokens, parser.events);
+                let pattern = tree
+                    .root(source)
+                    .children()
+                    .find_map(falcon_syntax::cst::Pattern::cast)
+                    .expect("pattern parser emits a pattern node");
+                assert_eq!(format!("{legacy:#?}"), format!("{pattern:#?}"), "{source}");
+                assert!(tree.is_lossless(source), "{source}");
+            }
+        }
     }
 }
