@@ -8,7 +8,10 @@ bun          = "latest"
 mr-boxington = "latest"
 cargo-make   = "latest"
 taplo        = "latest"
-# Lets the cargo: backend download prebuilt binaries instead of compiling them.
+# Lets cargo-watch use the cargo: backend to install its binary.
 cargo-binstall        = "latest"
-"cargo:cargo-nextest" = { version = "latest", locked = true }
+cargo-nextest = { version = "latest", version_prefix = "cargo-nextest-" }
 "cargo:cargo-watch"   = { version = "latest", locked = true }
+
+[tool_alias]
+cargo-nextest = "github:nextest-rs/nextest"

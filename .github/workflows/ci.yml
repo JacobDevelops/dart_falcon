@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
         with:
-          install_args: cargo-make cargo-binstall cargo:cargo-nextest mr-boxington
+          install_args: cargo-make cargo-binstall cargo-nextest mr-boxington
           cache: true
       - name: Restore main compiler snapshot
         id: compiler-cache
