@@ -30,6 +30,18 @@ sudo mv falcon /usr/local/bin/   # or anywhere on your PATH
 falcon version
 ```
 
+Each release also publishes `SHA256SUMS` and a GitHub build provenance
+attestation for every tarball. To verify a download before extracting it:
+
+```sh
+base=https://github.com/JacobDevelops/dart_falcon/releases/download/v0.4.1
+curl -fsSLO "$base/falcon-0.4.1-x86_64-linux.tar.gz" -O "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify falcon-0.4.1-x86_64-linux.tar.gz --repo JacobDevelops/dart_falcon
+```
+
+The mise GitHub backend runs these checks automatically.
+
 ## Build from source
 
 With a nightly Rust toolchain. On x86_64 GNU/Linux, building the bundled jemalloc
@@ -80,7 +92,8 @@ channel above first.
 1. A maintainer pushes a tag `vX.Y.Z`.
 2. CI (`.github/workflows/release.yml`) cross-builds all four platform binaries
    on Linux with `cargo-zigbuild` (static musl for Linux, zig-linked macOS).
-3. The binaries are packaged as `falcon-X.Y.Z-<system>.tar.gz` and attached to a
+3. The binaries are packaged as `falcon-X.Y.Z-<system>.tar.gz`, checksummed into
+   `SHA256SUMS`, given a build provenance attestation, and attached to a
    GitHub Release.
 
 ## Next steps
