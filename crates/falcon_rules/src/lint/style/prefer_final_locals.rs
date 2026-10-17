@@ -110,14 +110,13 @@ impl<'a> Collector<'_, 'a> {
         if self.outside_body {
             return;
         }
-        let roots: Vec<Pattern<'a>> = roots.into_iter().collect();
-        let count = roots.len();
-        for (index, root) in roots.into_iter().enumerate() {
+        let mut roots = roots.into_iter().enumerate().peekable();
+        while let Some((index, root)) = roots.next() {
             self.case_roots.insert(
                 root.syntax().id(),
                 CaseRoot {
                     first: index == 0,
-                    last: index + 1 == count,
+                    last: roots.peek().is_none(),
                 },
             );
         }

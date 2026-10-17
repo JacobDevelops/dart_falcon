@@ -69,18 +69,14 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             let Some(FunctionBody::Block(block)) = method.body() else {
                 continue;
             };
-            if block
+            let super_call = block
                 .stmts()
-                .first()
-                .is_some_and(is_super_init_state_statement)
-            {
+                .enumerate()
+                .find(|(_, statement)| is_super_init_state_statement(*statement));
+            if matches!(super_call, Some((0, _))) {
                 continue;
             }
-            let report = block
-                .stmts()
-                .find(|statement| is_super_init_state_statement(*statement))
-                .map(Stmt::span)
-                .unwrap_or(method.name().span());
+            let report = super_call.map_or(method.name().span(), |(_, statement)| statement.span());
             diags.push(ctx.diagnostic(
                 "proper-super-init-state",
                 "super.initState() should be called first in initState().",

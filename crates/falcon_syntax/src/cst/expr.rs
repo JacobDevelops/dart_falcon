@@ -3,26 +3,21 @@ use std::{borrow::Cow, fmt};
 use super::*;
 use crate::token::TokenKind;
 
-fn child<'a, T: AstNode<'a>>(node: SyntaxNode<'a>, index: usize) -> T {
-    node.children()
-        .filter_map(T::cast)
-        .nth(index)
-        .expect("required expression child")
-}
-fn name(node: SyntaxNode<'_>, index: usize) -> Identifier<'_> {
-    node.children()
-        .filter_map(Identifier::from_node)
-        .nth(index)
-        .expect("required expression identifier")
-}
 fn has(node: SyntaxNode<'_>, kind: TokenKind) -> bool {
     node.child_token(kind).is_some()
 }
 fn expr(node: SyntaxNode<'_>, index: usize) -> Expr<'_> {
-    child(node, index)
+    node.children()
+        .filter_map(Expr::cast)
+        .nth(index)
+        .expect("parser emits the required child")
 }
-fn types(node: SyntaxNode<'_>) -> AstChildren<'_, DartType<'_>> {
-    TypeArgs::of(node)
+
+fn collection_condition(node: SyntaxNode<'_>) -> IfCondition<'_> {
+    node.children()
+        .find(|node| node.kind() == NodeKind::ExprCondition)
+        .expect("parser emits the collection condition")
+        .required()
 }
 
 #[derive(Clone, Copy)]
@@ -328,12 +323,12 @@ impl<'a> BoolLitExpr<'a> {
 }
 impl<'a> ParenExpr<'a> {
     pub fn expr(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
 }
 impl<'a> UnaryExpr<'a> {
     pub fn operand(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn op(self) -> UnaryOp {
         match self.0.first_token().expect("unary operator").kind() {
@@ -348,7 +343,7 @@ impl<'a> UnaryExpr<'a> {
 }
 impl<'a> PostfixIncDecExpr<'a> {
     pub fn operand(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn op(self) -> PostfixIncDec {
         if has(self.0, TokenKind::PlusPlus) {
@@ -360,7 +355,7 @@ impl<'a> PostfixIncDecExpr<'a> {
 }
 impl<'a> BinaryExpr<'a> {
     pub fn left(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn right(self) -> Expr<'a> {
         expr(self.0, 1)
@@ -368,7 +363,7 @@ impl<'a> BinaryExpr<'a> {
 }
 impl<'a> AssignExpr<'a> {
     pub fn target(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn value(self) -> Expr<'a> {
         expr(self.0, 1)
@@ -376,7 +371,7 @@ impl<'a> AssignExpr<'a> {
 }
 impl<'a> ConditionalExpr<'a> {
     pub fn condition(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn then_expr(self) -> Expr<'a> {
         expr(self.0, 1)
@@ -387,10 +382,10 @@ impl<'a> ConditionalExpr<'a> {
 }
 impl<'a> IsExpr<'a> {
     pub fn expr(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn dart_type(self) -> DartType<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn negated(self) -> bool {
         has(self.0, TokenKind::Bang)
@@ -398,30 +393,28 @@ impl<'a> IsExpr<'a> {
 }
 impl<'a> AsExpr<'a> {
     pub fn expr(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn dart_type(self) -> DartType<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
 }
 impl<'a> FieldExpr<'a> {
     pub fn object(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn is_null_safe(self) -> bool {
         has(self.0, TokenKind::QmarkDot) || has(self.0, TokenKind::QmarkLBracket)
     }
     pub fn field(self) -> Identifier<'a> {
-        self.0
-            .children()
-            .filter_map(Identifier::from_node)
+        AstChildren::<Identifier>::new(self.0)
             .next_back()
             .expect("field identifier")
     }
 }
 impl<'a> IndexExpr<'a> {
     pub fn object(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn index(self) -> Expr<'a> {
         expr(self.0, 1)
@@ -432,18 +425,18 @@ impl<'a> IndexExpr<'a> {
 }
 impl<'a> CallExpr<'a> {
     pub fn callee(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn args(self) -> ArgList<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
-        types(self.0)
+        TypeArgs::of(self.0)
     }
 }
 impl<'a> CascadeExpr<'a> {
     pub fn object(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn sections(self) -> AstChildren<'a, CascadeSection<'a>> {
         AstChildren::new(self.0)
@@ -451,7 +444,7 @@ impl<'a> CascadeExpr<'a> {
     pub fn is_null_aware(self) -> bool {
         self.0
             .children_with_tokens()
-            .filter_map(|element| match element {
+            .find_map(|element| match element {
                 SyntaxElement::Token(token)
                     if matches!(token.kind(), TokenKind::DotDot | TokenKind::DotDotQmark) =>
                 {
@@ -462,23 +455,22 @@ impl<'a> CascadeExpr<'a> {
                 }
                 _ => None,
             })
-            .next()
             .is_some_and(|token| token.kind() == TokenKind::DotDotQmark)
     }
 }
 impl<'a> AwaitExpr<'a> {
     pub fn expr(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
 }
 impl<'a> ThrowExpr<'a> {
     pub fn expr(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
 }
 impl<'a> SwitchExpr<'a> {
     pub fn subject(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn arms(self) -> AstChildren<'a, SwitchExprArm<'a>> {
         AstChildren::new(self.0)
@@ -486,26 +478,26 @@ impl<'a> SwitchExpr<'a> {
 }
 impl<'a> NullAssertExpr<'a> {
     pub fn operand(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
 }
 impl<'a> GenericInstantiationExpr<'a> {
     pub fn target(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
-        types(self.0)
+        TypeArgs::of(self.0)
     }
 }
 impl<'a> NewExpr<'a> {
     pub fn dart_type(self) -> DartType<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
-        self.0.children().filter_map(Identifier::from_node).next()
+        self.0.child::<Identifier>()
     }
     pub fn args(self) -> ArgList<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
@@ -513,7 +505,7 @@ impl<'a> NewExpr<'a> {
 }
 impl<'a> DotShorthandExpr<'a> {
     pub fn name(self) -> Identifier<'a> {
-        name(self.0, 0)
+        self.0.required()
     }
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
@@ -521,7 +513,7 @@ impl<'a> DotShorthandExpr<'a> {
 }
 impl<'a> MapExpr<'a> {
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
-        types(self.0)
+        TypeArgs::of(self.0)
     }
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
@@ -532,7 +524,7 @@ impl<'a> MapExpr<'a> {
 }
 impl<'a> ListExpr<'a> {
     pub fn type_arg(self) -> Option<DartType<'a>> {
-        types(self.0).next()
+        TypeArgs::of(self.0).next()
     }
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
@@ -543,7 +535,7 @@ impl<'a> ListExpr<'a> {
 }
 impl<'a> SetExpr<'a> {
     pub fn type_arg(self) -> Option<DartType<'a>> {
-        types(self.0).next()
+        TypeArgs::of(self.0).next()
     }
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
@@ -565,10 +557,10 @@ impl<'a> FuncExpr<'a> {
         AstChildren::new(self.0)
     }
     pub fn params(self) -> FormalParamList<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn body(self) -> FunctionBody<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn async_marker(self) -> AsyncMarker {
         if has(self.0, TokenKind::Async) {
@@ -816,7 +808,7 @@ impl<'a> StringInterpolation<'a> {
         self.0
     }
     pub fn expr(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn span(self) -> Span {
         let first = self.0.first_token().expect("interpolation opener");
@@ -858,7 +850,7 @@ debug_tuple!(CascadeIndexAssign => "IndexAssign" { target, op, value });
 
 impl<'a> CascadeField<'a> {
     pub fn name(self) -> Identifier<'a> {
-        name(self.0, 0)
+        self.0.required()
     }
     pub fn is_null_aware(self) -> bool {
         has(self.0, TokenKind::QmarkDot)
@@ -872,7 +864,7 @@ impl<'a> CascadeField<'a> {
 }
 impl<'a> CascadeIndex<'a> {
     pub fn index(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn is_null_aware(self) -> bool {
         has(self.0, TokenKind::QmarkLBracket)
@@ -886,26 +878,26 @@ impl<'a> CascadeIndex<'a> {
 }
 impl<'a> CascadeCall<'a> {
     pub fn name(self) -> Identifier<'a> {
-        name(self.0, 0)
+        self.0.required()
     }
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
-        types(self.0)
+        TypeArgs::of(self.0)
     }
     pub fn args(self) -> ArgList<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
 }
 impl<'a> CascadeInvoke<'a> {
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
-        types(self.0)
+        TypeArgs::of(self.0)
     }
     pub fn args(self) -> ArgList<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
 }
 impl<'a> CascadeAssign<'a> {
     pub fn target(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn op(self) -> AssignOp {
         assign_op(self.0)
@@ -916,7 +908,7 @@ impl<'a> CascadeAssign<'a> {
 }
 impl<'a> CascadeIndexAssign<'a> {
     pub fn target(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn op(self) -> AssignOp {
         assign_op(self.0)
@@ -951,12 +943,12 @@ debug_node!(MapForElement => "For" { is_await, header, entry, span });
 
 impl<'a> NullAwareElement<'a> {
     pub fn expr(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
 }
 impl<'a> SpreadElement<'a> {
     pub fn expr(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn is_null_aware(self) -> bool {
         has(self.0, TokenKind::DotDotDotQmark)
@@ -964,7 +956,7 @@ impl<'a> SpreadElement<'a> {
 }
 impl<'a> MapSpreadElement<'a> {
     pub fn expr(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn is_null_aware(self) -> bool {
         has(self.0, TokenKind::DotDotDotQmark)
@@ -972,15 +964,10 @@ impl<'a> MapSpreadElement<'a> {
 }
 impl<'a> IfElement<'a> {
     pub fn condition(self) -> IfCondition<'a> {
-        let node = self
-            .0
-            .children()
-            .find(|node| node.kind() == NodeKind::ExprCondition)
-            .expect("collection condition");
-        child(node, 0)
+        collection_condition(self.0)
     }
     pub fn then_elem(self) -> CollectionElement<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn else_elem(self) -> Option<CollectionElement<'a>> {
         AstChildren::new(self.0).nth(1)
@@ -988,15 +975,10 @@ impl<'a> IfElement<'a> {
 }
 impl<'a> MapIfElement<'a> {
     pub fn condition(self) -> IfCondition<'a> {
-        let node = self
-            .0
-            .children()
-            .find(|node| node.kind() == NodeKind::ExprCondition)
-            .expect("map condition");
-        child(node, 0)
+        collection_condition(self.0)
     }
     pub fn then_entry(self) -> MapElement<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn else_entry(self) -> Option<MapElement<'a>> {
         AstChildren::new(self.0).nth(1)
@@ -1007,10 +989,10 @@ impl<'a> ForElement<'a> {
         has(self.0, TokenKind::Await)
     }
     pub fn header(self) -> ForHeader<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn element(self) -> CollectionElement<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
 }
 impl<'a> MapForElement<'a> {
@@ -1018,15 +1000,15 @@ impl<'a> MapForElement<'a> {
         has(self.0, TokenKind::Await)
     }
     pub fn header(self) -> ForHeader<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn entry(self) -> MapElement<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
 }
 impl<'a> MapEntry<'a> {
     pub fn key(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
     pub fn value(self) -> Expr<'a> {
         expr(self.0, 1)
@@ -1081,7 +1063,7 @@ impl<'a> RecordField<'a> {
         span
     }
     pub fn name(self) -> Option<Identifier<'a>> {
-        has(self.0, TokenKind::Colon).then(|| name(self.0, 0))
+        has(self.0, TokenKind::Colon).then(|| self.0.required())
     }
     pub fn value(self) -> Expr<'a> {
         self.0
@@ -1109,7 +1091,7 @@ typed_node!(NamedArg, NamedArg);
 debug_node!(NamedArg { name, value, span });
 impl<'a> NamedArg<'a> {
     pub fn name(self) -> Identifier<'a> {
-        name(self.0, 0)
+        self.0.required()
     }
     pub fn value(self) -> Expr<'a> {
         self.0
@@ -1128,7 +1110,7 @@ debug_node!(SwitchExprArm {
 });
 impl<'a> SwitchExprArm<'a> {
     pub fn pattern(self) -> Pattern<'a> {
-        child(self.0, 0)
+        self.0.required()
     }
     pub fn guard(self) -> Option<Expr<'a>> {
         self.0
@@ -1137,7 +1119,7 @@ impl<'a> SwitchExprArm<'a> {
             .map(|node| expr(node, 0))
     }
     pub fn body(self) -> Expr<'a> {
-        expr(self.0, 0)
+        self.0.required()
     }
 }
 

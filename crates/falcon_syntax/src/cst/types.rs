@@ -3,7 +3,9 @@ use std::fmt;
 use crate::token::TokenKind;
 
 use super::macros::DebugList;
-use super::{Annotation, AstChildren, AstNode, Identifier, NodeKind, Span, SyntaxNode};
+use super::{
+    Annotation, AstChildren, AstNode, FormalParamList, Identifier, NodeKind, Span, SyntaxNode,
+};
 
 #[derive(Clone, Copy)]
 pub enum DartType<'a> {
@@ -162,7 +164,7 @@ impl<'a> TypeArgs<'a> {
 
 impl<'a> NamedType<'a> {
     pub fn segments(self) -> impl DoubleEndedIterator<Item = Identifier<'a>> + Clone {
-        self.0.children().filter_map(Identifier::from_node)
+        AstChildren::<Identifier>::new(self.0)
     }
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
@@ -192,24 +194,11 @@ impl<'a> FunctionType<'a> {
     }
     pub fn span(self) -> Span {
         if self.0.kind() == NodeKind::LegacyTypedef {
-            let end = self
-                .0
-                .children()
-                .find(|node| node.kind() == NodeKind::FormalParamList)
-                .expect("legacy typedef has formal parameters")
-                .span()
-                .end;
+            let end = self.0.required::<FormalParamList>().span().end;
             Span::new(self.0.span().start, end)
         } else if self.0.kind() == NodeKind::SetterParameter {
             let start = self.return_type().map_or_else(
-                || {
-                    self.0
-                        .children()
-                        .find_map(Identifier::from_node)
-                        .expect("setter parameter has a name")
-                        .span()
-                        .start
-                },
+                || self.0.required::<Identifier>().span().start,
                 |ty| ty.span().start,
             );
             Span::new(start, self.0.span().end)
@@ -218,15 +207,10 @@ impl<'a> FunctionType<'a> {
         }
     }
     pub fn return_type(self) -> Option<DartType<'a>> {
-        if self.0.kind() == NodeKind::LegacyTypedef
-            && !self
-                .0
-                .children()
-                .any(|node| Identifier::from_node(node).is_some())
-        {
+        if self.0.kind() == NodeKind::LegacyTypedef && self.0.child::<Identifier>().is_none() {
             return None;
         }
-        self.0.children().find_map(DartType::cast)
+        self.0.child()
     }
     pub fn type_params(self) -> AstChildren<'a, TypeParam<'a>> {
         let mut children = self.0.children();
@@ -270,20 +254,12 @@ impl<'a> FunctionTypeParam<'a> {
         AstChildren::new(self.0)
     }
     pub fn name(self) -> Option<Identifier<'a>> {
-        self.0.children().find_map(Identifier::from_node)
+        self.0.child::<Identifier>()
     }
     pub fn param_type(self) -> DartType<'a> {
         self.0
-            .children()
-            .find_map(DartType::cast)
-            .unwrap_or_else(|| {
-                assert_eq!(
-                    self.0.kind(),
-                    NodeKind::FormalParam,
-                    "function type parameter always has a type"
-                );
-                DartType::Dynamic(DynamicType(self.0))
-            })
+            .child()
+            .unwrap_or(DartType::Dynamic(DynamicType(self.0)))
     }
     fn group(self) -> Option<TokenKind> {
         self.0.children().find_map(|child| match child.kind() {
@@ -347,16 +323,10 @@ impl fmt::Debug for RecordType<'_> {
 
 impl<'a> NamedRecordField<'a> {
     pub fn name(self) -> Identifier<'a> {
-        self.0
-            .children()
-            .find_map(Identifier::from_node)
-            .expect("named record field always has a name")
+        self.0.required::<Identifier>()
     }
     pub fn field_type(self) -> DartType<'a> {
-        self.0
-            .children()
-            .find_map(DartType::cast)
-            .expect("named record field always has a type")
+        self.0.required()
     }
 }
 
@@ -381,11 +351,7 @@ impl<'a> TypeParam<'a> {
     }
     pub fn name(self) -> Identifier<'a> {
         if matches!(self.0.kind(), NodeKind::TypeParam | NodeKind::NamedType)
-            && let Some(name) = self
-                .0
-                .children()
-                .filter_map(Identifier::from_node)
-                .next_back()
+            && let Some(name) = AstChildren::<Identifier>::new(self.0).next_back()
         {
             return name;
         }
@@ -393,7 +359,7 @@ impl<'a> TypeParam<'a> {
     }
     pub fn bound(self) -> Option<DartType<'a>> {
         (self.0.kind() == NodeKind::TypeParam)
-            .then(|| self.0.children().find_map(DartType::cast))
+            .then(|| self.0.child())
             .flatten()
     }
 }

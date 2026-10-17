@@ -93,27 +93,19 @@ fn pattern_debug(name: &str, value: &impl fmt::Debug, f: &mut fmt::Formatter<'_>
     }
 }
 
-fn child<'a, T: AstNode<'a>>(node: SyntaxNode<'a>) -> T {
-    node.children()
-        .find_map(T::cast)
-        .expect("parser emits the required pattern child")
-}
-fn ident(node: SyntaxNode<'_>) -> Option<Identifier<'_>> {
-    node.children().find_map(Identifier::from_node)
-}
-
 impl<'a> WildcardPattern<'a> {
     pub fn type_(self) -> Option<DartType<'a>> {
-        self.0.children().find_map(DartType::cast)
+        self.0.child()
     }
 }
 impl<'a> VariablePattern<'a> {
     pub fn type_(self) -> Option<DartType<'a>> {
-        ident(self.0).and_then(|_| self.0.children().find_map(DartType::cast))
+        self.0.child::<Identifier>().and_then(|_| self.0.child())
     }
     pub fn name(self) -> Identifier<'a> {
-        ident(self.0)
-            .or_else(|| self.0.children().find_map(|node| ident(node)))
+        self.0
+            .child()
+            .or_else(|| self.0.children().find_map(SyntaxNode::child))
             .expect("variable pattern has a binding name")
     }
 }
@@ -124,8 +116,8 @@ debug_node!(ErrorPattern => "Error" { span });
 macro_rules! binary_pattern {
     ($view:ident, $name:literal) => {
         impl<'a> $view<'a> {
-            pub fn left(self) -> Pattern<'a> { child(self.0) }
-            pub fn right(self) -> Pattern<'a> { self.0.children().filter_map(Pattern::cast).nth(1).expect("binary pattern has a right operand") }
+            pub fn left(self) -> Pattern<'a> { self.0.required() }
+            pub fn right(self) -> Pattern<'a> { self.0.children().filter_map(Pattern::cast).nth(1).expect("parser emits the required child") }
         }
         debug_node!($view => $name { left, right, span });
     };
@@ -134,7 +126,7 @@ binary_pattern!(LogicalAndPattern, "LogicalAnd");
 binary_pattern!(LogicalOrPattern, "LogicalOr");
 macro_rules! inner_pattern {
     ($view:ident, $name:literal) => {
-        impl<'a> $view<'a> { pub fn inner(self) -> Pattern<'a> { child(self.0) } }
+        impl<'a> $view<'a> { pub fn inner(self) -> Pattern<'a> { self.0.required() } }
         debug_node!($view => $name { inner, span });
     };
 }
@@ -143,16 +135,16 @@ inner_pattern!(NullAssertPattern, "NullAssert");
 inner_pattern!(ParenPattern, "ParenPattern");
 impl<'a> CastPattern<'a> {
     pub fn inner(self) -> Pattern<'a> {
-        child(self.0)
+        self.0.required()
     }
     pub fn cast_type(self) -> DartType<'a> {
-        child(self.0)
+        self.0.required()
     }
 }
 debug_node!(CastPattern => "Cast" { inner, cast_type, span });
 impl<'a> RelationalPattern<'a> {
     pub fn value(self) -> Expr<'a> {
-        child(self.0)
+        self.0.required()
     }
     pub fn op(self) -> RelationalPatternOp {
         match self
@@ -185,7 +177,7 @@ pub enum LiteralPatternValue<'a> {
 }
 impl<'a> LiteralPattern<'a> {
     pub fn value(self) -> LiteralPatternValue<'a> {
-        if let Some(string) = self.0.children().find_map(StringLitNode::cast) {
+        if let Some(string) = self.0.child::<StringLitNode<'a>>() {
             return LiteralPatternValue::String(string);
         }
         let mut tokens = self.0.significant_tokens();
@@ -254,7 +246,7 @@ impl<'a> ConstPattern<'a> {
             .children()
             .find(|node| node.kind() == NodeKind::ConstPatternExpr)
         {
-            return ConstPatternValue::Expr(child(value));
+            return ConstPatternValue::Expr(value.required());
         }
         let names = self
             .0
@@ -316,7 +308,7 @@ impl fmt::Debug for ListPatternElement<'_> {
 typed_node!(RestPattern, RestPattern);
 impl<'a> RestPattern<'a> {
     pub fn pattern(self) -> Option<Pattern<'a>> {
-        self.0.children().find_map(Pattern::cast)
+        self.0.child()
     }
 }
 debug_tuple!(RestPattern => "Rest" { pattern, span });
@@ -361,10 +353,10 @@ impl<'a> RecordPatternField<'a> {
         self.0
     }
     pub fn pattern(self) -> Pattern<'a> {
-        child(self.0)
+        self.0.required()
     }
     pub fn name(self) -> Option<Identifier<'a>> {
-        ident(self.0).or_else(|| {
+        self.0.child::<Identifier>().or_else(|| {
             (self
                 .0
                 .first_token()
@@ -431,16 +423,16 @@ debug_node!(MapPattern {
 typed_node!(MapPatternEntry, MapPatternEntry);
 impl<'a> MapPatternEntry<'a> {
     pub fn key(self) -> Expr<'a> {
-        child(self.0)
+        self.0.required()
     }
     pub fn pattern(self) -> Pattern<'a> {
-        child(self.0)
+        self.0.required()
     }
 }
 debug_node!(MapPatternEntry { key, pattern, span });
 impl<'a> ObjectPattern<'a> {
     pub fn type_(self) -> DartType<'a> {
-        child(self.0)
+        self.0.required()
     }
     pub fn fields(self) -> AstChildren<'a, ObjectPatternField<'a>> {
         AstChildren::new(self.0)
@@ -458,22 +450,15 @@ impl<'a> ObjectPatternField<'a> {
             .0
             .first_token()
             .is_some_and(|token| token.kind() == TokenKind::Colon);
-        ident(self.0)
+        self.0
+            .child()
             .or_else(|| {
                 shorthand
                     .then(|| self.pattern().and_then(binding_name))
                     .flatten()
             })
             .unwrap_or_else(|| {
-                let name = if self
-                    .0
-                    .first_token()
-                    .is_some_and(|token| token.kind() == TokenKind::Colon)
-                {
-                    "<shorthand>"
-                } else {
-                    "<field>"
-                };
+                let name = if shorthand { "<shorthand>" } else { "<field>" };
                 let span = self
                     .0
                     .recovery_span()
@@ -482,7 +467,7 @@ impl<'a> ObjectPatternField<'a> {
             })
     }
     pub fn pattern(self) -> Option<Pattern<'a>> {
-        self.0.children().find_map(Pattern::cast)
+        self.0.child()
     }
     pub fn source_name(self) -> Option<Identifier<'a>> {
         let name = self.name();

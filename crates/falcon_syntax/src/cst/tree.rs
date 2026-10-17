@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use super::Span;
 use super::kind::NodeKind;
-use super::node::SyntaxNode;
+use super::node::{SyntaxElement, SyntaxNode, SyntaxToken};
 use crate::token::{Token, TokenKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -15,8 +15,9 @@ pub struct NodeId(pub u32);
 pub(crate) struct NodeLink(NonZeroU32);
 
 impl NodeLink {
+    /// `arena_id` keeps node ids below `1 << 31`, so `id + 1` never saturates.
     fn new(id: NodeId) -> Self {
-        Self(NonZeroU32::new(id.0.checked_add(1).expect("syntax node capacity exceeded")).unwrap())
+        Self(NonZeroU32::MIN.saturating_add(id.0))
     }
 
     pub(crate) fn id(self) -> NodeId {
@@ -54,19 +55,29 @@ pub enum Event {
 pub(crate) struct Element(u32);
 
 impl Element {
+    const TOKEN: u32 = 1 << 31;
+
     pub(crate) fn node(id: NodeId) -> Self {
-        assert!(id.0 < 1 << 31);
         Self(id.0)
     }
     pub(crate) fn token(id: TokenId) -> Self {
-        assert!(id.0 < 1 << 31);
-        Self(id.0 | 1 << 31)
+        Self(id.0 | Self::TOKEN)
     }
     pub(crate) fn as_node(self) -> Option<NodeId> {
-        (self.0 >> 31 == 0).then_some(NodeId(self.0))
+        (self.0 & Self::TOKEN == 0).then_some(NodeId(self.0))
     }
     pub(crate) fn as_token(self) -> Option<TokenId> {
-        (self.0 >> 31 != 0).then_some(TokenId(self.0 & !(1 << 31)))
+        (self.0 & Self::TOKEN != 0).then_some(TokenId(self.0 & !Self::TOKEN))
+    }
+    pub(crate) fn resolve(self, parent: SyntaxNode<'_>) -> SyntaxElement<'_> {
+        match self.as_node() {
+            Some(id) => SyntaxElement::Node(SyntaxNode { id, ..parent }),
+            None => SyntaxElement::Token(SyntaxToken {
+                tree: parent.tree,
+                source: parent.source,
+                id: TokenId(self.0 & !Self::TOKEN),
+            }),
+        }
     }
 }
 
@@ -74,7 +85,6 @@ impl Element {
 pub(crate) struct NodeData {
     pub(crate) kind: NodeKind,
     pub(crate) parent: Option<NodeLink>,
-    pub(crate) previous_sibling: Option<NodeLink>,
     // Element IDs use 31 bits; even the combined node/token edge range fits in u32.
     // Keep source spans and public view ranges in native-width offsets.
     pub(crate) children: Range<u32>,
@@ -248,7 +258,7 @@ impl SyntaxTree {
                 }
                 Event::RecoverySpan(span) => {
                     recovery_spans.push((
-                        sink.stack.last().expect("recovery span requires a node").id,
+                        *sink.stack.last().expect("recovery span requires a node"),
                         span,
                     ));
                 }
@@ -263,11 +273,9 @@ impl SyntaxTree {
         }
         assert!(sink.stack.is_empty(), "unclosed syntax events");
         assert_eq!(sink.offset, source.len(), "root must consume the source");
-        let mut cursor = 0u32;
+        let mut cursor = 0;
         for node in &mut sink.nodes {
-            let end = cursor
-                .checked_add(node.children.end)
-                .expect("syntax element capacity exceeded");
+            let end = cursor + node.children.end;
             node.children = cursor..end;
             cursor = end;
         }
@@ -276,9 +284,7 @@ impl SyntaxTree {
         for (parent, element) in sink.edges {
             let position = &mut positions[parent.0 as usize];
             elements[*position as usize] = element;
-            *position = position
-                .checked_add(1)
-                .expect("syntax element capacity exceeded");
+            *position += 1;
         }
         cache_param_kinds(&mut sink.nodes, &elements, &sink.tokens);
         recovery_spans.sort_unstable_by_key(|(node, _)| *node);
@@ -334,6 +340,16 @@ fn cache_param_kinds(nodes: &mut [NodeData], elements: &[Element], tokens: &[Tok
     }
 }
 
+/// Converts the next arena index to an id. Node and token ids share `Element`'s
+/// 31 index bits; every other u32 in the arena (range ends, child counts, links)
+/// is bounded by these ids, so this is the arena's only capacity check.
+fn arena_id(index: usize) -> u32 {
+    match u32::try_from(index) {
+        Ok(id) if id < Element::TOKEN => id,
+        _ => panic!("syntax tree capacity exceeded"),
+    }
+}
+
 struct Sink<'a> {
     source_len: usize,
     lexical: &'a [Token],
@@ -343,23 +359,22 @@ struct Sink<'a> {
     tokens: Vec<Token>,
     parents: Vec<NodeId>,
     edges: Vec<(NodeId, Element)>,
-    stack: Vec<OpenNode>,
-}
-
-struct OpenNode {
-    id: NodeId,
-    last_child: Option<NodeLink>,
+    stack: Vec<NodeId>,
 }
 
 impl Sink<'_> {
+    /// Lossless: every pushed node and token was given an id by `arena_id`.
+    fn node_count(&self) -> u32 {
+        self.nodes.len() as u32
+    }
+
+    fn token_count(&self) -> u32 {
+        self.tokens.len() as u32
+    }
+
     fn start(&mut self, kind: NodeKind, offset: usize) {
-        let id = NodeId(u32::try_from(self.nodes.len()).expect("syntax node capacity exceeded"));
-        let (parent, previous_sibling) = if let Some(parent) = self.stack.last_mut() {
-            let previous = parent.last_child.replace(NodeLink::new(id));
-            (Some(parent.id), previous)
-        } else {
-            (None, None)
-        };
+        let id = NodeId(arena_id(self.nodes.len()));
+        let parent = self.stack.last().copied();
         if let Some(parent) = parent {
             if kind == NodeKind::FormalParam {
                 self.nodes[parent.0 as usize].flags |= NodeData::HAS_PARAMS;
@@ -368,34 +383,27 @@ impl Sink<'_> {
         } else {
             assert!(self.nodes.is_empty(), "syntax tree must have one root");
         }
-        let token_start = u32::try_from(self.tokens.len()).expect("syntax token capacity exceeded");
+        let token_start = self.token_count();
         self.nodes.push(NodeData {
             kind,
             parent: parent.map(NodeLink::new),
-            previous_sibling,
             children: 0..0,
             tokens: token_start..token_start,
             span: Span::new(offset, offset),
             subtree_end: 0,
             flags: 0,
         });
-        self.stack.push(OpenNode {
-            id,
-            last_child: None,
-        });
+        self.stack.push(id);
     }
 
     fn edge(&mut self, parent: NodeId, element: Element) {
-        let count = &mut self.nodes[parent.0 as usize].children.end;
-        *count = count
-            .checked_add(1)
-            .expect("syntax element capacity exceeded");
+        self.nodes[parent.0 as usize].children.end += 1;
         self.edges.push((parent, element));
     }
 
     fn emit(&mut self, token: Token) {
-        let parent = self.stack.last().expect("tokens require an open node").id;
-        let id = TokenId(u32::try_from(self.tokens.len()).expect("syntax token capacity exceeded"));
+        let parent = *self.stack.last().expect("tokens require an open node");
+        let id = TokenId(arena_id(self.tokens.len()));
         self.edge(parent, Element::token(id));
         self.tokens.push(token);
         self.parents.push(parent);
@@ -441,14 +449,15 @@ impl Sink<'_> {
     }
 
     fn finish(&mut self) {
-        let id = self.stack.pop().expect("finish requires an open node").id;
-        let subtree_end = u32::try_from(self.nodes.len()).expect("syntax node capacity exceeded");
+        let id = self.stack.pop().expect("finish requires an open node");
+        let subtree_end = self.node_count();
+        let tokens_end = self.token_count();
         let node = &mut self.nodes[id.0 as usize];
-        node.tokens.end = u32::try_from(self.tokens.len()).expect("syntax token capacity exceeded");
+        node.tokens.end = tokens_end;
         node.subtree_end = subtree_end;
         let (span, significant) = (node.span, node.flags & NodeData::SIGNIFICANT != 0);
         if significant && let Some(parent) = self.stack.last() {
-            let parent = &mut self.nodes[parent.id.0 as usize];
+            let parent = &mut self.nodes[parent.0 as usize];
             if parent.flags & NodeData::SIGNIFICANT == 0 {
                 parent.span.start = span.start;
             }
@@ -460,7 +469,7 @@ impl Sink<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::node::{AstChildren, AstNode, SyntaxElement};
+    use super::super::node::{AstChildren, AstNode};
     use super::*;
 
     fn start(kind: NodeKind, offset: usize) -> Event {
@@ -480,12 +489,22 @@ mod tests {
     }
 
     #[test]
+    fn arena_ids_accept_the_last_element_index() {
+        assert_eq!(arena_id(Element::TOKEN as usize - 1), Element::TOKEN - 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "syntax tree capacity exceeded")]
+    fn arena_ids_reject_the_element_tag_bit() {
+        arena_id(Element::TOKEN as usize);
+    }
+
+    #[test]
     fn arena_ranges_are_compact_and_preserve_endpoints() {
         assert!(std::mem::size_of::<NodeData>() <= 48);
         let node = NodeData {
             kind: NodeKind::Program,
             parent: None,
-            previous_sibling: None,
             children: 0..u32::MAX,
             tokens: u32::MAX..u32::MAX,
             span: Span::new(0, 0),
@@ -652,37 +671,6 @@ mod tests {
         );
     }
 
-    fn sink_with_child_count(count: u32) -> Sink<'static> {
-        let mut sink = Sink {
-            source_len: 0,
-            lexical: &[],
-            lexical_index: 0,
-            offset: 0,
-            nodes: Vec::new(),
-            tokens: Vec::new(),
-            parents: Vec::new(),
-            edges: Vec::new(),
-            stack: Vec::new(),
-        };
-        sink.start(NodeKind::Program, 0);
-        sink.nodes[0].children.end = count;
-        sink
-    }
-
-    #[test]
-    fn child_count_accepts_maximum() {
-        let mut sink = sink_with_child_count(u32::MAX - 1);
-        sink.edge(NodeId(0), Element::node(NodeId(0)));
-        assert_eq!(sink.nodes[0].children.end, u32::MAX);
-    }
-
-    #[test]
-    #[should_panic(expected = "syntax element capacity exceeded")]
-    fn child_count_rejects_overflow() {
-        let mut sink = sink_with_child_count(u32::MAX);
-        sink.edge(NodeId(0), Element::node(NodeId(0)));
-    }
-
     #[test]
     fn node_lookup_preserves_arena_identity() {
         let source = "";
@@ -705,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn siblings_skip_descendants_of_zero_width_nodes() {
+    fn zero_width_nodes_keep_nested_children() {
         let source = "";
         let tree = SyntaxTree::build(
             source,
@@ -728,20 +716,12 @@ mod tests {
         let second = children.next().unwrap();
         let nested = first.children().next().unwrap();
         let second_nested = second.children().next().unwrap();
-        assert_eq!(first.prev_sibling(), None);
-        assert_eq!(first.next_sibling(), Some(second));
-        assert_eq!(second.prev_sibling(), Some(first));
-        assert_eq!(second.next_sibling(), None);
-        assert_eq!(nested.prev_sibling(), None);
-        assert_eq!(nested.next_sibling(), None);
-        assert_eq!(second_nested.prev_sibling(), None);
-        assert_eq!(second_nested.next_sibling(), None);
         assert_eq!(nested.parent(), Some(first));
         assert_eq!(second_nested.parent(), Some(second));
     }
 
     #[test]
-    fn forward_parent_chain_preserves_prior_sibling() {
+    fn forward_parent_chain_preserves_prior_child() {
         let tree = SyntaxTree::build(
             "",
             &[Token::new(TokenKind::Eof, 0, 0)],
@@ -772,12 +752,9 @@ mod tests {
         let inner = outer.children().next().unwrap();
         let identifier = inner.children().next().unwrap();
         assert!(siblings.next().is_none());
-        assert_eq!(outer.prev_sibling(), Some(earlier));
-        assert_eq!(earlier.next_sibling(), Some(outer));
-        assert_eq!(inner.prev_sibling(), None);
-        assert_eq!(inner.next_sibling(), None);
+        assert!(earlier.children().next().is_none());
+        assert_eq!(outer.children().count(), 1);
         assert_eq!(identifier.parent(), Some(inner));
-        assert_eq!(identifier.prev_sibling(), None);
     }
 
     #[test]
@@ -848,14 +825,7 @@ mod tests {
         let missing = children.next().unwrap();
         assert_eq!(missing.span(), Span::new(14, 14));
         assert!(missing.tokens().next().is_none());
-        assert_eq!(identifier.next_sibling(), Some(missing));
-        assert_eq!(missing.prev_sibling(), Some(identifier));
-        assert_eq!(identifier.prev_sibling(), None);
-        assert_eq!(missing.next_sibling(), None);
-        assert_eq!(root.prev_sibling(), None);
-        assert_eq!(root.next_sibling(), None);
-        assert_eq!(outer.prev_sibling(), None);
-        assert_eq!(outer.next_sibling(), None);
+        assert!(children.next().is_none());
         assert_eq!(identifier.parent(), Some(outer));
         assert_eq!(identifier.ancestors().count(), 3);
         assert_eq!(root.descendants().count(), 4);

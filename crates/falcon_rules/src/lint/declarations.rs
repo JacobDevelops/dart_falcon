@@ -6,9 +6,11 @@ use std::collections::HashSet;
 
 use falcon_analyze::AnalyzeContext;
 use falcon_syntax::cst::{
-    Annotation, AstChildren, ClassMember, Expr, NodeId, OperatorDecl, Program, Span, SyntaxTree,
-    TopLevelDecl,
+    Annotation, AstChildren, ClassMember, Expr, OperatorDecl, Program, Span, SyntaxToken,
+    SyntaxTree, TopLevelDecl,
 };
+
+use super::tokens::{preceding_trivia, significant_tokens_in};
 
 /// Comments after metadata take precedence over comments before annotations.
 pub(crate) fn documented_node_span<'a>(
@@ -17,13 +19,10 @@ pub(crate) fn documented_node_span<'a>(
     ctx: &AnalyzeContext,
 ) -> Span {
     let documentation_before = |start: usize| {
-        let gap_start = ctx
-            .tree()
-            .tokens_in(ctx.source, Span::new(0, start))
-            .rev()
-            .take_while(|token| token.is_trivia())
-            .last()
-            .map_or(start, |token| token.offset());
+        let gap_start =
+            preceding_trivia(ctx.tree().tokens_in(ctx.source, Span::new(0, start)), start)
+                .last()
+                .map_or(start, |token| token.offset());
         ctx.tree()
             .documentation_start(ctx.source, Span::new(gap_start, start))
     };
@@ -31,10 +30,13 @@ pub(crate) fn documented_node_span<'a>(
         .clone()
         .next_back()
         .map_or(span.start, |annotation| {
-            ctx.tree()
-                .tokens_in(ctx.source, Span::new(annotation.span().end, span.end))
-                .find(|token| !token.is_trivia())
-                .map_or(span.start, |token| token.offset())
+            significant_tokens_in(
+                ctx.tree(),
+                ctx.source,
+                Span::new(annotation.span().end, span.end),
+            )
+            .next()
+            .map_or(span.start, |token| token.offset())
         });
     let documentation = documentation_before(body_start).or_else(|| {
         annotations
@@ -168,29 +170,43 @@ pub(crate) fn member_names<'a>(
     names
 }
 
-/// Identifies a top-level declaration by its syntax node for side tables.
-pub(crate) fn declaration_key(declaration: TopLevelDecl<'_>) -> NodeId {
-    declaration.syntax().id()
-}
-
 /// The span of the operator token (`==`, `[]=`) after the `operator` keyword
 /// of `operator`; the declaration's span when the keyword is not found.
 pub(crate) fn operator_token_span(operator: OperatorDecl<'_>) -> Span {
-    let header_start = operator
-        .annotations()
-        .last()
-        .map_or(operator.span().start, |annotation| annotation.span().end);
-    let syntax = operator.syntax();
-    let mut tokens = syntax.tree().tokens_in(
-        syntax.source(),
-        Span::new(header_start, operator.params().span().start),
-    );
-    tokens
-        .find(|token| token.kind() == falcon_syntax::TokenKind::Operator)
-        .and_then(|_| tokens.find(|token| !token.is_trivia()))
+    operator_name_tokens(operator)
+        .next()
         .map_or(operator.span(), |token| {
             Span::new(token.offset(), token.offset() + operator.op().len())
         })
+}
+
+/// The complete operator name, excluding the parameter list.
+pub(crate) fn operator_span(operator: OperatorDecl<'_>) -> Span {
+    let mut tokens = operator_name_tokens(operator);
+    let Some(first) = tokens.next() else {
+        return operator_header_span(operator);
+    };
+    let last = tokens.last().unwrap_or(first);
+    Span::new(first.offset(), last.offset() + last.len())
+}
+
+fn operator_header_span(operator: OperatorDecl<'_>) -> Span {
+    let start = operator
+        .annotations()
+        .last()
+        .map_or(operator.span().start, |annotation| annotation.span().end);
+    Span::new(start, operator.params().span().start)
+}
+
+fn operator_name_tokens(operator: OperatorDecl<'_>) -> impl Iterator<Item = SyntaxToken<'_>> {
+    let syntax = operator.syntax();
+    significant_tokens_in(
+        syntax.tree(),
+        syntax.source(),
+        operator_header_span(operator),
+    )
+    .skip_while(|token| token.kind() != falcon_syntax::TokenKind::Operator)
+    .skip(1)
 }
 
 /// Offset of a declaration's first token after its annotations (the
@@ -205,8 +221,8 @@ pub(crate) fn first_token_after_annotations<'a>(
     let offset = annotations
         .map(|annotation| annotation.span().end)
         .fold(span.start, usize::max);
-    tree.tokens_in(source, Span::new(offset, span.end))
-        .find(|token| !token.is_trivia())
+    significant_tokens_in(tree, source, Span::new(offset, span.end))
+        .next()
         .map_or(span.end, |token| token.offset())
 }
 
@@ -259,19 +275,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn declaration_keys_follow_syntax_node_identity() {
-        let source = "void first() {} void second() {}";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let program = parsed.tree.program(source);
-        let first = program.declarations().next().unwrap();
-        let first_again = program.declarations().next().unwrap();
-        let second = program.declarations().nth(1).unwrap();
-        assert_eq!(declaration_key(first), first.syntax().id());
-        assert_eq!(declaration_key(first), declaration_key(first_again));
-        assert_ne!(declaration_key(first), declaration_key(second));
-    }
     #[test]
     fn widened_container_dispatch_runs_each_rule() {
         use std::path::Path;

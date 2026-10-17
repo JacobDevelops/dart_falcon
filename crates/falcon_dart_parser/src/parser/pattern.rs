@@ -441,7 +441,7 @@ impl<'src> Parser<'src> {
             self.expect_ident();
             return (NodeKind::VariablePattern, true);
         }
-        match ty.kind() {
+        match ty.kind {
             NodeKind::NamedType if self.ctx.pattern_binding && bare_name => {
                 (NodeKind::VariablePattern, true)
             }

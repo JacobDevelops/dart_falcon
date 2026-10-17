@@ -50,8 +50,6 @@ impl Rule for UnnecessaryLibraryDirective {
 
 /// Whether the comments directly preceding `offset` include a doc comment.
 fn has_doc_comment(tree: &SyntaxTree, source: &str, offset: usize) -> bool {
-    tree.tokens_in(source, Span::new(0, offset))
-        .rev()
-        .take_while(|token| token.is_trivia())
+    crate::lint::tokens::preceding_trivia(tree.tokens_in(source, Span::new(0, offset)), offset)
         .any(|token| token.kind() == TokenKind::DocComment)
 }

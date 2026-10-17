@@ -2,6 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use falcon_dart_parser::parser::parse;
+use falcon_syntax::cst::visit::*;
 use falcon_syntax::cst::*;
 
 #[derive(Default)]

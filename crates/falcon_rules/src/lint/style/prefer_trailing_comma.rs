@@ -12,6 +12,8 @@ use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
+use crate::lint::tokens::significant_tokens_in;
+
 #[derive(Default)]
 pub struct PreferTrailingComma;
 
@@ -38,12 +40,7 @@ impl<'a> Collector<'a> {
         if args.positional().is_empty() && args.named().is_empty() {
             return;
         }
-        let mut tokens = self
-            .ctx
-            .tree()
-            .tokens_in(self.ctx.source, args.span())
-            .rev()
-            .filter(|token| !token.is_trivia());
+        let mut tokens = significant_tokens_in(self.ctx.tree(), self.ctx.source, args.span()).rev();
         let Some(close) = tokens
             .next()
             .filter(|token| token.kind() == TokenKind::RParen)

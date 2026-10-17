@@ -34,7 +34,7 @@ fn retains_nested_tokens_with_absolute_offsets_and_trivia() {
     let mut parser = Parser::new(&tokens, source, LanguageVersion::CURRENT);
     let expression = parser.parse_expr();
     assert!(parser.errors.is_empty(), "{:?}", parser.errors);
-    assert_eq!(expression.span(), Span::new(0, source.len()));
+    assert_eq!(expression.span, Span::new(0, source.len()));
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn adjacent_literals_and_simple_identifiers_keep_distinct_regions() {
         ["left", "right", "third"]
     );
     let mut parser = Parser::new(&tokens, source, LanguageVersion::CURRENT);
-    assert_ne!(parser.parse_expr().kind(), NodeKind::ErrorExpr);
+    assert_ne!(parser.parse_expr().kind, NodeKind::ErrorExpr);
     assert!(parser.errors.is_empty(), "{:?}", parser.errors);
 }
 

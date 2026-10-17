@@ -83,9 +83,10 @@ impl CrossFileRule for UnnecessaryNullable {
                     }),
                     &identities,
                 );
-                let signature_files: Vec<_> = files
-                    .iter()
-                    .map(|file| (file.path.clone(), std::sync::Arc::clone(&file.parsed)))
+                let signature_files: Vec<_> = project_files
+                    .into_iter()
+                    .zip(files)
+                    .map(|((path, _), file)| (path, std::sync::Arc::clone(&file.parsed)))
                     .collect();
                 let signatures =
                     SignatureIndex::from_project_files(&signature_files, &identities, &types);

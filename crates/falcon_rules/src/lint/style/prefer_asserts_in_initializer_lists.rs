@@ -298,7 +298,9 @@ impl<'p> ConstructorScope<'p> {
             params: HashSet::new(),
             initialized_fields: HashSet::new(),
         };
-        let mut super_positional = 0;
+        let mut super_positional = super_params
+            .into_iter()
+            .flat_map(|params| params.positional());
         for param in params.params() {
             let name = &source[param.name().span().start..param.name().span().end];
             match param.initializing() {
@@ -312,24 +314,15 @@ impl<'p> ConstructorScope<'p> {
                     // The super constructor parameter this formal forwards to:
                     // by position, or by name for a named formal.
                     let named = matches!(param.kind(), ParamKind::Named { .. });
-                    let target = super_params.and_then(|super_params| {
-                        if named {
-                            super_params.params().find(|candidate| {
-                                matches!(candidate.kind(), ParamKind::Named { .. })
-                                    && candidate.name().name() == name
-                            })
-                        } else {
-                            super_params
-                                .params()
-                                .filter(|candidate| {
-                                    !matches!(candidate.kind(), ParamKind::Named { .. })
-                                })
-                                .nth(super_positional)
-                        }
-                    });
-                    if !named {
-                        super_positional += 1;
-                    }
+                    let target = if named {
+                        super_params.and_then(|params| {
+                            params
+                                .named()
+                                .find(|candidate| candidate.name().name() == name)
+                        })
+                    } else {
+                        super_positional.next()
+                    };
                     if let Some(target) = target
                         && target.initializing() == Some(InitializingFormal::This)
                     {

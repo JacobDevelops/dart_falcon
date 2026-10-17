@@ -42,7 +42,7 @@ impl TopLevelTokens<'_> {
                 node.ancestors()
                     .filter(|node| is_interpolation(*node))
                     .last()
-                    .unwrap()
+                    .unwrap_or(node)
             } else {
                 node
             };
@@ -206,17 +206,7 @@ impl SyntaxTree {
         self.tokens(source).filter(|token| {
             token.kind() == TokenKind::Ident
                 || (token.kind().is_identifier_like()
-                    && token.parent().ancestors().any(|node| {
-                        node.kind() == NodeKind::StringInterpolation
-                            || (node.kind() == NodeKind::Error
-                                && node.significant_tokens().next().is_some_and(|first| {
-                                    matches!(
-                                        first.kind(),
-                                        TokenKind::InterpolationStart
-                                            | TokenKind::InterpolationDollar
-                                    )
-                                }))
-                    }))
+                    && token.parent().ancestors().any(is_interpolation))
         })
     }
     pub fn keywords_in<'a>(
@@ -227,14 +217,6 @@ impl SyntaxTree {
     ) -> impl DoubleEndedIterator<Item = SyntaxToken<'a>> + Clone {
         self.tokens_in(source, span)
             .filter(move |token| token.kind() == kind)
-    }
-    pub fn comments_in<'a>(
-        &'a self,
-        source: &'a str,
-        span: Span,
-    ) -> impl DoubleEndedIterator<Item = SyntaxToken<'a>> + Clone {
-        self.tokens_in(source, span)
-            .filter(|token| token.kind().is_comment())
     }
 
     /// Canonical documentation groups attached to the following code token or EOF.
@@ -327,15 +309,11 @@ impl SyntaxTree {
                 }
             };
             for (index, token) in self.tokens.iter().enumerate() {
-                while outer_stacks.last().is_some_and(|(end, _)| *end <= index) {
+                while let Some((_, outer)) = outer_stacks.pop_if(|(end, _)| *end <= index) {
                     clear_stacks(stacks, &mut pairs);
-                    stacks = outer_stacks.pop().unwrap().1;
+                    stacks = outer;
                 }
-                while interpolations
-                    .peek()
-                    .is_some_and(|range| range.start == index)
-                {
-                    let range = interpolations.next().unwrap();
+                while let Some(range) = interpolations.next_if(|range| range.start == index) {
                     outer_stacks.push((range.end, stacks));
                     stacks = [u32::MAX; 3];
                 }
@@ -466,14 +444,6 @@ mod tests {
                     tree.tokens_in(source, span)
                         .map(|token| (token.kind(), token.span()))
                         .eq(contained.clone().map(coordinate))
-                );
-                assert!(
-                    tree.comments_in(source, span)
-                        .map(|token| (token.kind(), token.span()))
-                        .eq(contained
-                            .clone()
-                            .filter(|token| token.kind.is_comment())
-                            .map(coordinate))
                 );
                 assert!(
                     tree.keywords_in(source, span, TokenKind::Ident)

@@ -14,6 +14,8 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::{Program, TopLevelDecl};
 use falcon_syntax::token::TokenKind;
 
+use crate::lint::tokens::significant_tokens_in;
+
 #[derive(Default)]
 pub struct PreferGenericFunctionTypeAliases;
 
@@ -45,10 +47,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let Some(params) = alias.legacy_params() else {
             return StructuralTraversal::SkipChildren;
         };
-        if !ctx
-            .tree()
-            .tokens_in(ctx.source, params.span())
-            .find(|token| !token.is_trivia())
+        if !significant_tokens_in(ctx.tree(), ctx.source, params.span())
+            .next()
             .is_some_and(|token| token.kind() == TokenKind::LParen)
         {
             return StructuralTraversal::SkipChildren;

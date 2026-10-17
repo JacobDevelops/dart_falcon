@@ -347,8 +347,7 @@ fn arrow_closure_field_then_more_members() {
 
 #[test]
 fn enum_constant_named_constructor() {
-    let src = "enum E { a.foo(1); const E.foo(this.n); final int n; }";
-    let source = src;
+    let source = "enum E { a.foo(1); const E.foo(this.n); final int n; }";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_eq!(errors.len(), 0, "errors: {errors:?}");
@@ -786,7 +785,7 @@ fn test_constructor_call_block_is_initializer_lambda() {
 
 #[test]
 fn test_leading_async_method_splits_await_and_operand_statements() {
-    // The AST marker does not reserve body keywords without a trailing marker.
+    // Only a trailing async marker reserves body keywords.
     let source = "class Foo { async void bar() { await x; } }";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
@@ -817,7 +816,7 @@ fn test_leading_async_method_splits_await_and_operand_statements() {
 
 #[test]
 fn test_async_sync_star_method_has_async_star_ast_marker() {
-    // The combined AST marker differs from the trailing marker used in the body.
+    // The combined method marker differs from the trailing marker used in the body.
     let source = "class C { async m() sync* { yield 1; } }";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
@@ -842,8 +841,7 @@ fn test_async_sync_star_method_has_async_star_ast_marker() {
 
 #[test]
 fn test_async_constructor_initializer_keeps_synchronous_body() {
-    let src = "class C { var f; C(bool async) : f = async { var await = 1; await; } }";
-    let source = src;
+    let source = "class C { var f; C(bool async) : f = async { var await = 1; await; } }";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert_clean(&errors);
@@ -875,7 +873,7 @@ fn test_async_constructor_initializer_keeps_synchronous_body() {
     let declarator = declaration.declarators().next().unwrap();
     assert_eq!(declarator.name().name(), "await");
     assert_eq!(
-        &src[declarator.name().span().start..declarator.name().span().end],
+        &source[declarator.name().span().start..declarator.name().span().end],
         "await"
     );
     assert!(
@@ -890,7 +888,7 @@ fn test_async_constructor_initializer_keeps_synchronous_body() {
     };
     assert_eq!(identifier.name(), "await");
     assert_eq!(
-        &src[identifier.span().start..identifier.span().end],
+        &source[identifier.span().start..identifier.span().end],
         "await"
     );
 }
@@ -911,15 +909,14 @@ fn ctor_name<'a>(ctor: ConstructorDecl<'a>) -> Option<&'a str> {
 
 #[test]
 fn test_new_unnamed_constructor() {
-    let src = "class C { new(this.x) : assert(x > 0); final int x; }";
-    let source = src;
+    let source = "class C { new(this.x) : assert(x > 0); final int x; }";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     assert_clean(&errors);
     let ctor = only_ctor(tree.program(source));
     assert!(!ctor.is_factory() && !ctor.is_const());
     assert_eq!(ctor.name().name(), "C");
     assert_eq!(
-        &src[ctor.name().span().start..ctor.name().span().end],
+        &source[ctor.name().span().start..ctor.name().span().end],
         "new"
     );
     assert_eq!(ctor_name(ctor), None);

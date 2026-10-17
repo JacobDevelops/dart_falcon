@@ -39,8 +39,6 @@ use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
-use crate::lint::tokens::significant_tokens;
-
 #[derive(Default)]
 pub struct RequireTrailingCommas;
 
@@ -55,7 +53,7 @@ impl Rule for RequireTrailingCommas {
         }
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            tokens: significant_tokens(ctx).collect(),
+            tokens: ctx.tree().significant_tokens(ctx.source).collect(),
             diags: Vec::new(),
         }))
     }

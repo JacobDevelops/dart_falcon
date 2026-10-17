@@ -28,6 +28,8 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
+use crate::lint::tokens::significant_tokens_in;
+
 const RULE: &str = "prefer-final-parameters";
 
 #[derive(Default)]
@@ -122,12 +124,15 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
             .rev()
             .find(|token| token.kind() == TokenKind::LParen)
             .map_or(anchor, |token| token.span().end);
-        let mut parameter_tokens = self.ctx.tree()
-            .tokens_in(self.ctx.source, Span::new(open, name.span().start));
+        let mut parameter_tokens = significant_tokens_in(
+            self.ctx.tree(),
+            self.ctx.source,
+            Span::new(open, name.span().start),
+        );
         if !parameter_tokens.clone().any(|token| token.kind() == TokenKind::Final)
         {
             let start = parameter_tokens
-                .find(|token| !token.is_trivia())
+                .next()
                 .map_or(name.span().start, |token| token.offset());
             self.check_name(
                 name,

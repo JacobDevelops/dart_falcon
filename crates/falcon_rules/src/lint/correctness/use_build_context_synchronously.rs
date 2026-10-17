@@ -6,6 +6,10 @@ use std::collections::HashMap;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
+use falcon_syntax::cst::visit::{
+    Visitor, walk_block, walk_catch_clause, walk_collection_element, walk_expr, walk_function_body,
+    walk_map_element, walk_stmt, walk_switch_case, walk_switch_expr_arm,
+};
 use falcon_syntax::cst::*;
 
 #[path = "use_build_context_semantics.rs"]

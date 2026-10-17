@@ -173,9 +173,8 @@ fn adjacent_strings_concatenate_interpolations() {
 fn malformed_inner_expression_is_dropped_but_error_propagates() {
     // `${` with an unparseable body records no interpolation, but its parse
     // diagnostic reaches the enclosing program with an absolute source offset.
-    let src = "void f() { var x = '${a +}'; }";
-    let source = src;
-    let parsed = parse(src);
+    let source = "void f() { var x = '${a +}'; }";
+    let parsed = parse(source);
     let errors = &parsed.errors;
     let program = parsed.tree.program(source);
     assert!(
@@ -201,8 +200,8 @@ fn malformed_inner_expression_is_dropped_but_error_propagates() {
     );
 
     // The diagnostic's offset is absolute and falls inside the `${...}` body.
-    let body_start = src.find("${").unwrap() + 2;
-    let body_end = src.find('}').unwrap();
+    let body_start = source.find("${").unwrap() + 2;
+    let body_end = source.find('}').unwrap();
     assert!(
         errors
             .iter()

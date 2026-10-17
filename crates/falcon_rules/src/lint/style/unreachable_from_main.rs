@@ -140,8 +140,7 @@ impl<'a> Reachability<'a> {
             } else {
                 (sibling_state.as_ref(), &sibling_types)
             };
-            let mut walker =
-                RefWalker::new(tables, index, unit.source, unit.tree, &bound, &mut deps);
+            let mut walker = RefWalker::new(tables, index, unit.parsed, &bound, &mut deps);
             walker.semantic = state.map(|state| (state, &types.0));
             for declaration in unit.program.declarations() {
                 walker.visit_top_level_decl(declaration);
@@ -198,9 +197,6 @@ struct Unit<'a> {
     program: Program<'a>,
     parsed: &'a std::sync::Arc<falcon_analyze::ParsedFile>,
     path: &'a std::path::Path,
-    /// The in-memory text `program` was parsed from, so its spans index it.
-    source: &'a str,
-    tree: &'a SyntaxTree,
 }
 
 /// The analyzed file plus every sibling unit of its library, each with the
@@ -210,8 +206,6 @@ fn library_units<'a>(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Optio
         program,
         parsed: ctx.parsed,
         path: ctx.file_path,
-        source: ctx.source,
-        tree: ctx.tree(),
     };
     if ctx
         .library
@@ -233,8 +227,6 @@ fn library_units<'a>(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Optio
             program,
             parsed,
             path,
-            source: &parsed.source,
-            tree: &parsed.tree,
         });
     Some(std::iter::once(current).chain(siblings).collect())
 }
@@ -386,7 +378,12 @@ impl<'a> Tables<'a> {
         };
         for (unit, source) in units.iter().enumerate() {
             for declaration in source.program.declarations() {
-                tables.add_top_level(unit, source.source, source.tree, declaration);
+                tables.add_top_level(
+                    unit,
+                    &source.parsed.source,
+                    &source.parsed.tree,
+                    declaration,
+                );
             }
         }
         let model = ctx.identities.map(|identities| {
@@ -413,8 +410,8 @@ impl<'a> Tables<'a> {
         for container in 0..tables.containers.len() {
             tables.add_members(
                 container,
-                units[tables.containers[container].unit].source,
-                units[tables.containers[container].unit].tree,
+                &units[tables.containers[container].unit].parsed.source,
+                &units[tables.containers[container].unit].parsed.tree,
                 semantic,
             );
         }
@@ -901,7 +898,7 @@ impl<'a> Tables<'a> {
         // Deliberately include names in comments and strings: this conservative
         // escape check must not conclude that a container is never named elsewhere.
         for (unit, source) in units.iter().enumerate() {
-            let bytes = source.source.as_bytes();
+            let bytes = source.parsed.source.as_bytes();
             let mut index = 0;
             while index < bytes.len() {
                 if !is_ident_body(bytes[index]) {
@@ -912,7 +909,11 @@ impl<'a> Tables<'a> {
                 while index < bytes.len() && is_ident_body(bytes[index]) {
                     index += 1;
                 }
-                let Some(containers) = source.source.get(start..index).and_then(|w| by_name.get(w))
+                let Some(containers) = source
+                    .parsed
+                    .source
+                    .get(start..index)
+                    .and_then(|w| by_name.get(w))
                 else {
                     continue;
                 };
@@ -1082,7 +1083,9 @@ fn annotated_start<'a>(annotations: AstChildren<'a, Annotation<'a>>, start: usiz
 // documentation groups and stops at ordinary comments.
 fn doc_start(source: &str, tree: &SyntaxTree, start: usize) -> usize {
     let mut start = start.min(source.len());
-    for token in tree.tokens_in(source, Span::new(0, start)).rev() {
+    for token in
+        crate::lint::tokens::preceding_trivia(tree.tokens_in(source, Span::new(0, start)), start)
+    {
         match token.kind() {
             falcon_syntax::TokenKind::Whitespace | falcon_syntax::TokenKind::Newline => {}
             falcon_syntax::TokenKind::DocComment => {
@@ -1214,16 +1217,15 @@ impl<'t, 'a> RefWalker<'t, 'a> {
     fn new(
         tables: &'t Tables<'a>,
         unit: usize,
-        source: &'t str,
-        tree: &'t SyntaxTree,
+        parsed: &'t falcon_analyze::ParsedFile,
         bound: &'t HashSet<usize>,
         deps: &'t mut Vec<Vec<DeclId>>,
     ) -> Self {
         Self {
             tables,
             unit,
-            source,
-            tree,
+            source: &parsed.source,
+            tree: &parsed.tree,
             bound,
             deps,
             stack: Vec::new(),

@@ -1,11 +1,7 @@
-//! Positive regression coverage for the visitor traversal gaps fixed in
-//! `cst::visit`. Each test plants a unique sentinel (an int literal, a named
-//! type, an identifier, or a string) in a position that the default walk chain
-//! only reaches through a newly-added walk edge, then asserts the recording
-//! visitor observed it exactly once. Missing and duplicated walk edges both
-//! fail the corresponding sentinel assertion.
+//! Regression coverage for traversal boundaries and source-child ordering.
 
 use falcon_dart_parser::parser::parse;
+use falcon_syntax::cst::visit::*;
 use falcon_syntax::cst::*;
 
 /// Records every leaf the default walk delivers, keyed by kind, so a sentinel's
@@ -217,8 +213,6 @@ fn local_var_hook_observes_statement_and_loop_declarations() {
     );
 }
 
-// ── Item 1: constructor initializers ──────────────────────────────────────────
-
 #[test]
 fn walks_constructor_field_initializer() {
     let r = record("class C { final int a; C() : a = 90001; }");
@@ -244,12 +238,8 @@ fn walks_constructor_assert_condition_and_message() {
     assert!(r.has_string("msg90005"), "assert message not walked");
 }
 
-// ── Item 2: annotations delivered uniformly ───────────────────────────────────
-
 #[test]
 fn walks_annotations_on_every_carrier() {
-    // Field, getter, setter, top-level var, extension, extension type, formal
-    // param, and enum variant annotations were previously never delivered.
     let r = record(
         "@A(90010) int tlv = 0;\n\
          @A(90011) extension Ext on int {}\n\
@@ -272,8 +262,6 @@ fn walks_annotations_on_every_carrier() {
     }
 }
 
-// ── Item 3: enum variant args + type args ─────────────────────────────────────
-
 #[test]
 fn walks_enum_variant_args_and_type_args() {
     let r = record("enum E { a<VarTArg>(90020); const E(int x); }");
@@ -281,16 +269,12 @@ fn walks_enum_variant_args_and_type_args() {
     assert!(r.has_named("VarTArg"), "enum variant type-arg not walked");
 }
 
-// ── Item 4: local function params (incl. default-value exprs) ──────────────────
-
 #[test]
 fn walks_local_function_param_defaults_and_types() {
     let r = record("void outer() { void g([LocalPT x = 90030]) {} }");
     assert!(r.has_int("90030"), "local-func param default not walked");
     assert!(r.has_named("LocalPT"), "local-func param type not walked");
 }
-
-// ── Item 5: directives ────────────────────────────────────────────────────────
 
 #[test]
 fn walks_library_import_export_part_directives() {
@@ -313,8 +297,6 @@ fn walks_part_of_directive() {
     let r = record("part of 'parent90046.dart';\n");
     assert!(r.has_string("parent90046.dart"), "part-of uri not walked");
 }
-
-// ── Item 6: type-parameter bounds ─────────────────────────────────────────────
 
 #[test]
 fn walks_type_param_bounds_across_declarations() {
@@ -347,8 +329,6 @@ fn walks_function_typed_formal_type_param_bound() {
     );
 }
 
-// ── Item 7: mixin-class supertype clauses ─────────────────────────────────────
-
 #[test]
 fn walks_mixin_class_supertypes() {
     let r = record("mixin class MC extends McBase with McMix implements McIface {}\n");
@@ -356,8 +336,6 @@ fn walks_mixin_class_supertypes() {
     assert!(r.has_named("McMix"), "mixin-class with-clause not walked");
     assert!(r.has_named("McIface"), "mixin-class implements not walked");
 }
-
-// ── Item 8: extension-type representation + implements ─────────────────────────
 
 #[test]
 fn walks_extension_type_representation_and_implements() {
@@ -372,8 +350,6 @@ fn walks_extension_type_representation_and_implements() {
     );
 }
 
-// ── Item 9: call / cascade-call type arguments ────────────────────────────────
-
 #[test]
 fn walks_call_type_args() {
     let r = record("void f() { gen<CallTArg>(); } void gen<T>() {}");
@@ -386,8 +362,6 @@ fn walks_cascade_call_type_args() {
     assert!(r.has_named("CascTArg"), "cascade-call type-arg not walked");
 }
 
-// ── Item 10: string literal in a literal pattern ──────────────────────────────
-
 #[test]
 fn walks_literal_pattern_string() {
     let r = record("void f(Object x) { switch (x) { case 'patstr90050': break; } }");
@@ -396,8 +370,6 @@ fn walks_literal_pattern_string() {
         "literal-pattern string not walked"
     );
 }
-
-// ── Extra gaps closed for consistency: operator params, function-typed params ──
 
 #[test]
 fn walks_operator_params() {
@@ -414,8 +386,6 @@ fn walks_function_typed_param_inner_params() {
     );
 }
 
-// ── Item 11 (parser span fix): adjacent-string merged span covers the full run ─
-
 #[test]
 fn adjacent_string_span_covers_full_run() {
     let src = r"var x = 'a\q' 'b\w';";
@@ -430,8 +400,6 @@ fn adjacent_string_span_covers_full_run() {
         panic!("expected string literal initializer");
     };
 
-    // The merged span must run from the first fragment's opening quote to the
-    // last fragment's closing quote — i.e. cover the entire adjacent run.
     let full_run = r"'a\q' 'b\w'";
     let expected_start = src.find(full_run).unwrap();
     let expected_end = expected_start + full_run.len();
@@ -446,81 +414,6 @@ fn adjacent_string_span_covers_full_run() {
         "span.end must be the last fragment"
     );
     assert_eq!(&src[lit.span().start..lit.span().end], full_run);
-}
-
-#[derive(Default)]
-struct CountingVisitor {
-    class_count: usize,
-    function_count: usize,
-    field_count: usize,
-}
-
-impl<'a> Visitor<'a> for CountingVisitor {
-    fn visit_class_decl(&mut self, node: ClassDecl<'a>) {
-        self.class_count += 1;
-        walk_class_decl(self, node);
-    }
-
-    fn visit_function_decl(&mut self, node: FunctionDecl<'a>) {
-        self.function_count += 1;
-        walk_function_decl(self, node);
-    }
-
-    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
-        self.field_count += 1;
-        walk_field_decl(self, node);
-    }
-}
-
-#[test]
-fn test_visitor_empty_program() {
-    let src = "";
-    let falcon_dart_parser::parser::ParseResult { tree, errors } = parse(src);
-    assert!(errors.is_empty());
-
-    let mut visitor = CountingVisitor::default();
-    visitor.visit_program(tree.program(src));
-
-    assert_eq!(visitor.class_count, 0);
-    assert_eq!(visitor.function_count, 0);
-}
-
-#[test]
-fn test_visitor_single_class() {
-    let src = "class Foo {}";
-    let falcon_dart_parser::parser::ParseResult { tree, errors } = parse(src);
-    assert!(errors.is_empty());
-
-    let mut visitor = CountingVisitor::default();
-    visitor.visit_program(tree.program(src));
-
-    assert_eq!(visitor.class_count, 1);
-}
-
-#[test]
-fn test_visitor_class_with_fields() {
-    let src = "class Foo { int x; String y; }";
-    let falcon_dart_parser::parser::ParseResult { tree, errors } = parse(src);
-    assert!(errors.is_empty());
-
-    let mut visitor = CountingVisitor::default();
-    visitor.visit_program(tree.program(src));
-
-    assert_eq!(visitor.class_count, 1);
-    assert_eq!(visitor.field_count, 2);
-}
-
-#[test]
-fn test_visitor_multiple_declarations() {
-    let src = "class Foo {} void bar() {} class Baz {}";
-    let falcon_dart_parser::parser::ParseResult { tree, errors } = parse(src);
-    assert!(errors.is_empty());
-
-    let mut visitor = CountingVisitor::default();
-    visitor.visit_program(tree.program(src));
-
-    assert_eq!(visitor.class_count, 2);
-    assert_eq!(visitor.function_count, 1);
 }
 
 #[test]

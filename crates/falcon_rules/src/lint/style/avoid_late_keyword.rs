@@ -57,7 +57,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
 
     fn visit_local_var(&mut self, local: LocalVarDecl<'a>) -> StructuralTraversal {
         if local.is_late() {
-            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", local.full_range()));
+            self.diags.push(self.ctx.diagnostic("avoid-late-keyword", "Avoid using the late keyword — use nullable types or initialize immediately instead", local.full_span()));
         }
         StructuralTraversal::Continue
     }

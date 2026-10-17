@@ -1,23 +1,10 @@
 //! Ratchet against hand-rolled syntax-tree traversal in rules.
 //!
-//! Every rule that walks the syntax tree itself re-implements the recursion, and
-//! every one of those walks ends in a `_ => {}` arm. That arm is silent by
-//! construction: when Dart gains syntax — a record-pattern declaration, a
-//! labeled statement, a generic tear-off — the walk simply stops there, the rule
-//! goes blind, and nothing warns or fails to compile. That is exactly how a
-//! whole class of false positives and missed detections reached a release.
+//! Catch-all arms in bespoke walkers silently miss new syntax. Prefer the
+//! exhaustive walker in `falcon_syntax::cst::visit` and its `for_each_expr` /
+//! `bound_names` helpers.
 //!
-//! `falcon_syntax::cst::visit` already provides an exhaustive walker plus the
-//! `for_each_expr` / `bound_names` helpers. A rule
-//! built on those cannot go blind, because the shared walker matches every syntax
-//! variant with no catch-all.
-//!
-//! This test does not forbid the remaining hand-rolled walkers outright — there
-//! are still plenty, and migrating them is ongoing. It pins the current set so
-//! that:
-//!   * a **new** hand-rolled walker fails the build (use the shared walker), and
-//!   * a **migrated** one must be removed from the baseline, so the list can only
-//!     shrink.
+//! New walkers fail this ratchet; migrated walkers must leave the baseline.
 //!
 //! Run with `UPDATE_BESPOKE_WALKER_BASELINE=1` to rewrite the baseline after a
 //! deliberate migration.
@@ -88,7 +75,7 @@ fn walkers_in(src: &str) -> Vec<String> {
             continue;
         };
         let self_recursive = body.contains(&format!("{name}("));
-        let walks_ast = body.contains("Stmt::") || body.contains("Expr::");
+        let walks_syntax = body.contains("Stmt::") || body.contains("Expr::");
         // A catch-all arm: `_` not starting a longer identifier, reaching a `=>`
         // on the same line — with or without a `_ if guard =>` in between.
         let has_catch_all = body.lines().any(|l| {
@@ -96,7 +83,7 @@ fn walkers_in(src: &str) -> Vec<String> {
                 if !r.starts_with(|c: char| c.is_alphanumeric() || c == '_')
                     && (r.contains("=>") || r.starts_with(" |")))
         });
-        if self_recursive && walks_ast && has_catch_all {
+        if self_recursive && walks_syntax && has_catch_all {
             found.push(name.to_string());
         }
     }
@@ -122,7 +109,7 @@ fn current_set() -> BTreeSet<String> {
 }
 
 #[test]
-fn no_new_hand_rolled_ast_walkers() {
+fn no_new_hand_rolled_syntax_walkers() {
     let current = current_set();
 
     if std::env::var("UPDATE_BESPOKE_WALKER_BASELINE").is_ok() {

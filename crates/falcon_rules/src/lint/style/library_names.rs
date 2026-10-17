@@ -16,7 +16,6 @@
 use std::sync::LazyLock;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
-use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::cst::*;
 use regex::Regex;
 
@@ -37,24 +36,25 @@ impl Rule for LibraryNames {
         let Some(lib) = program.library_directive() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let (Some(first), Some(last)) = (lib.name().next(), lib.name().last()) else {
+        let mut segments = lib.name();
+        let Some(first) = segments.next() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        let name = lib
-            .name()
-            .map(|segment| segment.name())
-            .collect::<Vec<_>>()
-            .join(".");
+        let mut name = String::with_capacity(lib.span().end - first.span().start);
+        name.push_str(first.name());
+        let mut span = first.span();
+        for segment in segments {
+            name.push('.');
+            name.push_str(segment.name());
+            span.end = segment.span().end;
+        }
         if LOWER_CASE_WITH_DOTS.is_match(&name) {
             return RulePreparation::Diagnostics(Vec::new());
         }
         RulePreparation::Diagnostics(vec![ctx.diagnostic(
             "library-names",
             format!("The library name '{name}' isn't a lower_case_with_underscores identifier."),
-            DiagSpan {
-                start: first.span().start,
-                end: last.span().end,
-            },
+            span,
         )])
     }
 }

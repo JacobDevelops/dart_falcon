@@ -1,5 +1,5 @@
 #[macro_use]
-pub mod macros;
+mod macros;
 
 mod decl;
 mod expr;
@@ -26,27 +26,21 @@ pub use query::DocBlock;
 pub use stmt::*;
 pub use tree::{Event, NodeId, SyntaxTree, TokenId};
 pub use types::*;
-pub use visit::*;
 
 pub use span::Span;
 pub use values::*;
 
 #[derive(Clone, Copy)]
-pub struct Identifier<'a>(SyntaxToken<'a>, IdentifierOrigin<'a>);
+pub struct Identifier<'a> {
+    node: SyntaxNode<'a>,
+    origin: IdentifierOrigin<'a>,
+}
 
 #[derive(Clone, Copy)]
 enum IdentifierOrigin<'a> {
-    Source,
-    Missing(NodeId),
-    Synthetic {
-        name: &'a str,
-        span: Span,
-        node: NodeId,
-    },
-    MissingWithSpan {
-        span: Span,
-        node: NodeId,
-    },
+    Source(TokenId),
+    Missing(Span),
+    Synthetic { name: &'a str, span: Span },
 }
 
 impl<'a> Identifier<'a> {
@@ -55,90 +49,89 @@ impl<'a> Identifier<'a> {
         if node.kind() != NodeKind::Identifier {
             return None;
         }
-        match node.significant_tokens().next() {
-            Some(token) => Some(Self(token, IdentifierOrigin::Source)),
-            None => node
-                .tree()
-                .token_at(node.source(), node.span().start)
-                .map(|token| Self(token, IdentifierOrigin::Missing(node.id()))),
+        if let Some(token) = node.significant_tokens().next() {
+            return Some(Self {
+                node: token.parent(),
+                origin: IdentifierOrigin::Source(token.id()),
+            });
         }
+        let token = node.tree().token_at(node.source(), node.span().start)?;
+        let span = node.recovery_span().unwrap_or_else(|| token.span());
+        Some(Self {
+            node,
+            origin: IdentifierOrigin::Missing(span),
+        })
     }
 
     pub fn synthetic(node: SyntaxNode<'a>, name: &'static str, span: Span) -> Self {
-        let token = node
-            .tree()
-            .token_at(node.source(), span.start)
-            .expect("synthetic identifier span must belong to its source");
-        Self(
-            token,
-            IdentifierOrigin::Synthetic {
-                name,
-                span,
-                node: node.id(),
-            },
-        )
+        Self {
+            node,
+            origin: IdentifierOrigin::Synthetic { name, span },
+        }
     }
 
     pub fn with_span(self, span: Span) -> Self {
-        let origin = if self.is_missing() {
-            IdentifierOrigin::MissingWithSpan {
-                span,
-                node: self.syntax().id(),
-            }
-        } else {
-            IdentifierOrigin::Synthetic {
-                name: self.name(),
-                span,
-                node: self.syntax().id(),
+        let origin = match self.origin {
+            IdentifierOrigin::Missing(_) => IdentifierOrigin::Missing(span),
+            IdentifierOrigin::Source(_) | IdentifierOrigin::Synthetic { .. } => {
+                IdentifierOrigin::Synthetic {
+                    name: self.name(),
+                    span,
+                }
             }
         };
-        Self(self.0, origin)
+        Self { origin, ..self }
     }
 
     /// The source name token, absent for missing, synthetic, or span-overridden names.
     pub fn token(self) -> Option<SyntaxToken<'a>> {
-        matches!(self.1, IdentifierOrigin::Source).then_some(self.0)
+        match self.origin {
+            IdentifierOrigin::Source(id) => Some(self.source_token(id)),
+            IdentifierOrigin::Missing(_) | IdentifierOrigin::Synthetic { .. } => None,
+        }
     }
 
-    pub fn syntax(self) -> SyntaxNode<'a> {
-        let id = match self.1 {
-            IdentifierOrigin::Source => return self.0.parent(),
-            IdentifierOrigin::Missing(node)
-            | IdentifierOrigin::Synthetic { node, .. }
-            | IdentifierOrigin::MissingWithSpan { node, .. } => node,
-        };
-        SyntaxNode {
-            tree: self.0.tree,
-            source: self.0.source,
+    fn source_token(self, id: TokenId) -> SyntaxToken<'a> {
+        SyntaxToken {
+            tree: self.node.tree,
+            source: self.node.source,
             id,
         }
     }
 
+    pub fn syntax(self) -> SyntaxNode<'a> {
+        self.node
+    }
+
     pub fn is_missing(self) -> bool {
-        matches!(
-            self.1,
-            IdentifierOrigin::Missing(_) | IdentifierOrigin::MissingWithSpan { .. }
-        )
+        matches!(self.origin, IdentifierOrigin::Missing(_))
     }
 
     pub fn name(self) -> &'a str {
-        match self.1 {
-            IdentifierOrigin::Source => self.0.text(),
-            IdentifierOrigin::Missing(_) | IdentifierOrigin::MissingWithSpan { .. } => "<error>",
+        match self.origin {
+            IdentifierOrigin::Source(id) => self.source_token(id).text(),
+            IdentifierOrigin::Missing(_) => "<error>",
             IdentifierOrigin::Synthetic { name, .. } => name,
         }
     }
 
     pub fn span(self) -> Span {
-        match self.1 {
-            IdentifierOrigin::Source => self.0.span(),
-            IdentifierOrigin::Missing(_) => self
-                .syntax()
-                .recovery_span()
-                .unwrap_or_else(|| self.0.span()),
-            IdentifierOrigin::MissingWithSpan { span, .. } => span,
-            IdentifierOrigin::Synthetic { span, .. } => span,
+        match self.origin {
+            IdentifierOrigin::Source(id) => self.source_token(id).span(),
+            IdentifierOrigin::Missing(span) | IdentifierOrigin::Synthetic { span, .. } => span,
         }
+    }
+}
+
+impl<'a> AstNode<'a> for Identifier<'a> {
+    fn cast(node: SyntaxNode<'a>) -> Option<Self> {
+        Self::from_node(node)
+    }
+    fn syntax(self) -> SyntaxNode<'a> {
+        self.node
+    }
+    fn span(self) -> Span {
+        Identifier::span(self)
     }
 }
 

@@ -253,7 +253,7 @@ impl<'src> Parser<'src> {
         // Expression(s) for-loop init, or bare `ident in expr`
         let expr = self.parse_expr();
         if self.eat(TokenKind::In).is_some() {
-            if expr.kind() != NodeKind::Identifier {
+            if expr.kind != NodeKind::Identifier {
                 self.error("expected identifier in for-in");
                 self.missing(NodeKind::Identifier);
             }
@@ -637,21 +637,8 @@ impl<'src> Parser<'src> {
     /// followed by `=` — e.g. a record-typed variable declaration.
     fn try_parse_pattern_declaration(&mut self) -> Option<NodeKind> {
         self.speculate(|p| {
-            let errors = p.errors.len();
             p.advance();
-            let pattern = p.parse_binding_pattern();
-            if p.errors.len() > errors
-                || matches!(
-                    pattern.kind(),
-                    NodeKind::VariablePattern | NodeKind::WildcardPattern
-                )
-            {
-                return None;
-            }
-            p.eat(TokenKind::Eq)?;
-            p.parse_expr();
-            p.eat(TokenKind::Semicolon);
-            Some(NodeKind::PatternDeclaration)
+            p.parse_destructuring_assignment(NodeKind::PatternDeclaration)
         })
     }
 
@@ -686,22 +673,24 @@ impl<'src> Parser<'src> {
 
     // Failed pattern trials must retain neither tokens nor diagnostics.
     fn try_parse_pattern_assign(&mut self) -> Option<NodeKind> {
-        self.speculate(|p| {
-            let errors = p.errors.len();
-            let pattern = p.parse_binding_pattern();
-            if p.errors.len() > errors
-                || matches!(
-                    pattern.kind(),
-                    NodeKind::VariablePattern | NodeKind::WildcardPattern
-                )
-            {
-                return None;
-            }
-            p.eat(TokenKind::Eq)?;
-            p.parse_expr();
-            p.eat(TokenKind::Semicolon);
-            Some(NodeKind::PatternAssignStmt)
-        })
+        self.speculate(|p| p.parse_destructuring_assignment(NodeKind::PatternAssignStmt))
+    }
+
+    fn parse_destructuring_assignment(&mut self, kind: NodeKind) -> Option<NodeKind> {
+        let errors = self.errors.len();
+        let pattern = self.parse_binding_pattern();
+        if self.errors.len() > errors
+            || matches!(
+                pattern.kind,
+                NodeKind::VariablePattern | NodeKind::WildcardPattern
+            )
+        {
+            return None;
+        }
+        self.eat(TokenKind::Eq)?;
+        self.parse_expr();
+        self.eat(TokenKind::Semicolon);
+        Some(kind)
     }
 
     /// Balanced lookahead for `Type[.Type][<args>](...) =` (not `==`): an

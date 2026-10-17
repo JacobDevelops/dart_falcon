@@ -33,7 +33,7 @@ pub struct AvoidReturningThis;
 impl Rule for AvoidReturningThis {
     fn prepare<'a>(
         &self,
-        program: Program<'a>,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
@@ -43,7 +43,6 @@ impl Rule for AvoidReturningThis {
             ctx,
             model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             signatures,
-            declarations: program.declarations(),
             owner: None,
             returned: None,
             diags: Vec::new(),
@@ -60,7 +59,6 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
-    declarations: AstChildren<'a, TopLevelDecl<'a>>,
     owner: Option<(&'a str, DeclarationIdentity)>,
     returned: Option<Returned>,
     diags: Vec<Diagnostic>,
@@ -81,16 +79,14 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
     fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
-        self.owner = self.declarations.next()
-            .inspect(|declaration| debug_assert_eq!(declaration.syntax().id(), node.syntax().id()))
-            .and_then(|declaration| match declaration {
-                TopLevelDecl::Class(node) => Some(node.name().name()),
-                TopLevelDecl::MixinClass(node) => Some(node.name().name()),
-                TopLevelDecl::Enum(node) => Some(node.name().name()),
-                TopLevelDecl::Mixin(node) => Some(node.name().name()),
-                _ => None,
-            })
-            .and_then(|name| self.model.resolve_name(name).map(|owner| (name, owner)));
+        self.owner = match node {
+            TopLevelDecl::Class(node) => Some(node.name().name()),
+            TopLevelDecl::MixinClass(node) => Some(node.name().name()),
+            TopLevelDecl::Enum(node) => Some(node.name().name()),
+            TopLevelDecl::Mixin(node) => Some(node.name().name()),
+            _ => None,
+        }
+        .and_then(|name| self.model.resolve_name(name).map(|owner| (name, owner)));
         if self.owner.is_some() {
             StructuralTraversal::Continue
         } else {

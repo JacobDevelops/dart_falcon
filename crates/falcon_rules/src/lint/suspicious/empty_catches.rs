@@ -33,31 +33,17 @@ impl Rule for EmptyCatches {
 }
 
 fn check_catch(catch: CatchClause<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if !catch.body().stmts().is_empty() {
-        return;
-    }
     // Exempt `catch (_) {}` / `on E catch (_) {}`.
     if catch.exception_var().is_some_and(|v| v.name() == "_") {
         return;
     }
-    // Exempt an intentionally documented empty body.
-    let mut tokens = catch.body().syntax().tokens();
-    let Some(open) = tokens.next() else { return };
-    let Some(close) = tokens.next_back() else {
+    let Some(span) = super::no_empty_block::empty_block_end(catch.body()) else {
         return;
     };
-    if open.kind() != falcon_syntax::TokenKind::LBrace
-        || close.kind() != falcon_syntax::TokenKind::RBrace
-    {
-        return;
-    }
-    if tokens.any(|token| token.kind().is_comment()) {
-        return;
-    }
     diags.push(ctx.diagnostic(
         "empty-catches",
         "Empty catch block — handle the exception, add a comment, or name it `_`",
-        Span::new(close.offset(), close.offset() + close.len()),
+        span,
     ));
 }
 

@@ -8,8 +8,7 @@
 //! Integer operations use native signed-64-bit wrapping and strings count UTF-16
 //! code units; type-test conditions use the same source-proven types as casts.
 //! Constructor type tests and casts resolve instantiated owner type parameters.
-//! Expressions and patterns are borrowed arena views; indexed initializer and
-//! constructor nodes retain their parsed source through the signature index.
+//! Indexed initializers and constructors retain parsed sources through the signature index.
 
 use std::collections::HashMap;
 

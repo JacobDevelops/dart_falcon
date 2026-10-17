@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use falcon_syntax::cst::visit::bound_names;
 use falcon_syntax::cst::*;
 
 pub(crate) struct NameScopes(Vec<HashSet<String>>);

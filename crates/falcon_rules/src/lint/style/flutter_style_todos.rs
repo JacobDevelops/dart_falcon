@@ -22,8 +22,6 @@ use falcon_syntax::cst::Program;
 use falcon_syntax::token::TokenKind;
 use regex::Regex;
 
-use crate::lint::tokens::comment_tokens;
-
 static TODO: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^//+\s*TODO\b").expect("valid TODO regex"));
 
@@ -41,7 +39,8 @@ impl Rule for FlutterStyleTodos {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Diagnostics(
-            comment_tokens(ctx)
+            ctx.tree()
+                .comment_tokens(ctx.source)
                 .filter(|token| {
                     matches!(token.kind(), TokenKind::LineComment | TokenKind::DocComment)
                 })

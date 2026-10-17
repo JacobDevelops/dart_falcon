@@ -2,20 +2,6 @@ use super::macros::DebugList;
 use super::*;
 use crate::token::TokenKind;
 
-fn child<'a, T: AstNode<'a>>(node: SyntaxNode<'a>) -> Option<T> {
-    node.children().find_map(T::cast)
-}
-fn required<'a, T: AstNode<'a>>(node: SyntaxNode<'a>) -> T {
-    child(node).expect("parser emits required declaration child")
-}
-fn names(node: SyntaxNode<'_>) -> impl DoubleEndedIterator<Item = Identifier<'_>> + Clone {
-    node.children().filter_map(Identifier::from_node)
-}
-fn name(node: SyntaxNode<'_>) -> Identifier<'_> {
-    names(node)
-        .next()
-        .expect("parser emits declaration identifier")
-}
 fn has(node: SyntaxNode<'_>, kind: TokenKind) -> bool {
     node.child_token(kind).is_some()
 }
@@ -61,8 +47,8 @@ fn keyword(node: SyntaxNode<'_>) -> VarKeyword {
 fn asynchronous(node: SyntaxNode<'_>) -> AsyncMarker {
     let mut marker = AsyncMarker::Sync;
     let cutoff = match node.kind() {
-        NodeKind::GetterDecl => name(node).span().end,
-        NodeKind::OperatorDecl => required::<FormalParamList>(node).span().end,
+        NodeKind::GetterDecl => node.required::<Identifier>().span().end,
+        NodeKind::OperatorDecl => node.required::<FormalParamList>().span().end,
         _ => 0,
     };
     for token in node
@@ -106,13 +92,13 @@ fn top_span(node: SyntaxNode<'_>) -> Span {
 }
 macro_rules! view { ($name:ident { $($field:ident),* $(,)? }) => { typed_node!($name, $name); debug_node!($name { $($field),* }); }; }
 macro_rules! annotations { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn annotations(self) -> AstChildren<'a, Annotation<'a>> { AstChildren::new(self.0) } })* }; }
-macro_rules! named { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn name(self) -> Identifier<'a> { name(self.0) } })* }; }
+macro_rules! named { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn name(self) -> Identifier<'a> { self.0.required() } })* }; }
 macro_rules! types { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn type_params(self) -> AstChildren<'a, TypeParam<'a>> { AstChildren::new(self.0) } })* }; }
 macro_rules! members { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn members(self) -> AstChildren<'a, ClassMember<'a>> { AstChildren::new(self.0) } })* }; }
 macro_rules! flags { ($method:ident, $kind:ident; $($name:ident),* $(,)?) => { $(impl $name<'_> { pub fn $method(self) -> bool { has(self.0, TokenKind::$kind) } })* }; }
-macro_rules! bodies { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn body(self) -> Option<FunctionBody<'a>> { child(self.0) } })* }; }
-macro_rules! return_types { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn return_type(self) -> Option<DartType<'a>> { child(self.0) } })* }; }
-macro_rules! params { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn params(self) -> FormalParamList<'a> { required(self.0) } })* }; }
+macro_rules! bodies { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn body(self) -> Option<FunctionBody<'a>> { self.0.child() } })* }; }
+macro_rules! return_types { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn return_type(self) -> Option<DartType<'a>> { self.0.child() } })* }; }
+macro_rules! params { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn params(self) -> FormalParamList<'a> { self.0.required() } })* }; }
 macro_rules! async_markers { ($($name:ident),* $(,)?) => { $(impl $name<'_> { pub fn async_marker(self) -> AsyncMarker { asynchronous(self.0) } })* }; }
 macro_rules! implements { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn implements(self) -> AstChildren<'a, DartType<'a>> { clause(self.0, NodeKind::ImplementsClause) } })* }; }
 macro_rules! with_clause { ($($name:ident),* $(,)?) => { $(impl<'a> $name<'a> { pub fn with_clause(self) -> AstChildren<'a, DartType<'a>> { clause(self.0, NodeKind::WithClause) } })* }; }
@@ -153,10 +139,10 @@ impl<'a> Program<'a> {
         )
     }
     pub fn library_directive(self) -> Option<LibraryDirective<'a>> {
-        child(self.0)
+        self.0.child()
     }
     pub fn part_of_directive(self) -> Option<PartOfDirective<'a>> {
-        child(self.0)
+        self.0.child()
     }
     pub fn part_directives(self) -> AstChildren<'a, PartDirective<'a>> {
         AstChildren::new(self.0)
@@ -185,15 +171,15 @@ typed_node!(LibraryDirective, LibraryDirective);
 typed_node!(PartOfDirective, PartOfDirective);
 impl<'a> LibraryDirective<'a> {
     pub fn name(self) -> impl DoubleEndedIterator<Item = Identifier<'a>> + Clone {
-        names(self.0)
+        AstChildren::<Identifier>::new(self.0)
     }
 }
 impl<'a> PartOfDirective<'a> {
     pub fn name(self) -> impl DoubleEndedIterator<Item = Identifier<'a>> + Clone {
-        names(self.0)
+        AstChildren::<Identifier>::new(self.0)
     }
     pub fn uri(self) -> Option<StringLitNode<'a>> {
-        child(self.0)
+        self.0.child()
     }
 }
 impl std::fmt::Debug for LibraryDirective<'_> {
@@ -238,29 +224,30 @@ view!(ExportDirective {
 });
 impl<'a> PartDirective<'a> {
     pub fn uri(self) -> StringLitNode<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 macro_rules! uri_directives { ($($name:ident),*) => { $(impl<'a> $name<'a> {
-    pub fn uri(self) -> StringLitNode<'a> { required(self.0) }
+    pub fn uri(self) -> StringLitNode<'a> { self.0.required() }
     pub fn configurable_uris(self) -> AstChildren<'a, ConfigurableUri<'a>> { AstChildren::new(self.0) }
     pub fn combinators(self) -> AstChildren<'a, ImportCombinator<'a>> { AstChildren::new(self.0) }
 })* }; }
 uri_directives!(ImportDirective, ExportDirective);
 impl<'a> ImportDirective<'a> {
     pub fn as_name(self) -> Option<Identifier<'a>> {
-        names(self.0).next()
+        self.0.child::<Identifier>()
     }
 }
 flags!(is_deferred, Deferred; ImportDirective);
 typed_node!(ConfigurableUri, ConfigurableUri);
 impl<'a> ConfigurableUri<'a> {
     pub fn test(self) -> impl DoubleEndedIterator<Item = Identifier<'a>> + Clone {
-        names(self.0)
+        AstChildren::<Identifier>::new(self.0)
     }
     pub fn value(self) -> Option<StringLitNode<'a>> {
         let mut strings = AstChildren::<StringLitNode>::new(self.0);
-        (strings.len() > 1).then(|| strings.next().expect("comparison literal"))
+        let first = strings.next()?;
+        strings.next().map(|_| first)
     }
     pub fn uri(self) -> StringLitNode<'a> {
         AstChildren::<StringLitNode>::new(self.0)
@@ -281,7 +268,7 @@ impl std::fmt::Debug for ConfigurableUri<'_> {
 typed_node!(Combinator, Combinator);
 impl<'a> Combinator<'a> {
     pub fn names(self) -> impl DoubleEndedIterator<Item = Identifier<'a>> + Clone {
-        names(self.0)
+        AstChildren::<Identifier>::new(self.0)
     }
 }
 impl std::fmt::Debug for Combinator<'_> {
@@ -422,11 +409,11 @@ top_view!(ExtensionTypeDecl {
 });
 macro_rules! modifiers { ($($name:ident),*) => { $(impl $name<'_> { pub fn modifiers(self) -> ClassModifiers { ClassModifiers { is_abstract: has(self.0, TokenKind::Abstract), restriction: restriction(self.0) } } })* }; }
 modifiers!(ClassDecl, ClassTypeAliasDecl);
-macro_rules! optional_primary { ($($name:ident),*) => { $(impl<'a> $name<'a> { pub fn primary_constructor(self) -> Option<PrimaryConstructor<'a>> { child(self.0) } })* }; }
+macro_rules! optional_primary { ($($name:ident),*) => { $(impl<'a> $name<'a> { pub fn primary_constructor(self) -> Option<PrimaryConstructor<'a>> { self.0.child() } })* }; }
 optional_primary!(ClassDecl, MixinClassDecl, EnumDecl);
 impl<'a> ExtensionTypeDecl<'a> {
     pub fn primary_constructor(self) -> PrimaryConstructor<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn representation(self) -> Option<FormalParam<'a>> {
         self.primary_constructor().params().params().first()
@@ -448,7 +435,7 @@ impl<'a> MixinDecl<'a> {
 }
 impl<'a> ExtensionDecl<'a> {
     pub fn name(self) -> Option<Identifier<'a>> {
-        names(self.0).next()
+        self.0.child::<Identifier>()
     }
     pub fn on_type(self) -> DartType<'a> {
         clause(self.0, NodeKind::OnClause)
@@ -474,10 +461,10 @@ impl<'a> EnumVariant<'a> {
         TypeArgs::of(self.0)
     }
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
-        names(self.0).nth(1)
+        AstChildren::<Identifier>::new(self.0).nth(1)
     }
     pub fn args(self) -> Option<ArgList<'a>> {
-        child(self.0)
+        self.0.child()
     }
 }
 
@@ -495,6 +482,9 @@ impl<'a> AstNode<'a> for PrimaryConstructor<'a> {
     }
 }
 impl<'a> PrimaryConstructor<'a> {
+    fn declaration(self) -> SyntaxNode<'a> {
+        self.0.parent().expect("primary constructor declaration")
+    }
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
@@ -502,27 +492,20 @@ impl<'a> PrimaryConstructor<'a> {
         self.0
     }
     pub fn name_span(self) -> Span {
-        name(
-            self.0
-                .parent()
-                .expect("primary constructor has declaration parent"),
-        )
-        .span()
+        self.declaration().required::<Identifier>().span()
     }
     pub fn is_const(self) -> bool {
-        has(
-            self.0.parent().expect("primary constructor parent"),
-            TokenKind::Const,
-        )
+        has(self.declaration(), TokenKind::Const)
     }
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
-        names(self.0).find(|name| !name.is_missing())
+        AstChildren::<Identifier>::new(self.0).find(|name| !name.is_missing())
     }
     pub fn span(self) -> Span {
-        if let Some(missing) = names(self.0).find(|name| name.is_missing()) {
+        let mut names = AstChildren::<Identifier>::new(self.0);
+        if let Some(missing) = names.find(|name| name.is_missing()) {
             return missing.span();
         }
-        let parent = self.0.parent().expect("primary constructor parent");
+        let parent = self.declaration();
         Span::new(
             parent
                 .child_token(TokenKind::Const)
@@ -581,7 +564,7 @@ impl<'a> FieldDecl<'a> {
         keyword(self.0)
     }
     pub fn field_type(self) -> Option<DartType<'a>> {
-        child(self.0)
+        self.0.child()
     }
     pub fn declarators(self) -> AstChildren<'a, VarDeclarator<'a>> {
         AstChildren::new(self.0)
@@ -614,23 +597,25 @@ impl<'a> ConstructorDecl<'a> {
                 NodeKind::ClassDecl
                 | NodeKind::MixinClassDecl
                 | NodeKind::EnumDecl
-                | NodeKind::ExtensionTypeDecl => Some(name(node)),
+                | NodeKind::ExtensionTypeDecl => Some(node.required::<Identifier>()),
                 _ => None,
             })?;
         let explicit = has(self.0, TokenKind::Dot)
-            || names(self.0)
-                .next()
+            || self
+                .0
+                .child::<Identifier>()
                 .is_some_and(|n| n.is_missing() || n.name() == enclosing.name());
         (!explicit).then_some(enclosing.with_span(keyword.span()))
     }
     pub fn name(self) -> Identifier<'a> {
-        self.implicit_name().unwrap_or_else(|| name(self.0))
+        self.implicit_name()
+            .unwrap_or_else(|| self.0.required::<Identifier>())
     }
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
-        names(self.0).nth(usize::from(self.implicit_name().is_none()))
+        AstChildren::<Identifier>::new(self.0).nth(usize::from(self.implicit_name().is_none()))
     }
     pub fn redirect(self) -> Option<RedirectedConstructor<'a>> {
-        child(self.0)
+        self.0.child()
     }
 }
 view!(RedirectedConstructor {
@@ -640,10 +625,10 @@ view!(RedirectedConstructor {
 });
 impl<'a> RedirectedConstructor<'a> {
     pub fn type_(self) -> DartType<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
-        names(self.0).next()
+        self.0.child::<Identifier>()
     }
 }
 macro_rules! initializers { ($($name:ident),*) => { $(impl<'a> $name<'a> { pub fn initializers(self) -> AstChildren<'a, ConstructorInitializer<'a>> { AstChildren::new(self.0) } })* }; }
@@ -652,11 +637,11 @@ typed_node!(SuperCallInitializer, SuperCallInitializer);
 typed_node!(ThisCallInitializer, ThisCallInitializer);
 typed_node!(FieldInitializer, FieldInitializer);
 typed_node!(AssertInitializer, AssertInitializer);
-macro_rules! call_init { ($($name:ident),*) => { $(impl<'a> $name<'a> { pub fn call_name(self) -> Option<Identifier<'a>> { names(self.0).next() } pub fn args(self) -> ArgList<'a> { required(self.0) } })* }; }
+macro_rules! call_init { ($($name:ident),*) => { $(impl<'a> $name<'a> { pub fn call_name(self) -> Option<Identifier<'a>> { self.0.child::<Identifier>() } pub fn args(self) -> ArgList<'a> { self.0.required() } })* }; }
 call_init!(SuperCallInitializer, ThisCallInitializer);
 impl<'a> FieldInitializer<'a> {
     pub fn field(self) -> Identifier<'a> {
-        name(self.0)
+        self.0.required::<Identifier>()
     }
     pub fn value(self) -> Expr<'a> {
         AstChildren::<Expr>::new(self.0)
@@ -666,7 +651,7 @@ impl<'a> FieldInitializer<'a> {
 }
 impl<'a> AssertInitializer<'a> {
     pub fn condition(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn message(self) -> Option<Expr<'a>> {
         AstChildren::<Expr>::new(self.0).nth(1)
@@ -780,13 +765,9 @@ impl<'a> SetterDecl<'a> {
     }
     pub fn param_type(self) -> Option<DartType<'a>> {
         let p = self.parameter();
-        if child::<FormalParamList>(p).is_some() {
-            Some(DartType::Function(
-                FunctionType::cast(p).expect("setter function type"),
-            ))
-        } else {
-            child(p)
-        }
+        FunctionType::cast(p)
+            .map(DartType::Function)
+            .or_else(|| p.child())
     }
     pub fn param_annotations(self) -> AstChildren<'a, Annotation<'a>> {
         AstChildren::new(self.parameter())
@@ -795,7 +776,7 @@ impl<'a> SetterDecl<'a> {
         has(self.parameter(), TokenKind::Covariant)
     }
     pub fn param(self) -> Identifier<'a> {
-        name(self.parameter())
+        self.parameter().required::<Identifier>()
     }
 }
 impl<'a> OperatorDecl<'a> {
@@ -860,9 +841,9 @@ impl<'a> FunctionDecl<'a> {
         if has(self.0, TokenKind::Get) {
             FunctionKind::Getter
         } else if has(self.0, TokenKind::Set) {
-            FunctionKind::Setter(required(self.0))
+            FunctionKind::Setter(self.0.required())
         } else {
-            FunctionKind::Function(required(self.0))
+            FunctionKind::Function(self.0.required())
         }
     }
     pub fn params(self) -> Option<FormalParamList<'a>> {
@@ -892,7 +873,7 @@ impl<'a> TopLevelVarDecl<'a> {
         }
     }
     pub fn var_type(self) -> Option<DartType<'a>> {
-        child(self.0)
+        self.0.child()
     }
     pub fn declarators(self) -> AstChildren<'a, VarDeclarator<'a>> {
         AstChildren::new(self.0)
@@ -914,8 +895,8 @@ impl<'a> TypeAliasDecl<'a> {
     }
     pub fn name(self) -> Identifier<'a> {
         if let Some(legacy) = self.legacy() {
-            names(legacy).next().unwrap_or_else(|| {
-                let leading = required::<DartType>(legacy);
+            legacy.child::<Identifier>().unwrap_or_else(|| {
+                let leading = legacy.required::<DartType>();
                 if let DartType::Named(named) = leading
                     && let Some(name) = named.segments().next_back()
                 {
@@ -924,13 +905,13 @@ impl<'a> TypeAliasDecl<'a> {
                 Identifier::synthetic(leading.syntax(), "<error>", leading.span())
             })
         } else {
-            name(self.0)
+            self.0.required::<Identifier>()
         }
     }
     pub fn type_params(self) -> AstChildren<'a, TypeParam<'a>> {
         let parent = self.legacy().unwrap_or(self.0);
         if self.legacy().is_some()
-            && names(parent).next().is_none()
+            && parent.child::<Identifier>().is_none()
             && let Some(args) = parent
                 .children()
                 .find(|n| n.kind() == NodeKind::NamedType)
@@ -942,13 +923,13 @@ impl<'a> TypeAliasDecl<'a> {
     }
     pub fn aliased(self) -> DartType<'a> {
         if let Some(legacy) = self.legacy() {
-            DartType::Function(FunctionType::cast(legacy).expect("legacy function type"))
+            DartType::Function(FunctionType(legacy))
         } else {
-            required(self.0)
+            self.0.required()
         }
     }
     pub fn legacy_params(self) -> Option<FormalParamList<'a>> {
-        self.legacy().and_then(child)
+        self.legacy().and_then(SyntaxNode::child)
     }
 }
 #[derive(Clone, Copy)]
@@ -973,7 +954,7 @@ impl<'a> FormalParamList<'a> {
         self.0
     }
     pub fn span(self) -> Span {
-        names(self.0)
+        AstChildren::<Identifier>::new(self.0)
             .find(|name| name.is_missing())
             .map_or(self.0.span(), |name| name.span())
     }
@@ -1017,25 +998,25 @@ impl<'a> FormalParam<'a> {
         }
     }
     pub fn param_type(self) -> Option<DartType<'a>> {
-        child(self.0)
+        self.0.child()
     }
     pub fn default_value(self) -> Option<Expr<'a>> {
         assigned_value(self.0)
     }
     pub fn function_params(self) -> Option<FormalParamList<'a>> {
-        child(self.0)
+        self.0.child()
     }
 }
 typed_node!(ArrowBody, ArrowBody);
 impl<'a> ArrowBody<'a> {
     pub fn expr(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 typed_node!(NativeBody, NativeBody);
 impl<'a> NativeBody<'a> {
     pub fn literal(self) -> Option<StringLitNode<'a>> {
-        child(self.0)
+        self.0.child()
     }
 }
 debug_tuple!(ArrowBody => "Arrow" { expr, span });
@@ -1107,7 +1088,8 @@ impl<'a> Annotation<'a> {
             .children()
             .find(|n| n.kind() == NodeKind::TypeArgs)
             .map(|n| n.span().start);
-        names(self.0).filter(move |n| limit.is_none_or(|end| n.span().start < end))
+        AstChildren::<Identifier>::new(self.0)
+            .filter(move |n| limit.is_none_or(|end| n.span().start < end))
     }
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
@@ -1119,10 +1101,10 @@ impl<'a> Annotation<'a> {
             .find(|n| n.kind() == NodeKind::TypeArgs)?
             .span()
             .end;
-        names(self.0).find(|n| n.span().start >= end)
+        AstChildren::<Identifier>::new(self.0).find(|n| n.span().start >= end)
     }
     pub fn args(self) -> Option<ArgList<'a>> {
-        child(self.0)
+        self.0.child()
     }
 }
 impl std::fmt::Debug for Annotation<'_> {

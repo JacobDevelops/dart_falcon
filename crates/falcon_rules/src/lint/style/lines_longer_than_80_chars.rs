@@ -24,7 +24,6 @@
 //! Adopted from the official `lines_longer_than_80_chars` lint.
 
 use crate::lint::string_lit::decode_escapes;
-use crate::lint::tokens::comment_tokens;
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
@@ -220,7 +219,7 @@ fn literal_contains_path<'a>(
 
 /// Allow comment lines, including comments inside interpolations.
 fn allow_comment_lines(ctx: &AnalyzeContext, lines: &Lines<'_>, allowed: &mut [bool]) {
-    for token in comment_tokens(ctx) {
+    for token in ctx.tree().comment_tokens(ctx.source) {
         let lexeme = token.text();
         let first = lines.line_of(token.offset());
         if let Some(text) = lexeme.strip_prefix("///") {

@@ -260,8 +260,8 @@ impl UsageCollector {
     ) {
         for initializer in initializers {
             match initializer {
-                ConstructorInitializer::SuperCall(call) => self.visit_initializer_args(call.args()),
-                ConstructorInitializer::ThisCall(call) => self.visit_initializer_args(call.args()),
+                ConstructorInitializer::SuperCall(call) => self.visit_arg_list(call.args()),
+                ConstructorInitializer::ThisCall(call) => self.visit_arg_list(call.args()),
                 ConstructorInitializer::FieldInit(field) => self.visit_expr(field.value()),
                 ConstructorInitializer::Assert(assertion) => {
                     self.visit_expr(assertion.condition());
@@ -270,15 +270,6 @@ impl UsageCollector {
                     }
                 }
             }
-        }
-    }
-
-    fn visit_initializer_args(&mut self, args: ArgList<'_>) {
-        for argument in args.positional() {
-            self.visit_expr(argument);
-        }
-        for argument in args.named() {
-            self.visit_expr(argument.value());
         }
     }
 

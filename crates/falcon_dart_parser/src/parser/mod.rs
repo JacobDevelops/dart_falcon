@@ -168,14 +168,15 @@ pub(super) struct CompletedMarker {
 
 impl Marker {
     pub(super) fn complete(self, parser: &mut Parser<'_>, kind: NodeKind) -> CompletedMarker {
-        let Event::Start { kind: slot, .. } = &mut parser.events[self.pos] else {
+        let Event::Start {
+            kind: slot, offset, ..
+        } = &mut parser.events[self.pos]
+        else {
             panic!("marker must refer to an open node");
         };
         *slot = kind;
+        let offset = *offset;
         parser.events.push(Event::Finish);
-        let Event::Start { offset, .. } = parser.events[self.pos] else {
-            unreachable!();
-        };
         let span = match (
             parser.events.get(self.pos + 1),
             parser.events.get(parser.events.len() - 2),
@@ -196,14 +197,6 @@ impl Marker {
 }
 
 impl CompletedMarker {
-    pub(super) fn kind(self) -> NodeKind {
-        self.kind
-    }
-
-    pub(super) fn span(self) -> Span {
-        self.span
-    }
-
     pub(super) fn text<'src>(self, parser: &Parser<'src>) -> &'src str {
         if self.kind == NodeKind::Identifier
             && matches!(
@@ -430,7 +423,7 @@ impl<'src> Parser<'src> {
 
     #[inline]
     pub(super) fn restore_cursor(&mut self, checkpoint: Checkpoint) {
-        self.rewind_to(checkpoint.pos);
+        self.pos = checkpoint.pos;
         while self.forward_parents.len() > checkpoint.forward_parents {
             let (pos, previous) = self.forward_parents.pop().unwrap();
             if let Event::Start { forward_parent, .. } = &mut self.events[pos] {
@@ -452,13 +445,6 @@ impl<'src> Parser<'src> {
             self.restore(checkpoint);
         }
         result
-    }
-
-    /// Discard a speculative cursor split without mutating canonical tokens.
-    pub(super) fn rewind_to(&mut self, saved: usize) {
-        self.split = None;
-        self.split_count = 0;
-        self.pos = saved;
     }
 
     /// Consume a trailing `?` as a nullable-type suffix, unless we are parsing an
@@ -608,12 +594,8 @@ impl<'src> Parser<'src> {
         Span::new(t.offset(), t.offset() + t.len())
     }
 
-    pub(super) fn tok_text(&self, tok: &Token) -> &'src str {
-        &self.src[tok.offset()..tok.offset() + tok.len()]
-    }
-
     pub(super) fn cur_text(&self) -> &str {
-        self.tok_text(self.cur())
+        self.cur().text(self.src)
     }
 
     pub(super) fn kind_at(&self, index: usize) -> TokenKind {
@@ -1078,10 +1060,10 @@ mod tests {
         let recovery = Span::new(0, 4);
         parser.events.push(Event::RecoverySpan(recovery));
         let field = field.complete(&mut parser, NodeKind::ObjectPatternField);
-        assert_eq!(field.span(), recovery);
+        assert_eq!(field.span, recovery);
         assert_eq!(field.text(&parser), "name");
         let missing = parser.missing(NodeKind::Identifier);
-        assert_eq!(missing.span(), Span::new(5, 9));
+        assert_eq!(missing.span, Span::new(5, 9));
         assert_eq!(missing.text(&parser), "<error>");
     }
 
@@ -1128,7 +1110,7 @@ mod tests {
         parser.advance();
         right.complete(&mut parser, NodeKind::Identifier);
         let wrapped = wrapper.complete(&mut parser, NodeKind::BinaryExpr);
-        assert_eq!(wrapped.span(), Span::new(0, source.len()));
+        assert_eq!(wrapped.span, Span::new(0, source.len()));
         assert_eq!(wrapped.text(&parser), source);
         root.complete(&mut parser, NodeKind::Program);
         let tree = SyntaxTree::build(source, &syntax, parser.events);

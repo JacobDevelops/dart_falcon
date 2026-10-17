@@ -286,10 +286,7 @@ fn args_match_params(args: ArgList<'_>, params: FormalParamList<'_>) -> bool {
 }
 
 fn has_preceding_comment(offset: usize, ctx: &AnalyzeContext) -> bool {
-    ctx.tokens()
-        .rev()
-        .skip_while(|token| token.offset() >= offset)
-        .take_while(|token| token.is_trivia())
+    crate::lint::tokens::preceding_trivia(ctx.tokens(), offset)
         .any(|token| token.kind().is_comment())
 }
 

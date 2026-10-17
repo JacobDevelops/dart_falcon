@@ -40,23 +40,22 @@ use falcon_syntax::TokenKind;
 use falcon_syntax::cst::*;
 
 use crate::lint::declarations::{documented_node_span, member_names, members_of};
+use crate::lint::tokens::significant_tokens_in;
 use falcon_analyze::semantic_scope::SemanticState;
 
 const RULE: &str = "always-specify-types";
 const MESSAGE: &str = "Missing type annotation.";
 
-/// Setter ASTs retain the name rather than the complete formal parameter range.
+/// Includes the setter's full parameter range rather than just its name.
 pub(crate) fn setter_parameter_span(node: SetterDecl<'_>, ctx: &AnalyzeContext) -> Span {
-    let start = ctx
-        .tree()
-        .tokens_in(
-            ctx.source,
-            Span::new(node.name().span().end, node.param().span().end),
-        )
-        .skip_while(|token| token.kind() != TokenKind::LParen)
-        .skip(1)
-        .find(|token| !token.is_trivia())
-        .map_or(node.param().span().start, |token| token.offset());
+    let start = significant_tokens_in(
+        ctx.tree(),
+        ctx.source,
+        Span::new(node.name().span().end, node.param().span().end),
+    )
+    .skip_while(|token| token.kind() != TokenKind::LParen)
+    .nth(1)
+    .map_or(node.param().span().start, |token| token.offset());
     documented_node_span(
         Span::new(start, node.param().span().end),
         node.param_annotations(),
@@ -186,10 +185,8 @@ impl<'a> Collector<'a> {
     }
 
     fn first_token(&self, span: Span) -> Span {
-        self.ctx
-            .tree()
-            .tokens_in(self.ctx.source, span)
-            .find(|token| !token.is_trivia())
+        significant_tokens_in(self.ctx.tree(), self.ctx.source, span)
+            .next()
             .map_or(span, |token| {
                 Span::new(token.offset(), token.offset() + token.len())
             })
@@ -393,8 +390,8 @@ impl<'a> Collector<'a> {
         let segments = named.segments();
         let mut type_segments = segments.clone();
         let constructor = type_segments.next_back()?;
-        if type_segments.clone().next().is_none()
-            || !named.type_args().is_empty()
+        let first = type_segments.clone().next()?;
+        if !named.type_args().is_empty()
             || QualifiedName::from_identifiers(segments)
                 .and_then(|name| state.model.resolve_name(name))
                 .is_some()
@@ -406,12 +403,9 @@ impl<'a> Collector<'a> {
             .resolve_name(QualifiedName::from_identifiers(type_segments.clone())?)?;
         (self.is_generic(&identity) && self.declares_constructor(&identity, constructor.name()))
             .then(|| {
-                type_segments
-                    .clone()
-                    .next()
-                    .unwrap()
+                first
                     .span()
-                    .merge(&type_segments.last().unwrap().span())
+                    .merge(&type_segments.next_back().unwrap_or(first).span())
             })
     }
 
@@ -484,7 +478,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         } else {
             self.check_declaration(
                 node.annotations(),
-                node.range(),
+                node.span(),
                 node.var_type(),
                 node.declarators(),
             );

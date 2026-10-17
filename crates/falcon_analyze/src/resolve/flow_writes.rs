@@ -3,6 +3,10 @@
 //! control may re-enter the region (a loop's back edge, a `catch`).
 use std::collections::{HashMap, HashSet};
 
+use falcon_syntax::cst::visit::{
+    Visitor, walk_class_member, walk_collection_element, walk_expr, walk_function_decl,
+    walk_map_element, walk_pattern, walk_stmt,
+};
 use falcon_syntax::cst::*;
 
 #[derive(Debug, Default)]
@@ -410,25 +414,18 @@ impl<'a> Visitor<'a> for FlowWrites {
     }
 
     fn visit_expr(&mut self, expression: Expr<'a>) {
-        match expression {
-            Expr::Assign(assignment) => {
-                if let Expr::Ident(name) = assignment.target().unparenthesized() {
-                    self.record(name);
-                }
-                walk_expr(self, expression);
-            }
+        let target = match expression {
+            Expr::Assign(assignment) => Some(assignment.target()),
             Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
-                if let Expr::Ident(name) = unary.operand().unparenthesized() {
-                    self.record(name);
-                }
-                walk_expr(self, expression);
+                Some(unary.operand())
             }
-            Expr::PostfixIncDec(postfix) => {
-                if let Expr::Ident(name) = postfix.operand().unparenthesized() {
-                    self.record(name);
-                }
-                walk_expr(self, expression);
-            }
+            Expr::PostfixIncDec(postfix) => Some(postfix.operand()),
+            _ => None,
+        };
+        if let Some(Expr::Ident(name)) = target.map(Expr::unparenthesized) {
+            self.record(name);
+        }
+        match expression {
             Expr::FuncExpr(function) => {
                 self.callable_bindings
                     .insert(function.span().start, self.bindings());

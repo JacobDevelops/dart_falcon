@@ -75,7 +75,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             let Some(facts) = self.signatures.declaration(&identity) else {
                 return StructuralTraversal::SkipChildren;
             };
-            for (params, mut initializers) in constructor_inputs(class) {
+            for constructor in class.element_members().constructors() {
+                let params = constructor.params;
+                let mut initializers = constructor.initializers;
                 let super_params = params
                     .params()
                     .filter(|param| {
@@ -129,31 +131,4 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         self.diags
     }
 }
-}
-
-fn constructor_inputs<'a>(
-    class: ClassDecl<'a>,
-) -> impl Iterator<
-    Item = (
-        FormalParamList<'a>,
-        AstChildren<'a, ConstructorInitializer<'a>>,
-    ),
-> {
-    let constructors = class.members().filter_map(|member| match member {
-        ClassMember::Constructor(constructor) => {
-            Some((constructor.params(), constructor.initializers()))
-        }
-        _ => None,
-    });
-    let primary = class.primary_constructor().map(|constructor| {
-        let initializers = class
-            .members()
-            .find_map(|member| match member {
-                ClassMember::PrimaryConstructorBody(body) => Some(body.initializers()),
-                _ => None,
-            })
-            .unwrap_or_else(AstChildren::empty);
-        (constructor.params(), initializers)
-    });
-    constructors.chain(primary)
 }

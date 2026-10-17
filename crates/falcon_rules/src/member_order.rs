@@ -13,11 +13,11 @@ pub fn read_string_list(ctx: &AnalyzeContext, rule_name: &str, key: &str) -> Opt
         .map(|values| values.map(str::to_string).collect())
 }
 
-pub(crate) fn is_override(annotations: AstChildren<'_, Annotation<'_>>) -> bool {
-    annotations.into_iter().any(|annotation| {
+pub(crate) fn is_override<'a>(mut annotations: AstChildren<'a, Annotation<'a>>) -> bool {
+    annotations.any(|annotation| {
         annotation
             .name()
-            .last()
+            .next_back()
             .is_some_and(|id| id.name() == "override")
     })
 }

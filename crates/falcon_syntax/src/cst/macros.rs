@@ -72,14 +72,3 @@ where
         f.debug_list().entries(self.0.clone()).finish()
     }
 }
-
-pub struct DebugWith<F>(pub F);
-
-impl<F> fmt::Debug for DebugWith<F>
-where
-    F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.0)(f)
-    }
-}

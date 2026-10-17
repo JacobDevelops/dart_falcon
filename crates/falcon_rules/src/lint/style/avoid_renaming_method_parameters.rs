@@ -33,7 +33,7 @@ pub struct AvoidRenamingMethodParameters;
 impl Rule for AvoidRenamingMethodParameters {
     fn prepare<'a>(
         &self,
-        program: Program<'a>,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities, ctx.signatures) else {
@@ -47,7 +47,6 @@ impl Rule for AvoidRenamingMethodParameters {
             tokens: ctx.tokens().collect(),
             model: SemanticModel::new(ctx.file_path, ctx.parsed, identities, ctx.types),
             signatures,
-            declarations: program.declarations(),
             owner: None,
             wildcards: ctx.language_version().supports(Feature::WildcardVariables),
             diags: Vec::new(),
@@ -60,7 +59,6 @@ struct Collector<'a> {
     tokens: Vec<SyntaxToken<'a>>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
-    declarations: AstChildren<'a, TopLevelDecl<'a>>,
     owner: Option<(DeclarationIdentity, InheritanceSource<'a>)>,
     wildcards: bool,
     diags: Vec<Diagnostic>,
@@ -71,9 +69,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
     fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
-        self.owner = self.declarations.next()
-            .inspect(|declaration| debug_assert_eq!(declaration.syntax().id(), node.syntax().id()))
-            .and_then(inheriting_declaration)
+        self.owner = inheriting_declaration(node)
             .filter(|declaration| !declaration.name.name().starts_with('_'))
             .and_then(|declaration| {
                 self.model.resolve_name(declaration.name.name())

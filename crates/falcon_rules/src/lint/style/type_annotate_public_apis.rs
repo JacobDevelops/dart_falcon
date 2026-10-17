@@ -30,8 +30,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::declarations::documented_node_span;
-use crate::lint::style::always_declare_return_types::operator_span;
+use crate::lint::declarations::{documented_node_span, operator_span};
 use crate::lint::style::always_specify_types::setter_parameter_span;
 use falcon_analyze::semantic_scope::SemanticState;
 
@@ -192,7 +191,7 @@ impl<'a> Checker<'a> {
                 }
                 ClassMember::Operator(operator) => {
                     if operator.return_type().is_none() && operator.op() != "[]=" {
-                        self.report(operator_span(operator, self.ctx.tree(), self.ctx.source));
+                        self.report(operator_span(operator));
                     }
                     self.params(operator.params());
                 }

@@ -169,22 +169,16 @@ fn cst_tokens_with_regions(
             }
             pieces.push(Token::new(prefix, start, prefix_len));
             if prefix == TokenKind::InterpolationStart {
-                if let Ok(index) = regions.binary_search_by_key(&span.start, |(span, _)| span.start)
-                {
-                    pieces.extend(
-                        regions[index]
-                            .1
-                            .iter()
-                            .copied()
-                            .filter(|t| t.kind != TokenKind::Eof),
-                    );
-                } else {
-                    pieces.extend(
-                        lex_region(source, span)
-                            .into_iter()
-                            .filter(|t| t.kind != TokenKind::Eof),
-                    );
-                }
+                let lexical;
+                let cached = regions.binary_search_by_key(&span.start, |(span, _)| span.start);
+                let tokens = match cached {
+                    Ok(index) => &regions[index].1,
+                    Err(_) => {
+                        lexical = lex_region(source, span);
+                        &lexical
+                    }
+                };
+                pieces.extend(tokens.iter().copied().filter(|t| t.kind != TokenKind::Eof));
                 pieces.push(Token::new(TokenKind::RBrace, span.end, 1));
                 cursor = span.end + 1;
             } else {
@@ -257,7 +251,7 @@ impl super::Parser<'_> {
                     let expr = sub.parse_expr();
                     if sub.errors.is_empty()
                         && sub.at(TokenKind::Eof)
-                        && expr.kind() != NodeKind::ErrorExpr
+                        && expr.kind != NodeKind::ErrorExpr
                     {
                         valid = true;
                     }

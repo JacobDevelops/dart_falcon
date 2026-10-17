@@ -3,15 +3,6 @@ use std::fmt;
 use super::*;
 use crate::token::TokenKind;
 
-fn child<'a, T: AstNode<'a>>(node: SyntaxNode<'a>) -> Option<T> {
-    node.children().find_map(T::cast)
-}
-fn required<'a, T: AstNode<'a>>(node: SyntaxNode<'a>) -> T {
-    child(node).expect("parser emits the required statement child")
-}
-fn name(node: SyntaxNode<'_>, index: usize) -> Option<Identifier<'_>> {
-    node.children().filter_map(Identifier::from_node).nth(index)
-}
 fn keyword(node: SyntaxNode<'_>) -> VarKeyword {
     match keyword_token(node).map(|token| token.kind()) {
         Some(TokenKind::Const) => VarKeyword::Const,
@@ -151,7 +142,7 @@ impl<'a> ErrorNode<'a> {
         self.0
             .children()
             .find(|node| node.kind() == NodeKind::Error)
-            .and_then(|node| name(node, 0))
+            .and_then(|node| node.child::<Identifier>())
             .expect("parser emits original recovery span")
             .span()
     }
@@ -255,10 +246,10 @@ impl fmt::Debug for IfCondition<'_> {
 }
 impl<'a> CaseCondition<'a> {
     pub fn expr(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn pattern(self) -> Pattern<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn guard(self) -> Option<Expr<'a>> {
         self.0.children().filter_map(Expr::cast).nth(1)
@@ -267,10 +258,10 @@ impl<'a> CaseCondition<'a> {
 debug_tuple!(CaseCondition => "Case" { expr, pattern, guard });
 impl<'a> IfStmt<'a> {
     pub fn condition(self) -> IfCondition<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn then_branch(self) -> Stmt<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn else_branch(self) -> Option<Stmt<'a>> {
         self.0.children().filter_map(Stmt::cast).nth(1)
@@ -283,10 +274,10 @@ impl<'a> ForStmt<'a> {
             .any(|node| node.kind() == NodeKind::AwaitFor)
     }
     pub fn header(self) -> ForHeader<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn body(self) -> Stmt<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 #[derive(Clone, Copy)]
@@ -350,16 +341,16 @@ impl<'a> ForInInit<'a> {
         keyword(self.0)
     }
     pub fn var_type(self) -> Option<DartType<'a>> {
-        child(self.0)
+        self.0.child()
     }
     pub fn name(self) -> Identifier<'a> {
-        name(self.0, 0).expect("parser emits for-in name")
+        self.0.required()
     }
     pub fn iterable(self) -> Expr<'a> {
         self.0
             .children()
             .filter_map(Expr::cast)
-            .last()
+            .next_back()
             .expect("parser emits for-in iterable")
     }
 }
@@ -371,10 +362,10 @@ impl<'a> PatternForInInit<'a> {
         keyword(self.0)
     }
     pub fn pattern(self) -> Pattern<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn iterable(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 impl<'a> ForExprsInit<'a> {
@@ -384,13 +375,13 @@ impl<'a> ForExprsInit<'a> {
 }
 impl<'a> ForHeader<'a> {
     pub fn init(self) -> Option<ForInit<'a>> {
-        child(self.0)
+        self.0.child()
     }
     pub fn condition(self) -> Option<Expr<'a>> {
         self.0
             .children()
             .find(|n| n.kind() == NodeKind::ForCondition)
-            .and_then(child)
+            .and_then(SyntaxNode::child)
     }
     pub fn updates(self) -> AstChildren<'a, Expr<'a>> {
         AstChildren::new(
@@ -403,14 +394,14 @@ impl<'a> ForHeader<'a> {
 }
 macro_rules! loop_accessors {
     ($($ty:ident),*) => { $(impl<'a> $ty<'a> {
-        pub fn condition(self) -> Expr<'a> { required(self.0) }
-        pub fn body(self) -> Stmt<'a> { required(self.0) }
+        pub fn condition(self) -> Expr<'a> { self.0.required() }
+        pub fn body(self) -> Stmt<'a> { self.0.required() }
     })* };
 }
 loop_accessors!(WhileStmt, DoWhileStmt);
 impl<'a> SwitchStmt<'a> {
     pub fn subject(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn cases(self) -> AstChildren<'a, SwitchCase<'a>> {
         AstChildren::new(self.0)
@@ -418,7 +409,7 @@ impl<'a> SwitchStmt<'a> {
 }
 impl<'a> SwitchCase<'a> {
     pub fn labels(self) -> impl Iterator<Item = Identifier<'a>> + Clone {
-        self.0.children().filter_map(Identifier::from_node)
+        AstChildren::<Identifier>::new(self.0)
     }
     pub fn cases(self) -> AstChildren<'a, SwitchCaseKind<'a>> {
         AstChildren::new(self.0)
@@ -472,15 +463,15 @@ impl fmt::Debug for SwitchCaseKind<'_> {
 }
 impl<'a> CasePatternLabel<'a> {
     pub fn pattern(self) -> Pattern<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn guard(self) -> Option<Expr<'a>> {
-        child(self.0)
+        self.0.child()
     }
 }
 impl<'a> CaseExprLabel<'a> {
     pub fn expr(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 debug_tuple!(CasePatternLabel => "Pattern" { pattern, guard });
@@ -492,7 +483,7 @@ impl fmt::Debug for DefaultLabel<'_> {
 }
 impl<'a> TryCatchStmt<'a> {
     pub fn body(self) -> Block<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn catches(self) -> AstChildren<'a, CatchClause<'a>> {
         AstChildren::new(self.0)
@@ -503,36 +494,36 @@ impl<'a> TryCatchStmt<'a> {
 }
 impl<'a> CatchClause<'a> {
     pub fn exception_type(self) -> Option<DartType<'a>> {
-        child(self.0)
+        self.0.child()
     }
     pub fn exception_var(self) -> Option<Identifier<'a>> {
-        name(self.0, 0)
+        self.0.child::<Identifier>()
     }
     pub fn stack_trace_var(self) -> Option<Identifier<'a>> {
-        name(self.0, 1)
+        AstChildren::<Identifier>::new(self.0).nth(1)
     }
     pub fn body(self) -> Block<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 impl<'a> ReturnStmt<'a> {
     pub fn value(self) -> Option<Expr<'a>> {
-        child(self.0)
+        self.0.child()
     }
 }
 impl<'a> ThrowStmt<'a> {
     pub fn value(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 impl<'a> BreakStmt<'a> {
     pub fn label(self) -> Option<Identifier<'a>> {
-        name(self.0, 0)
+        self.0.child::<Identifier>()
     }
 }
 impl<'a> ContinueStmt<'a> {
     pub fn label(self) -> Option<Identifier<'a>> {
-        name(self.0, 0)
+        self.0.child::<Identifier>()
     }
 }
 impl<'a> LocalVarDecl<'a> {
@@ -549,13 +540,7 @@ impl<'a> LocalVarDecl<'a> {
             .parent()
             .is_some_and(|p| p.kind() == NodeKind::ForHeader)
         {
-            let start = self
-                .declarators()
-                .first()
-                .expect("parser emits for initializer declarator")
-                .name()
-                .span()
-                .start;
+            let start = self.0.required::<VarDeclarator<'a>>().name().span().start;
             Span::new(start, span.end.max(start))
         } else {
             span
@@ -574,7 +559,7 @@ impl<'a> LocalVarDecl<'a> {
         self.0.child_token(TokenKind::Late).is_some()
     }
     pub fn var_type(self) -> Option<DartType<'a>> {
-        child(self.0)
+        self.0.child()
     }
     pub fn declarators(self) -> AstChildren<'a, VarDeclarator<'a>> {
         AstChildren::new(self.0)
@@ -601,12 +586,6 @@ impl<'a> LocalVarDecl<'a> {
             span.end,
         )
     }
-    pub fn range(self) -> Span {
-        self.span()
-    }
-    pub fn full_range(self) -> Span {
-        self.full_span()
-    }
 }
 impl<'a> PatternDeclaration<'a> {
     pub fn annotations(self) -> AstChildren<'a, Annotation<'a>> {
@@ -621,26 +600,26 @@ impl<'a> PatternDeclaration<'a> {
             .span()
     }
     pub fn pattern(self) -> Pattern<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn init(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 impl<'a> PatternAssignStmt<'a> {
     pub fn pattern(self) -> Pattern<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn value(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 impl<'a> LabeledStmt<'a> {
     pub fn label(self) -> Identifier<'a> {
-        name(self.0, 0).expect("parser emits statement label")
+        self.0.required()
     }
     pub fn stmt(self) -> Stmt<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 impl<'a> LocalFuncDecl<'a> {
@@ -658,24 +637,24 @@ impl<'a> LocalFuncDecl<'a> {
         }
     }
     pub fn return_type(self) -> Option<DartType<'a>> {
-        child(self.0)
+        self.0.child()
     }
     pub fn name(self) -> Identifier<'a> {
-        name(self.0, 0).expect("parser emits local function name")
+        self.0.required()
     }
     pub fn type_params(self) -> AstChildren<'a, TypeParam<'a>> {
         AstChildren::new(self.0)
     }
     pub fn params(self) -> FormalParamList<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn body(self) -> FunctionBody<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 impl<'a> AssertStmt<'a> {
     pub fn condition(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
     pub fn message(self) -> Option<Expr<'a>> {
         self.0.children().filter_map(Expr::cast).nth(1)
@@ -686,11 +665,11 @@ impl<'a> YieldStmt<'a> {
         self.0.child_token(TokenKind::Star).is_some()
     }
     pub fn value(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
 }
 impl<'a> ExprStmt<'a> {
     pub fn expr(self) -> Expr<'a> {
-        required(self.0)
+        self.0.required()
     }
 }

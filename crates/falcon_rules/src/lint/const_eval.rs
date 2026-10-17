@@ -459,12 +459,9 @@ fn has_non_const_collection(expr: Expr<'_>) -> bool {
     impl<'a> Visitor<'a> for Finder {
         fn visit_expr(&mut self, node: Expr<'a>) {
             match node {
-                Expr::List(list) if !list.is_const() => self.0 = true,
-                Expr::Map(map) if !map.is_const() => self.0 = true,
-                Expr::Set(set) if !set.is_const() => self.0 = true,
-                Expr::List(list) if list.is_const() => {}
-                Expr::Map(map) if map.is_const() => {}
-                Expr::Set(set) if set.is_const() => {}
+                Expr::List(list) => self.0 |= !list.is_const(),
+                Expr::Map(map) => self.0 |= !map.is_const(),
+                Expr::Set(set) => self.0 |= !set.is_const(),
                 Expr::Record(record) if record.is_const() => {}
                 Expr::New(construction) if construction.is_const() => {}
                 _ => walk_expr(self, node),

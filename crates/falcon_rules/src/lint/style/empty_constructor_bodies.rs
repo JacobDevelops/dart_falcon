@@ -53,10 +53,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 }
 
 fn check_constructor(ctor: ConstructorDecl<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let FunctionBody::Block(block) = (match ctor.body() {
-        Some(b) => b,
-        None => return,
-    }) else {
+    let Some(FunctionBody::Block(block)) = ctor.body() else {
         return;
     };
     if !block.stmts().is_empty() {

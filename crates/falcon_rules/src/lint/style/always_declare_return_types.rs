@@ -21,7 +21,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::declarations::in_test_directory;
+use crate::lint::declarations::{in_test_directory, operator_span};
 
 const RULE: &str = "always-declare-return-types";
 
@@ -113,7 +113,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
             ClassMember::Operator(operator)
                 if operator.return_type().is_none() && operator.op() != "[]=" =>
             {
-                let span = operator_span(operator, self.ctx.tree(), self.ctx.source);
+                let span = operator_span(operator);
                 self.method(operator.op(), span);
             }
             _ => {}
@@ -130,25 +130,4 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
         StructuralTraversal::Continue
     }
 }
-}
-
-/// The operator name alone, including both tokens of `[]`.
-pub(crate) fn operator_span(operator: OperatorDecl<'_>, tree: &SyntaxTree, source: &str) -> Span {
-    let header_start = operator
-        .annotations()
-        .last()
-        .map_or(operator.span().start, |annotation| annotation.span().end);
-    let mut tokens = tree
-        .tokens_in(
-            source,
-            Span::new(header_start, operator.params().span().start),
-        )
-        .filter(|token| !token.is_trivia())
-        .skip_while(|token| token.kind() != falcon_syntax::TokenKind::Operator)
-        .skip(1);
-    let Some(first) = tokens.next() else {
-        return Span::new(header_start, operator.params().span().start);
-    };
-    let last = tokens.last().unwrap_or(first);
-    Span::new(first.offset(), last.offset() + last.len())
 }

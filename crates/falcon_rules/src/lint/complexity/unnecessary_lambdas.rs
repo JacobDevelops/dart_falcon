@@ -53,6 +53,9 @@ use falcon_analyze::{
     resolve_call_constructor, resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
+use falcon_syntax::cst::visit::{
+    Visitor, walk_expr, walk_formal_param, walk_local_var, walk_program, walk_stmt,
+};
 use falcon_syntax::cst::*;
 
 use crate::lint::declarations::{declaration_initializers, members_of};

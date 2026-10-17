@@ -51,10 +51,7 @@ pub(crate) struct ApiDeclaration<'a> {
 
 pub(crate) fn documented(tokens: &[SyntaxToken<'_>], start: usize) -> bool {
     let end = tokens.partition_point(|token| token.offset() < start);
-    tokens[..end]
-        .iter()
-        .rev()
-        .take_while(|t| t.is_trivia())
+    crate::lint::tokens::preceding_trivia(tokens[..end].iter().copied(), start)
         // The lexer leaves `/**/` as ordinary trivia; analyzer still attaches
         // that empty block as a declaration's documentation comment.
         .any(|t| {

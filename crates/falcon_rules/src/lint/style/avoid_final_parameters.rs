@@ -25,6 +25,8 @@ use falcon_syntax::Feature;
 use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
+use crate::lint::tokens::significant_tokens_in;
+
 const RULE: &str = "avoid-final-parameters";
 const MESSAGE: &str = "Parameters should not be marked as 'final'.";
 
@@ -78,14 +80,11 @@ impl Collector<'_> {
     /// A class setter's parameter is not modelled as a formal parameter, so
     /// its `final` is found in the tokens of `set name(...)`.
     fn check_setter(&mut self, setter: SetterDecl<'_>) {
-        let mut tokens = self
-            .ctx
-            .tree()
-            .tokens_in(
-                self.ctx.source,
-                Span::new(setter.name().span().end, setter.span().end),
-            )
-            .filter(|token| !token.is_trivia());
+        let mut tokens = significant_tokens_in(
+            self.ctx.tree(),
+            self.ctx.source,
+            Span::new(setter.name().span().end, setter.span().end),
+        );
         if tokens.next().map(|token| token.kind()) != Some(TokenKind::LParen) {
             return;
         }

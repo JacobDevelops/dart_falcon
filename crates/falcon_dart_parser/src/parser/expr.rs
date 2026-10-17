@@ -943,7 +943,7 @@ impl<'src> Parser<'src> {
             }
         });
         let is_plain_block_lambda =
-            async_marker == AsyncMarker::Sync && body.kind() == NodeKind::Block;
+            async_marker == AsyncMarker::Sync && body.kind == NodeKind::Block;
         (
             marker.complete(self, NodeKind::FuncExpr),
             is_plain_block_lambda,

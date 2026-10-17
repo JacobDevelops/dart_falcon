@@ -325,7 +325,7 @@ impl<'src> Parser<'src> {
             && !self.version.supports(Feature::PrivateNamedParameters)
         {
             self.error_at(
-                name.span().start,
+                name.span.start,
                 "This requires the 'private-named-parameters' language feature",
             );
         }
@@ -376,7 +376,7 @@ impl<'src> Parser<'src> {
                     | TokenKind::Eq
                     | TokenKind::Colon
             );
-            if ty.kind() != NodeKind::FunctionType {
+            if ty.kind != NodeKind::FunctionType {
                 return None;
             }
             if !ends_param {

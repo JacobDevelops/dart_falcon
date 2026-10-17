@@ -93,7 +93,6 @@ pub enum NodeKind {
     YieldStmt,
     ExprStmt,
     ErrorNode,
-    ElseBranch,
     ForCondition,
     ForUpdates,
     AwaitFor,

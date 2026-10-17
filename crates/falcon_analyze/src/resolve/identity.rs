@@ -857,11 +857,12 @@ impl IdentityIndex {
             let mut imports = Vec::with_capacity(program.imports().len());
             let mut implicit_core = true;
             for import in program.imports() {
-                if import.uri().value() == "dart:core" {
+                let uri = import.uri().value();
+                if uri == "dart:core" {
                     implicit_core = false;
                 }
                 imports.push(Import {
-                    target: resolver.resolve(path, external_instance, &import.uri().value()),
+                    target: resolver.resolve(path, external_instance, &uri),
                     prefix: import.as_name().map(|id| id.name().to_owned()),
                     combinators: Combinators::collect(import.combinators(), &mut interner),
                 });
@@ -2376,10 +2377,6 @@ fn may_be_deprecation(annotation: Annotation<'_>) -> bool {
         }
 }
 
-fn might_deprecate<'a>(mut annotations: AstChildren<'a, Annotation<'a>>) -> bool {
-    annotations.any(may_be_deprecation)
-}
-
 /// Deprecation does not apply to required parameters (the official
 /// `deprecated_member_use` verifier skips them), so they are never indexed.
 fn parameter_deprecation(param: FormalParam<'_>, parsed: &Arc<ParsedFile>) -> Option<Vec<NodeRef>> {
@@ -2402,12 +2399,11 @@ fn deprecation_annotations(
     annotations: AstChildren<'_, Annotation<'_>>,
     parsed: &Arc<ParsedFile>,
 ) -> Option<Vec<NodeRef>> {
-    might_deprecate(annotations.clone()).then(|| {
-        annotations
-            .filter(|annotation| may_be_deprecation(*annotation))
-            .map(|annotation| NodeRef::new(Arc::clone(parsed), annotation.syntax().id()))
-            .collect()
-    })
+    let annotations: Vec<_> = annotations
+        .filter(|annotation| may_be_deprecation(*annotation))
+        .map(|annotation| NodeRef::new(Arc::clone(parsed), annotation.syntax().id()))
+        .collect();
+    (!annotations.is_empty()).then_some(annotations)
 }
 
 fn declaration_identities(

@@ -33,6 +33,13 @@ impl Hasher for StableHasher {
     }
 }
 
+impl std::fmt::Write for StableHasher {
+    fn write_str(&mut self, value: &str) -> std::fmt::Result {
+        Hasher::write(self, value.as_bytes());
+        Ok(())
+    }
+}
+
 fn hash<T: Hash>(value: &T) -> String {
     let mut hasher = StableHasher::new();
     value.hash(&mut hasher);
@@ -42,7 +49,7 @@ fn hash<T: Hash>(value: &T) -> String {
 fn shape_hash(tree: &SyntaxTree, source: &str) -> String {
     let mut hasher = StableHasher::new();
     for node in tree.root(source).descendants() {
-        node.kind().hash(&mut hasher);
+        write!(&mut hasher, "{:?}", node.kind()).unwrap();
         node.span().hash(&mut hasher);
         let children = node.children_with_tokens();
         children.clone().count().hash(&mut hasher);
@@ -50,11 +57,11 @@ fn shape_hash(tree: &SyntaxTree, source: &str) -> String {
             match child {
                 SyntaxElement::Node(child) => {
                     0u8.hash(&mut hasher);
-                    child.kind().hash(&mut hasher);
+                    write!(&mut hasher, "{:?}", child.kind()).unwrap();
                 }
                 SyntaxElement::Token(token) => {
                     1u8.hash(&mut hasher);
-                    token.kind().hash(&mut hasher);
+                    write!(&mut hasher, "{:?}", token.kind()).unwrap();
                     token.span().hash(&mut hasher);
                 }
             }

@@ -30,6 +30,7 @@ use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
 use crate::lint::const_eval::{ConstContexts, constant_in_context, deferred_prefixes};
+use crate::lint::tokens::significant_tokens_in;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -128,7 +129,7 @@ impl<'a> Visitor<'a> for Declarations {
             self.collect(
                 variable.keyword(),
                 variable.declarators(),
-                variable.full_range(),
+                variable.full_span(),
                 true,
             );
         }
@@ -160,11 +161,11 @@ impl<'a> SemanticRuleVisitor<'a> for Checker<'a> {
                 } else {
                     let mut start = group.span.start;
                     let mut preceding_late = None;
-                    for token in ctx
-                        .tree()
-                        .tokens_in(ctx.source, Span::new(group.span.start, group.first_name))
-                        .filter(|token| !token.is_trivia())
-                    {
+                    for token in significant_tokens_in(
+                        ctx.tree(),
+                        ctx.source,
+                        Span::new(group.span.start, group.first_name),
+                    ) {
                         if token.kind() == TokenKind::Final {
                             start = preceding_late.unwrap_or(token.offset());
                         }

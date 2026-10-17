@@ -3,8 +3,7 @@ use falcon_syntax::cst::*;
 
 #[test]
 fn test_identifier_basic() {
-    let src = "class Foo {}";
-    let source = src;
+    let source = "class Foo {}";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert!(errors.is_empty());
@@ -18,8 +17,7 @@ fn test_identifier_basic() {
 
 #[test]
 fn test_identifier_with_underscore() {
-    let src = "void _privateFunc() {}";
-    let source = src;
+    let source = "void _privateFunc() {}";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);
     assert!(errors.is_empty());
@@ -1089,14 +1087,14 @@ fn local_variable_spans_preserve_attached_documentation_and_metadata() {
         };
         assert_eq!(declaration.annotations().len(), 1);
         assert_eq!(
-            declaration.full_range(),
+            declaration.full_span(),
             Span::new(
                 source.find(first_documentation).unwrap(),
                 source.find(";\n}").unwrap() + 1,
             )
         );
         assert_eq!(
-            declaration.range(),
+            declaration.span(),
             Span::new(
                 source.find("@deprecated").unwrap(),
                 source.find(";\n}").unwrap() + 1,
@@ -1138,10 +1136,10 @@ fn local_variable_keyword_spans_are_consumed_tokens_not_documentation_words() {
         });
         assert_eq!(declaration.keyword_span(), expected);
         assert_eq!(
-            declaration.range().start,
+            declaration.span().start,
             source.find("@deprecated").unwrap()
         );
-        assert_eq!(declaration.full_range().start, source.find("///").unwrap());
+        assert_eq!(declaration.full_span().start, source.find("///").unwrap());
     }
 }
 

@@ -96,14 +96,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 let constructor_name = construction.constructor_name();
                 let mut segments: Vec<&str> =
                     named.segments().map(|segment| segment.name()).collect();
-                let constructor = match constructor_name {
-                    Some(name) => name.name(),
-                    None => {
-                        let Some(name) = segments.pop() else {
-                            return;
-                        };
-                        name
-                    }
+                let Some(constructor) = constructor_name
+                    .map(|name| name.name())
+                    .or_else(|| segments.pop())
+                else {
+                    return;
                 };
                 let Some(ty) = state.model.resolve_type_name(&segments) else {
                     return;

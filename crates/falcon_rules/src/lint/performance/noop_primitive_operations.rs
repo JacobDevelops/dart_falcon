@@ -67,13 +67,12 @@ impl Collector<'_> {
     }
 
     fn check_adjacent(&mut self, literal: StringLitNode<'_>) {
-        if !literal.is_adjacent() || literal.segment_spans().count() < 3 {
+        if !literal.is_adjacent() {
             return;
         }
-        let segments: Vec<_> = literal.segments().collect();
-        let last = segments.len().saturating_sub(1);
-        for (index, (delimiter, span)) in segments.into_iter().enumerate() {
-            if index > 0 && index < last && delimiter.content.is_empty() {
+        let mut segments = literal.segments().skip(1).peekable();
+        while let Some((delimiter, span)) = segments.next() {
+            if segments.peek().is_some() && delimiter.content.is_empty() {
                 self.report(span);
             }
         }

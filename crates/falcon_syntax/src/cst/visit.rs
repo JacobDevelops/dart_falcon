@@ -599,18 +599,27 @@ pub fn walk_top_level_decl<'a, V: Visitor<'a>>(v: &mut V, node: TopLevelDecl<'a>
     }
 }
 
-pub fn walk_class_decl<'a, V: Visitor<'a>>(v: &mut V, node: ClassDecl<'a>) {
-    for ann in node.annotations() {
-        v.visit_annotation(ann);
+fn walk_class_header<'a, V: Visitor<'a>>(
+    v: &mut V,
+    node: SyntaxNode<'a>,
+    name: Identifier<'a>,
+    members: EffectiveMembers<'a>,
+) {
+    for annotation in AstChildren::new(node) {
+        v.visit_annotation(annotation);
     }
-    v.visit_identifier(node.name());
-    walk_type_params(v, node.type_params());
-    for constructor in node.element_members().constructors() {
+    v.visit_identifier(name);
+    walk_type_params(v, AstChildren::new(node));
+    for constructor in members.constructors() {
         v.visit_constructor(constructor);
     }
-    if let Some(ctor) = node.primary_constructor() {
-        v.visit_primary_constructor(ctor);
+    if let Some(constructor) = members.primary {
+        v.visit_primary_constructor(constructor);
     }
+}
+
+pub fn walk_class_decl<'a, V: Visitor<'a>>(v: &mut V, node: ClassDecl<'a>) {
+    walk_class_header(v, node.syntax(), node.name(), node.element_members());
     if let Some(sup) = node.extends() {
         v.visit_dart_type(sup);
     }
@@ -658,17 +667,7 @@ pub fn walk_mixin_decl<'a, V: Visitor<'a>>(v: &mut V, node: MixinDecl<'a>) {
 }
 
 pub fn walk_mixin_class<'a, V: Visitor<'a>>(v: &mut V, node: MixinClassDecl<'a>) {
-    for ann in node.annotations() {
-        v.visit_annotation(ann);
-    }
-    v.visit_identifier(node.name());
-    walk_type_params(v, node.type_params());
-    for constructor in node.element_members().constructors() {
-        v.visit_constructor(constructor);
-    }
-    if let Some(ctor) = node.primary_constructor() {
-        v.visit_primary_constructor(ctor);
-    }
+    walk_class_header(v, node.syntax(), node.name(), node.element_members());
     if let Some(sup) = node.extends() {
         v.visit_dart_type(sup);
     }
@@ -684,17 +683,7 @@ pub fn walk_mixin_class<'a, V: Visitor<'a>>(v: &mut V, node: MixinClassDecl<'a>)
 }
 
 pub fn walk_enum_decl<'a, V: Visitor<'a>>(v: &mut V, node: EnumDecl<'a>) {
-    for ann in node.annotations() {
-        v.visit_annotation(ann);
-    }
-    v.visit_identifier(node.name());
-    walk_type_params(v, node.type_params());
-    for constructor in node.element_members().constructors() {
-        v.visit_constructor(constructor);
-    }
-    if let Some(ctor) = node.primary_constructor() {
-        v.visit_primary_constructor(ctor);
-    }
+    walk_class_header(v, node.syntax(), node.name(), node.element_members());
     for t in node.with_clause() {
         v.visit_dart_type(t);
     }
@@ -724,15 +713,7 @@ pub fn walk_extension_decl<'a, V: Visitor<'a>>(v: &mut V, node: ExtensionDecl<'a
 }
 
 pub fn walk_extension_type<'a, V: Visitor<'a>>(v: &mut V, node: ExtensionTypeDecl<'a>) {
-    for ann in node.annotations() {
-        v.visit_annotation(ann);
-    }
-    v.visit_identifier(node.name());
-    walk_type_params(v, node.type_params());
-    for constructor in node.element_members().constructors() {
-        v.visit_constructor(constructor);
-    }
-    v.visit_primary_constructor(node.primary_constructor());
+    walk_class_header(v, node.syntax(), node.name(), node.element_members());
     for t in node.implements() {
         v.visit_dart_type(t);
     }
@@ -991,10 +972,7 @@ pub fn walk_stmt<'a, V: Visitor<'a>>(v: &mut V, node: Stmt<'a>) {
 
 pub fn walk_expr<'a, V: Visitor<'a>>(v: &mut V, node: Expr<'a>) {
     match node {
-        Expr::Paren(n) => {
-            let expr = n.expr();
-            v.visit_expr(expr);
-        }
+        Expr::Paren(n) => v.visit_expr(n.expr()),
         Expr::IntLit(_)
         | Expr::DoubleLit(_)
         | Expr::BoolLit(_)
@@ -1003,165 +981,108 @@ pub fn walk_expr<'a, V: Visitor<'a>>(v: &mut V, node: Expr<'a>) {
         | Expr::Super(_)
         | Expr::SymbolLit(_)
         | Expr::Error(_) => {}
-        Expr::DotShorthand(n) => {
-            let name = n.name();
-            v.visit_name(name);
-        }
+        Expr::DotShorthand(n) => v.visit_name(n.name()),
 
-        Expr::StringLit(x) => {
-            walk_source_string(v, x);
-        }
+        Expr::StringLit(x) => walk_source_string(v, x),
         Expr::Ident(x) => v.visit_identifier(x),
 
-        Expr::Unary(n) => {
-            let operand = n.operand();
-            v.visit_expr(operand);
-        }
-        Expr::PostfixIncDec(n) => {
-            let operand = n.operand();
-            v.visit_expr(operand);
-        }
+        Expr::Unary(n) => v.visit_expr(n.operand()),
+        Expr::PostfixIncDec(n) => v.visit_expr(n.operand()),
         Expr::Binary(n) => {
-            let left = n.left();
-            let right = n.right();
-            v.visit_expr(left);
-            v.visit_expr(right);
+            v.visit_expr(n.left());
+            v.visit_expr(n.right());
         }
         Expr::Assign(n) => {
-            let target = n.target();
-            let value = n.value();
-            v.visit_expr(target);
-            v.visit_expr(value);
+            v.visit_expr(n.target());
+            v.visit_expr(n.value());
         }
         Expr::Conditional(n) => {
-            let condition = n.condition();
-            let then_expr = n.then_expr();
-            let else_expr = n.else_expr();
-            v.visit_expr(condition);
-            v.visit_expr(then_expr);
-            v.visit_expr(else_expr);
+            v.visit_expr(n.condition());
+            v.visit_expr(n.then_expr());
+            v.visit_expr(n.else_expr());
         }
         Expr::Is(n) => {
-            let expr = n.expr();
-            let dart_type = n.dart_type();
-            v.visit_expr(expr);
-            v.visit_dart_type(dart_type);
+            v.visit_expr(n.expr());
+            v.visit_dart_type(n.dart_type());
         }
         Expr::As(n) => {
-            let expr = n.expr();
-            let dart_type = n.dart_type();
-            v.visit_expr(expr);
-            v.visit_dart_type(dart_type);
+            v.visit_expr(n.expr());
+            v.visit_dart_type(n.dart_type());
         }
         Expr::Field(n) => {
-            let object = n.object();
-            let field = n.field();
-            v.visit_expr(object);
-            v.visit_name(field);
+            v.visit_expr(n.object());
+            v.visit_name(n.field());
         }
         Expr::Index(n) => {
-            let object = n.object();
-            let index = n.index();
-            v.visit_expr(object);
-            v.visit_expr(index);
+            v.visit_expr(n.object());
+            v.visit_expr(n.index());
         }
         Expr::Call(n) => {
-            let callee = n.callee();
-            let type_args = n.type_args();
-            let args = n.args();
-            v.visit_expr(callee);
-            for t in type_args {
+            v.visit_expr(n.callee());
+            for t in n.type_args() {
                 v.visit_dart_type(t);
             }
-            v.visit_arg_list(args);
+            v.visit_arg_list(n.args());
         }
         Expr::Cascade(n) => {
-            let object = n.object();
-            let sections = n.sections();
-            v.visit_expr(object);
-            for section in sections {
+            v.visit_expr(n.object());
+            for section in n.sections() {
                 v.visit_cascade_section(section);
             }
         }
         Expr::List(n) => {
-            let type_arg = n.type_arg();
-            let elements = n.elements();
-            if let Some(t) = type_arg {
+            if let Some(t) = n.type_arg() {
                 v.visit_dart_type(t);
             }
-            for elem in elements {
+            for elem in n.elements() {
                 v.visit_collection_element(elem);
             }
         }
         Expr::Set(n) => {
-            let type_arg = n.type_arg();
-            let elements = n.elements();
-            if let Some(t) = type_arg {
+            if let Some(t) = n.type_arg() {
                 v.visit_dart_type(t);
             }
-            for elem in elements {
+            for elem in n.elements() {
                 v.visit_collection_element(elem);
             }
         }
         Expr::Map(n) => {
-            let type_args = n.type_args();
-            let elements = n.elements();
-            for t in type_args {
+            for t in n.type_args() {
                 v.visit_dart_type(t);
             }
-            for element in elements {
+            for element in n.elements() {
                 v.visit_map_element(element);
             }
         }
         Expr::Record(n) => {
-            let fields = n.fields();
-            for field in fields {
+            for field in n.fields() {
                 v.visit_record_field(field);
             }
         }
         Expr::FuncExpr(n) => {
-            let type_params = n.type_params();
-            let params = n.params();
-            let body = n.body();
-            walk_type_params(v, type_params);
-            v.visit_formal_param_list(params);
-            v.visit_function_body(body);
+            walk_type_params(v, n.type_params());
+            v.visit_formal_param_list(n.params());
+            v.visit_function_body(n.body());
         }
         Expr::New(n) => {
-            let dart_type = n.dart_type();
-            let constructor_name = n.constructor_name();
-            let args = n.args();
-            v.visit_dart_type(dart_type);
-            if let Some(name) = constructor_name {
+            v.visit_dart_type(n.dart_type());
+            if let Some(name) = n.constructor_name() {
                 v.visit_name(name);
             }
-            v.visit_arg_list(args);
+            v.visit_arg_list(n.args());
         }
         Expr::GenericInstantiation(n) => {
-            let target = n.target();
-            let type_args = n.type_args();
-            v.visit_expr(target);
-            for t in type_args {
+            v.visit_expr(n.target());
+            for t in n.type_args() {
                 v.visit_dart_type(t);
             }
         }
-        Expr::Await(n) => {
-            let expr = n.expr();
-            v.visit_expr(expr);
-        }
-        Expr::Throw(n) => {
-            let expr = n.expr();
-            v.visit_expr(expr);
-        }
-        Expr::NullAssert(n) => {
-            let expr = n.operand();
-            v.visit_expr(expr);
-        }
+        Expr::Await(n) => v.visit_expr(n.expr()),
+        Expr::Throw(n) => v.visit_expr(n.expr()),
+        Expr::NullAssert(n) => v.visit_expr(n.operand()),
         Expr::Switch(n) => {
-            let subject = n.subject();
-            let arms = n.arms();
-            v.visit_expr(subject);
-            for arm in arms {
+            v.visit_expr(n.subject());
+            for arm in n.arms() {
                 v.visit_switch_expr_arm(arm);
             }
         }
@@ -1823,11 +1744,11 @@ pub fn walk_string_lit<'a, V: Visitor<'a>>(v: &mut V, node: StringLitNode<'a>) {
         v.visit_string_interpolation(interpolation);
     }
 }
-pub fn walk_source_string<'a, V: Visitor<'a>>(v: &mut V, node: StringLitNode<'a>) {
+fn walk_source_string<'a, V: Visitor<'a>>(v: &mut V, node: StringLitNode<'a>) {
     v.visit_string_lit(node);
     walk_string_lit(v, node);
 }
-pub fn walk_native_string<'a, V: Visitor<'a>>(v: &mut V, node: StringLitNode<'a>) {
+fn walk_native_string<'a, V: Visitor<'a>>(v: &mut V, node: StringLitNode<'a>) {
     v.visit_native_string(node);
     walk_string_lit(v, node);
 }

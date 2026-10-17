@@ -37,7 +37,7 @@ impl<'src> Parser<'src> {
         let part = self.tokens.get(i);
         let of = self.tokens.get(i + 1);
         let is_part_of = part.is_some_and(|t| t.kind == TokenKind::Part)
-            && of.is_some_and(|t| t.kind == TokenKind::Ident && self.tok_text(t) == "of");
+            && of.is_some_and(|t| t.kind == TokenKind::Ident && t.text(self.src) == "of");
         if !is_part_of {
             return None;
         }
@@ -718,8 +718,7 @@ impl<'src> Parser<'src> {
 
         // Type parameters or an async/sync marker force an untyped method.
         if self.cur().kind.is_identifier_like() {
-            let name_tok = *self.cur();
-            let name_text = self.tok_text(&name_tok);
+            let name_text = self.cur().text(self.src);
             let name_marker = self.start();
             self.advance();
             name_marker.complete(self, NodeKind::Identifier);

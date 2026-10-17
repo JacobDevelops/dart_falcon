@@ -40,7 +40,6 @@ use falcon_syntax::cst::visit::{
 };
 use falcon_syntax::cst::*;
 
-use crate::lint::declarations::declaration_key;
 use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
 use crate::lint::expressions::is_parenthesized;
 use crate::lint::semantic_type_operations::nullability;
@@ -317,7 +316,7 @@ fn check_mentions<'n>(
 struct Candidate<'a> {
     name: &'a str,
     span: Span,
-    /// The declaring type ([`declaration_key`]); `None` for top-level variables.
+    /// The declaring type's syntax identity; `None` for top-level variables.
     owner: Option<OwnerKey>,
 }
 
@@ -391,10 +390,7 @@ fn collect_candidates<'a>(
                 if (all_fields || is_private(declarator.name().name()))
                     && potentially_nullable(field.field_type(), declarator, &scope, state, ctx)
                 {
-                    candidates.push(candidate(
-                        declarator,
-                        Some((0, declaration_key(declaration))),
-                    ));
+                    candidates.push(candidate(declarator, Some((0, declaration.syntax().id()))));
                 }
             }
         }
@@ -609,7 +605,7 @@ impl<'a> SemanticRuleVisitor<'a> for SafeUses<'_, '_> {
 struct DeclarationScopes<'p> {
     /// Type declarations by name.
     types: HashMap<&'p str, OwnerKey>,
-    /// Names declared by each type declaration, by [`declaration_key`].
+    /// Names declared by each type declaration, keyed by syntax identity.
     members: HashMap<OwnerKey, HashSet<&'p str>>,
     top_level: HashSet<&'p str>,
 }
@@ -674,7 +670,7 @@ impl<'p> DeclarationScopes<'p> {
                         .collect(),
                 ),
             };
-            let key = (file, declaration_key(declaration));
+            let key = (file, declaration.syntax().id());
             if let Some(name) = name {
                 scopes.top_level.insert(name.name());
                 scopes.types.insert(name.name(), key);
@@ -755,7 +751,7 @@ enum Access {
 struct Mention<'a> {
     name: &'a str,
     start: usize,
-    /// The enclosing type declaration ([`declaration_key`]).
+    /// The enclosing type declaration's syntax identity.
     enclosing: Option<OwnerKey>,
     access: Access,
 }
@@ -809,7 +805,7 @@ impl<'a> Visitor<'a> for Mentions<'_, '_> {
             | TopLevelDecl::MixinClass(_)
             | TopLevelDecl::Mixin(_)
             | TopLevelDecl::Extension(_)
-            | TopLevelDecl::ExtensionType(_) => Some((self.file, declaration_key(node))),
+            | TopLevelDecl::ExtensionType(_) => Some((self.file, node.syntax().id())),
             TopLevelDecl::Variable(_)
             | TopLevelDecl::Function(_)
             | TopLevelDecl::ClassTypeAlias(_)
@@ -921,8 +917,8 @@ mod tests {
         scopes.extend(DeclarationScopes::of(second_program, 1));
 
         assert_eq!(scopes.members.len(), 2);
-        assert_eq!(scopes.types["A"], (0, declaration_key(first_declaration)));
-        assert_eq!(scopes.types["B"], (1, declaration_key(second_declaration)));
+        assert_eq!(scopes.types["A"], (0, first_declaration.syntax().id()));
+        assert_eq!(scopes.types["B"], (1, second_declaration.syntax().id()));
         for owner in scopes.types.values() {
             assert!(scopes.members[owner].contains("_x"));
         }

@@ -109,27 +109,33 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
 }
 
 fn flag_if_empty(block: Block<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    if !block.stmts().is_empty() {
-        return;
-    }
-    let mut tokens = block.syntax().tokens();
-    let Some(open) = tokens.next() else { return };
-    let Some(close) = tokens.next_back() else {
+    let Some(span) = empty_block_end(block) else {
         return;
     };
-    if open.kind() != falcon_syntax::TokenKind::LBrace
-        || close.kind() != falcon_syntax::TokenKind::RBrace
-    {
-        return;
-    }
-    if tokens.any(|token| token.kind().is_comment()) {
-        return;
-    }
     diags.push(ctx.diagnostic(
         "no-empty-block",
         "Avoid empty blocks — add a comment explaining the intent or remove the block",
-        Span::new(close.offset(), close.offset() + close.len()),
+        span,
     ));
+}
+
+/// Closing brace of an empty block without an explanatory comment.
+pub(super) fn empty_block_end(block: Block<'_>) -> Option<Span> {
+    if !block.stmts().is_empty() {
+        return None;
+    }
+    let mut tokens = block.syntax().tokens();
+    let open = tokens.next()?;
+    let close = tokens.next_back()?;
+    if open.kind() != falcon_syntax::TokenKind::LBrace
+        || close.kind() != falcon_syntax::TokenKind::RBrace
+    {
+        return None;
+    }
+    if tokens.any(|token| token.kind().is_comment()) {
+        return None;
+    }
+    Some(Span::new(close.offset(), close.offset() + close.len()))
 }
 
 #[cfg(test)]

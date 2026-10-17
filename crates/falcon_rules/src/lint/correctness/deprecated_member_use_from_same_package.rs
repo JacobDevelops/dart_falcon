@@ -515,11 +515,10 @@ impl<'a> Visitor<'a> for Frontier<'a> {
         if let Some(redirect) = &node.redirect
             && redirect.constructor_name().is_none()
             && let DartType::Named(named) = redirect.type_()
-            && let (Some(class_name), Some(constructor), None) = (
-                named.segments().next(),
-                named.segments().nth(1),
-                named.segments().nth(2),
-            )
+            && let (Some(class_name), Some(constructor), None) = {
+                let mut segments = named.segments();
+                (segments.next(), segments.next(), segments.next())
+            }
             && let Some(owner) = self.model.resolve_name(class_name.name())
             && self
                 .signatures
@@ -540,10 +539,10 @@ impl<'a> Visitor<'a> for Frontier<'a> {
             return;
         }
         if let DartType::Named(named) = node
+            && let Some(qualified) = QualifiedName::from_identifiers(named.segments())
+            && !(qualified.prefix.is_none() && self.parameters.contains(qualified.name))
+            && let Some(identity) = self.model.resolve_name(qualified)
             && let Some(name) = named.segments().last()
-            && !(named.segments().count() == 1 && self.parameters.contains(name.name()))
-            && let Some(identity) = QualifiedName::from_identifiers(named.segments())
-                .and_then(|name| self.model.resolve_name(name))
         {
             self.types.push_declaration(identity, name.span());
         }
@@ -674,7 +673,7 @@ impl<'a> Visitor<'a> for Frontier<'a> {
         self.metadata_scope = previous;
     }
     fn visit_local_var(&mut self, node: LocalVarDecl<'a>) {
-        let previous = self.declaration.replace(node.full_range());
+        let previous = self.declaration.replace(node.full_span());
         if let Some(scope) = self.blocks.last()
             && let Some(message) = deprecation(node.annotations(), self.model, self.signatures)
         {

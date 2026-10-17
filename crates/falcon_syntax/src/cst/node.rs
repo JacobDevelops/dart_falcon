@@ -85,6 +85,17 @@ impl<'a> SyntaxNode<'a> {
             inner: self.children_with_tokens(),
         }
     }
+    /// The first child that casts to `T`.
+    pub(crate) fn child<T: AstNode<'a>>(self) -> Option<T> {
+        self.children().find_map(T::cast)
+    }
+    /// A child the parser emits on every recovery path, as a zero-width
+    /// missing node when absent from source.
+    #[track_caller]
+    pub(crate) fn required<T: AstNode<'a>>(self) -> T {
+        self.child()
+            .expect("parser emits required children, recovering with missing nodes")
+    }
     pub fn descendants(self) -> impl DoubleEndedIterator<Item = Self> + ExactSizeIterator + Clone {
         (self.id.0 as usize..self.data().subtree_end as usize).map(move |index| Self {
             id: NodeId(index as u32),
@@ -104,31 +115,10 @@ impl<'a> SyntaxNode<'a> {
     pub fn last_token(self) -> Option<SyntaxToken<'a>> {
         self.tokens().next_back()
     }
-    pub fn prev_sibling(self) -> Option<Self> {
-        self.data().previous_sibling.map(|link| Self {
-            id: link.id(),
-            ..self
-        })
-    }
-    pub fn next_sibling(self) -> Option<Self> {
-        let parent = self.data().parent?;
-        let index = self.data().subtree_end as usize;
-        let next = self.tree.nodes.get(index)?;
-        (next.parent == Some(parent)).then_some(Self {
-            id: NodeId(index as u32),
-            ..self
-        })
-    }
     pub fn child_token(self, kind: TokenKind) -> Option<SyntaxToken<'a>> {
-        self.tree.elements[self.data().child_range()]
-            .iter()
-            .filter_map(|element| element.as_token())
-            .find(|id| self.tree.tokens[id.index()].kind == kind)
-            .map(|id| SyntaxToken {
-                tree: self.tree,
-                source: self.source,
-                id,
-            })
+        self.children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == kind)
     }
 }
 
@@ -228,13 +218,6 @@ pub enum SyntaxElement<'a> {
 }
 
 impl<'a> SyntaxElement<'a> {
-    pub fn into_node(self) -> Option<SyntaxNode<'a>> {
-        if let Self::Node(node) = self {
-            Some(node)
-        } else {
-            None
-        }
-    }
     pub fn into_token(self) -> Option<SyntaxToken<'a>> {
         if let Self::Token(token) = self {
             Some(token)
@@ -261,24 +244,10 @@ pub struct SyntaxElementChildren<'a> {
     parent: SyntaxNode<'a>,
     elements: std::slice::Iter<'a, Element>,
 }
-impl<'a> SyntaxElementChildren<'a> {
-    fn resolve(&self, element: Element) -> SyntaxElement<'a> {
-        if let Some(id) = element.as_node() {
-            SyntaxElement::Node(SyntaxNode { id, ..self.parent })
-        } else {
-            SyntaxElement::Token(SyntaxToken {
-                tree: self.parent.tree,
-                source: self.parent.source,
-                id: element.as_token().unwrap(),
-            })
-        }
-    }
-}
 impl<'a> Iterator for SyntaxElementChildren<'a> {
     type Item = SyntaxElement<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        let element = *self.elements.next()?;
-        Some(self.resolve(element))
+        Some(self.elements.next()?.resolve(self.parent))
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.elements.size_hint()
@@ -286,8 +255,7 @@ impl<'a> Iterator for SyntaxElementChildren<'a> {
 }
 impl DoubleEndedIterator for SyntaxElementChildren<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        let element = *self.elements.next_back()?;
-        Some(self.resolve(element))
+        Some(self.elements.next_back()?.resolve(self.parent))
     }
 }
 impl ExactSizeIterator for SyntaxElementChildren<'_> {}

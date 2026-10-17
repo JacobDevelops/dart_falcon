@@ -322,23 +322,13 @@ impl TypeEnvironment {
                     return Err(return_type);
                 }
                 let mut signature = ResolvedSignature {
-                    call_parameters: shape.as_ref().map_or_else(Vec::new, |shape| {
-                        shape
-                            .type_parameters
-                            .iter()
-                            .filter_map(|ty| match ty {
-                                ResolvedType::TypeParameter { id, .. } => Some(id.clone()),
-                                _ => None,
-                            })
-                            .collect()
-                    }),
                     shape: shape.clone(),
                     optional_positional: *optional_positional,
                     positional: positional.to_vec(),
                     named: named.iter().cloned().collect(),
                     ..ResolvedSignature::returning(return_type)
                 };
-                if local_generic {
+                if local_generic || shape.is_some() {
                     signature.bind_local_type_parameters(context.type_parameters);
                 }
                 (Cow::Owned(signature), HashMap::new())
@@ -427,6 +417,13 @@ mod tests {
     use crate::resolve::IdentitySource;
     use falcon_dart_parser::parse;
 
+    fn arrow_expression(body: Option<FunctionBody<'_>>) -> Expr<'_> {
+        let Some(FunctionBody::Arrow(arrow)) = body else {
+            panic!()
+        };
+        arrow.expr()
+    }
+
     fn with_model(
         source: &str,
         test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex),
@@ -472,10 +469,7 @@ mod tests {
             let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
                 panic!()
             };
-            let Some(FunctionBody::Arrow(arrow)) = function.body() else {
-                panic!()
-            };
-            let body = arrow.expr();
+            let body = arrow_expression(function.body());
             assert_eq!(null_shorted(body), expected, "{expression}");
         }
     }
@@ -490,10 +484,7 @@ mod tests {
                 else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
-                    panic!()
-                };
-                let body = arrow.expr();
+                let body = arrow_expression(function.body());
                 let Expr::Call(call) = body else { panic!() };
                 let callee = call.callee();
                 let type_args = call.type_args();
@@ -537,10 +528,7 @@ mod tests {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(arrow)) = function.body() else {
-                        panic!()
-                    };
-                    let body = arrow.expr();
+                    let body = arrow_expression(function.body());
                     let mut environment = TypeEnvironment::new();
                     environment.bind_params(function.params().unwrap(), model, &scope);
                     let context = InferenceContext {
@@ -687,10 +675,7 @@ mod tests {
                     let TopLevelDecl::Function(function) = declaration else {
                         panic!()
                     };
-                    let Some(FunctionBody::Arrow(arrow)) = function.body() else {
-                        panic!()
-                    };
-                    let body = arrow.expr();
+                    let body = arrow_expression(function.body());
                     let Expr::Call(call) = body else {
                         panic!()
                     };
@@ -755,10 +740,7 @@ mod tests {
                 else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
-                    panic!()
-                };
-                let body = arrow.expr();
+                let body = arrow_expression(function.body());
                 let Expr::Call(call) = body else { panic!() };
                 let callee = call.callee();
                 let type_args = call.type_args();
@@ -804,10 +786,7 @@ mod tests {
                 else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
-                    panic!()
-                };
-                let body = arrow.expr();
+                let body = arrow_expression(function.body());
                 let signature = signatures
                     .function(&model.resolve_value("probe").unwrap())
                     .unwrap();
@@ -838,10 +817,7 @@ mod tests {
                 else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
-                    panic!()
-                };
-                let body = arrow.expr();
+                let body = arrow_expression(function.body());
                 let Expr::Call(call) = body else { panic!() };
                 let callee = call.callee();
                 let type_args = call.type_args();
@@ -881,10 +857,7 @@ mod tests {
                 else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
-                    panic!()
-                };
-                let body = arrow.expr();
+                let body = arrow_expression(function.body());
                 let Expr::Call(call) = body else { panic!() };
                 let callee = call.callee();
                 let type_args = call.type_args();
@@ -929,10 +902,7 @@ mod tests {
                 else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
-                    panic!()
-                };
-                let body = arrow.expr();
+                let body = arrow_expression(function.body());
                 let Expr::Call(call) = body else { panic!() };
                 let callee = call.callee();
                 let type_args = call.type_args();
@@ -972,10 +942,7 @@ mod tests {
                 else {
                     panic!()
                 };
-                let Some(FunctionBody::Arrow(arrow)) = function.body() else {
-                    panic!()
-                };
-                let body = arrow.expr();
+                let body = arrow_expression(function.body());
                 let Expr::Call(call) = body else { panic!() };
                 let callee = call.callee();
                 let type_args = call.type_args();
