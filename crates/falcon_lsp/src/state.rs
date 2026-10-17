@@ -362,7 +362,7 @@ impl LspState {
 
     /// `textDocument/didOpen`: cache and parse the document, then analyze it.
     pub fn open(&mut self, uri: &str, mut text: String, version: Option<i32>) -> Vec<Diagnostic> {
-        let (path, unresolved_path) = document_path(uri);
+        let (path, unresolved_path) = document_path(uri, &self.workspace_root);
         let source_error = reject_oversized_buffer(&path, &mut text);
         self.pending_semantic_affected.remove(uri);
         if self.resolve_semantics && !self.documents.is_empty() {
@@ -465,9 +465,10 @@ impl LspState {
     /// `textDocument/didSave`: refresh filesystem identity when resolvable and
     /// any supplied text (re-parsing only when it actually differs), then analyze.
     pub fn save(&mut self, uri: &str, text: Option<String>) -> Vec<Diagnostic> {
-        if let Some(doc) = self.documents.get(uri) {
-            let (path, unresolved_path) = document_path(uri);
-            if !unresolved_path && path != doc.path {
+        if let Some(doc) = self.documents.get(uri)
+            && let Ok(path) = std::fs::canonicalize(uri_to_path(uri))
+        {
+            if path != doc.path {
                 if self.resolve_semantics {
                     let affected = self.affected_open_uris(uri);
                     self.pending_semantic_affected
@@ -487,7 +488,7 @@ impl LspState {
             self.documents
                 .get_mut(uri)
                 .expect("document checked above")
-                .unresolved_path &= unresolved_path;
+                .unresolved_path = false;
         }
         if let Some(text) = text {
             let differs = self.documents.get(uri).is_some_and(|doc| doc.text != text);
@@ -608,7 +609,7 @@ impl LspState {
         }
         self.ensure_semantic_snapshot();
         let changed_path = self.documents.get(uri).map_or_else(
-            || canonical_or_lexical(&uri_to_path(uri)),
+            || document_path(uri, &self.workspace_root).0,
             |doc| doc.path.clone(),
         );
         let mut uris = self
@@ -791,8 +792,9 @@ impl LspState {
             .iter()
             .filter(|(_, doc)| doc.unresolved_path)
             .filter_map(|(uri, _)| {
-                let (path, unresolved) = document_path(uri);
-                (!unresolved).then(|| (uri.clone(), path))
+                std::fs::canonicalize(uri_to_path(uri))
+                    .ok()
+                    .map(|path| (uri.clone(), path))
             })
             .collect();
         let mut changed = false;
@@ -1516,11 +1518,21 @@ fn watched_path(path: &Path) -> PathBuf {
     canonical_or_lexical(path)
 }
 
-fn document_path(uri: &str) -> (PathBuf, bool) {
+/// Keep missing inner symlinks lexical until materialization, resolving only the workspace prefix.
+fn document_path(uri: &str, workspace_root: &Path) -> (PathBuf, bool) {
     let path = uri_to_path(uri);
     match std::fs::canonicalize(&path) {
         Ok(path) => (path, false),
-        Err(_) => (falcon_analyze::resolve::lexical_normalize(&path), true),
+        Err(_) => {
+            let path = falcon_analyze::resolve::lexical_normalize(&path);
+            for ancestor in path.ancestors() {
+                if canonical_or_lexical(ancestor) == workspace_root {
+                    let suffix = path.strip_prefix(ancestor).expect("path ancestor");
+                    return (workspace_root.join(suffix), true);
+                }
+            }
+            (path, true)
+        }
     }
 }
 
@@ -2031,10 +2043,10 @@ mod dependency_tests {
         )
         .unwrap();
         std::fs::write(workspace.join("lib/main.dart"), "void main() {}\n").unwrap();
-        let alias = dir.path().join("alias");
-        std::os::unix::fs::symlink(&workspace, &alias).unwrap();
+        let alias = workspace.join("alias");
+        std::os::unix::fs::symlink(workspace.join("lib"), &alias).unwrap();
         let path = workspace.join("lib/orphan.dart");
-        let uri = format!("file://{}", alias.join("lib/orphan.dart").display());
+        let uri = format!("file://{}", alias.join("orphan.dart").display());
         let source = "int api() => 1;\n";
         let mut state = LspState::new(Some(config_path));
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
@@ -2355,11 +2367,10 @@ mod environment_regressions {
             &state.external_indexes.as_ref().unwrap().identities
         ));
         state.close(&core_uri);
-        state
-            .config
-            .files
-            .includes
-            .extend_excludes(&[format!("{}/**", app.join("packages/core").display())]);
+        state.config.files.includes.extend_excludes(&[format!(
+            "{}/**",
+            canonical_or_lexical(&app.join("packages/core")).display()
+        )]);
         state.invalidate_semantic_snapshot();
         state.analyze(&uri);
         assert!(has_external_class(&state, "NestedBefore"));
@@ -2430,6 +2441,7 @@ mod environment_regressions {
         assert!(Arc::ptr_eq(&types, &cache.types));
         assert!(Arc::ptr_eq(&signatures, &cache.signatures));
         let snapshot = state.semantic_snapshot.as_ref().unwrap();
+        let generated = canonical_or_lexical(&generated);
         assert!(
             snapshot.files[snapshot.by_path[&generated]]
                 .source
@@ -2551,6 +2563,7 @@ mod environment_regressions {
         let (dir, mut state, uri, _) = dependency_fixture(false);
         let companion = dir.path().join("companion.dart");
         std::fs::write(&companion, "part of 'app/main.dart'; class Before {}").unwrap();
+        let companion = canonical_or_lexical(&companion);
         state.change(
             &uri,
             "import 'package:dep/api.dart'; part '../companion.dart'; void main() {}".into(),
@@ -2723,11 +2736,12 @@ mod environment_regressions {
         )
         .unwrap();
         state.watched_files_changed(std::slice::from_ref(&lock));
+        let dependency_path = canonical_or_lexical(&dependency);
         assert!(
             state
                 .watched_dependency_roots()
                 .iter()
-                .any(|root| dependency.starts_with(root))
+                .any(|root| dependency_path.starts_with(root))
         );
         let identities = Arc::clone(&state.external_indexes.as_ref().unwrap().identities);
         std::fs::write(&dependency, "class NewReference {}").unwrap();
@@ -2807,7 +2821,7 @@ mod environment_regressions {
         state.watched_files_changed(&[dependency]);
         assert!(state.external_indexes.is_none());
         let paths = state.external_topology.as_ref().unwrap().paths.as_ptr();
-        let target = canonical_or_lexical(&dir.path().join("app/main.dart"));
+        let target = canonical_or_lexical(&dir.path().join("app")).join("main.dart");
         assert!(
             state
                 .external_topology
@@ -2854,6 +2868,47 @@ mod environment_regressions {
             );
             assert_eq!(state.documents[&uri].parse_count, 2);
             assert!(!state.environment.has_sdk());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_workspace_alias_buffer_refreshes_grammar_and_preserves_uri() {
+        for semantic in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("workspace");
+            let alias = dir.path().join("alias");
+            std::fs::create_dir(&root).unwrap();
+            std::os::unix::fs::symlink(&root, &alias).unwrap();
+            let mut state = state(&alias);
+            state.resolve_semantics = semantic;
+            let uri = format!("file://{}", alias.join("new_directory/main.dart").display());
+            let source = "void f(Object o) { switch (o) { case 1 + 2: break; } }";
+            state.open(&uri, source.into(), Some(1));
+            let expected = canonical_or_lexical(&root).join("new_directory/main.dart");
+            assert_eq!(state.documents[&uri].path, expected);
+            assert!(state.documents[&uri].unresolved_path);
+            assert!(!expected.exists());
+            assert_eq!(
+                state.documents[&uri].language_version,
+                LanguageVersion::CURRENT
+            );
+            std::fs::create_dir(alias.join(".dart_tool")).unwrap();
+            let config = alias.join(".dart_tool/package_config.json");
+            std::fs::write(&config,
+                r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","packageUri":"","languageVersion":"2.19"}]}"#).unwrap();
+            let published = state.watched_files_changed(&[config]);
+            assert_eq!(published.len(), 1);
+            assert_eq!(published[0].0, uri);
+            assert_eq!(state.open_uris(), std::slice::from_ref(&uri));
+            assert_eq!(state.documents[&uri].path, expected);
+            assert_eq!(
+                state.documents[&uri].language_version,
+                LanguageVersion::new(2, 19)
+            );
+            assert_eq!(state.documents[&uri].parse_count, 2);
+            state.analyze(&uri);
+            assert_eq!(state.documents[&uri].parse_count, 2);
         }
     }
 
@@ -2919,6 +2974,8 @@ mod environment_regressions {
             let mut state = state(&app);
             let app_uri = format!("file://{}", app.join("main.dart").display());
             let part_uri = format!("file://{}", part.display());
+            let defining = canonical_or_lexical(&defining);
+            let part = canonical_or_lexical(&part);
             let buffered = "part of leaf; class Unsaved {}";
             if !warm {
                 state.open(&part_uri, buffered.into(), Some(1));

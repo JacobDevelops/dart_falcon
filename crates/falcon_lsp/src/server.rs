@@ -31,6 +31,7 @@ use lsp_types::{
 };
 use tracing::{debug, info, warn};
 
+use falcon_analyze::canonical_or_lexical;
 use falcon_diagnostics::{Diagnostic, lsp_position_to_byte};
 
 use crate::state::LspState;
@@ -115,7 +116,7 @@ impl FileWatching {
             .chain(params.get("rootUri").and_then(serde_json::Value::as_str))
             .filter_map(|text| Uri::from_str(text).ok())
             .filter(|uri| uri.scheme().is_some_and(|scheme| scheme.as_str() == "file"))
-            .map(|uri| crate::state::uri_to_path(uri.as_str()))
+            .map(|uri| canonical_or_lexical(&crate::state::uri_to_path(uri.as_str())))
             .collect();
         Self {
             dynamic,
@@ -941,6 +942,54 @@ mod file_watching_tests {
         })
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_workspace_watcher_roots_use_filesystem_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("workspace");
+        let alias = dir.path().join("alias");
+        let dependency = root.join("dep");
+        std::fs::create_dir_all(root.join(".dart_tool")).unwrap();
+        std::fs::create_dir_all(dependency.join("lib")).unwrap();
+        std::fs::write(root.join("falcon.json"), CONFIG).unwrap();
+        std::fs::write(root.join("main.dart"), SOURCE).unwrap();
+        std::fs::write(
+            dependency.join("lib/api.dart"),
+            "class C {} C make() => C();",
+        )
+        .unwrap();
+        Client::package_config(&root, "../dep");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(root.join("falcon.json")), |_| None);
+        state.open(
+            file_uri(&alias.join("main.dart")).unwrap().as_str(),
+            SOURCE.to_string(),
+            Some(1),
+        );
+        assert!(
+            state
+                .watched_dependency_roots()
+                .contains(&canonical_or_lexical(&dependency))
+        );
+        let mut watching = FileWatching::new(&json!({
+            "capabilities": {"workspace": {"didChangeWatchedFiles": {
+                "dynamicRegistration": true, "relativePatternSupport": true
+            }}},
+            "workspaceFolders": [{"uri": file_uri(&alias).unwrap(), "name": "workspace"}]
+        }));
+        let (server, client) = Connection::memory();
+        watching.refresh(&server, &state).unwrap();
+        let messages: Vec<_> = client.receiver.try_iter().collect();
+        let registered = registrations(&messages);
+        assert_eq!(registered.len(), 1);
+        assert!(
+            registered[0]
+                .watchers
+                .iter()
+                .all(|watcher| matches!(watcher.glob_pattern, GlobPattern::String(_)))
+        );
+    }
+
     #[test]
     fn watcher_registration_respects_each_client_capability_and_does_not_repeat() {
         for (dynamic, relative) in [(false, false), (false, true), (true, false), (true, true)] {
@@ -977,7 +1026,7 @@ mod file_watching_tests {
             let registrations = registrations(&opened);
             assert_eq!(registrations.len(), usize::from(dynamic && relative));
             if dynamic && relative {
-                let root = client.directory.path().join("dep [one]");
+                let root = canonical_or_lexical(&client.directory.path().join("dep [one]"));
                 assert!(registrations[0].watchers.iter().any(|watcher| {
                     watcher.glob_pattern
                         == GlobPattern::Relative(RelativePattern {
@@ -988,7 +1037,9 @@ mod file_watching_tests {
                 assert!(registrations[0].watchers.iter().any(|watcher| {
                     watcher.glob_pattern
                         == GlobPattern::Relative(RelativePattern {
-                            base_uri: OneOf::Right(file_uri(client.directory.path()).unwrap()),
+                            base_uri: OneOf::Right(
+                                file_uri(&canonical_or_lexical(client.directory.path())).unwrap(),
+                            ),
                             pattern: "*".to_string(),
                         })
                 }));
@@ -1039,7 +1090,7 @@ mod file_watching_tests {
         assert!(registered[0].watchers.iter().any(|watcher| {
             watcher.glob_pattern
                 == GlobPattern::Relative(RelativePattern {
-                    base_uri: OneOf::Right(file_uri(&local).unwrap()),
+                    base_uri: OneOf::Right(file_uri(&canonical_or_lexical(&local)).unwrap()),
                     pattern: "api[[]one[]].dart".to_string(),
                 })
         }));
@@ -1048,7 +1099,8 @@ mod file_watching_tests {
             .iter()
             .find_map(|watcher| match &watcher.glob_pattern {
                 GlobPattern::Relative(relative)
-                    if relative.base_uri == OneOf::Right(file_uri(&local).unwrap()) =>
+                    if relative.base_uri
+                        == OneOf::Right(file_uri(&canonical_or_lexical(&local)).unwrap()) =>
                 {
                     Some(relative.pattern.clone())
                 }
@@ -1126,7 +1178,7 @@ mod file_watching_tests {
             assert!(registered[0].watchers.iter().any(|watcher| {
                 watcher.glob_pattern
                     == GlobPattern::Relative(RelativePattern {
-                        base_uri: OneOf::Right(file_uri(&local).unwrap()),
+                        base_uri: OneOf::Right(file_uri(&canonical_or_lexical(&local)).unwrap()),
                         pattern: changed_file.to_string(),
                     })
             }));
@@ -1135,7 +1187,7 @@ mod file_watching_tests {
                     if relative.pattern == "**/*"
                         && [local.as_path(), client.directory.path()]
                             .iter()
-                            .any(|base| relative.base_uri == OneOf::Right(file_uri(base).unwrap())))
+                            .any(|base| relative.base_uri == OneOf::Right(file_uri(&canonical_or_lexical(base)).unwrap())))
             }));
             let changed = local.join(changed_file);
             let declarations = "class C {} class D {} D make() => D();";
@@ -1214,7 +1266,10 @@ mod file_watching_tests {
         assert_eq!(
             bases,
             [&OneOf::Right(
-                file_uri(&client.directory.path().join("dep two")).unwrap()
+                file_uri(&canonical_or_lexical(
+                    &client.directory.path().join("dep two")
+                ))
+                .unwrap()
             )]
         );
         client.finish();
