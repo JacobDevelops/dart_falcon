@@ -246,6 +246,7 @@ impl super::Parser<'_> {
                 if span.start < span.end {
                     let tokens = lex_region(self.src, span);
                     let mut sub = super::Parser::new(&tokens, self.src, self.version);
+                    sub.ctx.body = self.ctx.body;
                     sub.depth = self.depth;
                     sub.depth_limit_hit = self.depth_limit_hit;
                     let expr = sub.parse_expr();
