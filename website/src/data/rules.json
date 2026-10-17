@@ -238,12 +238,24 @@
         "file": null,
         "line": 51,
         "message": "Avoid inverted boolean expressions. Simplify the double negation."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 56,
+        "message": "Avoid inverted boolean expressions. Simplify the double negation."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 57,
+        "message": "Avoid inverted boolean expressions. Simplify the double negation."
       }
     ],
     "docs": "Flags a doubly-negated boolean expression such as `!!x`.\n\nTwo `!` operators cancel out, so `!!x` is just `x`, and a longer run of\nleading bangs reduces to `x` or `!x` by parity. The redundant negation adds\nno meaning and obscures the value. The rule flags a `!` whose operand is\nitself a `!`, reporting once at the outer negation and skipping the inner\nbangs. Despite the rule's name, it targets only stacked negations — it does\nnot rewrite `!(a == b)` into `a != b`.",
     "domains": [],
     "examples": {
-      "bad": "class BooleanExpressions {\n  void examples() {\n    bool isValid = true;\n    bool condition = false;\n\n    /// Double negation with double bang\n    if (!!isValid) {\n      print('valid');\n    }\n\n    /// Nested negation\n    if (!(!condition)) {\n      print('condition met');\n    }\n\n    /// Double negation in assignment\n    final result = !!isValid;\n    print(result);\n\n    /// Double negation in variable declaration\n    var flag = !!condition;\n\n    /// Negation of negation in return\n    if (!(!isValid)) {\n      return;\n    }\n\n    /// Triple negation (still bad)\n    bool x = !!!isValid;\n  }\n}\n\n// Regression: the violation must still be found inside Dart 3 containers\n// (pattern declaration, labeled statement, switch expression and subject,\n// collection if/spread, record field).\nvoid containersRegression(int rcount, bool flag) {\n  final (ra, _) = (!!flag, 0);\n  lbl: {\n    final rb = !!flag;\n    print(rb);\n  }\n  final rc = switch (rcount) {\n    0 => !!flag,\n    _ => null,\n  };\n  final rd = switch (!!flag) {\n    _ => 0,\n  };\n  final re = [if (rcount > 0) !!flag];\n  final rf = [...[!!flag]];\n  final rg = (p: !!flag, q: 0);\n  print([ra, rc, rd, re, rf, rg]);\n}",
+      "bad": "class BooleanExpressions {\n  void examples() {\n    bool isValid = true;\n    bool condition = false;\n\n    /// Double negation with double bang\n    if (!!isValid) {\n      print('valid');\n    }\n\n    /// Nested negation\n    if (!(!condition)) {\n      print('condition met');\n    }\n\n    /// Double negation in assignment\n    final result = !!isValid;\n    print(result);\n\n    /// Double negation in variable declaration\n    var flag = !!condition;\n\n    /// Negation of negation in return\n    if (!(!isValid)) {\n      return;\n    }\n\n    /// Triple negation (still bad)\n    bool x = !!!isValid;\n  }\n}\n\n// Regression: the violation must still be found inside Dart 3 containers\n// (pattern declaration, labeled statement, switch expression and subject,\n// collection if/spread, record field).\nvoid containersRegression(int rcount, bool flag) {\n  final (ra, _) = (!!flag, 0);\n  lbl: {\n    final rb = !!flag;\n    print(rb);\n  }\n  final rc = switch (rcount) {\n    0 => !!flag,\n    _ => null,\n  };\n  final rd = switch (!!flag) {\n    _ => 0,\n  };\n  final re = [if (rcount > 0) !!flag];\n  final rf = [...[!!flag]];\n  final rg = (p: !!flag, q: 0);\n  print([ra, rc, rd, re, rf, rg]);\n}\n\nbool nestedChains(bool a, bool b) =>\n    !!(a &&\n        !!b);",
       "crossFile": null,
       "good": "class BooleanExpressions {\n  void examples() {\n    bool isValid = true;\n    bool condition = false;\n\n    /// Direct boolean check\n    if (isValid) {\n      print('valid');\n    }\n\n    /// Single negation\n    if (!condition) {\n      print('condition met');\n    }\n\n    /// Direct assignment\n    final result = isValid;\n    print(result);\n\n    /// Single negation in assignment\n    var flag = !condition;\n\n    /// Single negation in return\n    if (isValid) {\n      return;\n    }\n\n    /// Simple negation\n    bool x = !isValid;\n  }\n}"
     },
@@ -409,7 +421,7 @@
     "examples": {
       "bad": "class NestedIfExamples {\n  // A vertical chain: the outer then-branch contains two further `if`\n  // statements (b and c), so the outermost `if` is flagged.\n  void chain(bool a, bool b, bool c) {\n    if (a) {\n      if (b) {\n        if (c) {\n          print('all true');\n        }\n      }\n    }\n  }\n\n  // Two sibling `if` statements inside the then-branch also reach the\n  // nesting threshold of two.\n  void siblings(bool a, bool b, bool c) {\n    if (a) {\n      if (b) {\n        print('b');\n      }\n      if (c) {\n        print('c');\n      }\n    }\n  }\n\n  // Nested `if` statements reached through an intervening loop still count.\n  void throughLoop(bool a, bool b, List<int> xs) {\n    if (a) {\n      for (final x in xs) {\n        if (b) {\n          if (x > 0) {\n            print(x);\n          }\n        }\n      }\n    }\n  }\n\n  // A label on the nested chain must not hide the `if`s it wraps.\n  void labeledChain(bool a, bool b, bool c) {\n    if (a) {\n      outer:\n      if (b) {\n        if (c) {\n          print('all true');\n        }\n      }\n    }\n  }\n\n  void doSomething() {}\n}",
       "crossFile": null,
-      "good": "class NestedIfExamples {\n  // A single level of nesting is allowed (default max_nesting_level is 2).\n  void singleNesting(bool a, bool b) {\n    if (a) {\n      if (b) {\n        print('both true');\n      }\n    }\n  }\n\n  // Combined conditions avoid nesting entirely.\n  void combined(bool a, bool b, bool c) {\n    if (a && b && c) {\n      print('all true');\n    }\n  }\n\n  // Guard clauses with early returns keep the body flat.\n  void guards(bool a, bool b) {\n    if (!a) {\n      return;\n    }\n    doSomething();\n    if (!b) {\n      return;\n    }\n    print('both conditions met');\n  }\n\n  // An if/else-if chain is a sibling chain, not nesting: each then-branch\n  // holds no further `if`.\n  void elseIfChain(int code) {\n    if (code == 1) {\n      print('one');\n    } else if (code == 2) {\n      print('two');\n    } else {\n      print('other');\n    }\n  }\n\n  // A labeled `if` with only one nested `if` stays under the threshold.\n  void labeledSingle(bool a, bool b) {\n    outer:\n    if (a) {\n      if (b) {\n        print('two');\n      }\n    }\n  }\n\n  void doSomething() {}\n}"
+      "good": "class NestedIfExamples {\n  // A single level of nesting is allowed (default max_nesting_level is 2).\n  void singleNesting(bool a, bool b) {\n    if (a) {\n      if (b) {\n        print('both true');\n      }\n    }\n  }\n\n  // Combined conditions avoid nesting entirely.\n  void combined(bool a, bool b, bool c) {\n    if (a && b && c) {\n      print('all true');\n    }\n  }\n\n  // Guard clauses with early returns keep the body flat.\n  void guards(bool a, bool b) {\n    if (!a) {\n      return;\n    }\n    doSomething();\n    if (!b) {\n      return;\n    }\n    print('both conditions met');\n  }\n\n  // An if/else-if chain is a sibling chain, not nesting: each then-branch\n  // holds no further `if`.\n  void elseIfChain(int code) {\n    if (code == 1) {\n      print('one');\n    } else if (code == 2) {\n      print('two');\n    } else {\n      print('other');\n    }\n  }\n\n  // A labeled `if` with only one nested `if` stays under the threshold.\n  void labeledSingle(bool a, bool b) {\n    outer:\n    if (a) {\n      if (b) {\n        print('two');\n      }\n    }\n  }\n\n  void doSomething() {}\n}\n\nvoid unbracedThenRoot(bool a, bool b, bool c) {\n  if (a)\n    if (b) {\n      if (c) {}\n    }\n}"
     },
     "group": "complexity",
     "name": "avoid-nested-if",
@@ -945,7 +957,7 @@
     "examples": {
       "bad": "// Each function below exceeds the configured max_complexity of 3.\n// Complexity = 1 + decision points (if / && / || / ?? / for / while / case / catch / ternary).\n\nint classifyNumber(int a, int b) {\n  if (a > 0) return 1;\n  if (b > 0) return 2;\n  if (a > b && b > 0) return 3;\n  return 0;\n}\n\nint loopScan(List<int> xs, int limit) {\n  var total = 0;\n  for (final x in xs) total += x;\n  while (total > limit) total -= 1;\n  final capped = total > 0 || limit < 0;\n  final safe = total ?? limit;\n  return capped ? safe : 0;\n}\n\nint nestedTernary(int a, int b, int c) {\n  final first = a > 0 ? 1 : (b > 0 ? 2 : 3);\n  final second = c > 0 && a > 0 ? 4 : 5;\n  return first + second;\n}\n\nString describe(int code) {\n  switch (code) {\n    case 1:\n      return 'one';\n    case 2:\n      return 'two';\n    case 3:\n      return 'three';\n    default:\n      return 'other';\n  }\n}\n\nint guarded(Object value) {\n  try {\n    if (value == null) return -1;\n  } on FormatException {\n    return -2;\n  } on StateError {\n    return -3;\n  }\n  return value.hashCode > 0 && value.hashCode < 100 ? 1 : 0;\n}\n\nclass Calculator {\n  int compute(int a, int b) {\n    if (a > b) return a - b;\n    if (a < b) return b - a;\n    if (a == 0 || b == 0) return 0;\n    return a + b;\n  }\n}\n\n// Decision points inside a labeled loop must still count.\nint labeledBranches(List<int> xs) {\n  outer:\n  while (xs.isNotEmpty) {\n    if (xs.first > 0) return 1;\n    if (xs.last < 0) return 2;\n    if (xs.length > 5 && xs.first == 0) break outer;\n    xs.removeAt(0);\n  }\n  return 0;\n}",
       "crossFile": null,
-      "good": "// Each function stays at or below a cyclomatic complexity of 3\n// (at most two decision points), so none trigger the rule.\n\nint addTwo(int a, int b) {\n  return a + b;\n}\n\nint atMostOne(int a) {\n  if (a > 0) return a;\n  return 0;\n}\n\nint clamp(int a, int max) {\n  final over = a > max;\n  return over ? max : a;\n}\n\nint fallback(int? a, int b) {\n  return a ?? b;\n}\n\nint sumList(List<int> xs) {\n  var total = 0;\n  for (final x in xs) total += x;\n  return total;\n}\n\nclass Counter {\n  int value = 0;\n\n  int increment() {\n    value += 1;\n    return value;\n  }\n}\n\n// Labeled loop whose complexity stays within the limit.\nint labeledLow(List<int> xs) {\n  loop:\n  while (xs.isNotEmpty) {\n    xs.removeAt(0);\n    continue loop;\n  }\n  return 0;\n}"
+      "good": "// Each function stays at or below a cyclomatic complexity of 3\n// (at most two decision points), so none trigger the rule.\n\nint addTwo(int a, int b) {\n  return a + b;\n}\n\nint atMostOne(int a) {\n  if (a > 0) return a;\n  return 0;\n}\n\nint clamp(int a, int max) {\n  final over = a > max;\n  return over ? max : a;\n}\n\nint fallback(int? a, int b) {\n  return a ?? b;\n}\n\nint sumList(List<int> xs) {\n  var total = 0;\n  for (final x in xs) total += x;\n  return total;\n}\n\nclass Counter {\n  int value = 0;\n\n  int increment() {\n    value += 1;\n    return value;\n  }\n}\n\n// Labeled loop whose complexity stays within the limit.\nint labeledLow(List<int> xs) {\n  loop:\n  while (xs.isNotEmpty) {\n    xs.removeAt(0);\n    continue loop;\n  }\n  return 0;\n}\n\nfinal outsideDeclaredBody = (bool value) {\n  if (value) {\n    if (value) {\n      if (value) {}\n    }\n  }\n};\n\nclass OutsideDeclaredBodies {\n  void previous() {}\n\n  final field = (bool value) {\n    if (value) {\n      if (value) {\n        if (value) {}\n      }\n    }\n  };\n\n  final dynamic initialized;\n\n  OutsideDeclaredBodies()\n      : initialized = ((bool value) {\n          if (value) {\n            if (value) {\n              if (value) {}\n            }\n          }\n        }) {}\n}"
     },
     "group": "complexity",
     "name": "cyclomatic-complexity",
@@ -1652,6 +1664,12 @@
         "file": null,
         "line": 35,
         "message": "Prefer extracting the callback to a separate widget method."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 47,
+        "message": "Prefer extracting the callback to a separate widget method."
       }
     ],
     "docs": "Flags inline block-body callbacks passed to Widget constructors.\n\nThe rule uses resolved Flutter identities for both the containing Widget class\nand each constructed Widget. Calls that cannot be resolved uniquely are left\nalone; spelling, capitalization, and import-prefix shape are not evidence.",
@@ -1659,9 +1677,9 @@
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nclass MyWidget extends StatelessWidget {\n  const MyWidget({super.key});\n\n  @override\n  Widget build(BuildContext context) {\n    return ElevatedButton(\n      onPressed: () {\n        final now = DateTime.now();\n        doSomething(now);\n      },\n      child: const Text('go'),\n    );\n  }\n}\n\nclass MyState extends State<MyWidget> {\n  @override\n  Widget build(BuildContext context) {\n    return GestureDetector(\n      onTap: () {\n        setState(() {});\n        doSomething(null);\n      },\n      child: const Text('tap'),\n    );\n  }\n}\n\nclass PrefixedWidget extends f.StatelessWidget {\n  @override\n  f.Widget build(f.BuildContext context) => f.ElevatedButton(\n    onPressed: () {\n      final value = DateTime.now();\n      doSomething(value);\n    },\n  );\n}\n\nvoid doSomething(Object? x) {}",
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as f;\n\nclass MyWidget extends StatelessWidget {\n  const MyWidget({super.key});\n\n  @override\n  Widget build(BuildContext context) {\n    return ElevatedButton(\n      onPressed: () {\n        final now = DateTime.now();\n        doSomething(now);\n      },\n      child: const Text('go'),\n    );\n  }\n}\n\nclass MyState extends State<MyWidget> {\n  @override\n  Widget build(BuildContext context) {\n    return GestureDetector(\n      onTap: () {\n        setState(() {});\n        doSomething(null);\n      },\n      child: const Text('tap'),\n    );\n  }\n}\n\nclass PrefixedWidget extends f.StatelessWidget {\n  @override\n  f.Widget build(f.BuildContext context) => f.ElevatedButton(\n    onPressed: () {\n      final value = DateTime.now();\n      doSomething(value);\n    },\n  );\n}\n\nvoid doSomething(Object? x) {}\n\nclass NestedClosureReturn extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) => ElevatedButton(\n    onPressed: () {\n      final nested = () {\n        return const Text('nested');\n      };\n      doSomething(nested);\n    },\n  );\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/material.dart';\n\n// Non-widget class: callbacks are never flagged (dcl only visits Widget/State).\nclass NotAWidget {\n  void run(List<int> items) {\n    items.forEach((item) {\n      final doubled = item * 2;\n      print(doubled);\n    });\n  }\n}\n\nclass MyWidget extends StatelessWidget {\n  const MyWidget({super.key});\n\n  final int mode = 0;\n\n  @override\n  Widget build(BuildContext context) {\n    return Column(\n      children: [\n        // Arrow callback: not a block body, never flagged.\n        ElevatedButton(\n          onPressed: () => doSomething(),\n          child: const Text('go'),\n        ),\n        // Single-line block callback: within allowed_line_count, not flagged.\n        ElevatedButton(\n          onPressed: () { doSomething(); },\n          child: const Text('short'),\n        ),\n        // Builder callback (first parameter is BuildContext) is excluded.\n        Builder(\n          builder: (BuildContext context) {\n            final theme = Theme.of(context);\n            return Text('$theme');\n          },\n        ),\n        // Untyped builder parameter: unresolved, still treated as a builder.\n        Builder(\n          builder: (context) {\n            final label = 'value';\n            return Text(label);\n          },\n        ),\n        // Widget returned only from nested branches still counts as a builder.\n        Builder(\n          builder: (BuildContext context) {\n            switch (mode) {\n              case 0:\n                return const Text('a');\n              default:\n                return const Text('b');\n            }\n          },\n        ),\n      ],\n    );\n  }\n}\n\nvoid doSomething() {}"
+      "good": "import 'package:flutter/material.dart';\n\n// Non-widget class: callbacks are never flagged (dcl only visits Widget/State).\nclass NotAWidget {\n  void run(List<int> items) {\n    items.forEach((item) {\n      final doubled = item * 2;\n      print(doubled);\n    });\n  }\n}\n\nclass MyWidget extends StatelessWidget {\n  const MyWidget({super.key});\n\n  final int mode = 0;\n\n  @override\n  Widget build(BuildContext context) {\n    return Column(\n      children: [\n        // Arrow callback: not a block body, never flagged.\n        ElevatedButton(\n          onPressed: () => doSomething(),\n          child: const Text('go'),\n        ),\n        // Single-line block callback: within allowed_line_count, not flagged.\n        ElevatedButton(\n          onPressed: () { doSomething(); },\n          child: const Text('short'),\n        ),\n        // Builder callback (first parameter is BuildContext) is excluded.\n        Builder(\n          builder: (BuildContext context) {\n            final theme = Theme.of(context);\n            return Text('$theme');\n          },\n        ),\n        // Untyped builder parameter: unresolved, still treated as a builder.\n        Builder(\n          builder: (context) {\n            final label = 'value';\n            return Text(label);\n          },\n        ),\n        // Widget returned only from nested branches still counts as a builder.\n        Builder(\n          builder: (BuildContext context) {\n            switch (mode) {\n              case 0:\n                return const Text('a');\n              default:\n                return const Text('b');\n            }\n          },\n        ),\n      ],\n    );\n  }\n}\n\nvoid doSomething() {}\n\nclass LocalFunctionReturn extends StatelessWidget {\n  @override\n  Widget build(BuildContext context) => Builder(\n    builder: (BuildContext context) {\n      Widget local() {\n        return const Text('local');\n      }\n      return local();\n    },\n  );\n}"
     },
     "group": "complexity",
     "name": "prefer-extracting-callbacks",
@@ -1764,12 +1782,42 @@
         "file": null,
         "line": 28,
         "message": "Use an 'if' element to conditionally add elements."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 33,
+        "message": "Use an 'if' element to conditionally add elements."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 35,
+        "message": "Use an 'if' element to conditionally add elements."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 37,
+        "message": "Use an 'if' element to conditionally add elements."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 43,
+        "message": "Use an 'if' element to conditionally add elements."
+      },
+      {
+        "column": 7,
+        "file": null,
+        "line": 45,
+        "message": "Use an 'if' element to conditionally add elements."
       }
     ],
     "docs": "Prefers collection `if` elements to conditional expressions in list and set literals.\n\nSince Dart 2.3 a list or set literal can choose an element with an `if`\nelement, so `[a, b ? c : d]` reads better as `[a, if (b) c else d]`. The rule\nflags a conditional expression that is itself a list or set element, or the\n`then`/`else` element of a collection `if`, or the body of a collection `for`.\nConditionals nested deeper inside an element (`[f(b ? c : d)]`) and map\nentries are left alone, as the official lint does.",
     "domains": [],
     "examples": {
-      "bad": "List<int> lists(bool flag, int a, int b) {\n  return [\n    1,\n    flag ? a : b,\n  ];\n}\n\nSet<String> sets(bool flag) {\n  return {\n    'x',\n    flag ? 'y' : 'z',\n  };\n}\n\nList<int> nestedIf(bool a, bool b) => [\n  if (a) b ? 1 : 2,\n];\n\nList<int> nestedElse(bool a, bool b) => [\n  if (a) 0 else b ? 1 : 2,\n];\n\nList<int> forBody(List<int> values) => [\n  for (final v in values) v.isEven ? v : -v,\n];\n\nconst typed = <int>[\n  true ? 1 : 2,\n];",
+      "bad": "List<int> lists(bool flag, int a, int b) {\n  return [\n    1,\n    flag ? a : b,\n  ];\n}\n\nSet<String> sets(bool flag) {\n  return {\n    'x',\n    flag ? 'y' : 'z',\n  };\n}\n\nList<int> nestedIf(bool a, bool b) => [\n  if (a) b ? 1 : 2,\n];\n\nList<int> nestedElse(bool a, bool b) => [\n  if (a) 0 else b ? 1 : 2,\n];\n\nList<int> forBody(List<int> values) => [\n  for (final v in values) v.isEven ? v : -v,\n];\n\nconst typed = <int>[\n  true ? 1 : 2,\n];\n\nList<int> nestedElseIf(bool a, bool b, bool c, bool d, bool e) => [\n  if (a)\n    b ? 1 : 2\n  else if (c)\n    d ? 3 : 4\n  else\n    e ? 5 : 6,\n];\n\nList<int> ifInsideFor(List<int> values, bool a, bool b, bool c) => [\n  for (final value in values)\n    if (a)\n      b ? value : -value\n    else\n      c ? value : 0,\n];",
       "crossFile": null,
       "good": "List<int> lists(bool flag, int a, int b) {\n  return [\n    1,\n    if (flag) a else b,\n  ];\n}\n\nint pick(bool flag, int a, int b) => flag ? a : b;\n\nList<int> nestedArgument(bool flag, int a, int b) => [pick(flag, a, b), (flag ? a : b) + 1];\n\nMap<String, int> maps(bool flag) => {'k': flag ? 1 : 2};\n\nList<int> spread(bool flag, List<int> a, List<int> b) => [...flag ? a : b];\n\nList<int> nullAware(bool flag, int? a) => [?a];\n\nvoid call(bool flag) => print([1, 2].map((v) => flag ? v : -v));"
     },
@@ -4264,6 +4312,12 @@
         "file": null,
         "line": 79,
         "message": "The public property isn't described by either 'debugFillProperties' or 'debugDescribeChildren'."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 83,
+        "message": "The public property isn't described by either 'debugFillProperties' or 'debugDescribeChildren'."
       }
     ],
     "docs": "Requires every public property of a `Diagnosticable` class to be referenced in its debug methods.\n\nFlutter's diagnostics (the widget inspector, `debugDumpApp`, `toString`)\nonly show what `debugFillProperties` adds, so a public field or getter that\nis never mentioned there — nor in `debugDescribeChildren` — is invisible\nwhen debugging. A property counts as described when its name, or its\n`debug`-prefixed variant (`debugFoo` for `foo`), appears as an identifier in\neither method. Widget-valued properties (and `List`/`Set` of widgets) are\nexempt because they are described as children, and so are static members,\nprivate members, and overrides (a field or getter does not override an\ninherited setter). Like the analyzer, the rule applies to classes with a\nsupertype named `Diagnosticable` declared in an unnamed library, including\ndependency libraries. Declared and inferred property types are checked;\nunresolved types stay silent. Declaring primary constructor parameters are\nchecked like instance fields.\n\n```dart\nclass Tile extends StatelessWidget {\n  final String title; // BAD: not described\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n  }\n}\n```",
@@ -4271,7 +4325,7 @@
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/foundation.dart';\nimport 'package:flutter/material.dart';\n\nclass Tile extends StatelessWidget {\n  const Tile({\n    super.key,\n    required this.title,\n    required this.count,\n    required this.tags,\n    required this.child,\n  });\n\n  final String title;\n  final int count;\n  final List<String> tags;\n  final Widget child;\n\n  bool get enabled => count > 0;\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n    properties.add(IntProperty('count', count));\n  }\n\n  @override\n  Widget build(BuildContext context) => child;\n}\n\nclass Counter extends StatefulWidget {\n  const Counter({super.key});\n\n  @override\n  State<Counter> createState() => _CounterState();\n}\n\nclass _CounterState extends State<Counter> {\n  int clicks = 0;\n  DateTime? lastClick;\n\n  @override\n  Widget build(BuildContext context) => const Placeholder();\n}\n\nclass Model with Diagnosticable {\n  Model(this.value);\n\n  final double value;\n  final Duration timeout = Duration.zero;\n}\n\nclass Choice<T> extends StatelessWidget {\n  const Choice({super.key, required this.value});\n\n  final T value;\n\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nabstract class SinkWidget extends StatelessWidget {\n  const SinkWidget({super.key});\n\n  set sink(int value);\n}\n\nclass Sink extends SinkWidget {\n  Sink({super.key});\n\n  // A field does not override an inherited setter.\n  int sink = 0;\n\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nclass InferredModel with Diagnosticable {\n  final count = 1;\n  final values = <String>[];\n}",
+      "bad": "import 'package:flutter/foundation.dart';\nimport 'package:flutter/material.dart';\n\nclass Tile extends StatelessWidget {\n  const Tile({\n    super.key,\n    required this.title,\n    required this.count,\n    required this.tags,\n    required this.child,\n  });\n\n  final String title;\n  final int count;\n  final List<String> tags;\n  final Widget child;\n\n  bool get enabled => count > 0;\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n    properties.add(IntProperty('count', count));\n  }\n\n  @override\n  Widget build(BuildContext context) => child;\n}\n\nclass Counter extends StatefulWidget {\n  const Counter({super.key});\n\n  @override\n  State<Counter> createState() => _CounterState();\n}\n\nclass _CounterState extends State<Counter> {\n  int clicks = 0;\n  DateTime? lastClick;\n\n  @override\n  Widget build(BuildContext context) => const Placeholder();\n}\n\nclass Model with Diagnosticable {\n  Model(this.value);\n\n  final double value;\n  final Duration timeout = Duration.zero;\n}\n\nclass Choice<T> extends StatelessWidget {\n  const Choice({super.key, required this.value});\n\n  final T value;\n\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nabstract class SinkWidget extends StatelessWidget {\n  const SinkWidget({super.key});\n\n  set sink(int value);\n}\n\nclass Sink extends SinkWidget {\n  Sink({super.key});\n\n  // A field does not override an inherited setter.\n  int sink = 0;\n\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n\nclass InferredModel with Diagnosticable {\n  final count = 1;\n  final values = <String>[];\n}\n\nclass DebugScopeModel with Diagnosticable {\n  final int outsideBody = 1;\n  final int nestedReference = 2;\n\n  void otherMethod() {\n    print(outsideBody);\n  }\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    final deferred = () => nestedReference;\n    properties.add(IntProperty('nestedReference', deferred()));\n  }\n}",
       "crossFile": null,
       "good": "import 'package:flutter/foundation.dart';\nimport 'package:flutter/material.dart';\n\nclass Tile extends StatelessWidget {\n  const Tile({\n    super.key,\n    required this.title,\n    required this.count,\n    required this.children,\n    required this.child,\n    this.debugLabel,\n  });\n\n  final String title;\n  final int count;\n  final List<Widget> children;\n  final Widget child;\n  final String? debugLabel;\n  final String _cache = '';\n\n  static const String tag = 'tile';\n\n  bool get enabled => count > 0;\n\n  @override\n  Key? get key => super.key;\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n    properties\n      ..add(StringProperty('title', title))\n      ..add(IntProperty('count', count))\n      ..add(StringProperty('label', label))\n      ..add(FlagProperty('enabled', value: widget.enabled));\n  }\n\n  String get label => debugLabel ?? _cache;\n\n  Tile get widget => this;\n\n  @override\n  Widget build(BuildContext context) => child;\n}\n\nclass Plain {\n  Plain(this.value);\n\n  final int value;\n}\n\nclass InferredModel with Diagnosticable {\n  final count = 1;\n  final child = const SizedBox();\n  final children = <Widget>[const SizedBox()];\n\n  @override\n  void debugFillProperties(DiagnosticPropertiesBuilder properties) {\n    super.debugFillProperties(properties);\n    properties.add(IntProperty('count', count));\n  }\n}"
     },
@@ -5007,14 +5061,50 @@
         "file": null,
         "line": 15,
         "message": "Don't use adjacent strings in a list literal."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 25,
+        "message": "Don't use adjacent strings in a list literal."
+      },
+      {
+        "column": 34,
+        "file": null,
+        "line": 29,
+        "message": "Don't use adjacent strings in a list literal."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 32,
+        "message": "Don't use adjacent strings in a list literal."
+      },
+      {
+        "column": 10,
+        "file": null,
+        "line": 35,
+        "message": "Don't use adjacent strings in a list literal."
+      },
+      {
+        "column": 22,
+        "file": null,
+        "line": 36,
+        "message": "Don't use adjacent strings in a list literal."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 37,
+        "message": "Don't use adjacent strings in a list literal."
       }
     ],
     "docs": "Flags adjacent string literals used as an element of a list or set literal.\n\nAdjacent strings concatenate, so a missing comma between two elements\nsilently merges them into one:\n\n```dart\nvar list = <String>[\n  'a'      // flagged: a comma is missing, the list has two elements\n  'b',\n  'c',\n];\nvar list = <String>['a' + 'b', 'c']; // fine: concatenation is explicit\n```\n\nAlso checked: the body of a `for` element, the `then` element of an `if`\nelement without `else` (or the `else` element when present), and constant\nstring elements of a list pattern in a `switch` statement case. Map\nliterals and parenthesized elements are not checked.",
     "domains": [],
     "examples": {
-      "bad": "void use(Object o) {}\n\nvoid main(bool flag, List<String> xs) {\n  use(<String>[\n    'a'\n    'b',\n    'c',\n  ]);\n  use(['x' 'y']);\n  use(<String>{'set' 'element'});\n  use([if (flag) 'then' 'element']);\n  use([if (flag) 'then' else 'else' 'element']);\n  use([for (var x in xs) 'body' 'part']);\n  switch (xs) {\n    case ['pattern' 'element']:\n      break;\n  }\n}",
+      "bad": "void use(Object o) {}\n\nvoid main(bool flag, List<String> xs) {\n  use(<String>[\n    'a'\n    'b',\n    'c',\n  ]);\n  use(['x' 'y']);\n  use(<String>{'set' 'element'});\n  use([if (flag) 'then' 'element']);\n  use([if (flag) 'then' else 'else' 'element']);\n  use([for (var x in xs) 'body' 'part']);\n  switch (xs) {\n    case ['pattern' 'element']:\n      break;\n  }\n}\n\nvoid nestedCollectionContexts(bool flag, List<String> xs) {\n  use([\n    for (final x in xs)\n      if (flag)\n        for (final y in xs)\n          'nested' 'body',\n  ]);\n  use([\n    if (flag)\n      if (flag) 'innerThen' else 'inner' 'else'\n    else\n      for (final x in xs)\n        'outer' 'else',\n  ]);\n  use([\n    if (['condition' 'list'].isNotEmpty) 'body',\n    for (final x in ['header' 'list']) x,\n    ...['spread' 'list'],\n  ]);\n}",
       "crossFile": null,
-      "good": "void use(Object o) {}\n\nvoid main(bool flag, List<String> xs) {\n  use(<String>['a' + 'b', 'c']);\n  use(['a', 'b']);\n  use([('paren' 'thesized')]);\n  use({'map' 'key': 'value' 'part'});\n  use([if (flag) 'then' 'quirk' else 'else']);\n  use([...xs]);\n  use('not' 'in a list');\n  switch (xs) {\n    case ['a', 'b']:\n      break;\n  }\n}"
+      "good": "void use(Object o) {}\n\nvoid main(bool flag, List<String> xs) {\n  use(<String>['a' + 'b', 'c']);\n  use(['a', 'b']);\n  use([('paren' 'thesized')]);\n  use({'map' 'key': 'value' 'part'});\n  use([if (flag) 'then' 'quirk' else 'else']);\n  use([...xs]);\n  use('not' 'in a list');\n  switch (xs) {\n    case ['a', 'b']:\n      break;\n  }\n}\n\nvoid collectionContextsDoNotLeak(bool flag, List<String> xs) {\n  use([\n    if (('condition' 'text').isNotEmpty) 'body',\n    for (final x in ('header' 'text').split('')) x,\n    ...('spread' 'text').split(''),\n    if (flag)\n      'outerThen' 'excluded'\n    else\n      if (flag) 'innerThen' else 'innerElse',\n  ]);\n  use([\n    if (flag) 'excluded' 'then' else 'included',\n    for (final x in xs) ('parenthesized' 'body'),\n  ]);\n  use('outside' 'collection');\n}"
     },
     "group": "correctness",
     "name": "no-adjacent-strings-in-list",
@@ -5588,6 +5678,54 @@
         "file": null,
         "line": 68,
         "message": "This controller is never disposed; dispose it in the State's dispose() method."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 72,
+        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 85,
+        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 86,
+        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 87,
+        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 88,
+        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 89,
+        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 90,
+        "message": "This controller is never disposed; dispose it in the State's dispose() method."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 91,
+        "message": "This controller is never disposed; dispose it in the State's dispose() method."
       }
     ],
     "docs": "Requires Flutter controllers owned by a `State` field to be disposed.",
@@ -5595,9 +5733,9 @@
       "flutter"
     ],
     "examples": {
-      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as flutter;\n\nclass A extends State<StatefulWidget> {\n  final controller = TextEditingController();\n\n  @override\n  void dispose() {\n    super.dispose();\n  }\n}\n\nclass B extends State<StatefulWidget> {\n  final page = PageController();\n}\n\nclass C extends State<StatefulWidget> {\n  late ScrollController scroll;\n\n  @override\n  void initState() {\n    super.initState();\n    scroll = ScrollController();\n  }\n\n  @override\n  void dispose() {\n    super.dispose();\n  }\n}\n\nclass D extends State<StatefulWidget> {\n  final tabs = TabController(length: 2, vsync: this);\n  final text = TextEditingController();\n\n  @override\n  void dispose() {\n    text.dispose();\n    super.dispose();\n  }\n}\n\nclass E extends State<StatefulWidget> {\n  late final anim = AnimationController.unbounded(vsync: this);\n\n  @override\n  void dispose() {\n    super.dispose();\n  }\n}\n\nclass F extends State<StatefulWidget> {\n  final controller = TextEditingController();\n\n  @override\n  void dispose() {\n    final controller = TextEditingController();\n    controller.dispose();\n    super.dispose();\n  }\n}\n\nclass G extends State<StatefulWidget> {\n  final controller = TextEditingController(text: widget.initialText);\n}\n\nclass H extends flutter.State<flutter.StatefulWidget> {\n  final controller = flutter.ScrollController();\n}",
+      "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/material.dart' as flutter;\n\nclass A extends State<StatefulWidget> {\n  final controller = TextEditingController();\n\n  @override\n  void dispose() {\n    super.dispose();\n  }\n}\n\nclass B extends State<StatefulWidget> {\n  final page = PageController();\n}\n\nclass C extends State<StatefulWidget> {\n  late ScrollController scroll;\n\n  @override\n  void initState() {\n    super.initState();\n    scroll = ScrollController();\n  }\n\n  @override\n  void dispose() {\n    super.dispose();\n  }\n}\n\nclass D extends State<StatefulWidget> {\n  final tabs = TabController(length: 2, vsync: this);\n  final text = TextEditingController();\n\n  @override\n  void dispose() {\n    text.dispose();\n    super.dispose();\n  }\n}\n\nclass E extends State<StatefulWidget> {\n  late final anim = AnimationController.unbounded(vsync: this);\n\n  @override\n  void dispose() {\n    super.dispose();\n  }\n}\n\nclass F extends State<StatefulWidget> {\n  final controller = TextEditingController();\n\n  @override\n  void dispose() {\n    final controller = TextEditingController();\n    controller.dispose();\n    super.dispose();\n  }\n}\n\nclass G extends State<StatefulWidget> {\n  final controller = TextEditingController(text: widget.initialText);\n}\n\nclass H extends flutter.State<flutter.StatefulWidget> {\n  final controller = flutter.ScrollController();\n}\n\nclass CollectionIfCaseInsideStatement extends State<StatefulWidget> {\n  late TextEditingController controller;\n\n  @override\n  void initState() {\n    super.initState();\n    if (widget case final controller?) {\n      final list = [if (widget case final nested?) nested];\n    }\n    controller = TextEditingController();\n  }\n}\n\nclass ShadowedBodyDisposals extends State<StatefulWidget> {\n  final blockShadow = TextEditingController();\n  final forShadow = TextEditingController();\n  final patternShadow = TextEditingController();\n  final caseShadow = TextEditingController();\n  final catchShadow = TextEditingController();\n  final closureShadow = TextEditingController();\n  final functionShadow = TextEditingController();\n\n  @override\n  void dispose() {\n    {\n      final blockShadow = TextEditingController();\n      blockShadow.dispose();\n    }\n    for (final forShadow in <TextEditingController>[]) {\n      forShadow.dispose();\n    }\n    for (final [patternShadow] in <List<TextEditingController>>[]) {\n      patternShadow.dispose();\n    }\n    if (widget case TextEditingController caseShadow) {\n      caseShadow.dispose();\n    }\n    try {\n      throw widget;\n    } catch (catchShadow) {\n      catchShadow.dispose();\n    }\n    final callback = (TextEditingController closureShadow) {\n      closureShadow.dispose();\n    };\n    void local(TextEditingController functionShadow) {\n      functionShadow.dispose();\n    }\n    super.dispose();\n  }\n}",
       "crossFile": null,
-      "good": "import 'package:flutter/material.dart';\n\nclass A extends State<StatefulWidget> {\n  final controller = TextEditingController();\n\n  @override\n  void dispose() {\n    controller.dispose();\n    super.dispose();\n  }\n}\n\nclass B extends State<StatefulWidget> {\n  late final controller = widget.controller;\n\n  @override\n  void dispose() {\n    super.dispose();\n  }\n}\n\nclass C extends State<StatefulWidget> {\n  final scroll = ScrollController();\n  final text = TextEditingController();\n\n  @override\n  void dispose() {\n    scroll.dispose();\n    text.dispose();\n    super.dispose();\n  }\n}\n\nclass D {\n  final controller = TextEditingController();\n}\n\nclass E extends State<StatefulWidget> {\n  TabController? tabs;\n\n  @override\n  void dispose() {\n    tabs?.dispose();\n    super.dispose();\n  }\n}\n\nclass F extends State<StatefulWidget> {\n  final _controller = ScrollController();\n\n  @override\n  void dispose() {\n    _controller\n      ..removeListener(_onScroll)\n      ..dispose();\n    super.dispose();\n  }\n\n  void _onScroll() {}\n}\n\nclass G extends State<StatefulWidget> {\n  final controller = TextEditingController();\n\n  @override\n  void dispose() {\n    this.controller.dispose();\n    super.dispose();\n  }\n}"
+      "good": "import 'package:flutter/material.dart';\n\nclass A extends State<StatefulWidget> {\n  final controller = TextEditingController();\n\n  @override\n  void dispose() {\n    controller.dispose();\n    super.dispose();\n  }\n}\n\nclass B extends State<StatefulWidget> {\n  late final controller = widget.controller;\n\n  @override\n  void dispose() {\n    super.dispose();\n  }\n}\n\nclass C extends State<StatefulWidget> {\n  final scroll = ScrollController();\n  final text = TextEditingController();\n\n  @override\n  void dispose() {\n    scroll.dispose();\n    text.dispose();\n    super.dispose();\n  }\n}\n\nclass D {\n  final controller = TextEditingController();\n}\n\nclass E extends State<StatefulWidget> {\n  TabController? tabs;\n\n  @override\n  void dispose() {\n    tabs?.dispose();\n    super.dispose();\n  }\n}\n\nclass F extends State<StatefulWidget> {\n  final _controller = ScrollController();\n\n  @override\n  void dispose() {\n    _controller\n      ..removeListener(_onScroll)\n      ..dispose();\n    super.dispose();\n  }\n\n  void _onScroll() {}\n}\n\nclass G extends State<StatefulWidget> {\n  final controller = TextEditingController();\n\n  @override\n  void dispose() {\n    this.controller.dispose();\n    super.dispose();\n  }\n}\n\nclass CollectionIfCases extends State<StatefulWidget> {\n  final controller = TextEditingController();\n\n  @override\n  void dispose() {\n    final value = widget;\n    final list = [if (value case final controller?) controller];\n    final set = <Object>{if (value case final controller?) controller};\n    final map = <Object, Object>{\n      if (value case final controller?) controller: controller,\n    };\n    controller.dispose();\n    super.dispose();\n  }\n}\n\nclass RestoredBodyScopes extends State<StatefulWidget> {\n  final controller = TextEditingController();\n\n  @override\n  void dispose() {\n    {\n      final controller = TextEditingController();\n      controller.dispose();\n    }\n    for (final controller in <TextEditingController>[]) {\n      controller.dispose();\n    }\n    for (final [controller] in <List<TextEditingController>>[]) {\n      controller.dispose();\n    }\n    if (widget case final controller?) {\n      final list = [if (widget case final nested?) nested];\n    } else {\n      controller.dispose();\n    }\n    try {\n      throw widget;\n    } catch (controller) {}\n    final callback = (TextEditingController controller) {\n      controller.dispose();\n    };\n    void local(TextEditingController controller) {\n      controller.dispose();\n    }\n    controller.dispose();\n    super.dispose();\n  }\n}\n\nclass InitializerIsNotBodyOwnership extends State<StatefulWidget> {\n  final TextEditingController controller;\n\n  InitializerIsNotBodyOwnership() : controller = TextEditingController();\n}"
     },
     "group": "correctness",
     "name": "proper-controller-dispose",
@@ -5703,7 +5841,7 @@
     "examples": {
       "bad": "final apiUrl = String.fromEnvironment('API_URL');\n\nfinal debug = bool.fromEnvironment('DEBUG');\n\nfinal port = int.fromEnvironment('PORT');\n\nString read() => String.fromEnvironment('KEY');\n\nvoid f() {\n  var mode = String.fromEnvironment('MODE');\n  print(mode);\n}",
       "crossFile": null,
-      "good": "const apiUrl = String.fromEnvironment('API_URL');\n\nconst debug = bool.fromEnvironment('DEBUG');\n\nconst port = int.fromEnvironment('PORT');\n\nclass C {\n  static const key = String.fromEnvironment('KEY');\n}\n\nconst list = [\n  String.fromEnvironment('A'),\n  String.fromEnvironment('B'),\n];\n\nString get env => const String.fromEnvironment('ENV');"
+      "good": "const apiUrl = String.fromEnvironment('API_URL');\n\nconst debug = bool.fromEnvironment('DEBUG');\n\nconst port = int.fromEnvironment('PORT');\n\nclass C {\n  static const key = String.fromEnvironment('KEY');\n}\n\nconst list = [\n  String.fromEnvironment('A'),\n  String.fromEnvironment('B'),\n];\n\nString get env => const String.fromEnvironment('ENV');\n\nclass EnvironmentValue {\n  final String value;\n  const EnvironmentValue(this.value);\n}\n\n@EnvironmentValue(String.fromEnvironment('ANNOTATED'))\nvoid annotated() {}"
     },
     "group": "correctness",
     "name": "proper-from-environment",
@@ -6221,7 +6359,7 @@
     "examples": {
       "bad": "// Bad: an outer-nullable return type whose every return is a non-null literal.\n\nString? getStatus() {\n  return 'active';\n}\n\nint? getNumber() {\n  return 42;\n}\n\n// The outer `?` (after `List<...>`) counts; the returned list is non-null.\nList<String?>? getItems() {\n  return ['a', 'b', 'c'];\n}\n\nbool? isValid() {\n  if (DateTime.now().isUtc) {\n    return true;\n  }\n  return false;\n}\n\nclass Holder {\n  String? get label => 'x';\n}",
       "crossFile": null,
-      "good": "// Good: return type is non-nullable when function never returns null\n\nFuture<String> getName() async {\n  return 'hello';\n}\n\nString getStatus() {\n  return 'active';\n}\n\nint getNumber() {\n  return 42;\n}\n\nList<String> getItems() {\n  return ['a', 'b', 'c'];\n}\n\nFuture<bool> isValid() async {\n  return true;\n}\n\n// Good: nullable return type when function can return null\n\nString? maybeGetName(bool shouldReturn) {\n  if (shouldReturn) {\n    return 'hello';\n  }\n  return null;\n}\n\nint? findIndex(List<int> items, int target) {\n  try {\n    return items.indexOf(target);\n  } catch (e) {\n    return null;\n  }\n}\n\n// Good: only the OUTER `?` counts — a nullable type argument does not.\nFuture<String?> asyncName() async {\n  return 'hello';\n}\n\nFuture<bool?> asyncValid() async {\n  return true;\n}\n\n// Good: returns we cannot prove non-null are not flagged.\nString? fromVariable(String value) {\n  return value;\n}\n\nString? fromCall() {\n  return compute();\n}\n\nString? withNullBranch(bool flag) {\n  if (flag) {\n    return 'x';\n  }\n  return null;\n}"
+      "good": "// Good: return type is non-nullable when function never returns null\n\nFuture<String> getName() async {\n  return 'hello';\n}\n\nString getStatus() {\n  return 'active';\n}\n\nint getNumber() {\n  return 42;\n}\n\nList<String> getItems() {\n  return ['a', 'b', 'c'];\n}\n\nFuture<bool> isValid() async {\n  return true;\n}\n\n// Good: nullable return type when function can return null\n\nString? maybeGetName(bool shouldReturn) {\n  if (shouldReturn) {\n    return 'hello';\n  }\n  return null;\n}\n\nint? findIndex(List<int> items, int target) {\n  try {\n    return items.indexOf(target);\n  } catch (e) {\n    return null;\n  }\n}\n\n// Good: only the OUTER `?` counts — a nullable type argument does not.\nFuture<String?> asyncName() async {\n  return 'hello';\n}\n\nFuture<bool?> asyncValid() async {\n  return true;\n}\n\n// Good: returns we cannot prove non-null are not flagged.\nString? fromVariable(String value) {\n  return value;\n}\n\nString? fromCall() {\n  return compute();\n}\n\nString? withNullBranch(bool flag) {\n  if (flag) {\n    return 'x';\n  }\n  return null;\n}\n\nString? onlyDelayedReturns() {\n  String? local() {\n    return 'local';\n  }\n  final callback = () {\n    return 'callback';\n  };\n}\n\nString? nullableOuterAfterNonNullClosure() {\n  final callback = () {\n    return 'callback';\n  };\n  return null;\n}"
     },
     "group": "correctness",
     "name": "unnecessary-nullable-return-type",
@@ -10860,14 +10998,38 @@
         "file": null,
         "line": 40,
         "message": "Don't return 'this' from a method."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 51,
+        "message": "Don't return 'this' from a method."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 59,
+        "message": "Don't return 'this' from a method."
+      },
+      {
+        "column": 16,
+        "file": null,
+        "line": 70,
+        "message": "Don't return 'this' from a method."
+      },
+      {
+        "column": 12,
+        "file": null,
+        "line": 93,
+        "message": "Don't return 'this' from a method."
       }
     ],
     "docs": "Flags methods that return `this` only to enable a fluent interface.\n\nDart's cascade operator (`..`) chains calls on the same receiver without any\ncooperation from the API, so a method returning its own receiver adds\nnothing but a misleading return type. Return `void` and let callers cascade.\n\n```dart\nclass Builder {\n  Builder add(int x) {        // flagged at `return this`\n    _items.add(x);\n    return this;\n  }\n  Builder clear() => this;    // flagged at `clear`\n}\n```\n\nOnly methods whose declared return type is the enclosing class, enum, or\nmixin and whose every `return` yields an unparenthesized `this` are reported.\nMethods that override an inherited member are exempt.",
     "domains": [],
     "examples": {
-      "bad": "class Builder {\n  final List<int> _items = [];\n\n  Builder add(int x) {\n    _items.add(x);\n    return this;\n  }\n\n  Builder clear() => this;\n\n  Builder addAll(List<int> xs) {\n    if (xs.isEmpty) {\n      return this;\n    }\n    _items.addAll(xs);\n    return this;\n  }\n\n  Builder get self => this;\n}\n\nclass Generic<T> {\n  Generic<T> touch() => this;\n}\n\nmixin Fluent {\n  Fluent reset() {\n    return this;\n  }\n}\n\nenum Level {\n  low;\n\n  Level same() => this;\n}\n\n// An unresolved superclass does not establish an override.\nclass Remote extends SomeUnknownBase {\n  Remote ping() => this;\n}",
+      "bad": "class Builder {\n  final List<int> _items = [];\n\n  Builder add(int x) {\n    _items.add(x);\n    return this;\n  }\n\n  Builder clear() => this;\n\n  Builder addAll(List<int> xs) {\n    if (xs.isEmpty) {\n      return this;\n    }\n    _items.addAll(xs);\n    return this;\n  }\n\n  Builder get self => this;\n}\n\nclass Generic<T> {\n  Generic<T> touch() => this;\n}\n\nmixin Fluent {\n  Fluent reset() {\n    return this;\n  }\n}\n\nenum Level {\n  low;\n\n  Level same() => this;\n}\n\n// An unresolved superclass does not establish an override.\nclass Remote extends SomeUnknownBase {\n  Remote ping() => this;\n}\n\nclass NestedReturns {\n  NestedReturns run() {\n    NestedReturns local() {\n      return NestedReturns();\n    }\n    final callback = () {\n      return NestedReturns();\n    };\n    return this;\n  }\n}\n\nclass ControlReturns {\n  ControlReturns guarded(bool fail) {\n    try {\n      if (fail) throw StateError('failed');\n      return this;\n    } catch (_) {\n      return this;\n    } finally {\n      return this;\n    }\n  }\n\n  ControlReturns branches(int value) {\n    switch (value) {\n      case 0:\n        return this;\n      default:\n        outer:\n        for (var i = 0; i < value; i++) {\n          if (i == 1) return this;\n          break outer;\n        }\n    }\n    while (value-- > 0) {\n      return this;\n    }\n    do {\n      return this;\n    } while (false);\n  }\n\n  ControlReturns callbacks() {\n    final callback = () {\n      return this;\n    };\n    ControlReturns local() {\n      return this;\n    }\n    return this;\n  }\n}",
       "crossFile": null,
-      "good": "class Builder {\n  final List<int> _items = [];\n\n  // Use cascades instead of returning `this`.\n  void add(int x) => _items.add(x);\n\n  // Returns a new instance, not `this`.\n  Builder copy() => Builder().._items.addAll(_items);\n\n  // Some paths return something else.\n  Builder pick(Builder other, bool first) {\n    if (first) return this;\n    return other;\n  }\n\n  // Return type is not the enclosing type.\n  Object identity() => this;\n\n  // Operators are not methods.\n  Builder operator +(int x) => this;\n}\n\n// Overriding an inherited member is required by the interface.\nabstract class Chain {\n  Chain next();\n}\n\nclass Link implements Chain {\n  @override\n  Chain next() => this;\n}\n\nclass Node extends Link {\n  @override\n  Link next() => this;\n}\n\n\n// Extensions are not checked.\nextension on String {\n  String same() => this;\n}\n\n// Static methods cannot return `this`; nested closures do not count.\nclass Holder {\n  Holder run() {\n    final f = () => this;\n    return Holder();\n  }\n}\n\nclass GroupedReceiver {\n  GroupedReceiver arrow() => (this);\n  GroupedReceiver block() {\n    return (/* grouping is significant to this lint */ this);\n  }\n  GroupedReceiver mixed(bool flag) {\n    if (flag) return this;\n    return ((this));\n  }\n}"
+      "good": "class Builder {\n  final List<int> _items = [];\n\n  // Use cascades instead of returning `this`.\n  void add(int x) => _items.add(x);\n\n  // Returns a new instance, not `this`.\n  Builder copy() => Builder().._items.addAll(_items);\n\n  // Some paths return something else.\n  Builder pick(Builder other, bool first) {\n    if (first) return this;\n    return other;\n  }\n\n  // Return type is not the enclosing type.\n  Object identity() => this;\n\n  // Operators are not methods.\n  Builder operator +(int x) => this;\n}\n\n// Overriding an inherited member is required by the interface.\nabstract class Chain {\n  Chain next();\n}\n\nclass Link implements Chain {\n  @override\n  Chain next() => this;\n}\n\nclass Node extends Link {\n  @override\n  Link next() => this;\n}\n\n\n// Extensions are not checked.\nextension on String {\n  String same() => this;\n}\n\n// Static methods cannot return `this`; nested closures do not count.\nclass Holder {\n  Holder run() {\n    final f = () => this;\n    return Holder();\n  }\n}\n\nclass GroupedReceiver {\n  GroupedReceiver arrow() => (this);\n  GroupedReceiver block() {\n    return (/* grouping is significant to this lint */ this);\n  }\n  GroupedReceiver mixed(bool flag) {\n    if (flag) return this;\n    return ((this));\n  }\n}\n\nclass NestedOnly {\n  NestedOnly run() {\n    NestedOnly local() {\n      return this;\n    }\n    final callback = () {\n      return this;\n    };\n  }\n}\n\nclass ReturnedClosure {\n  ReturnedClosure run() {\n    return (() {\n      return this;\n    })();\n  }\n}"
     },
     "group": "style",
     "name": "avoid-returning-this",
@@ -11484,12 +11646,18 @@
         "file": null,
         "line": 19,
         "message": "An 'async' function should have a 'Future' return type when it doesn't return a value."
+      },
+      {
+        "column": 8,
+        "file": null,
+        "line": 23,
+        "message": "An 'async' function should have a 'Future' return type when it doesn't return a value."
       }
     ],
     "docs": "Avoid `async` functions and methods declared to return `void`.\n\nCallers cannot await a `void` result, so they cannot know when the work has\nfinished or observe its errors. Return `Future<void>` instead:\n\n```dart\nvoid save() async {} // BAD\nFuture<void> save() async {} // GOOD\n```\n\nA top-level `main` and `async*` generators are exempt. Functions without a\nwritten return type are skipped: an override may inherit `void`, which only\nfull type resolution can see.",
     "domains": [],
     "examples": {
-      "bad": "void save() async {}\n\nvoid arrow() async => print('x');\n\nclass Store {\n  void flush() async {}\n\n  static void reset() async {}\n\n  void get refresh async {}\n}\n\nvoid outer() {\n  void inner() async {}\n  inner();\n}\n\nmixin Loader {\n  void load() async {}\n}",
+      "bad": "void save() async {}\n\nvoid arrow() async => print('x');\n\nclass Store {\n  void flush() async {}\n\n  static void reset() async {}\n\n  void get refresh async {}\n}\n\nvoid outer() {\n  void inner() async {}\n  inner();\n}\n\nmixin Loader {\n  void load() async {}\n}\n\nvoid main() async {\n  void callback() async {}\n  [callback].forEach((run) => run());\n}",
       "crossFile": null,
       "good": "import 'dart:async';\n\nvoid main() async {}\n\nFuture<void> save() async {}\n\nFuture<int> compute() async => 1;\n\nvoid syncWork() {}\n\nStream<void> events() async* {}\n\nFutureOr<void> maybe() async {}\n\nclass Store {\n  Future<void> flush() async {}\n\n  void syncFlush() {}\n\n  Future<void> get refresh async {}\n}\n\nvoid outer() {\n  Future<void> inner() async {}\n  final callback = () async {};\n  inner();\n  callback();\n}"
     },
@@ -14361,14 +14529,56 @@
         "file": null,
         "line": 30,
         "message": "Using 'toString' on a 'Type' is not safe in production code."
+      },
+      {
+        "column": 41,
+        "file": null,
+        "line": 34,
+        "message": "Using 'toString' on a 'Type' is not safe in production code."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 42,
+        "message": "Using 'toString' on a 'Type' is not safe in production code."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 47,
+        "message": "Using 'toString' on a 'Type' is not safe in production code."
+      },
+      {
+        "column": 15,
+        "file": null,
+        "line": 51,
+        "message": "Using 'toString' on a 'Type' is not safe in production code."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 53,
+        "message": "Using 'toString' on a 'Type' is not safe in production code."
+      },
+      {
+        "column": 29,
+        "file": null,
+        "line": 58,
+        "message": "Using 'toString' on a 'Type' is not safe in production code."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 66,
+        "message": "Using 'toString' on a 'Type' is not safe in production code."
       }
     ],
     "docs": "Avoid calling `toString()` on `runtimeType`.\n\n`runtimeType.toString()` forces the runtime to keep type names around and is\nslow; in production builds the names may also be minified:\n\n```dart\nclass Point {\n  @override\n  String toString() => '$runtimeType()'; // BAD\n}\n```\n\nReported for `this.runtimeType`, `super.runtimeType`, or an implicit-`this`\n`runtimeType` getter that is either interpolated or has `toString()` called\non it. Uses inside asserts, `throw` expressions, catch clauses, mixins, and\nabstract classes are exempt. Extension-target checks are syntactic: an\nunqualified named target is checked only if it names a non-abstract class\ndeclared in this file, `Object`, or one of the extension's type parameters.\nNon-named targets, including `dynamic`, `void`, function and record types,\nare checked. Falcon limitation: other named targets are exempt, including\nprefixed targets, external classes and `Never`; this is not a semantic test\nof whether the target is concrete.",
     "domains": [],
     "examples": {
-      "bad": "class Point {\n  final int x;\n\n  Point(this.x);\n\n  @override\n  String toString() => '$runtimeType($x)';\n\n  String describe() => runtimeType.toString();\n\n  String explicit() => this.runtimeType.toString();\n\n  String viaSuper() => super.runtimeType.toString();\n\n  String braced() => 'Instance of ${this.runtimeType}';\n\n  void log() {\n    final callback = () => print('$runtimeType');\n    callback();\n  }\n}\n\nenum Color {\n  red;\n\n  String label() => '$runtimeType.$name';\n}\n\nextension on Point {\n  String tag() => runtimeType.toString();\n}",
+      "bad": "class Point {\n  final int x;\n\n  Point(this.x);\n\n  @override\n  String toString() => '$runtimeType($x)';\n\n  String describe() => runtimeType.toString();\n\n  String explicit() => this.runtimeType.toString();\n\n  String viaSuper() => super.runtimeType.toString();\n\n  String braced() => 'Instance of ${this.runtimeType}';\n\n  void log() {\n    final callback = () => print('$runtimeType');\n    callback();\n  }\n}\n\nenum Color {\n  red;\n\n  String label() => '$runtimeType.$name';\n}\n\nextension on Point {\n  String tag() => runtimeType.toString();\n}\n\nclass ExplicitDespiteShadow {\n  String describe() => this.runtimeType.toString();\n\n  void unrelated(String runtimeType) {}\n}\n\nclass ExemptionRestoration {\n  ExemptionRestoration()\n      : assert(runtimeType.toString().isNotEmpty) {\n    print('$runtimeType');\n  }\n\n  void inspect() {\n    try {\n      print('$runtimeType');\n    } catch (error) {\n      print('$runtimeType');\n    } finally {\n      print('$runtimeType');\n    }\n    print('$runtimeType');\n  }\n}\n\nclass PrimaryInitializer(int value) {\n  this : assert(runtimeType.toString().isNotEmpty);\n}\n\nabstract class ExemptBeforeConcrete {\n  String describe() => '$runtimeType';\n}\n\nclass CheckedAfterAbstract {\n  String describe() => '$runtimeType';\n}",
       "crossFile": null,
-      "good": "abstract class Base {\n  @override\n  String toString() => '$runtimeType';\n}\n\nmixin Describe {\n  String describe() => runtimeType.toString();\n}\n\nclass Checked {\n  void check(int value) {\n    assert(value > 0, '$runtimeType: value must be positive');\n    if (value > 10) {\n      throw StateError('${runtimeType.toString()} overflow');\n    }\n    try {\n      print(value);\n    } catch (e) {\n      print('$runtimeType failed: $e');\n    }\n  }\n\n  String other(Object value) => value.runtimeType.toString();\n\n  String plain() => toString();\n}\n\nclass Shadowed {\n  String describe(String runtimeType) => runtimeType.toString();\n}\n\nString topLevel(Object value) => '${value.runtimeType}';\n\nextension on int {\n  String tag() => runtimeType.toString();\n}"
+      "good": "abstract class Base {\n  @override\n  String toString() => '$runtimeType';\n}\n\nmixin Describe {\n  String describe() => runtimeType.toString();\n}\n\nclass Checked {\n  void check(int value) {\n    assert(value > 0, '$runtimeType: value must be positive');\n    if (value > 10) {\n      throw StateError('${runtimeType.toString()} overflow');\n    }\n    try {\n      print(value);\n    } catch (e) {\n      print('$runtimeType failed: $e');\n    }\n  }\n\n  String other(Object value) => value.runtimeType.toString();\n\n  String plain() => toString();\n}\n\nclass Shadowed {\n  String describe(String runtimeType) => runtimeType.toString();\n}\n\nString topLevel(Object value) => '${value.runtimeType}';\n\nextension on int {\n  String tag() => runtimeType.toString();\n}\n\nclass LaterShadow {\n  String describe() => '$runtimeType';\n\n  void unrelated() {\n    final runtimeType = 'local';\n    print(runtimeType);\n  }\n}\n\nclass InitializerExemptions {\n  InitializerExemptions()\n      : assert(runtimeType.toString().isNotEmpty, '$runtimeType');\n}\n\n// INVALID-CODE: annotation arguments need not be constant for this syntactic rule.\nclass IgnoredConstructorMetadata {\n  @Tag(this.runtimeType.toString())\n  IgnoredConstructorMetadata();\n\n  factory IgnoredConstructorMetadata.redirect() =\n      Target<void Function(@Tag(this.runtimeType.toString()) int value)>;\n}"
     },
     "group": "style",
     "name": "no-runtime-type-to-string",
@@ -14864,14 +15074,20 @@
         "file": null,
         "line": 50,
         "message": "Invalid assignment to the parameter 'limit'."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 57,
+        "message": "Invalid assignment to the parameter 'input'."
       }
     ],
     "docs": "Don't reassign parameters of functions, methods, or constructors.\n\nRebinding a parameter makes the body harder to follow: the name no longer\nmeans what the caller passed. Assignments (`x = ...`, `x += ...`),\nincrements and decrements, and pattern assignments (`(x, y) = ...`) that\nwrite a parameter are flagged, including writes from closures inside the\nbody. One exception mirrors the analyzer: an optional parameter without a\ndefault value (so it defaults to `null`) may be given a default once with\n`x ??= value`; a second `??=` or any other assignment is still flagged.\nThe analyzer also exempts increments/decrements of optional parameters\nwithout defaults, and this rule retains that exception.\n\nLike the analyzer's visitor, the search does not descend into an assignment\nexpression unless that assignment itself writes the parameter and the\nparameter defaults to `null`: writes nested in any other assignment\n(`target[offset++] = v`, `x = p++`, `c.onCancel = () { p = 0; }`,\n`a..v = (p = 2)`) are not reported. A constructor's parameters are searched\nfor in its body only, not in its initializer list.\n\n```dart\nvoid f(int x) { x = 2; } // flagged\nvoid g([int? x]) { x ??= 2; } // ok\n```",
     "domains": [],
     "examples": {
-      "bad": "class Point {\n  int x;\n  Point(this.x);\n\n  void move(int dx) {\n    dx = dx * 2;\n    x += dx;\n  }\n\n  Point.from(int start) : x = 0 {\n    start++;\n    x = start;\n  }\n}\n\nint compute(int value, [int? fallback]) {\n  value += 1;\n  fallback ??= 1;\n  fallback ??= 2;\n  fallback = 3;\n  return value + fallback;\n}\n\nvoid named({required int count, int step = 1}) {\n  count ??= 2;\n  step = 2;\n  print(count + step);\n}\n\nvoid swap(int a, int b) {\n  (a, b) = (b, a);\n  print(a + b);\n}\n\nvoid closures(int total) {\n  void bump() {\n    total--;\n  }\n\n  bump();\n  final f = (int n) {\n    n = 0;\n    return n;\n  };\n  print(f(total));\n}\n\nvoid nestedInOwnAssignment(int count, [int? limit]) {\n  count = count++;\n  limit = limit ??= 2;\n  print('$count$limit');\n}",
+      "bad": "class Point {\n  int x;\n  Point(this.x);\n\n  void move(int dx) {\n    dx = dx * 2;\n    x += dx;\n  }\n\n  Point.from(int start) : x = 0 {\n    start++;\n    x = start;\n  }\n}\n\nint compute(int value, [int? fallback]) {\n  value += 1;\n  fallback ??= 1;\n  fallback ??= 2;\n  fallback = 3;\n  return value + fallback;\n}\n\nvoid named({required int count, int step = 1}) {\n  count ??= 2;\n  step = 2;\n  print(count + step);\n}\n\nvoid swap(int a, int b) {\n  (a, b) = (b, a);\n  print(a + b);\n}\n\nvoid closures(int total) {\n  void bump() {\n    total--;\n  }\n\n  bump();\n  final f = (int n) {\n    n = 0;\n    return n;\n  };\n  print(f(total));\n}\n\nvoid nestedInOwnAssignment(int count, [int? limit]) {\n  count = count++;\n  limit = limit ??= 2;\n  print('$count$limit');\n}\n\nclass ConstructorBody {\n  final int value;\n  ConstructorBody(int input) : value = input++ {\n    input++;\n  }\n}",
       "crossFile": null,
-      "good": "class Point {\n  int x;\n  Point(this.x) {\n    x = x + 1;\n  }\n\n  void move(int dx) {\n    x += dx;\n  }\n}\n\nint compute(int value, [int? fallback]) {\n  fallback ??= 1;\n  final result = value + fallback;\n  return result;\n}\n\nvoid named({int? count}) {\n  count ??= 2;\n  print(count);\n}\n\nvoid shadowed(int value) {\n  void inner(int value) {\n    print(value);\n  }\n\n  inner(value);\n  [1, 2].forEach((value) {\n    print(value);\n  });\n}\n\nvoid loop(int item, List<int> items) {\n  for (item in items) {\n    print(item);\n  }\n}\n\n// The analyzer does not search inside assignments that write something else.\nclass Callbacks {\n  void Function()? onCancel;\n}\n\nvoid nestedInAssignment(List<int> target, int targetOffset, int size, Callbacks c) {\n  target[targetOffset++] = 1;\n  var copy = 0;\n  copy = size++;\n  c.onCancel = () {\n    size = 0;\n  };\n  print(copy);\n}"
+      "good": "class Point {\n  int x;\n  Point(this.x) {\n    x = x + 1;\n  }\n\n  void move(int dx) {\n    x += dx;\n  }\n}\n\nint compute(int value, [int? fallback]) {\n  fallback ??= 1;\n  final result = value + fallback;\n  return result;\n}\n\nvoid named({int? count}) {\n  count ??= 2;\n  print(count);\n}\n\nvoid shadowed(int value) {\n  void inner(int value) {\n    print(value);\n  }\n\n  inner(value);\n  [1, 2].forEach((value) {\n    print(value);\n  });\n}\n\nvoid loop(int item, List<int> items) {\n  for (item in items) {\n    print(item);\n  }\n}\n\n// The analyzer does not search inside assignments that write something else.\nclass Callbacks {\n  void Function()? onCancel;\n}\n\nvoid nestedInAssignment(List<int> target, int targetOffset, int size, Callbacks c) {\n  target[targetOffset++] = 1;\n  var copy = 0;\n  copy = size++;\n  c.onCancel = () {\n    size = 0;\n  };\n  print(copy);\n}\n\nclass InitializerOnly {\n  final int value;\n  InitializerOnly(int input) : value = input++;\n}"
     },
     "group": "style",
     "name": "parameter-assignments",
@@ -14998,14 +15214,26 @@
         "file": null,
         "line": 48,
         "message": "Assert should be in the initializer list."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 54,
+        "message": "Assert should be in the initializer list."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 58,
+        "message": "Assert should be in the initializer list."
       }
     ],
     "docs": "Flags leading constructor-body asserts that could live in the initializer list.\n\nAn `assert` at the start of a generative constructor body that does not\nneed the instance (no `this`, no instance member of the class or its\nsuperclasses and mixins) can move into the initializer list, where it runs\nbefore the object is used and works for `const` constructors too. Fields\ninitialized by `this.x` formals count as available, since the formal holds\nthe same value, as do fields a `super.x` formal passes to a superclass\nconstructor's `this.x` parameter. The analyzer retains the last class's\nsuperclass/mixin chain for subsequent extension type constructors.\n\n```dart\nclass A {\n  A(int a) { assert(a != 0); } // flagged\n  A(int a) : assert(a != 0);   // ok\n}\n```",
     "domains": [],
     "examples": {
-      "bad": "int limit = 10;\n\nclass Range {\n  final int start;\n  final int end;\n  Range(this.start, this.end) {\n    assert(start <= end);\n    assert(end < limit);\n    print(start);\n  }\n  Range.of(int a, int b) : start = a, end = b {\n    assert(a <= b, 'ordered');\n  }\n  Range.single(int v) : start = v, end = v {\n    assert(isValid(v));\n  }\n  Range.list(List<int> items) : start = items.first, end = items.last {\n    assert(items.every((e) => e >= 0));\n  }\n  static bool isValid(int v) => v >= 0;\n}\n\nclass Sub extends Range {\n  Sub(int a) : super(a, a) {\n    assert(a > 0);\n  }\n}\n\nclass Parent {\n  final int value;\n  Parent(this.value);\n}\n\nclass SuperFormal extends Parent {\n  SuperFormal(super.value) {\n    assert(value > 0);\n  }\n}\n\nextension type CheckedValue(int? value) {\n  CheckedValue.checked(this.value) {\n    assert(value != null);\n  }\n}\n\nclass ParameterMessage {\n  ParameterMessage(int value) {\n    assert(value > 0, value);\n  }\n}",
+      "bad": "int limit = 10;\n\nclass Range {\n  final int start;\n  final int end;\n  Range(this.start, this.end) {\n    assert(start <= end);\n    assert(end < limit);\n    print(start);\n  }\n  Range.of(int a, int b) : start = a, end = b {\n    assert(a <= b, 'ordered');\n  }\n  Range.single(int v) : start = v, end = v {\n    assert(isValid(v));\n  }\n  Range.list(List<int> items) : start = items.first, end = items.last {\n    assert(items.every((e) => e >= 0));\n  }\n  static bool isValid(int v) => v >= 0;\n}\n\nclass Sub extends Range {\n  Sub(int a) : super(a, a) {\n    assert(a > 0);\n  }\n}\n\nclass Parent {\n  final int value;\n  Parent(this.value);\n}\n\nclass SuperFormal extends Parent {\n  SuperFormal(super.value) {\n    assert(value > 0);\n  }\n}\n\nextension type CheckedValue(int? value) {\n  CheckedValue.checked(this.value) {\n    assert(value != null);\n  }\n}\n\nclass ParameterMessage {\n  ParameterMessage(int value) {\n    assert(value > 0, value);\n  }\n}\n\nclass NestedAssertions {\n  NestedAssertions(int value) {\n    assert(() {\n      assert(value > 0);\n      return true;\n    }());\n    assert(value < 10);\n    print(value);\n    assert(value != 5);\n  }\n}",
       "crossFile": null,
-      "good": "class Range {\n  final int start;\n  final int end;\n  int get length => end - start;\n  Range(this.start, this.end) : assert(start <= end);\n  Range.checked(this.start, this.end) {\n    assert(length >= 0);\n  }\n  Range.self(this.start, this.end) {\n    assert(this.start <= this.end);\n  }\n  Range.method(this.start, this.end) {\n    assert(validate());\n  }\n  Range.late(int a, int b) : start = a, end = b {\n    print(a);\n    assert(a <= b);\n  }\n  factory Range.make(int a) {\n    assert(a > 0);\n    return Range(a, a);\n  }\n  Range.other(Range other) : start = other.start, end = other.end {\n    assert(other.length >= 0);\n  }\n  bool validate() => start <= end;\n}\n\nclass External extends Object with Mixed {\n  final int x;\n  External(this.x) {\n    assert(mixed > 0);\n  }\n}\n\nmixin Mixed {\n  int get mixed => 1;\n}\n\nclass Parent {\n  final int value;\n  Parent(this.value);\n}\n\nclass SuperFormal extends Parent {\n  SuperFormal(super.value) : assert(value > 0);\n}\n\nextension type CheckedValue(int? value) {\n  CheckedValue.checked(this.value) : assert(value != null);\n}\n\nclass InstanceMessage {\n  InstanceMessage(int value) {\n    assert(value > 0, this);\n  }\n  InstanceMessage.property(int value) {\n    assert(value > 0, this.toString());\n  }\n}"
+      "good": "class Range {\n  final int start;\n  final int end;\n  int get length => end - start;\n  Range(this.start, this.end) : assert(start <= end);\n  Range.checked(this.start, this.end) {\n    assert(length >= 0);\n  }\n  Range.self(this.start, this.end) {\n    assert(this.start <= this.end);\n  }\n  Range.method(this.start, this.end) {\n    assert(validate());\n  }\n  Range.late(int a, int b) : start = a, end = b {\n    print(a);\n    assert(a <= b);\n  }\n  factory Range.make(int a) {\n    assert(a > 0);\n    return Range(a, a);\n  }\n  Range.other(Range other) : start = other.start, end = other.end {\n    assert(other.length >= 0);\n  }\n  bool validate() => start <= end;\n}\n\nclass External extends Object with Mixed {\n  final int x;\n  External(this.x) {\n    assert(mixed > 0);\n  }\n}\n\nmixin Mixed {\n  int get mixed => 1;\n}\n\nclass Parent {\n  final int value;\n  Parent(this.value);\n}\n\nclass SuperFormal extends Parent {\n  SuperFormal(super.value) : assert(value > 0);\n}\n\nextension type CheckedValue(int? value) {\n  CheckedValue.checked(this.value) : assert(value != null);\n}\n\nclass InstanceMessage {\n  InstanceMessage(int value) {\n    assert(value > 0, this);\n  }\n  InstanceMessage.property(int value) {\n    assert(value > 0, this.toString());\n  }\n}\n\nclass InitializerClosure {\n  final bool value;\n  InitializerClosure(int input)\n      : value = (() {\n          assert(input > 0);\n          return true;\n        })() {\n    assert(input > 0, this);\n  }\n}\n\nclass SuperClosureParent {\n  SuperClosureParent(bool value);\n}\n\nclass SuperArgumentClosure extends SuperClosureParent {\n  SuperArgumentClosure(int input)\n      : super((() {\n          assert(input > 0);\n          return true;\n        })()) {\n    assert(input > 0, this);\n  }\n}"
     },
     "group": "style",
     "name": "prefer-asserts-in-initializer-lists",
@@ -15114,12 +15342,18 @@
         "file": null,
         "line": 33,
         "message": "Prefer async/await over .then() chains"
+      },
+      {
+        "column": 3,
+        "file": null,
+        "line": 43,
+        "message": "Prefer async/await over .then() chains"
       }
     ],
     "docs": "Flags `.then(...)` future chains that should use `async`/`await`.\n\nChaining callbacks with `Future.then` nests logic inside closures and scatters\nerror handling across `onError`/`catchError`, whereas `async`/`await` lets\nasynchronous code read top-to-bottom with ordinary `try`/`catch`. Function\nliterals passed to a chain are treated as delayed scopes and remain opaque.\n\nMatching is currently syntactic on the `then` name. Resolver-backed Future\nidentity is required before unrelated user-defined `then` methods can be\nexcluded reliably.",
     "domains": [],
     "examples": {
-      "bad": "// Bad: using .then() chains instead of async/await\nFuture<String> getData() {\n  return fetch().then((data) {\n    return process(data);\n  });\n}\n\nvoid processUser() {\n  getUserId().then((id) {\n    print(id);\n  });\n}\n\nFuture<int> compute() {\n  return loadData().then((d) => transform(d)).catchError((e) {\n    print('Error: $e');\n    return 0;\n  });\n}\n\nclass Api {\n  Future<String> fetchName() {\n    return http.get(url).then((response) => response.body);\n  }\n}\n\nvoid refresh() {\n  reload().then((_) => notifyListeners());\n}\n\nvoid withLocalFunction() {\n  void body() {\n    reload().then((_) => notifyListeners());\n  }\n  body();\n}",
+      "bad": "// Bad: using .then() chains instead of async/await\nFuture<String> getData() {\n  return fetch().then((data) {\n    return process(data);\n  });\n}\n\nvoid processUser() {\n  getUserId().then((id) {\n    print(id);\n  });\n}\n\nFuture<int> compute() {\n  return loadData().then((d) => transform(d)).catchError((e) {\n    print('Error: $e');\n    return 0;\n  });\n}\n\nclass Api {\n  Future<String> fetchName() {\n    return http.get(url).then((response) => response.body);\n  }\n}\n\nvoid refresh() {\n  reload().then((_) => notifyListeners());\n}\n\nvoid withLocalFunction() {\n  void body() {\n    reload().then((_) => notifyListeners());\n  }\n  body();\n}\n\nvoid restoredAfterArrow(Future<int> future) {\n  Future<int> arrow() => future.then((value) => value);\n  final callback = () {\n    future.then((value) => value);\n  };\n  future.then((value) => value);\n  print(callback);\n}",
       "crossFile": null,
       "good": "// Good: using async/await instead of .then() chains\nFuture<String> getData() async {\n  final data = await fetch();\n  return process(data);\n}\n\nvoid processUser() async {\n  final id = await getUserId();\n  print(id);\n}\n\nFuture<int> compute() async {\n  try {\n    final d = await loadData();\n    return transform(d);\n  } catch (e) {\n    print('Error: $e');\n    return 0;\n  }\n}\n\nclass Api {\n  Future<String> fetchName() async {\n    final response = await http.get(url);\n    return response.body;\n  }\n}\n\n// OK: .then() with simple arrow function\nFuture<String> simpleFetch() => fetch().then((d) => d);\n\n// OK: arrow-bodied local function is a delayed scope, same as a top-level arrow body.\nvoid withArrowLocalFunction() {\n  void body() => reload().then((_) => notifyListeners());\n  body();\n}"
     },
@@ -16010,14 +16244,26 @@
         "file": null,
         "line": 42,
         "message": "Static method should be a constructor."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 47,
+        "message": "Static method should be a constructor."
+      },
+      {
+        "column": 26,
+        "file": null,
+        "line": 51,
+        "message": "Static method should be a constructor."
       }
     ],
     "docs": "Flags static methods that create and return an instance of their own class.\n\nA static method whose job is to build an instance of the enclosing type is a\nnamed constructor in disguise. Named (and factory) constructors make the\nintent explicit, show up as constructors in tooling, and work with\nconstructor tear-offs.\n\n```dart\nclass Point {\n  final num x, y;\n  Point(this.x, this.y);\n  static Point polar(num theta, num radius) =>   // flagged\n      Point(radius * cos(theta), radius * sin(theta));\n  Point.fromPolar(num theta, num radius)         // preferred\n      : x = radius * cos(theta), y = radius * sin(theta);\n}\n```\n\nOnly non-generic static methods and getters of non-generic classes and\nextension types are checked. As in the analyzer, the last visited constructor\ncall determines whether the body creates the declared enclosing return type.",
     "domains": [],
     "examples": {
-      "bad": "class Point {\n  final num x;\n  final num y;\n  Point(this.x, this.y);\n\n  static Point polar(num theta, num radius) =>\n      Point(radius * theta, radius * theta);\n\n  static Point origin() {\n    return Point(0, 0);\n  }\n\n  static Point fromList(List<num> xs) {\n    final p = Point(xs[0], xs[1]);\n    return p;\n  }\n}\n\nclass Named {\n  final String name;\n  Named._(this.name);\n\n  static Named create(String name) => Named._(name.trim());\n}\n\nclass WithNew {\n  WithNew();\n\n  static WithNew make() => new WithNew();\n}\n\nclass Implicit {\n  static Implicit build() => Implicit();\n}\n\nclass Singleton {\n  static Singleton get instance => Singleton();\n}\n\nclass NamedCreation {\n  const NamedCreation.fallback();\n  static NamedCreation of(Object? value) => value as NamedCreation? ?? const NamedCreation.fallback();\n}",
+      "bad": "class Point {\n  final num x;\n  final num y;\n  Point(this.x, this.y);\n\n  static Point polar(num theta, num radius) =>\n      Point(radius * theta, radius * theta);\n\n  static Point origin() {\n    return Point(0, 0);\n  }\n\n  static Point fromList(List<num> xs) {\n    final p = Point(xs[0], xs[1]);\n    return p;\n  }\n}\n\nclass Named {\n  final String name;\n  Named._(this.name);\n\n  static Named create(String name) => Named._(name.trim());\n}\n\nclass WithNew {\n  WithNew();\n\n  static WithNew make() => new WithNew();\n}\n\nclass Implicit {\n  static Implicit build() => Implicit();\n}\n\nclass Singleton {\n  static Singleton get instance => Singleton();\n}\n\nclass NamedCreation {\n  const NamedCreation.fallback();\n  static NamedCreation of(Object? value) => value as NamedCreation? ?? const NamedCreation.fallback();\n}\n\nclass PrunedArguments {\n  PrunedArguments(Object value);\n  static PrunedArguments create() => PrunedArguments(Object());\n}\n\nclass ClosureCreation {\n  static ClosureCreation create() {\n    final make = () => ClosureCreation();\n    return make();\n  }\n}",
       "crossFile": null,
-      "good": "class Point {\n  final num x;\n  final num y;\n  Point(this.x, this.y);\n\n  Point.polar(num theta, num radius)\n      : x = radius * theta,\n        y = radius * theta;\n\n  // Nullable return type: a constructor cannot return null.\n  static Point? tryParse(String text) => text.isEmpty ? null : Point(0, 0);\n\n  // Generic static method.\n  static Point first<T>(List<T> xs) => Point(xs.length, 0);\n\n  // Returns a cached instance without constructing one.\n  static final Point _zero = Point(0, 0);\n  static Point zero() => _zero;\n\n  // Instance method creating a new instance.\n  Point translate(num dx) => Point(x + dx, y);\n\n  // Returns another type.\n  static String describe() => Point(0, 0).toString();\n}\n\n// Generic classes are skipped.\nclass Box<T> {\n  final T value;\n  Box(this.value);\n  static Box<int> ofInt() => Box<int>(0);\n}\n\n// Factory constructor already.\nclass Logger {\n  Logger._();\n  factory Logger.create() => Logger._();\n}\n\n// Returning a subtype instance.\nclass Shape {\n  static Shape square() => Square();\n}\n\nclass Square extends Shape {}\n\n// The analyzer's visitor overwrites earlier matching constructor calls.\nclass LastCreation {\n  static LastCreation create() {\n    final value = LastCreation();\n    Object();\n    return value;\n  }\n}"
+      "good": "class Point {\n  final num x;\n  final num y;\n  Point(this.x, this.y);\n\n  Point.polar(num theta, num radius)\n      : x = radius * theta,\n        y = radius * theta;\n\n  // Nullable return type: a constructor cannot return null.\n  static Point? tryParse(String text) => text.isEmpty ? null : Point(0, 0);\n\n  // Generic static method.\n  static Point first<T>(List<T> xs) => Point(xs.length, 0);\n\n  // Returns a cached instance without constructing one.\n  static final Point _zero = Point(0, 0);\n  static Point zero() => _zero;\n\n  // Instance method creating a new instance.\n  Point translate(num dx) => Point(x + dx, y);\n\n  // Returns another type.\n  static String describe() => Point(0, 0).toString();\n}\n\n// Generic classes are skipped.\nclass Box<T> {\n  final T value;\n  Box(this.value);\n  static Box<int> ofInt() => Box<int>(0);\n}\n\n// Factory constructor already.\nclass Logger {\n  Logger._();\n  factory Logger.create() => Logger._();\n}\n\n// Returning a subtype instance.\nclass Shape {\n  static Shape square() => Square();\n}\n\nclass Square extends Shape {}\n\n// The analyzer's visitor overwrites earlier matching constructor calls.\nclass LastCreation {\n  static LastCreation create() {\n    final value = LastCreation();\n    Object();\n    return value;\n  }\n}\n\nclass DefaultParameterOnly {\n  const DefaultParameterOnly();\n  static DefaultParameterOnly create([\n    DefaultParameterOnly value = const DefaultParameterOnly(),\n  ]) => value;\n}\n\nclass ClosureOverwrite {\n  static ClosureOverwrite create() {\n    final value = ClosureOverwrite();\n    final other = () => Object();\n    return value;\n  }\n}"
     },
     "group": "style",
     "name": "prefer-constructors-over-static-methods",
@@ -20603,12 +20849,84 @@
         "file": null,
         "line": 124,
         "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 14,
+        "file": null,
+        "line": 135,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 136,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 35,
+        "file": null,
+        "line": 144,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 146,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 38,
+        "file": null,
+        "line": 151,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 153,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 42,
+        "file": null,
+        "line": 169,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 170,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 172,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 11,
+        "file": null,
+        "line": 180,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 13,
+        "file": null,
+        "line": 190,
+        "message": "Unnecessary 'this.' qualifier."
+      },
+      {
+        "column": 30,
+        "file": null,
+        "line": 190,
+        "message": "Unnecessary 'this.' qualifier."
       }
     ],
-    "docs": "Flags a redundant `this.` qualifier on member access.",
+    "docs": "Flags a redundant `this.` qualifier on member access.\n\nLexical scopes are prebound before checking instance member bodies.",
     "domains": [],
     "examples": {
-      "bad": "// `this.` where no parameter or local shadows the member.\nclass A {\n  int x = 0;\n  int y = 0;\n  void m() {\n    this.x = 1;\n    print(this.y);\n  }\n  int get sum => this.x + this.y;\n}\n\nclass B {\n  int value = 0;\n  void update(int v) {\n    this.helper();\n    value = v;\n  }\n  void helper() {}\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    this.count += 1;\n  }\n}\n\nclass SourceOrdered {\n  int value = 0;\n  void run() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n}\n\nclass NestedScopes {\n  int value = 0;\n  void run() {\n    {\n      final value = 1;\n      print(this.value + value);\n    }\n    print(this.value);\n    (() {\n      final value = 2;\n      print(this.value + value);\n    })();\n    print(this.value);\n  }\n}\n\nclass TryScopes {\n  int value = 0;\n  void run() {\n    try {\n      final value = 1;\n      print(value);\n    } catch (_) {\n      print(this.value);\n    } finally {\n      print(this.value);\n    }\n    print(this.value);\n  }\n}\n\nclass BranchScopes {\n  int value = 0;\n  void run(bool flag, Object subject) {\n    if (flag) {\n      final value = 1;\n      print(this.value + value);\n    } else {\n      print(this.value);\n    }\n    if (subject case final value) {\n      print(this.value + value.hashCode);\n    } else {\n      print(this.value);\n    }\n    while (flag) {\n      final value = 2;\n      print(this.value + value);\n      break;\n    }\n    print(this.value);\n  }\n}\n\nbool isNull(Object? value) => value == null;\n\nclass DeclaredMember {\n  bool get isNull => false;\n  bool check() => this.isNull;\n}\n\nclass LaterNestedBlock {\n  int value = 0;\n  void run() {\n    print(this.value);\n    {\n      final value = 1;\n      print(value);\n    }\n  }\n}\n\nextension DeclaredExtension on String {\n  bool get isNull => false;\n  bool check() => this.isNull;\n}\n\nint headerValue = 0;\nint representationValue = 0;\n\n// Declaring header parameters are direct members, ahead of library names.\nclass HeaderMember(final int headerValue) {\n  int read() => this.headerValue;\n  int shadowed(int headerValue) => this.headerValue + headerValue;\n}\n\nextension type RepresentationMember(int representationValue) {\n  int read() => this.representationValue;\n  int shadowed(int representationValue) =>\n      this.representationValue + representationValue;\n}",
+      "bad": "// `this.` where no parameter or local shadows the member.\nclass A {\n  int x = 0;\n  int y = 0;\n  void m() {\n    this.x = 1;\n    print(this.y);\n  }\n  int get sum => this.x + this.y;\n}\n\nclass B {\n  int value = 0;\n  void update(int v) {\n    this.helper();\n    value = v;\n  }\n  void helper() {}\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    this.count += 1;\n  }\n}\n\nclass SourceOrdered {\n  int value = 0;\n  void run() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n}\n\nclass NestedScopes {\n  int value = 0;\n  void run() {\n    {\n      final value = 1;\n      print(this.value + value);\n    }\n    print(this.value);\n    (() {\n      final value = 2;\n      print(this.value + value);\n    })();\n    print(this.value);\n  }\n}\n\nclass TryScopes {\n  int value = 0;\n  void run() {\n    try {\n      final value = 1;\n      print(value);\n    } catch (_) {\n      print(this.value);\n    } finally {\n      print(this.value);\n    }\n    print(this.value);\n  }\n}\n\nclass BranchScopes {\n  int value = 0;\n  void run(bool flag, Object subject) {\n    if (flag) {\n      final value = 1;\n      print(this.value + value);\n    } else {\n      print(this.value);\n    }\n    if (subject case final value) {\n      print(this.value + value.hashCode);\n    } else {\n      print(this.value);\n    }\n    while (flag) {\n      final value = 2;\n      print(this.value + value);\n      break;\n    }\n    print(this.value);\n  }\n}\n\nbool isNull(Object? value) => value == null;\n\nclass DeclaredMember {\n  bool get isNull => false;\n  bool check() => this.isNull;\n}\n\nclass LaterNestedBlock {\n  int value = 0;\n  void run() {\n    print(this.value);\n    {\n      final value = 1;\n      print(value);\n    }\n  }\n}\n\nextension DeclaredExtension on String {\n  bool get isNull => false;\n  bool check() => this.isNull;\n}\n\nint headerValue = 0;\nint representationValue = 0;\n\n// Declaring header parameters are direct members, ahead of library names.\nclass HeaderMember(final int headerValue) {\n  int read() => this.headerValue;\n  int shadowed(int headerValue) => this.headerValue + headerValue;\n}\n\nextension type RepresentationMember(int representationValue) {\n  int read() => this.representationValue;\n  int shadowed(int representationValue) =>\n      this.representationValue + representationValue;\n}\n\nclass DoWhileScopes {\n  int value = 0;\n  void run() {\n    do {\n      final value = 1;\n      print(this.value + value);\n    } while (this.value > 0);\n    print(this.value);\n  }\n}\n\nclass CollectionForScopes {\n  int value = 0;\n  void forIn(List<int> values) {\n    final items = [\n      for (final value in values) this.value,\n    ];\n    print(this.value);\n    print(items);\n  }\n  void patternForIn(List<(int,)> values) {\n    final items = [\n      for (final (value,) in values) this.value,\n    ];\n    print(this.value);\n    print(items);\n  }\n  void variableHeader() {\n    final items = [\n      for (var value = 0; value < 1; value++) this.value,\n    ];\n    print(this.value);\n    print(items);\n  }\n}\n\nclass CollectionIfCaseScopes {\n  int value = 0;\n  void run(Object? subject) {\n    final items = [\n      if (subject case final value? when this.value > 0)\n        this.value,\n    ];\n    print(this.value);\n    if (subject case final value?) {\n      final nested = [\n        if (subject case final other?) other,\n      ];\n      print(this.value + value.hashCode);\n      print(nested);\n    }\n    print(this.value);\n    print(items);\n  }\n}\n\nclass PatternDeclarationReportOrder {\n  int value = 0;\n  (int, int) pair = (0, 0);\n  void run() {\n    // Initializer diagnostics precede pattern diagnostics.\n    var (== this.value, _) = this.pair;\n  }\n}",
       "crossFile": null,
       "good": "// `this.` needed because of a shadowing parameter or local, or no `this.`.\nclass A {\n  int x = 0;\n  void m(int x) {\n    this.x = x;\n  }\n}\n\nclass B {\n  int value = 0;\n  void update() {\n    var value = 5;\n    this.value = value;\n  }\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    count += 1;\n  }\n  int get doubled => count * 2;\n}\n\nclass D {\n  int total = 0;\n  void add(int total) {\n    this.total += total;\n  }\n}\n\nclass E {\n  void run(int helper) {\n    this.helper();\n  }\n  void helper() {}\n}\n\nclass ScopedBindings {\n  int value = 0;\n\n  void catchesAndLoops() {\n    try {\n      throw 1;\n    } catch (value) {\n      print(this.value + value.hashCode);\n    }\n    for (final value in [1]) {\n      print(this.value + value);\n    }\n    if (Object() case final value) {\n      print(this.value + value.hashCode);\n    }\n  }\n\n  void closures() {\n    ((value) => print(this.value + value))(1);\n  }\n}\n\nclass InitializerScope {\n  int value = 1;\n  void ordinary() {\n    final value = this.value;\n    print(value);\n  }\n  void pattern() {\n    final (value,) = (this.value,);\n    print(value);\n  }\n  void later() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n  void capturedLater() {\n    void read() => print(this.value);\n    final value = 1;\n    read();\n    print(value);\n  }\n}\n\nbool isNull(Object? value) => value == null;\n\nextension NullableCheck on Object? {\n  bool get isNull => this == null;\n}\n\nclass ExtensionMember {\n  bool check() => this.isNull;\n}\n\nclass InheritedBase {\n  bool get isNull => false;\n}\n\nclass InheritedMember extends InheritedBase {\n  bool check() => this.isNull;\n}\n\nclass LoopInitializers {\n  int x = 0;\n  int y = 1;\n  List<int> values = [1];\n  void run() {\n    for (var x = this.x; x < 1; x++) {}\n    for (var x = this.y, y = 1; x < y; x++) {}\n    for (final values in this.values) {\n      print(values);\n    }\n  }\n}\n\nclass SwitchGuardBodyScope {\n  int y = 0;\n  void run(int v) {\n    switch (v) {\n      // The SDK linter's ancestor scope includes the case body's declarations.\n      case _ when this.y > 0:\n        print(this.y);\n        var y = 1;\n        print(y);\n    }\n  }\n}"
     },
@@ -23694,14 +24012,32 @@
         "file": null,
         "line": 46,
         "message": "Use `rethrow` to re-throw the caught exception and preserve its stack trace."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 58,
+        "message": "Use `rethrow` to re-throw the caught exception and preserve its stack trace."
+      },
+      {
+        "column": 9,
+        "file": null,
+        "line": 65,
+        "message": "Use `rethrow` to re-throw the caught exception and preserve its stack trace."
+      },
+      {
+        "column": 5,
+        "file": null,
+        "line": 70,
+        "message": "Use `rethrow` to re-throw the caught exception and preserve its stack trace."
       }
     ],
     "docs": "Flags `throw e` inside a `catch (e)` by matching the exception parameter's name.\n\nRe-throwing the caught object with `throw e` starts a fresh stack trace from\nthe catch site, discarding the original point of failure and making the error\nfar harder to trace. Use `rethrow`, which propagates the same exception with\nits trace intact. Matching is syntactic: the thrown identifier must have the\nexception parameter's spelling; binding identity is not resolved. Throws\ninside a nested closure or a nested `try`/`catch` are skipped.",
     "domains": [],
     "examples": {
-      "bad": "// Bad: re-throwing the caught exception with `throw e` instead of `rethrow`.\nbool cond = true;\nvoid x() {}\nvoid log(Object o) {}\n\nvoid a() {\n  try {\n    x();\n  } catch (e) {\n    throw e;\n  }\n}\n\nvoid b() {\n  try {\n    x();\n  } catch (e) {\n    log(e);\n    throw e;\n  }\n}\n\nvoid c() {\n  try {\n    x();\n  } catch (e) {\n    if (cond) {\n      throw e;\n    }\n  }\n}\n\nvoid d() {\n  try {\n    x();\n  } on Exception catch (e) {\n    throw e;\n  }\n}\n\nvoid e2() {\n  try {\n    x();\n  } catch (err, st) {\n    log(st);\n    throw err;\n  }\n}",
+      "bad": "// Bad: re-throwing the caught exception with `throw e` instead of `rethrow`.\nbool cond = true;\nvoid x() {}\nvoid log(Object o) {}\n\nvoid a() {\n  try {\n    x();\n  } catch (e) {\n    throw e;\n  }\n}\n\nvoid b() {\n  try {\n    x();\n  } catch (e) {\n    log(e);\n    throw e;\n  }\n}\n\nvoid c() {\n  try {\n    x();\n  } catch (e) {\n    if (cond) {\n      throw e;\n    }\n  }\n}\n\nvoid d() {\n  try {\n    x();\n  } on Exception catch (e) {\n    throw e;\n  }\n}\n\nvoid e2() {\n  try {\n    x();\n  } catch (err, st) {\n    log(st);\n    throw err;\n  }\n}\n\nvoid nestedCatchInsideFunctionBoundaries() {\n  try {\n    x();\n  } catch (outer) {\n    final callback = () {\n      try {\n        x();\n      } catch (inner) {\n        throw inner;\n      }\n    };\n    void local() {\n      try {\n        x();\n      } catch (inner) {\n        throw inner;\n      }\n    }\n    callback();\n    local();\n    throw outer;\n  }\n}",
       "crossFile": null,
-      "good": "// Good: `rethrow`, or a throw that is not equivalent to rethrowing the caught exception.\nvoid x() {}\nvoid y() {}\nvoid log(Object o) {}\n\nvoid a() {\n  try {\n    x();\n  } catch (e) {\n    rethrow; // already uses rethrow\n  }\n}\n\nvoid b() {\n  try {\n    x();\n  } catch (e) {\n    throw StateError('nope'); // throws a different object\n  }\n}\n\nvoid c() {\n  try {\n    x();\n  } catch (e) {\n    throw Exception(e); // wraps e rather than rethrowing it\n  }\n}\n\nvoid d() {\n  try {\n    x();\n  } catch (e) {\n    void handler() {\n      throw e; // inside a nested function: rethrow would be illegal here\n    }\n\n    handler();\n  }\n}\n\nvoid e2() {\n  try {\n    x();\n  } catch (e) {\n    try {\n      y();\n    } catch (e2) {\n      throw e; // refers to the outer exception; rethrow is not valid here\n    }\n  }\n}\n\nvoid f() {\n  try {\n    x();\n  } catch (e) {\n    final cb = () {\n      throw e; // inside a closure expression\n    };\n    cb();\n  }\n}"
+      "good": "// Good: `rethrow`, or a throw that is not equivalent to rethrowing the caught exception.\nvoid x() {}\nvoid y() {}\nvoid log(Object o) {}\n\nvoid a() {\n  try {\n    x();\n  } catch (e) {\n    rethrow; // already uses rethrow\n  }\n}\n\nvoid b() {\n  try {\n    x();\n  } catch (e) {\n    throw StateError('nope'); // throws a different object\n  }\n}\n\nvoid c() {\n  try {\n    x();\n  } catch (e) {\n    throw Exception(e); // wraps e rather than rethrowing it\n  }\n}\n\nvoid d() {\n  try {\n    x();\n  } catch (e) {\n    void handler() {\n      throw e; // inside a nested function: rethrow would be illegal here\n    }\n\n    handler();\n  }\n}\n\nvoid e2() {\n  try {\n    x();\n  } catch (e) {\n    try {\n      y();\n    } catch (e2) {\n      throw e; // refers to the outer exception; rethrow is not valid here\n    }\n  }\n}\n\nvoid f() {\n  try {\n    x();\n  } catch (e) {\n    final cb = () {\n      throw e; // inside a closure expression\n    };\n    cb();\n  }\n}\n\nvoid nestedTryDoesNotRethrowOuterBinding() {\n  try {\n    x();\n  } catch (outer) {\n    try {\n      throw outer;\n    } catch (inner) {\n      throw outer;\n    } finally {\n      throw outer;\n    }\n  }\n}"
     },
     "group": "suspicious",
     "name": "use-rethrow-when-possible",
