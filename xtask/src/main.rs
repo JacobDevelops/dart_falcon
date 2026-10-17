@@ -140,11 +140,13 @@ fn schema(check: bool) {
 
 /// Markdown docs plus the site's CLI data: every file that pins the falcon version.
 fn versioned_files(root: &Path) -> Vec<PathBuf> {
+    let changelog = root.join("CHANGELOG.md");
     let mut files: Vec<PathBuf> = [root.to_path_buf(), root.join("docs")]
         .iter()
         .flat_map(|dir| fs::read_dir(dir).expect("read docs dir"))
         .map(|entry| entry.expect("read docs entry").path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "md"))
+        .filter(|path| *path != changelog)
         .collect();
     files.push(root.join("website/src/data/cli.json"));
     files
@@ -1774,6 +1776,21 @@ mod tests {
                 path.display()
             );
         }
+    }
+
+    #[test]
+    fn versioned_files_excludes_historical_changelog_pins() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        std::fs::create_dir(root.join("docs")).unwrap();
+        let changelog = root.join("CHANGELOG.md");
+        std::fs::write(&changelog, "Download falcon-0.1.0-x86_64-linux.tar.gz").unwrap();
+        let readme = root.join("README.md");
+        std::fs::write(&readme, "Download falcon-0.4.2-x86_64-linux.tar.gz").unwrap();
+
+        let files = versioned_files(root);
+        assert!(!files.contains(&changelog));
+        assert!(files.contains(&readme));
     }
 
     #[test]

@@ -10,7 +10,9 @@ cargo-make    = "latest"
 taplo         = "latest"
 cargo-nextest = { version = "latest", version_prefix = "cargo-nextest-" }
 cargo-watch   = "latest"
+knope         = "latest"
 
 [tool_alias]
 cargo-nextest = "github:nextest-rs/nextest"
 cargo-watch   = "github:watchexec/cargo-watch"
+knope         = "github:knope-dev/knope"
