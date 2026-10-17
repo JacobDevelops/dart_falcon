@@ -25,10 +25,7 @@ pub fn with_rules_stack<T: Send>(f: impl FnOnce() -> T + Send) -> std::io::Resul
     })
 }
 
-pub(crate) fn rules_thread_diagnostic(
-    path: &std::path::Path,
-    error: &std::io::Error,
-) -> Diagnostic {
+pub fn rules_thread_diagnostic(path: &std::path::Path, error: &std::io::Error) -> Diagnostic {
     Diagnostic::new(
         "syntax-error",
         falcon_diagnostics::Severity::Error,

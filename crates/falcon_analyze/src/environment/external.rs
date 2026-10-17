@@ -7,11 +7,12 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use falcon_dart_parser::parse_for_package;
 use falcon_dart_parser::parser::ParseError;
+use falcon_dart_parser::try_parse_for_package;
 use falcon_syntax::ast::{ClassMember, FunctionDecl, Program, TopLevelDecl, VarKeyword};
 use falcon_syntax::visitor::{Visitor, walk_top_level_decl};
 use rayon::prelude::*;
+use tracing::warn;
 
 use super::{AnalysisEnvironment, LanguageVersion};
 use crate::intern::{InternedString, StringInterner};
@@ -70,6 +71,8 @@ pub struct ExternalLibraries {
     project_evictions: HashMap<PathBuf, PathBuf>,
     project_companions: std::collections::BTreeMap<PathBuf, Vec<PathBuf>>,
     companion_dependencies: HashMap<PathBuf, CompanionDependencies>,
+    /// Defining files whose parser thread could not start; the next extend retries them.
+    retry: Vec<(PathBuf, Option<usize>)>,
 }
 
 /// Source-validated directives: unchanged snapshots need not reparse unopened parts.
@@ -196,6 +199,7 @@ impl ExternalLibraries {
                 }
             }
         }
+        wave.append(&mut self.retry);
         self.load_waves(environment, wave, &is_project);
         self.libraries
             .sort_unstable_by(|left, right| left.files[0].path.cmp(&right.files[0].path));
@@ -224,7 +228,11 @@ impl ExternalLibraries {
             .get(path)
             .is_some_and(|cached| cached.source == source && cached.context == context);
         if !unchanged {
-            let file = read_source(path, &source, environment.package_language_version(path));
+            let Ok(file) = read_source(path, &source, environment.package_language_version(path))
+            else {
+                self.companion_dependencies.remove(path);
+                return None;
+            };
             let mut dependencies = dependencies(environment, context, path, &file.facts);
             dependencies.extend(
                 file.doc_imports
@@ -263,15 +271,25 @@ impl ExternalLibraries {
                 .map_init(StringInterner::default, |interner, (path, context)| {
                     let origin = environment.origin(context, &path, interner);
                     let local = matches!(origin, ExternalOrigin::Project);
-                    let loaded = load_library(environment, &path, context, origin);
+                    let loaded = load_library(environment, &path, context, origin)
+                        .map_err(|error| (error, context));
                     (path, local, loaded)
                 })
                 .collect();
             for (path, local, loaded) in loaded {
                 if local {
-                    self.attempted_project_paths.insert(path);
+                    self.attempted_project_paths.insert(path.clone());
                 }
-                let Some((library, context, dependencies)) = loaded else {
+                let Some((library, context, dependencies)) =
+                    loaded.unwrap_or_else(|(error, context)| {
+                        warn!(
+                            "could not start parser thread for {}: {error}",
+                            path.display()
+                        );
+                        self.retry.push((path, context));
+                        None
+                    })
+                else {
                     continue;
                 };
                 let mut project_owned = false;
@@ -417,23 +435,33 @@ fn dependencies(
         .collect()
 }
 
+/// A loaded library, its package-configuration context and its dependencies.
+type LoadedLibrary = (ExternalLibrary, Option<usize>, Vec<PathBuf>);
+
 /// Read and parse the library defined at `path` with its parts; `None` when
 /// the file is unreadable, exceeds the source-size limit or is itself a part.
+///
+/// # Errors
+///
+/// Returns the spawn error when a parser thread cannot start, so the load is
+/// retried instead of cached as unloadable or missing a part.
 fn load_library(
     environment: &AnalysisEnvironment,
     path: &Path,
     context: Option<usize>,
     origin: ExternalOrigin,
-) -> Option<(ExternalLibrary, Option<usize>, Vec<PathBuf>)> {
+) -> std::io::Result<Option<LoadedLibrary>> {
     // Each file parses at its package's language version (SDK: current).
     let read = |path: &Path| {
         let package_version =
             context.and_then(|index| environment.contexts[index].config.language_version(path));
         read(path, package_version)
     };
-    let defining = read(path).ok()?;
+    let Some(defining) = read(path)? else {
+        return Ok(None);
+    };
     if defining.facts.part_of_directive.is_some() {
-        return None;
+        return Ok(None);
     }
     let mut files = vec![defining];
     let mut seen = HashSet::from([path.to_path_buf()]);
@@ -451,7 +479,9 @@ fn load_library(
             })
             .filter(|part| seen.insert(part.clone()))
             .collect();
-        files.extend(parts.iter().filter_map(|part| read(part).ok()));
+        for part in parts {
+            files.extend(read(&part)?);
+        }
         index += 1;
     }
     let dependencies = files
@@ -466,7 +496,7 @@ fn load_library(
                 )
         })
         .collect();
-    Some((
+    Ok(Some((
         ExternalLibrary {
             origin,
             files,
@@ -474,36 +504,42 @@ fn load_library(
         },
         context,
         dependencies,
-    ))
+    )))
 }
 
-fn read(path: &Path, package_version: Option<LanguageVersion>) -> std::io::Result<ExternalFile> {
-    let source = crate::source::read_source(path)?;
-    Ok(read_source(path, &source, package_version))
+/// `None` when the source is unreadable; `Err` when the parser thread cannot start.
+fn read(
+    path: &Path,
+    package_version: Option<LanguageVersion>,
+) -> std::io::Result<Option<ExternalFile>> {
+    let Ok(source) = crate::source::read_source(path) else {
+        return Ok(None);
+    };
+    read_source(path, &source, package_version).map(Some)
 }
 
 fn read_source(
     path: &Path,
     source: &str,
     package_version: Option<LanguageVersion>,
-) -> ExternalFile {
+) -> std::io::Result<ExternalFile> {
     let falcon_dart_parser::ParseResult {
         mut program,
         errors,
         ..
-    } = parse_for_package(source, package_version);
+    } = try_parse_for_package(source, package_version)?;
     let has_parse_errors = !declarations_intact(&program, &errors);
     let doc_imports = crate::resolve::doc_imports(&program, source)
         .map(str::to_owned)
         .collect();
     let concrete_operators = compact_declarations(&mut program);
-    ExternalFile {
+    Ok(ExternalFile {
         path: path.to_path_buf(),
         facts: program,
         doc_imports,
         concrete_operators,
         has_parse_errors,
-    }
+    })
 }
 
 /// Whether every parse error leaves the file's declarations intact: it lies
@@ -702,7 +738,8 @@ mod tests {
             .unwrap()
             .set_len(u64::from(u32::MAX) + 1)
             .unwrap();
-        let error = read(&imported, None).unwrap_err();
+        assert!(read(&imported, None).unwrap().is_none());
+        let error = crate::source::read_source(&imported).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert!(error.to_string().contains("maximum supported source size"));
 

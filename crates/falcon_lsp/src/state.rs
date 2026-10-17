@@ -754,7 +754,23 @@ impl LspState {
                     });
             same_packages.then_some(&snapshot.indexes)
         });
-        let diags = run_cross_file(&self.cross_file_rules, &files, &self.config, indexes);
+        let diags = match run_cross_file(&self.cross_file_rules, &files, &self.config, indexes) {
+            Ok(diags) => diags,
+            Err(error) => {
+                // Editors only show open buffers, so every open document carries the failure.
+                warn!("could not start cross-file rules thread: {error}");
+                return self
+                    .documents
+                    .values()
+                    .map(|doc| {
+                        (
+                            doc.path.to_string_lossy().into_owned(),
+                            vec![falcon_analyze::rules_thread_diagnostic(&doc.path, &error)],
+                        )
+                    })
+                    .collect();
+            }
+        };
         let mut grouped: HashMap<String, Vec<Diagnostic>> = HashMap::new();
         for diag in diags {
             grouped

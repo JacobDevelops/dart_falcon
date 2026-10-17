@@ -6,4 +6,4 @@
 pub mod lexer;
 pub mod parser;
 
-pub use parser::{ParseResult, lex_syntax, parse, parse_for_package};
+pub use parser::{ParseResult, lex_syntax, parse, parse_for_package, try_parse_for_package};

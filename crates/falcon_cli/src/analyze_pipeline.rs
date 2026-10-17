@@ -199,12 +199,19 @@ pub fn collect_check_with_sdk_locator(
     apply_severities(&mut diagnostics, &config);
 
     if collect_programs {
-        diagnostics.extend(run_cross_file(
+        match run_cross_file(
             &cross_file_registry,
             &project_files,
             &config,
             indexes.as_ref(),
-        ));
+        ) {
+            Ok(cross_file) => diagnostics.extend(cross_file),
+            Err(error) => diagnostics.extend(
+                project_files
+                    .first()
+                    .map(|file| falcon_analyze::rules_thread_diagnostic(&file.path, &error)),
+            ),
+        }
     }
 
     // Resolve 1-based line/col for every diagnostic from its file's source, so

@@ -14,7 +14,7 @@ Falcon's default set has been re-chosen independently of upstream presets, with 
 
 ### Remaining
 
-- **Engine checklist.** Per-package-context library identity, thread-spawn failure handling, and a concrete syntax tree; see [`docs/v1-checklist.md`](docs/v1-checklist.md#engine).
+- **Engine checklist.** Per-package-context library identity and a concrete syntax tree; see [`docs/v1-checklist.md`](docs/v1-checklist.md#engine).
 - **Rule-catalog expansion.** Two sources remain in the checklist:
   - **DCM-inspired rules: 231** (75 must-have, 132 nice-to-have, 24 post-1.0).
     These are candidates from the DCM survey, not current pricing claims.
