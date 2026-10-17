@@ -8,10 +8,9 @@ bun          = "latest"
 mr-boxington = "latest"
 cargo-make   = "latest"
 taplo        = "latest"
-# Lets cargo-watch use the cargo: backend to install its binary.
-cargo-binstall        = "latest"
 cargo-nextest = { version = "latest", version_prefix = "cargo-nextest-" }
-"cargo:cargo-watch"   = { version = "latest", locked = true }
+cargo-watch   = "latest"
 
 [tool_alias]
 cargo-nextest = "github:nextest-rs/nextest"
+cargo-watch   = "github:watchexec/cargo-watch"
