@@ -19,7 +19,7 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::ast::*;
 
-use super::{canonical_or_lexical, detect_package, is_under_lib, resolve_directive_uri};
+use super::{canonical_package_path, detect_package, is_under_lib, resolve_directive_uri};
 
 #[derive(Default)]
 pub struct UnusedCode;
@@ -65,7 +65,7 @@ impl CrossFileRule for UnusedCode {
 
         let mut diags = Vec::new();
         for (idx, f) in files.iter().enumerate() {
-            let canon = canonical_or_lexical(&f.path);
+            let canon = canonical_package_path(&f.path);
             if !is_under_lib(&canon, pkg.as_ref()) {
                 continue;
             }
@@ -172,7 +172,7 @@ fn collect_exported_files(
 ) -> super::ReferenceSet {
     let mut refs = super::ReferenceSet::default();
     for f in files {
-        let from = canonical_or_lexical(&f.path);
+        let from = canonical_package_path(&f.path);
         for exp in &f.program.exports {
             if let Some(r) = resolve_directive_uri(&from, exp.uri.value.as_str(), pkg) {
                 refs.insert(r);
@@ -208,6 +208,54 @@ fn collect_used_names(source: &str, syntax: &falcon_syntax::SyntaxStore) -> Hash
 #[cfg(test)]
 mod tests {
     use super::collect_used_names;
+
+    #[cfg(unix)]
+    #[test]
+    fn virtual_symlinked_package_reports_unused_but_preserves_exports() {
+        use std::path::PathBuf;
+
+        use falcon_analyze::{CrossFileRule, ProjectFile};
+
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("package");
+        let workspace = root.path().join("workspace");
+        let sources = root.path().join("sources");
+        std::fs::create_dir_all(package.join("bin")).unwrap();
+        std::fs::create_dir_all(sources.join("src")).unwrap();
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::os::unix::fs::symlink(&package, &workspace).unwrap();
+        std::os::unix::fs::symlink(&sources, package.join("lib")).unwrap();
+        let file = |path: PathBuf, source: &str| {
+            let parsed = falcon_dart_parser::parse(source);
+            assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+            ProjectFile {
+                path,
+                source: source.to_owned(),
+                program: parsed.program,
+                syntax: parsed.syntax,
+                has_parse_errors: false,
+            }
+        };
+        let dead = workspace.join("lib/src/dead.dart");
+        let files = [
+            file(
+                workspace.join("bin/main.dart"),
+                "export '../lib/src/api.dart';\nvoid main() {}\n",
+            ),
+            file(workspace.join("lib/src/api.dart"), "class Exported {}\n"),
+            file(dead.clone(), "class Unused {}\n"),
+        ];
+        assert!(files.iter().all(|file| !file.path.exists()));
+
+        let diagnostics = super::UnusedCode.analyze_project(
+            &files,
+            &falcon_config::FalconConfig::default(),
+            None,
+        );
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].file_path, dead.to_string_lossy());
+        assert!(diagnostics[0].message.contains("'Unused'"));
+    }
 
     #[test]
     fn retained_interpolation_identifiers_exclude_literal_text_and_comments() {

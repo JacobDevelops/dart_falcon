@@ -52,6 +52,36 @@ pub fn enclosing_pubspec(path: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Normalize package roots for virtual files without resolving their inner symlinks.
+pub fn canonical_package_path(path: &Path) -> PathBuf {
+    if let Ok(path) = std::fs::canonicalize(path) {
+        return path;
+    }
+    let path = canonical_or_lexical(path);
+    let Some(manifest) = enclosing_pubspec(&path) else {
+        return path;
+    };
+    let root = manifest.parent().unwrap();
+    let Ok(relative) = path.strip_prefix(root) else {
+        return path;
+    };
+    if let Ok(relative) = relative.strip_prefix("lib") {
+        canonical_lib_root(root).join(relative)
+    } else {
+        canonical_or_lexical(root).join(relative)
+    }
+}
+
+fn canonical_lib_root(root: &Path) -> PathBuf {
+    std::fs::canonicalize(root.join("lib"))
+        .unwrap_or_else(|_| canonical_or_lexical(root).join("lib"))
+}
+
+fn package_identity(manifest: &Path) -> PackageIdentity {
+    let root = canonical_or_lexical(manifest.parent().unwrap());
+    crate::package_identity(&root.join("pubspec.yaml"))
+}
+
 /// Locate a parsed YAML string in its original source using the same mapping keys
 /// and sequence indexes in a parser that preserves scalar source markers.
 pub fn yaml_string_span(source: &str, root: &Value, target: &Value) -> Option<DiagSpan> {
@@ -235,7 +265,7 @@ pub fn detect_package(files: &[ProjectFile]) -> Option<PackageIdentity> {
     let pubspec = files
         .iter()
         .find_map(|file| enclosing_pubspec(&file.path))?;
-    let package = crate::package_identity(&pubspec);
+    let package = package_identity(&pubspec);
     (!package.name.is_empty()).then_some(package)
 }
 
@@ -279,7 +309,9 @@ pub fn resolve_directive_uri(
         }
     }
     let from_dir = from_file.parent().unwrap_or_else(|| Path::new(""));
-    Some(ResolvedRef::Path(canonical_or_lexical(&from_dir.join(uri))))
+    Some(ResolvedRef::Path(canonical_package_path(
+        &from_dir.join(uri),
+    )))
 }
 
 /// Conditional alternatives also keep platform-specific files reachable.
@@ -362,10 +394,10 @@ pub fn enclosing_package(path: &Path) -> Option<PackageIdentity> {
     let manifest = enclosing_pubspec(path)?;
     let pubspec = canonical_or_lexical(&manifest);
     let Ok(metadata) = std::fs::metadata(&pubspec) else {
-        return Some(crate::package_identity(&manifest));
+        return Some(package_identity(&manifest));
     };
     let Ok(modified) = metadata.modified() else {
-        return Some(crate::package_identity(&manifest));
+        return Some(package_identity(&manifest));
     };
     let length = metadata.len();
     #[cfg(unix)]
@@ -388,10 +420,10 @@ pub fn enclosing_package(path: &Path) -> Option<PackageIdentity> {
         return Some(PackageIdentity {
             name,
             // Resolve lib/ afresh: its symlink can change independently of pubspec.
-            lib_root: canonical_or_lexical(&manifest.parent()?.join("lib")),
+            lib_root: canonical_lib_root(manifest.parent()?),
         });
     }
-    let package = crate::package_identity(&manifest);
+    let package = package_identity(&manifest);
     let mut cache = PACKAGE_CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -417,7 +449,7 @@ pub fn enclosing_package(path: &Path) -> Option<PackageIdentity> {
 /// any package or outside `lib/`.
 pub fn lib_dir_package(path: &Path) -> Option<PackageIdentity> {
     let package = enclosing_package(path)?;
-    canonical_or_lexical(path)
+    canonical_package_path(path)
         .starts_with(&package.lib_root)
         .then_some(package)
 }
@@ -577,6 +609,79 @@ mod tests {
         std::fs::remove_file(&manifest).unwrap();
         assert!(enclosing_package(&source).is_none());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_lib_root_agrees_for_saved_and_virtual_sources() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("package");
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(package.join("bin")).unwrap();
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::fs::write(package.join("bin/main.dart"), "void main() {}\n").unwrap();
+        std::os::unix::fs::symlink(&package, &workspace).unwrap();
+        let source = workspace.join("lib/src/unsaved.dart");
+        let saved_package = enclosing_package(&workspace.join("bin/main.dart")).unwrap();
+        let virtual_package = lib_dir_package(&source).unwrap();
+
+        assert!(!workspace.join("lib").exists());
+        assert_eq!(
+            saved_package.lib_root,
+            canonical_or_lexical(&package).join("lib")
+        );
+        assert_eq!(virtual_package.lib_root, saved_package.lib_root);
+        assert!(canonical_package_path(&source).starts_with(&saved_package.lib_root));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lib_dir_package_recognizes_virtual_files_in_symlinked_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("package");
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(package.join("lib")).unwrap();
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::os::unix::fs::symlink(&package, &workspace).unwrap();
+
+        let source = workspace.join("lib/src/unsaved.dart");
+        assert!(!source.exists());
+        let identity = lib_dir_package(&source).unwrap();
+        assert_eq!(identity.name, "app");
+        assert_eq!(
+            identity.lib_root,
+            canonical_or_lexical(&package.join("lib"))
+        );
+        assert!(lib_dir_package(&workspace.join("test/unsaved.dart")).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn virtual_package_paths_resolve_lib_root_but_preserve_inner_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("package");
+        let sources = root.path().join("sources");
+        let target = root.path().join("target");
+        std::fs::create_dir(&package).unwrap();
+        std::fs::create_dir(&sources).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::os::unix::fs::symlink(&sources, package.join("lib")).unwrap();
+        std::os::unix::fs::symlink(&target, sources.join("inner")).unwrap();
+        let source = package.join("lib/inner/unsaved.dart");
+
+        assert!(!source.exists());
+        assert_eq!(
+            canonical_package_path(&source),
+            canonical_or_lexical(&sources).join("inner/unsaved.dart")
+        );
+        assert!(lib_dir_package(&source).is_some());
+
+        std::fs::write(&source, "").unwrap();
+        assert_eq!(
+            canonical_package_path(&source),
+            canonical_or_lexical(&target.join("unsaved.dart"))
+        );
     }
 
     #[cfg(unix)]

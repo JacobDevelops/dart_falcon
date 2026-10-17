@@ -123,7 +123,6 @@ fn imported_package(uri: &str) -> Option<&str> {
 fn is_public_or_executable(file: &Path, pubspec: &Path) -> bool {
     let root = pubspec.parent().unwrap_or_else(|| Path::new(""));
     let file = canonical_or_lexical(file);
-    let root = canonical_or_lexical(root);
     let Ok(relative) = file.strip_prefix(root) else {
         return false;
     };
@@ -140,6 +139,37 @@ fn is_public_or_executable(file: &Path, pubspec: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn virtual_public_paths_in_symlinked_workspace_are_not_dev_only() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("package");
+        let workspace = root.path().join("workspace");
+        let sources = root.path().join("sources");
+        std::fs::create_dir(&package).unwrap();
+        std::fs::create_dir(&sources).unwrap();
+        std::os::unix::fs::symlink(&sources, package.join("lib")).unwrap();
+        std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::os::unix::fs::symlink(&package, &workspace).unwrap();
+        let manifest = workspace.join("pubspec.yaml");
+
+        for path in [
+            "lib/api.dart",
+            "bin/main.dart",
+            "hook/build.dart",
+            "hook/link.dart",
+        ] {
+            assert!(
+                is_public_or_executable(&workspace.join(path), &manifest),
+                "{path}"
+            );
+        }
+        assert!(!is_public_or_executable(
+            &workspace.join("test/test.dart"),
+            &manifest
+        ));
+    }
 
     #[test]
     fn extracts_only_package_imports() {
