@@ -3,10 +3,12 @@ members  = [ ".", "crates/*", "xtask" ]
 resolver = "2"
 
 [workspace.package]
-version = "0.4.1"
-edition = "2024"
-authors = [ "Jacob Sanderson" ]
-license = "MIT"
+version    = "0.4.1"
+edition    = "2024"
+authors    = [ "Jacob Sanderson" ]
+license    = "MIT"
+homepage   = "https://dart-falcon.jacobdevelops.com"
+repository = "https://github.com/JacobDevelops/dart_falcon"
 
 [workspace.dependencies]
 # Diagnostics & reporting
@@ -50,12 +52,16 @@ insta     = "1"
 criterion = { version = "0.5", features = [ "html_reports" ] }
 
 [package]
-name              = "dart_falcon"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-description       = "A fast Dart linter built in Rust"
+name                 = "dart_falcon"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+homepage.workspace   = true
+repository.workspace = true
+description          = "A fast Dart linter built in Rust"
+keywords             = [ "dart", "flutter", "linter", "lsp" ]
+categories           = [ "command-line-utilities", "development-tools" ]
 
 [dependencies]
 falcon_cli = { path = "crates/falcon_cli" }
