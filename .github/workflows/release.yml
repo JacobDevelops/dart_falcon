@@ -12,17 +12,24 @@ on:
         required: true
 
 jobs:
-  build-linux:
-    name: Build Linux (static musl)
+  build:
+    name: Build ${{ matrix.platform }}
+    # zig cross-links every target from Linux; falcon links no Apple frameworks, so macOS needs no SDK.
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, platform: x86_64-linux }
+          - { target: aarch64-unknown-linux-musl, platform: aarch64-linux }
+          - { target: x86_64-apple-darwin, platform: x86_64-darwin }
+          - { target: aarch64-apple-darwin, platform: aarch64-darwin }
     env:
       INPUT_TAG: ${{ github.event.inputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
         with:
-          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
-      # zig is the cross-linker: aarch64 musl links cleanly on the x86_64 runner.
+          targets: ${{ matrix.target }}
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.13.0
@@ -33,62 +40,19 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${INPUT_TAG:-$GITHUB_REF_NAME}"; VERSION="${VERSION#v}"
-          archive_platform() {
-            case "$1" in
-              x86_64-unknown-linux-musl) echo x86_64-linux ;;
-              aarch64-unknown-linux-musl) echo aarch64-linux ;;
-            esac
-          }
-          mkdir -p dist
-          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
-            cargo zigbuild --release --locked -p dart_falcon --target "$target"
-            rm -rf stage && mkdir -p stage
-            install -m755 "target/$target/release/falcon" stage/falcon
-            tar -C stage -czf "dist/falcon-${VERSION}-$(archive_platform "$target").tar.gz" falcon
-          done
+          cargo zigbuild --release --locked -p dart_falcon --target "${{ matrix.target }}"
+          mkdir -p stage dist
+          install -m755 "target/${{ matrix.target }}/release/falcon" stage/falcon
+          tar -C stage -czf "dist/falcon-${VERSION}-${{ matrix.platform }}.tar.gz" falcon
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: tarballs-linux
-          path: dist/*.tar.gz
-          if-no-files-found: error
-
-  build-darwin:
-    name: Build macOS
-    runs-on: macos-latest
-    env:
-      INPUT_TAG: ${{ github.event.inputs.tag }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - name: Build and package
-        run: |
-          set -euo pipefail
-          VERSION="${INPUT_TAG:-$GITHUB_REF_NAME}"; VERSION="${VERSION#v}"
-          archive_platform() {
-            case "$1" in
-              aarch64-apple-darwin) echo aarch64-darwin ;;
-              x86_64-apple-darwin) echo x86_64-darwin ;;
-            esac
-          }
-          mkdir -p dist
-          # Apple's native toolchain cross-builds the intel target on arm runners.
-          for target in aarch64-apple-darwin x86_64-apple-darwin; do
-            cargo build --release --locked -p dart_falcon --target "$target"
-            rm -rf stage && mkdir -p stage
-            install -m755 "target/$target/release/falcon" stage/falcon
-            tar -C stage -czf "dist/falcon-${VERSION}-$(archive_platform "$target").tar.gz" falcon
-          done
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: tarballs-darwin
+          name: tarball-${{ matrix.platform }}
           path: dist/*.tar.gz
           if-no-files-found: error
 
   release:
     name: Publish GitHub Release
-    needs: [build-linux, build-darwin]
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -98,7 +62,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: tarballs-*
+          pattern: tarball-*
           merge-multiple: true
           path: dist
       # Fail fast if the release tag and Cargo.toml version disagree.
