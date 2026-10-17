@@ -39,38 +39,53 @@ pub fn parse(source: &str) -> ParseResult {
 /// Parse Dart into an AST and recoverable errors at the file's effective
 /// language version — its `// @dart` override, else `package_version`, else
 /// [`LanguageVersion::CURRENT`] — on a depth-bounded worker stack, so deeply
-/// nested input cannot exhaust the caller's stack.
+/// nested input cannot exhaust the caller's stack. A worker that cannot start
+/// yields an empty program with one error; use [`try_parse_for_package`] to
+/// tell that apart from a real parse.
 ///
 /// # Panics
 ///
 /// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
 pub fn parse_for_package(source: &str, package_version: Option<LanguageVersion>) -> ParseResult {
+    try_parse_for_package(source, package_version).unwrap_or_else(|error| ParseResult {
+        program: Program {
+            library_directive: None,
+            part_of_directive: None,
+            part_directives: Vec::new(),
+            imports: Vec::new(),
+            exports: Vec::new(),
+            declarations: Vec::new(),
+            span: Span::new(0, 0),
+        },
+        errors: vec![ParseError {
+            message: format!("could not start parser thread: {error}"),
+            offset: 0,
+        }],
+        syntax: lex_syntax(source),
+    })
+}
+
+/// [`parse_for_package`], failing when the parser worker thread cannot start.
+///
+/// # Errors
+///
+/// Returns the spawn error when the worker thread cannot be created.
+///
+/// # Panics
+///
+/// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
+pub fn try_parse_for_package(
+    source: &str,
+    package_version: Option<LanguageVersion>,
+) -> std::io::Result<ParseResult> {
     let version = LanguageVersion::file_override(source)
         .or(package_version)
         .unwrap_or(LanguageVersion::CURRENT);
     std::thread::scope(|scope| {
-        match std::thread::Builder::new()
+        let handle = std::thread::Builder::new()
             .stack_size(PARSER_STACK_SIZE)
-            .spawn_scoped(scope, || parse_inner(source, version))
-        {
-            Ok(handle) => handle.join().expect("parser thread panicked"),
-            Err(error) => ParseResult {
-                program: Program {
-                    library_directive: None,
-                    part_of_directive: None,
-                    part_directives: Vec::new(),
-                    imports: Vec::new(),
-                    exports: Vec::new(),
-                    declarations: Vec::new(),
-                    span: Span::new(0, 0),
-                },
-                errors: vec![ParseError {
-                    message: format!("could not start parser thread: {error}"),
-                    offset: 0,
-                }],
-                syntax: lex_syntax(source),
-            },
-        }
+            .spawn_scoped(scope, || parse_inner(source, version))?;
+        Ok(handle.join().expect("parser thread panicked"))
     })
 }
 
