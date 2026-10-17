@@ -1,13 +1,28 @@
-# Falcon 1.0 checklist
+| Source | must-have | nice-to-have | post-1.0 | total |
+|---|---:|---:|---:|---:|
+| DCM-inspired | 75 | 132 | 24 | 231 |
+| Cross-file additions | 5 | 4 | 4 | 13 |
+| Additional rules | 7 | 9 | 3 | 19 |
+| **Total** | **87** | **145** | **31** | **263** |
 
 Everything here must be resolved before falcon 1.0. Engine items are checked off when they land; a rule row is deleted once the rule ships. `RULE_METADATA` in `crates/falcon_rules/src/meta.rs` is authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
 
 ## Engine
 
-- [x] **Per-package-context library identity.** When one repository holds several package contexts that resolve the same `package:` URI to different copies (for example two apps pinned to different versions of a dependency), every file resolves against the copy from its own package context. Shared dependencies split into separate per-context instances only when their import closures resolve differently; otherwise all contexts share one instance.
+- [x] **Per-package-context library identity.** When one repository holds several package contexts that resolve the same `package:` URI to different copies (for example two apps pinned to different versions of a dependency), every file resolves against the copy from its own package context. Shared dependencies split into separate per-context instances only when all package contexts resolve identically; otherwise all package contexts resolve differently and receive independent instances.
 - [x] **Don't cache failed parser-thread spawns.** If the parser thread can't start while loading a dependency or companion part, the empty result is cached as a real parse (companion directive cache, external-load "attempted" set). The LSP then keeps that library unresolved until the environment resets, and a part's import/part edges stay empty until its text changes.
 - [x] **Surface cross-file thread spawn failures in the LSP.** The error is attached to the first collected file only; when that file isn't an open document, the error never shows and cross-file rules silently report nothing.
 - [ ] **Concrete syntax tree.** Replace the AST plus retained token stream with an arena CST that keeps every token and trivia, so new rules read syntax from one tree and never need parser changes.
+
+## Workflow
+
+- [ ] **Safe autofixes.** Add CLI preview/apply, editor quick fixes, fix-all, and fix-on-save.
+- [ ] **Existing-debt baselines.** Let teams adopt falcon without fixing historical findings, matching findings robustly across line changes rather than by rule/path/line/message.
+- [ ] **CI report formats.** Add SARIF first, then CodeClimate/GitLab, Checkstyle, and Sonar where users need them, plus HTML; falcon already supports JSON and text.
+- [ ] **Git-aware PR review.** Analyse changes since a git ref with project context, produce a PR-focused report, and optionally write a GitHub step summary or comment. This is a workflow gap, not an engine gap.
+- [ ] **Severity-based CI thresholds.** Add an explicit fail-on warnings/errors policy alongside baselines; max-errors and custom exit codes are not the same interface.
+- [ ] **Easier install and update.** Add an npm wrapper that downloads and verifies binaries, self-update and version selection, cargo-binstall metadata, optional signing/notarisation, and Homebrew publishing.
+- [ ] **Package-aware monorepo runs.** Detect Melos/pub workspaces, apply per-package config, and aggregate per-package reports; falcon already analyses multiple paths.
 
 ## Priorities
 
@@ -33,11 +48,14 @@ style | suspicious`.
 | Source | must-have | nice-to-have | post-1.0 | total |
 |---|---:|---:|---:|---:|
 | DCM-inspired | 75 | 132 | 24 | 231 |
-| Cross-file additions | 4 | 3 | 4 | 11 |
-| **Total** | **79** | **135** | **28** | **242** |
+| Cross-file additions | 5 | 4 | 4 | 13 |
+| Additional rules | 7 | 9 | 3 | 19 |
+| **Total** | **87** | **145** | **31** | **263** |
 
 Six DCM rows were deduplicated against shipped official lints and the cross-file list (see
 [Deduplication notes](#deduplication-notes)); the counts above are post-dedupe.
+
+The additional-rule count includes newly planned rows and additions merged into existing rows where one rule covers both requirements.
 
 ## Planned DCM-inspired rules (231)
 
@@ -64,7 +82,7 @@ provisional and should be confirmed at implementation time.
 | `avoid-uncaught-future-errors` | correctness | FT | paid | Future error path with no catch. | must-have |
 | `avoid-weak-cryptographic-algorithms` | security | FT | paid | MD5/SHA1/weak cipher usage. | must-have |
 | `avoid-duplicate-cascades` | correctness | S | paid? | Same cascade section invoked twice. | nice-to-have |
-| `avoid-duplicate-exports` | correctness | S | paid | Duplicate export directive. | nice-to-have |
+| `avoid-duplicate-exports` | correctness | S | paid | Duplicate export directives are redundant only when URI and combinators make the directive genuinely redundant. | nice-to-have |
 | `avoid-duplicate-named-imports` | correctness | S | paid | Duplicate named import. | nice-to-have |
 | `avoid-duplicate-mixins` | correctness | S | paid | Same mixin applied twice. | nice-to-have |
 | `avoid-duplicate-factories` | correctness | S | paid | Duplicate factory declaration. | nice-to-have |
@@ -137,7 +155,7 @@ provisional and should be confirmed at implementation time.
 | `prefer-getter-over-method` | style | LT | paid | Zero-arg method that should be a getter. | nice-to-have |
 | `prefer-named-parameters` | style | S | paid | Too many positional params → named. | nice-to-have |
 | `prefer-boolean-prefixes` | style | S | paid | Bool getters/fields lacking is/has/should prefix (verify vs boolean-prefixes). | nice-to-have |
-| `prefer-match-file-name` | style | X | paid | Top-level type name should match file name. | nice-to-have |
+| `prefer-match-file-name` | style | X | paid | Sole class or enum in a file should match the filename; naming conventions are checked separately. | nice-to-have |
 | `prefer-type-over-var` | style | LT | paid | Explicit type instead of `var` where unclear. | nice-to-have |
 | `prefer-correct-error-name` | style | S | paid | Naming convention for error types. | nice-to-have |
 | `prefer-correct-handler-name` | style | S | paid | Naming convention for handlers. | nice-to-have |
@@ -175,7 +193,8 @@ provisional and should be confirmed at implementation time.
 | `avoid-nested-switch-expressions` | complexity | S | paid | Deeply nested switch expressions. | nice-to-have |
 | `avoid-nested-try-statements` | complexity | S | paid | Deeply nested try statements. | nice-to-have |
 | `max-statements` | complexity | S | paid | Statement-count-per-function metric. | nice-to-have |
-| `avoid-local-functions` | complexity | S | paid | Overuse of local functions. | post-1.0 |
+| `cognitive-complexity` | complexity | S | n/a | Nesting-weighted complexity metric, distinct from cyclomatic complexity and maximum nesting level. | nice-to-have |
+| `widget-tree-depth` | complexity | FT | n/a | Widget-tree nesting depth from real widget structure, not parenthesis counting. | nice-to-have |
 | `avoid-excessive-expressions` | complexity | S | paid | Expression-length metric. | post-1.0 |
 
 ### 2e. core: performance
@@ -220,12 +239,18 @@ not re-added.
 | DCM rule | falcon group | analysis | paywall | description | priority |
 |---|---|---|---|---|---|
 | `use-setstate-synchronously` | correctness | FT | paid | `setState` after await without mounted check. | must-have |
+| `setstate-lifecycle` | correctness | FT | n/a | Detect setState after an async gap without a fresh mounted guard, and calls in lifecycle methods where they do not belong. | must-have |
+| `require-super-dispose` | correctness | FT | n/a | Require super.dispose() in overrides; distinct from the shipped ordering check. | must-have |
 | `avoid-empty-setstate` | correctness | S | paid | `setState(() {})` with an empty body. | must-have |
 | `avoid-unnecessary-setstate` | correctness | FT | paid | setState in build/init where needless. | must-have |
 | `use-closest-build-context` | correctness | FT | paid | Wrong BuildContext across an async gap. | must-have |
 | `avoid-late-context` | correctness | FT | paid | Storing BuildContext in a late field. | must-have |
 | `avoid-inherited-widget-in-initstate` | correctness | FT | paid | `.of(context)` in initState. | must-have |
 | `avoid-undisposed-instances` | correctness | FT | paid | Controllers/notifiers never disposed. | must-have |
+| `dispose-focus-node-and-timer` | correctness | FT | n/a | Extend disposal checks to FocusNode and Timer fields, proving FocusNode.dispose() or Timer.cancel() actually runs. | must-have |
+| `avoid-hardcoded-credentials` | security | S | n/a | Warn when credential-like names are assigned literal values; heuristic, not a full secrets scanner. | nice-to-have |
+| `accessible-widget-labels` | a11y | LT | n/a | Warn on interactive widgets missing labels; heuristic, not compliance validation. Image labels are covered by `avoid-missing-image-alt`. | nice-to-have |
+| `minimum-touch-target` | a11y | LT | n/a | Warn on explicitly undersized interactive touch targets; heuristic, not compliance validation. | nice-to-have |
 | `dispose-fields` | correctness | FT | paid | Disposable fields not disposed in `dispose()`. | must-have |
 | `always-remove-listener` | correctness | FT | paid | `addListener` without `removeListener`. | must-have |
 | `avoid-recursive-widget-calls` | correctness | LT | paid | Widget builds itself → stack overflow. | must-have |
@@ -255,6 +280,7 @@ not re-added.
 | `avoid-unnecessary-gesture-detector` | performance | LT | paid | GestureDetector wrapping an already-tappable widget. | nice-to-have |
 | `prefer-text-rich` | style | LT | paid | `Text.rich`/RichText guidance. | post-1.0 |
 | `proper-super-calls` | correctness | FT | paid | initState/dispose super-call ordering (verify vs proper-super-init-state). | post-1.0 |
+| `avoid-non-ascii-symbols` | style | S | n/a | Opt-in warning for non-ASCII symbols. | post-1.0 |
 
 ### 2h. test domain (new)
 
@@ -270,6 +296,7 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `prefer-expect-later` | correctness | FT | paid | Async matcher needs `expectLater`. | nice-to-have |
 | `prefer-test-matchers` | style | FT | paid | Use dedicated matchers over manual expect. | nice-to-have |
 | `avoid-top-level-members-in-tests` | suspicious | S | paid | Top-level state leaking across tests. | nice-to-have |
+| `allow-top-level-test-helpers` | suspicious | S | n/a | Opt-in convention check for top-level helpers in test files. | post-1.0 |
 | `avoid-missing-test-files` | correctness | X | paid | Source file without a matching test. | post-1.0 |
 | `avoid-misused-test-matchers` | correctness | FT | paid | Matcher applied to the wrong type. | post-1.0 |
 | `format-test-name` | style | S | paid | Test description formatting. | post-1.0 |
@@ -291,6 +318,9 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `avoid-passing-build-context-to-blocs` | suspicious | FT | paid | BuildContext leaking into a bloc. | nice-to-have |
 | `avoid-bloc-public-fields` | style | LT | paid | Bloc encapsulation (fields). | nice-to-have |
 | `avoid-bloc-public-methods` | style | LT | paid | Bloc encapsulation (methods). | nice-to-have |
+| `avoid-emit-outside-bloc` | correctness | FT | n/a | Prevent emitting outside a Bloc. | must-have |
+| `avoid-passing-bloc-to-widget` | suspicious | FT | n/a | Avoid passing a Bloc directly to a widget. | nice-to-have |
+| `prefer-bloc-extensions` | style | LT | n/a | Prefer Bloc extensions for supported APIs. | nice-to-have |
 | `prefer-bloc-event-suffix` | style | S | paid | Event naming convention. | nice-to-have |
 | `prefer-bloc-state-suffix` | style | S | paid | State naming convention. | nice-to-have |
 | `prefer-multi-bloc-provider` | style | LT | paid | Nested providers → MultiBlocProvider. | nice-to-have |
@@ -305,9 +335,12 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `avoid-ref-watch-outside-build` | correctness | FT | paid | `ref.watch` outside build. | must-have |
 | `avoid-ref-read-inside-build` | correctness | FT | paid | `ref.read` inside build. | must-have |
 | `use-ref-read-synchronously` | correctness | FT | paid | Ref used after await without mounted. | must-have |
+| `prefer-ref-read-for-methods` | correctness | FT | n/a | Prefer ref.read for method actions rather than watching state. | must-have |
 | `use-ref-and-state-synchronously` | correctness | FT | paid | Ref/state used after await without mounted. | must-have |
 | `avoid-calling-notifier-members-inside-build` | correctness | FT | paid | Mutating a notifier during build. | must-have |
 | `dispose-provided-instances` | correctness | FT | paid | Provided disposables not disposed. | must-have |
+| `dispose-provider-resources` | correctness | FT | n/a | Provider-created resources must use autoDispose or ref.onDispose for cleanup; avoid misleading scope-leak terminology. | must-have |
+| `prefer-async-value-when` | style | LT | n/a | Optional style preference for AsyncValue.when. | post-1.0 |
 | `avoid-unnecessary-consumer-widgets` | performance | LT | paid | ConsumerWidget without ref use. | must-have |
 | `avoid-ref-inside-state-dispose` | correctness | FT | paid | ref used in dispose. | nice-to-have |
 | `avoid-public-notifier-properties` | style | LT | paid | Notifier exposing mutable state. | nice-to-have |
@@ -326,6 +359,7 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `avoid-read-inside-build` | correctness | FT | paid | `.read` inside build. | must-have |
 | `avoid-watch-outside-build` | correctness | FT | paid | `.watch` outside build. | must-have |
 | `dispose-providers` | correctness | FT | paid | Provided disposables not disposed. | must-have |
+| `prefer-read-for-methods` | correctness | FT | n/a | Prefer read for method actions rather than watching state. | must-have |
 | `avoid-instantiating-in-value-provider` | correctness | FT | paid | `.value` provider creating a new instance. | nice-to-have |
 | `prefer-multi-provider` | style | LT | paid | Nested providers → MultiProvider. | nice-to-have |
 | `prefer-provider-extensions` | style | LT | paid | Use context extensions over `Provider.of`. | nice-to-have |
@@ -348,6 +382,8 @@ Activated for `*_test.dart`. Falcon ships none of these today.
 | `list-all-equatable-fields` | correctness | FT | paid | Field missing from Equatable props. | must-have |
 | `add-equatable-props` | correctness | FT | paid | Equatable subclass missing a props override. | must-have |
 | `extend-equatable` | style | LT | paid | Value class should extend Equatable. | nice-to-have |
+| `avoid-mutable-equatable-subclass-fields` | correctness | FT | n/a | Mutable fields on subclasses inheriting Equatable equality can invalidate equality/hash behavior. | must-have |
+| `prefer-equatable` | style | LT | n/a | Library preference to use Equatable for value classes, not a correctness improvement. | nice-to-have |
 | `prefer-equatable-mixin` | style | LT | paid | Use EquatableMixin where appropriate. | nice-to-have |
 
 ### Deduplication notes
@@ -361,8 +397,6 @@ These DCM rows are covered elsewhere and are **not** counted in the DCM totals:
 | `avoid-self-assignment` | official `no_self_assignments` | same check; prefer official naming |
 | `avoid-unnecessary-parentheses` | official `unnecessary_parenthesis` | same check; prefer official naming |
 | `avoid-unnecessary-statements` | official `unnecessary_statements` | same check; prefer official naming |
-| `avoid-banned-imports` | cross-file `banned-imports` | same architecture-boundary check; lives in the cross-file pass |
-
 Related-but-distinct pairs kept separately (noted for implementers):
 `avoid-collection-equality-checks` (collections) vs official
 `unrelated_type_equality_checks` (unrelated types); DCM's granular BuildContext
@@ -370,12 +404,15 @@ checks (`use-setstate-synchronously`, `use-closest-build-context`) vs official
 `use_build_context_synchronously`; `avoid-duplicate-switch-case-conditions` vs
 falcon's shipped `no-duplicate-case-values`; `avoid-self-compare` vs falcon's
 shipped `no-self-comparisons`.
+Deduplicated or partially covered requirements: `avoid-bloc-public-methods` and `prefer-multi-bloc-provider` are existing rows; `prefer-ref-read-for-methods` is covered by neither existing provider nor riverpod rows and is listed separately. Image labels are covered by `avoid-missing-image-alt`; disposal work is limited to `super.dispose()`, FocusNode.dispose(), and Timer.cancel() coverage absent from existing disposal checks. The cascade-precedence, cognitive-complexity, widget-tree-depth, and filename-correspondence checks are distinct from shipped style or complexity checks; duplicate exports must account for combinators.
 
 The survey excludes rules already ported by falcon and niche-package rules for flame, patrol, mocktail, get_it, and fake_async.
 
+Additional planned rows cover uncovered lifecycle and disposal cases, accessibility labels and touch targets, provider cleanup, mutable Equatable subclasses, cognitive complexity, widget-tree depth, redundant exports, and optional conventions.
+
 ---
 
-## Planned cross-file rules (11)
+## Planned cross-file rules (13)
 
 Whole-project / app-wide rules live in the `cross-file` config section.
 The current shipped set is defined by the cross-file entries in `RULE_METADATA`;
@@ -385,24 +422,25 @@ infrastructure: **A** reuses the resolved directive graph / lexical name index;
 (`dependencies`/`dev_dependencies`/`flutter.assets`); **C** needs a new
 asset/l10n index (filesystem walk and/or `.arb` parsing).
 
-**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The four shipped official lints are not counted in the 11 planned additions below.
+**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, and `sort-pub-dependencies`. The four shipped official lints are not counted in the 13 planned additions below.
 
-### 3a. Tier 1: must-have (4)
+### 3a. Tier 1: must-have (5)
 
 | rule | falcon group | analysis | difficulty | description |
 |---|---|---|---|---|
 | `unused-dependencies` | correctness | needs-cross-file/project | B | A package in pubspec `dependencies:` that no source file imports via `package:<dep>/…`. |
 | `undeclared-dependencies` | correctness | needs-cross-file/project | B | A `package:<x>/…` import whose `<x>` is neither a declared (dev)dependency nor the package itself. |
-| `no-import-cycles` | correctness | needs-cross-file/project | A | Import/export cycle between library files (SCC over the resolved directive graph). |
+| `no-import-cycles` | correctness | needs-cross-file/project | A | Import/export cycle between library files; report the full cycle chain. |
 | `banned-imports` | correctness | needs-cross-file/project | A | User-configured architecture boundaries: files matching glob X may not import glob Y. |
+| `cascade-after-null-coalescing` | correctness | S | n/a | Warn when a cascade after `??` changes apparent precedence; distinct from cascade style checks. | must-have |
 
-### 3b. Tier 2: nice-to-have (3)
+### 3b. Tier 2: nice-to-have (4)
 
 | rule | falcon group | analysis | difficulty | description |
 |---|---|---|---|---|
 | `unused-assets` | correctness | needs-cross-file/project | C | Asset declared in pubspec `flutter: assets:` but no string literal references its path. |
 | `unused-l10n` | correctness | needs-cross-file/project | C | Generated localization key (`.arb`) never referenced through the generated accessor. |
-| `unexported-public-api` | style | needs-cross-file/project | A | Public declaration used across the package but never surfaced through a barrel/public library. |
+| `architecture-layer-boundaries` | correctness | needs-cross-file/project | A | Warn when imports cross clean-architecture or feature-first layers classified heuristically by path. |
 
 ### 3c. Tier 3: post-1.0 (4)
 

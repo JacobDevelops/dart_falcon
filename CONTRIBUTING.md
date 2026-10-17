@@ -19,7 +19,7 @@ mise install
 makers build
 ```
 
-`mise.toml` installs cargo-make (`makers`), `cargo-nextest` from the nextest GitHub release, `cargo-watch`, taplo, Bun, and [mbx](https://github.com/jdx/mr-boxington) at their latest releases. Activate mise in your shell to put them on `PATH`, or prefix commands with `mise exec --`. mise routes `cargo` through mbx, a compiler cache shared across checkouts, and `makers` tasks call `mbx` directly (`CARGO_CMD=cargo makers ...` bypasses it). Rust stays under rustup: `rust-toolchain.toml` tracks the latest nightly with `rust-src`, `rust-analyzer`, Clippy, rustfmt, and the `wasm32-wasip2` target. rustup installs the declared toolchain on first use. `makers --list-all-steps` lists every task.
+`mise.toml` installs cargo-make (`makers`), `cargo-nextest` from the nextest GitHub release, `cargo-watch`, taplo, Bun, [Knope](https://knope.tech), and [mbx](https://github.com/jdx/mr-boxington) at their latest releases. Activate mise in your shell to put them on `PATH`, or prefix commands with `mise exec --`. mise routes `cargo` through mbx, a compiler cache shared across checkouts, and `makers` tasks call `mbx` directly (`CARGO_CMD=cargo makers ...` bypasses it). Rust stays under rustup: `rust-toolchain.toml` tracks the latest nightly with `rust-src`, `rust-analyzer`, Clippy, rustfmt, and the `wasm32-wasip2` target. rustup installs the declared toolchain on first use. `makers --list-all-steps` lists every task.
 
 The repo is a colocated jj + git repo. **jj (Jujutsu) users are welcome**, but
 plain git works fine. Use whichever you prefer.
@@ -138,17 +138,34 @@ Inline suppression is handled centrally by `crates/falcon_analyze/src/suppressio
 
 ## Commits & pull requests
 
-- Use **conventional commits** (`feat:`, `fix:`, `chore:`, `refactor:`, …). One
-  logical change per commit.
+- Keep each commit to one logical change. Conventional commit prefixes are welcome, but release versions and notes come only from changesets, not commit messages or PR titles.
+- Include a changeset for user-facing changes, such as new rules, diagnostic fixes, CLI behavior, or installation changes. Internal refactors, tests, and documentation-only changes do not need one unless they affect users.
 - Run the four gates before pushing.
 - Keep PR descriptions concrete: what changed, why, and how you verified it.
 
+Run `makers changeset` (it wraps `knope document-change`) and commit the generated `.changeset/*.md` file with your PR. Choose `patch` for fixes, `minor` for features, or `major` for breaking changes, and describe the change for users. You can also create a uniquely named file by hand, for example `.changeset/fix-install.md`:
+
+```markdown
+---
+default: patch
+---
+
+Fix installation on Linux.
+```
+
+`default` is Knope's single-package key. All workspace crates share the resulting version.
+
 ## Releasing (maintainers)
 
-falcon versions its workspace crates together. To cut a release:
+falcon versions its workspace crates together and publishes binaries through GitHub Releases, not crates.io.
 
-1. Bump `version` under `[workspace.package]` in `Cargo.toml` (all workspace crates derive from it).
-2. Commit, then tag: `git tag vX.Y.Z && git push --tags`.
+1. Configure the repository Actions secret `RELEASE_PAT` with a fine-grained personal access token scoped to this repository, granting **Contents: read and write** and **Pull requests: read and write**. Also grant **Workflows: read and write** so refreshing an existing release branch can carry workflow changes from `main`. The PAT lets bot pushes trigger PR checks.
+2. Merge user-facing PRs with their changesets. Every push to `main` with `.changeset/*.md` files refreshes the bot's `release` branch and release PR. Knope bumps `Cargo.toml`, writes `CHANGELOG.md`, and deletes the consumed changesets. The workflow then runs `cargo xtask version` to refresh `Cargo.lock` and pinned documentation versions before committing. An existing release PR gets its title and body updated. Pushes with no changesets skip preparation.
+3. Review and merge the release PR. `.github/workflows/release.yml` builds the four platform binaries from the merge commit and publishes a GitHub Release tagged `vX.Y.Z`, using that version's changelog section as release notes.
 
-The tag triggers `.github/workflows/release.yml`, which builds the four platform binaries and publishes a GitHub Release with auto-generated notes (failing if the tag and `Cargo.toml` version disagree).
+`makers version X.Y.Z` (it wraps `cargo xtask version X.Y.Z`) still exists for manual bumps. It updates `[workspace.package]` in `Cargo.toml`, refreshes `Cargo.lock`, and rewrites pinned release URLs, archive names and mise pins in root and `docs/` Markdown, plus `website/src/data/cli.json`. `CHANGELOG.md` is excluded so historical versions stay unchanged. A test fails if the current installation references drift; new pin shapes belong in `with_version_references` in `xtask/src/main.rs`.
+
+For a manual release, update the version and changelog, commit and merge, then push the matching `vX.Y.Z` tag. Tag pushes and manual workflow dispatches with an existing tag remain supported, and fail if the tag and `Cargo.toml` version disagree. If an old version has no changelog section, GitHub generates its release notes.
+
+Each tarball ships twice: `falcon-X.Y.Z-<platform>.tar.gz` for pinned installs and `falcon-<platform>.tar.gz` for the unpinned `releases/latest/download/` quick-start links. Releases include SHA256 checksums and build provenance attestations.
 
