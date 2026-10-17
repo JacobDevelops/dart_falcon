@@ -2,8 +2,6 @@ include = [ "**/*.toml" ]
 exclude = [
   "**/target/**",
   "**/node_modules/**",
-  "**/.direnv/**",
-  "**/.devenv/**",
   ".fallow/**",
   ".numen-refine/**",
   ".git/**",
