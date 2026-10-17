@@ -78,6 +78,14 @@ target_dir="${CARGO_TARGET_DIR:-${ROOT}/target}"
 command = "${CARGO_CMD}"
 args    = [ "xtask", "docgen" ]
 
+[tasks.changeset]
+command = "knope"
+args    = [ "document-change" ]
+
+[tasks.version]
+command = "${CARGO_CMD}"
+args    = [ "xtask", "version", "${@}" ]
+
 [tasks.bench]
 command = "${CARGO_CMD}"
 args    = [ "bench", "--locked", "--workspace", "${@}" ]
