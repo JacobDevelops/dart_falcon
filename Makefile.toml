@@ -69,8 +69,9 @@ args         = [ "xtask", "validate-rules", "--falcon-bin", "${ROOT}/target/debu
 [tasks.ci_validate]
 script = '''
 set -eu
+target_dir="${CARGO_TARGET_DIR:-${ROOT}/target}"
 "${CARGO_CMD}" build --locked --workspace --bins --bench '*'
-"${ROOT}/target/debug/xtask" validate-rules --falcon-bin "${ROOT}/target/debug/falcon"
+"${target_dir}/debug/xtask" validate-rules --falcon-bin "${target_dir}/debug/falcon"
 '''
 
 [tasks.docgen]
@@ -97,9 +98,11 @@ args    = [ "run", "--locked", "--release", "-p", "dart_falcon", "--", "${@}" ]
 command = "${CARGO_CMD}"
 args    = [ "watch", "-x", "check --workspace --all-targets" ]
 
+# `mbx clean` only removes mbx-managed targets, not an explicit CARGO_TARGET_DIR.
 [tasks.clean]
-command = "${CARGO_CMD}"
-args    = [ "clean" ]
+script = '''
+if [ -n "${CARGO_TARGET_DIR:-}" ]; then cargo clean; else "${CARGO_CMD}" clean; fi
+'''
 
 [tasks.web_install]
 cwd     = "website"
