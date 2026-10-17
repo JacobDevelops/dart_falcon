@@ -1,8 +1,11 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 
+wrappers = { cargo = { command = "mbx", env = { MBX_CARGO_SHIM_MODE = "1" } } }
+
 # Rust comes from rustup via rust-toolchain.toml; mise installs every other tool at latest.
 [tools]
 bun                   = "latest"
+mr-boxington          = "latest"
 cargo-make            = "latest"
 taplo                 = "latest"
 "cargo:cargo-nextest" = { version = "latest", locked = true }

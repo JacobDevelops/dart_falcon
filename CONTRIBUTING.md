@@ -19,7 +19,7 @@ mise install
 makers build
 ```
 
-`mise.toml` installs cargo-make (`makers`), `cargo-nextest`, `cargo-watch`, taplo, and Bun at their latest releases. Activate mise in your shell to put them on `PATH`, or prefix commands with `mise exec --`. Rust stays under rustup: `rust-toolchain.toml` tracks the latest nightly with `rust-src`, `rust-analyzer`, Clippy, rustfmt, and the `wasm32-wasip2` target. rustup installs the declared toolchain on first use. `makers --list-all-steps` lists every task.
+`mise.toml` installs cargo-make (`makers`), `cargo-nextest`, `cargo-watch`, taplo, Bun, and [mbx](https://github.com/jdx/mr-boxington) at their latest releases. Activate mise in your shell to put them on `PATH`, or prefix commands with `mise exec --`. mise routes `cargo` through mbx, a compiler cache shared across checkouts, and `makers` tasks call `mbx` directly (`CARGO_CMD=cargo makers ...` bypasses it). Rust stays under rustup: `rust-toolchain.toml` tracks the latest nightly with `rust-src`, `rust-analyzer`, Clippy, rustfmt, and the `wasm32-wasip2` target. rustup installs the declared toolchain on first use. `makers --list-all-steps` lists every task.
 
 The repo is a colocated jj + git repo. **jj (Jujutsu) users are welcome**, but
 plain git works fine. Use whichever you prefer.
